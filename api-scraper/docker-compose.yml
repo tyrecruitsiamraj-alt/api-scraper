@@ -1,0 +1,30 @@
+# Postgres is EXTERNAL (94.74.115.204) — not run here.
+# Two services share one image: the control API (always on) and the worker
+# (run on demand or via the host scheduler / cron).
+services:
+  api:
+    build: .
+    image: api-scraper:latest
+    env_file: .env
+    environment:
+      PORT: 8080         # container listens on 8080; host maps it below
+    ports:
+      - "8137:8080"     # host 8137 (8080 is used by the So Recruit frontend)
+    restart: unless-stopped
+    command: ["node", "src/api/server.js"]
+
+  worker:
+    build: .
+    image: api-scraper:latest
+    env_file: .env
+    restart: "no"
+    profiles: ["manual"]        # `docker compose run --rm worker`
+    command: ["node", "src/worker.js"]
+
+  migrate:
+    build: .
+    image: api-scraper:latest
+    env_file: .env
+    restart: "no"
+    profiles: ["manual"]        # `docker compose run --rm migrate`
+    command: ["node", "src/db/migrate.js"]

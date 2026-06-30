@@ -1,0 +1,94 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --font-kanit: 'Kanit', system-ui, sans-serif;
+}
+
+html, body {
+  background: theme('colors.canvas');
+  color: theme('colors.ink');
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+  letter-spacing: -0.011em;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+::selection { background: rgba(228, 28, 36, 0.14); }
+
+@layer components {
+  /* Surfaces ------------------------------------------------------------- */
+  .card {
+    @apply bg-white rounded-2xl border border-line/60 shadow-card;
+  }
+  .glass {
+    background: rgba(255, 255, 255, 0.72);
+    backdrop-filter: saturate(180%) blur(20px);
+    -webkit-backdrop-filter: saturate(180%) blur(20px);
+  }
+
+  /* Buttons -------------------------------------------------------------- */
+  .btn {
+    @apply inline-flex items-center justify-center gap-2 rounded-full px-5 py-2.5
+           text-sm font-medium transition-all duration-150 active:scale-[0.97]
+           disabled:pointer-events-none disabled:opacity-40;
+  }
+  .btn-primary {
+    @apply btn bg-accent text-white shadow-sm hover:bg-accent-hover;
+  }
+  .btn-secondary {
+    @apply btn bg-black/[0.05] text-ink hover:bg-black/[0.08];
+  }
+  .btn-ghost {
+    @apply btn text-ink hover:bg-black/5;
+  }
+  .btn-sm {
+    @apply px-3.5 py-1.5 text-[13px];
+  }
+  .btn-danger {
+    @apply btn text-red-600 hover:bg-red-50;
+  }
+
+  /* Pills + status dot --------------------------------------------------- */
+  .pill {
+    @apply inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium;
+  }
+  .dot {
+    @apply inline-block h-2 w-2 shrink-0 rounded-full;
+  }
+
+  /* Form controls -------------------------------------------------------- */
+  .field {
+    @apply w-full rounded-xl border border-hairline/70 bg-black/[0.015] px-3.5 py-2.5
+           text-sm text-ink outline-none transition
+           placeholder:text-subtle/60
+           focus:border-accent focus:bg-white focus:ring-4 focus:ring-accent/10;
+  }
+  .label {
+    @apply mb-1.5 block text-[13px] font-medium text-ink/70;
+  }
+
+  /* Segmented control (iOS-style) --------------------------------------- */
+  .seg {
+    @apply inline-flex gap-1 rounded-[13px] bg-black/[0.05] p-1;
+  }
+  .seg-btn {
+    @apply rounded-[9px] px-4 py-1.5 text-[13px] font-medium text-subtle transition hover:text-ink;
+  }
+  .seg-btn-active {
+    @apply bg-white text-ink shadow-sm hover:text-ink;
+  }
+
+  /* List row (dense, divider-based — not heavy table borders) ----------- */
+  .row {
+    @apply flex items-center gap-4 px-5 py-4 transition-colors hover:bg-black/[0.015];
+  }
+}
+
+* { scrollbar-width: thin; scrollbar-color: #c7c7cc transparent; }
+::-webkit-scrollbar { width: 9px; height: 9px; }
+::-webkit-scrollbar-thumb { background: #c7c7cc; border-radius: 999px; border: 2px solid transparent; background-clip: content-box; }
+::-webkit-scrollbar-thumb:hover { background: #aeaeb2; background-clip: content-box; }
