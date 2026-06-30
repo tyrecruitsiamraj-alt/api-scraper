@@ -1,0 +1,26 @@
+{
+  "name": "demo-scaping",
+  "version": "1.0.0",
+  "description": "Multi-platform talent scrape demo (JobBKK, JobThai, JobDB, Facebook) — Playwright",
+  "type": "module",
+  "scripts": {
+    "auth": "node auth.js",
+    "scrape": "node scrape.js",
+    "download": "node download.js"
+  },
+  "keywords": [
+    "playwright",
+    "scraping",
+    "jobbkk"
+  ],
+  "license": "UNLICENSED",
+  "private": true,
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "csv-writer": "^1.6.0",
+    "dotenv": "^16.4.7",
+    "playwright": "^1.51.1"
+  }
+}
