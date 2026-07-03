@@ -13,8 +13,8 @@ const kanit = Kanit({
 });
 
 export const metadata: Metadata = {
-  title: 'So Recruit',
-  description: 'ระบบบริหารกำลังคนและการสรรหา (Workforce & recruitment)',
+  title: 'So Scraping',
+  description: 'ระบบดึงข้อมูลผู้สมัครจากแพลตฟอร์มสรรหา',
 };
 
 export default async function RootLayout({ children }: { children: React.ReactNode }) {

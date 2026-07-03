@@ -5,7 +5,21 @@ import { detectSoftBan, fatal, withRetry } from '../../core/anti-ban.js';
 export const BASE = 'https://www3.jobthai.com';
 const SEARCH = `${BASE}/findresume/resume_list.php`;
 
-// JobThai education level codes (level param). Best-effort mapping.
+function reloginError(message) {
+  const e = new Error(message);
+  e.needsRelogin = true;
+  return e;
+}
+
+function assertAuthed(url, body = '') {
+  if (/jobthai\.com\/th\/jobpost|auth\.jobthai\.com/i.test(url)) {
+    throw reloginError('session_expired: redirected away from resume area');
+  }
+  const head = body.slice(0, 8000);
+  if (/login-form-username|login_company|เข้าสู่ระบบสำหรับบริษัท/i.test(head)) {
+    throw reloginError('session_expired: login page in response');
+  }
+}
 function mapLevel(education) {
   const t = String(education ?? '').toLowerCase();
   if (!t) return '';
@@ -38,12 +52,19 @@ export function buildSearchUrl(criteria, page = 1) {
 async function getText(request, url, runtime = {}) {
   return withRetry(
     async () => {
-      const res = await request.get(url, { maxRedirects: 5, timeout: 60_000 });
-      const body = await res.text();
-      const ban = detectSoftBan({ status: res.status(), finalUrl: res.url(), body });
-      if (ban.banned) throw fatal(`soft_ban:${ban.reason}`);
-      if (!res.ok()) throw new Error(`HTTP ${res.status()} for ${url}`);
-      return body;
+      try {
+        const res = await request.get(url, { maxRedirects: 5, timeout: 60_000 });
+        const body = await res.text();
+        const ban = detectSoftBan({ status: res.status(), finalUrl: res.url(), body });
+        if (ban.banned) throw fatal(`soft_ban:${ban.reason}`);
+        if (!res.ok()) throw new Error(`HTTP ${res.status()} for ${url}`);
+        assertAuthed(res.url(), body);
+        return body;
+      } catch (e) {
+        if (e.needsRelogin || e.fatal) throw e;
+        if (/Max redirect/i.test(e.message)) throw reloginError('session_redirect_loop');
+        throw e;
+      }
     },
     { debug: runtime.debug, label: 'GET', retries: 3 },
   );

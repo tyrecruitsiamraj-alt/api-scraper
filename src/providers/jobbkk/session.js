@@ -2,13 +2,17 @@ import { chromium } from 'playwright';
 import { mkdir } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
-import { AUTH_DIR, envString, sleep } from '../../config.js';
+import { AUTH_DIR, envString, envInt, sleep } from '../../config.js';
 import { detectCaptcha, injectCaptchaToken, solveCaptcha } from '../../captcha.js';
 import { dismissOverlays } from '../../core/popup.js';
 
 const STORAGE_PATH = join(AUTH_DIR, 'jobbkk.json');
 const LOGIN_URL = () => envString('JOBBKK_EMPLOYER_LOGIN_URL', 'https://www.jobbkk.com/login/employer_login');
 const DASHBOARD_URL = () => envString('JOBBKK_DASHBOARD_URL', 'https://www.jobbkk.com/employer/dashboard');
+// Fail-fast: cap the fresh-login wait so a bot-check/CAPTCHA hang errors quickly (with a debug
+// screenshot) instead of freezing for minutes. Tunable via env; defaults 45s wait / 30s page-load.
+const LOGIN_TIMEOUT_MS = () => envInt('JOBBKK_LOGIN_TIMEOUT_MS', 45_000);
+const LOGIN_GOTO_TIMEOUT_MS = () => envInt('JOBBKK_LOGIN_GOTO_TIMEOUT_MS', 30_000);
 
 /**
  * Is this context's session still a valid logged-in employer session?
@@ -31,39 +35,88 @@ async function isLoggedIn(context) {
  */
 async function handleAlreadyLoggedIn(page, debug) {
   const body = await page.locator('body').innerText().catch(() => '');
-  if (!/ถูกใช้งานอยู่ในระบบ|ใช้งานอยู่ในระบบ/u.test(body)) return false;
-  if (debug) console.log('  "already logged in elsewhere" dialog — confirming (ยืนยัน) to take over...');
+  if (!/ถูกใช้งานอยู่ในระบบ|ใช้งานอยู่ในระบบ|logged in elsewhere/i.test(body)) return false;
+  if (debug) console.log('  [JobBKK] "already logged in elsewhere" dialog — confirming...');
 
-  // The dialog's confirm button is labelled "ตกลง" (the cancel one is "ยกเลิก").
   const candidates = [
     page.getByRole('button', { name: 'ตกลง', exact: true }),
-    page.locator('button, a, input[type="button"], input[type="submit"]').filter({ hasText: /^ตกลง$/ }),
     page.getByRole('button', { name: 'ยืนยัน', exact: false }),
+    page.locator('button, a, input[type="button"], input[type="submit"]').filter({ hasText: /^(ตกลง|ยืนยัน)$/ }),
+    page.locator('.modal.show button, .swal2-confirm, .confirm').filter({ hasText: /ตกลง|ยืนยัน/ }),
   ];
   for (const loc of candidates) {
     const n = await loc.count().catch(() => 0);
     for (let i = 0; i < n; i += 1) {
       const el = loc.nth(i);
       if (await el.isVisible().catch(() => false)) {
-        await el.click().catch(() => {});
+        await el.click({ timeout: 3000 }).catch(() => {});
         await page.waitForLoadState('domcontentloaded').catch(() => {});
         await sleep(1200);
+        if (debug) console.log('  [JobBKK] confirmed session takeover');
         return true;
       }
     }
   }
-  if (debug) console.log('  could not find visible ยืนยัน button');
+  if (debug) console.log('  [JobBKK] could not find confirm button on session dialog');
   return false;
 }
 
-async function performLogin(context, { username, password, debug }) {
+/** Poll until cookies prove we're logged in — handles dialogs/CAPTCHA along the way. */
+async function waitForLoginComplete(page, context, { debug, onHeartbeat, timeoutMs = LOGIN_TIMEOUT_MS() }) {
+  const start = Date.now();
+  let captchaNotified = false;
+  let lastBeat = 0;
+
+  while (Date.now() - start < timeoutMs) {
+    if (onHeartbeat) await Promise.resolve(onHeartbeat()).catch(() => {});
+
+    if (await isLoggedIn(context)) {
+      if (debug) console.log('  [JobBKK] login complete ✓');
+      return;
+    }
+
+    // heartbeat every ~10s so a slow login is visible progress, not a silent freeze
+    const elapsed = Math.floor((Date.now() - start) / 1000);
+    if (elapsed >= lastBeat + 10) {
+      lastBeat = elapsed;
+      console.log(`  [JobBKK] waiting for login… ${elapsed}s / ${Math.round(timeoutMs / 1000)}s`);
+    }
+
+    await handleAlreadyLoggedIn(page, debug);
+    await dismissOverlays(page, { debug });
+
+    const challenge = await detectCaptcha(page);
+    if (challenge?.present) {
+      if (!captchaNotified) {
+        console.log('  [JobBKK] CAPTCHA on login — attempting automated solve...');
+        captchaNotified = true;
+      }
+      const token = await solveCaptcha(challenge);
+      await injectCaptchaToken(page, token);
+      const submit = page.locator('#sign_in_emp, button[name="sign_in_emp"]').first();
+      if (await submit.isVisible().catch(() => false)) await submit.click().catch(() => {});
+    }
+
+    await sleep(600);
+  }
+
+  const shot = join(AUTH_DIR, 'jobbkk-login-debug.png');
+  await page.screenshot({ path: shot, fullPage: true }).catch(() => {});
+  const secs = Math.round(timeoutMs / 1000);
+  console.log(`  [JobBKK] login failed — screenshot saved → ${shot} | url=${page.url()}`);
+  throw new Error(`Login timed out — employer session not detected within ${secs}s (likely a CAPTCHA/bot-check on fresh login; see ${shot}). Retrying usually works, or raise JOBBKK_LOGIN_TIMEOUT_MS / configure a CAPTCHA solver.`);
+}
+
+async function performLogin(context, { username, password, debug, onHeartbeat }) {
   if (!username || !password) {
     throw new Error('JobBKK username/password missing (จาก connector หรือ .env)');
   }
 
   const page = await context.newPage();
   try {
-    await page.goto(LOGIN_URL(), { waitUntil: 'domcontentloaded', timeout: 120_000 });
+    if (onHeartbeat) await Promise.resolve(onHeartbeat()).catch(() => {});
+    console.log('  [JobBKK] opening login page...');
+    await page.goto(LOGIN_URL(), { waitUntil: 'domcontentloaded', timeout: LOGIN_GOTO_TIMEOUT_MS() });
     await sleep(500);
 
     const userField = page.locator('#username_emp, input[name="username_emp"]').first();
@@ -71,14 +124,14 @@ async function performLogin(context, { username, password, debug }) {
     await userField.fill(username);
     await passField.fill(password);
 
-    // CAPTCHA — keep Human=0: detect, solve via service, inject. Rare in practice.
     const challenge = await detectCaptcha(page);
     if (challenge?.present) {
-      if (debug) console.log('  CAPTCHA detected on login — attempting automated solve...');
+      console.log('  [JobBKK] CAPTCHA before submit — attempting automated solve...');
       const token = await solveCaptcha(challenge);
       await injectCaptchaToken(page, token);
     }
 
+    console.log('  [JobBKK] submitting credentials...');
     const submit = page.locator('#sign_in_emp, button[name="sign_in_emp"]').first();
     if (await submit.count()) {
       await submit.click();
@@ -86,37 +139,12 @@ async function performLogin(context, { username, password, debug }) {
       await passField.press('Enter');
     }
 
-    // success = navigated away from the login page
-    await page
-      .waitForURL((url) => !/employer_login|\/login\//i.test(url.href), { timeout: 30_000 })
-      .catch(() => {});
-    await page.waitForLoadState('domcontentloaded').catch(() => {});
-    await sleep(800);
-
-    // "already logged in elsewhere" dialog — confirm to take over the session.
-    await handleAlreadyLoggedIn(page, debug);
-
-    // ad / cookie / modal popups (may be 0, 1, or several stacked)
-    await dismissOverlays(page, { debug });
+    await waitForLoginComplete(page, context, { debug, onHeartbeat });
 
     const postChallenge = await detectCaptcha(page);
     if (postChallenge?.present) {
       throw new Error('Login still on a CAPTCHA challenge after submit — configure a solver (see captcha.js).');
     }
-
-    // Verify via the session itself (cookies), not a race-prone URL check:
-    // poll the dashboard over HTTP until the employer session is live.
-    for (let attempt = 0; attempt < 10; attempt += 1) {
-      if (await isLoggedIn(context)) return;
-      await sleep(800);
-    }
-
-    if (debug) {
-      const shot = join(AUTH_DIR, 'login-debug.png');
-      await page.screenshot({ path: shot, fullPage: true }).catch(() => {});
-      console.log(`  login-debug.png saved | url=${page.url()}`);
-    }
-    throw new Error('Login failed — employer session not detected (check credentials / CAPTCHA in .env).');
   } finally {
     await page.close().catch(() => {});
   }
@@ -134,7 +162,7 @@ async function performLogin(context, { username, password, debug }) {
  *
  * Returns { browser, context, request, dumpState, reused }.
  */
-export async function getJobbkkSession({ headless = true, debug = false, username, password, storageState, forceLogin = false } = {}) {
+export async function getJobbkkSession({ headless = true, debug = false, username, password, storageState, forceLogin = false, onHeartbeat } = {}) {
   const creds = {
     username: username ?? envString('JOBBKK_USERNAME'),
     password: password ?? envString('JOBBKK_PASSWORD'),
@@ -162,7 +190,8 @@ export async function getJobbkkSession({ headless = true, debug = false, usernam
   }
 
   if (!loggedIn) {
-    await performLogin(context, { ...creds, debug });
+    console.log(`  [JobBKK] logging in as ${creds.username}...`);
+    await performLogin(context, { ...creds, debug, onHeartbeat });
     if (useFile) {
       await context.storageState({ path: STORAGE_PATH });
       if (debug) console.log(`  Logged in & saved session → ${STORAGE_PATH}`);

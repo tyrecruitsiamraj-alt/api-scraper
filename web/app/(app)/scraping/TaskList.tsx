@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import type { TaskRow } from '@/lib/repo';
+import { ScrapingStatusBar } from '@/components/ScrapingStatusBar';
 import { deleteTaskAction, queueTaskAction, toggleTaskAction } from '@/lib/actions';
 
 type LiveStatus = {
@@ -12,6 +13,7 @@ type LiveStatus = {
   progress_target: number;
   last_error: string | null;
   last_run_at: string | null;
+  updated_at: string | null;
 };
 
 const PLATFORM_LABEL: Record<string, string> = { jobbkk: 'JobBKK', jobthai: 'JobThai' };
@@ -48,18 +50,35 @@ function scheduleLabel(cron: string | null): string {
 export function TaskList({ initialTasks }: { initialTasks: TaskRow[] }) {
   const [live, setLive] = useState<Record<string, LiveStatus>>({});
 
-  // Poll live status while any task is active. Refresh the page data once a task
-  // finishes so newly-scraped candidates/runs show up elsewhere.
+  // Poll live status. If a task sits in "queued" too long, re-kick the worker
+  // (covers cases where the first kick failed silently).
   useEffect(() => {
     let active = true;
+    const queuedAt = new Map<string, number>();
+
     const tick = async () => {
       try {
         const res = await fetch('/api/scrape-tasks', { cache: 'no-store' });
         if (!res.ok || !active) return;
         const data = (await res.json()) as { tasks: LiveStatus[] };
         const map: Record<string, LiveStatus> = {};
-        for (const t of data.tasks) map[t.id] = t;
+        const now = Date.now();
+        let needKick = false;
+
+        for (const t of data.tasks) {
+          map[t.id] = t;
+          if (t.status === 'queued') {
+            if (!queuedAt.has(t.id)) queuedAt.set(t.id, now);
+            else if (now - (queuedAt.get(t.id) ?? now) > 5000) needKick = true;
+          } else {
+            queuedAt.delete(t.id);
+          }
+        }
+
         setLive(map);
+        if (needKick) {
+          await fetch('/api/run-worker', { method: 'POST' }).catch(() => {});
+        }
       } catch {
         /* ignore transient poll errors */
       }
@@ -76,8 +95,28 @@ export function TaskList({ initialTasks }: { initialTasks: TaskRow[] }) {
     return <div className="card px-5 py-16 text-center text-subtle">ยังไม่มีงาน Scraping — สร้างงานใหม่ด้านบน</div>;
   }
 
+  const activeTask = initialTasks.find((t) => {
+    const status = live[t.id]?.status ?? t.status;
+    return status === 'running' || status === 'queued';
+  });
+  const activeLive = activeTask ? live[activeTask.id] : undefined;
+
   return (
-    <div className="space-y-3">
+    <div className="space-y-4">
+      {activeTask && (
+        <div className="sticky top-[4.25rem] z-20 sm:top-16">
+          <ScrapingStatusBar
+            taskName={activeTask.name}
+            status={activeLive?.status ?? activeTask.status}
+            phase={activeLive?.phase ?? activeTask.phase ?? 'idle'}
+            got={activeLive?.progress_got ?? activeTask.progress_got}
+            target={activeLive?.progress_target ?? activeTask.progress_target}
+            updatedAt={activeLive?.updated_at ?? null}
+          />
+        </div>
+      )}
+
+      <div className="space-y-3">
       {initialTasks.map((t) => {
         const s = live[t.id];
         const status = s?.status ?? t.status;
@@ -129,6 +168,9 @@ export function TaskList({ initialTasks }: { initialTasks: TaskRow[] }) {
             {(status !== 'idle' || got > 0) && (
               <div className="mt-3 space-y-1.5">
                 {status === 'queued' && <div className="text-xs text-amber-700">อยู่ในคิว — รอเริ่มทำงาน…</div>}
+                {status === 'running' && phase === 'login' && (
+                  <div className="text-xs text-blue-700">กำลัง login เข้าแพลตฟอร์ม (เปิด browser)…</div>
+                )}
 
                 {PHASES.map((p, idx) => {
                   // state of this step relative to the current phase
@@ -191,6 +233,7 @@ export function TaskList({ initialTasks }: { initialTasks: TaskRow[] }) {
           </div>
         );
       })}
+      </div>
     </div>
   );
 }

@@ -69,15 +69,17 @@ async function performLogin(context, { username, password, debug }) {
 }
 
 /** Same contract as the JobBKK session. */
-export async function getJobthaiSession({ headless = true, debug = false, username, password, storageState } = {}) {
+export async function getJobthaiSession({ headless = true, debug = false, username, password, storageState, forceLogin = false } = {}) {
   const creds = {
     username: username ?? envString('JOBTHAI_USERNAME'),
     password: password ?? envString('JOBTHAI_PASSWORD'),
   };
-  const useFile = !storageState;
+  const useFile = !storageState && !forceLogin;
   if (useFile) await mkdir(AUTH_DIR, { recursive: true });
 
-  const initialState = storageState ?? (useFile && existsSync(STORAGE_PATH) ? STORAGE_PATH : undefined);
+  const initialState = forceLogin
+    ? undefined
+    : storageState ?? (useFile && existsSync(STORAGE_PATH) ? STORAGE_PATH : undefined);
   const browser = await chromium.launch({ headless });
   const context = await browser.newContext({ locale: 'th-TH', acceptDownloads: true, ...(initialState ? { storageState: initialState } : {}) });
 

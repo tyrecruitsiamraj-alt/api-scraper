@@ -1,5 +1,6 @@
 import { resolveProvider } from './connectors/registry.js';
 import { RateLimiter } from './core/anti-ban.js';
+import { envInt } from './config.js';
 import {
   countScrapedToday,
   finishRun,
@@ -15,6 +16,24 @@ import {
 } from './db/repositories.js';
 
 const COOLDOWN_MS = 2 * 60 * 60 * 1000; // 2h after a soft-ban
+const CANDIDATE_TIMEOUT_MS = envInt('CANDIDATE_TIMEOUT_MS', 180_000); // skip hung resume fetches
+const LOGIN_TIMEOUT_MS = envInt('LOGIN_TIMEOUT_MS', 300_000); // browser login must finish within 5 min
+
+function withTimeout(promise, ms, label) {
+  let timer;
+  return Promise.race([
+    promise,
+    new Promise((_, reject) => {
+      timer = setTimeout(() => reject(new Error(`timeout:${label}:${ms}ms`)), ms);
+    }),
+  ]).finally(() => clearTimeout(timer));
+}
+
+function isSessionError(e) {
+  if (e?.needsRelogin) return true;
+  const m = String(e?.message ?? '');
+  return /session_expired|session_redirect|Max redirect|jobpost|not_authenticated|logged-out|timeout:login/i.test(m);
+}
 
 /**
  * Run one scrape for a connector and persist everything to Postgres.
@@ -47,6 +66,7 @@ export async function runConnector(connector, criteria, runtime, opts = {}) {
   // The daily caps below still bound the result strictly (anti-ban).
   const requested = criteria.maxCandidates ?? connector.scrape_limit;
   const target = Math.min(requested, connectorRemaining, providerRemaining);
+  if (opts.onTarget) await opts.onTarget(target);
 
   try {
     if (target <= 0) {
@@ -59,13 +79,27 @@ export async function runConnector(connector, criteria, runtime, opts = {}) {
       return finalize();
     }
 
-    let sess = await provider.getSession({
-      headless: runtime.headless,
-      debug: runtime.debug,
-      username: connector.username,
-      password: connector.password(),
-      storageState: connector.session_state ?? undefined,
-    });
+    const openSession = async (forceLogin = false) => {
+      if (opts.onPhase) await opts.onPhase('login');
+      if (opts.onHeartbeat) await opts.onHeartbeat();
+      console.log(`  [${connector.label}] opening browser session${forceLogin ? ' (fresh login)' : ''}...`);
+      return withTimeout(
+        provider.getSession({
+          headless: runtime.headless,
+          debug: runtime.debug,
+          username: connector.username,
+          password: connector.password(),
+          storageState: connector.session_state ?? undefined,
+          forceLogin,
+          onHeartbeat: opts.onHeartbeat,
+        }),
+        LOGIN_TIMEOUT_MS,
+        'login',
+      );
+    };
+
+    if (opts.onPhase) await opts.onPhase('scraping');
+    let sess = await openSession(false);
     browser = sess.browser;
     await saveConnectorSession(connector.id, await sess.dumpState());
 
@@ -80,13 +114,7 @@ export async function runConnector(connector, criteria, runtime, opts = {}) {
       if (!e.needsRelogin) throw e;
       console.warn(`  [${connector.label}] ${e.message} → forcing fresh login + retry`);
       await browser.close().catch(() => {});
-      sess = await provider.getSession({
-        headless: runtime.headless,
-        debug: runtime.debug,
-        username: connector.username,
-        password: connector.password(),
-        forceLogin: true,
-      });
+      sess = await openSession(true);
       browser = sess.browser;
       await saveConnectorSession(connector.id, await sess.dumpState());
       search = await runSearch();
@@ -94,36 +122,45 @@ export async function runConnector(connector, criteria, runtime, opts = {}) {
     found = search.ids.length;
     console.log(`  [${connector.label}] found ${found} ids (target ${target}, site ~${search.totalAvailable ?? '?'})`);
 
-    let saved = 0;
-    let detailRelogged = false; // force a fresh login (taking over other sessions) at most once
-    for (const id of search.ids) {
+    const resumeFrom = Math.max(0, opts.resumeFrom ?? 0);
+    if (resumeFrom > 0) {
+      console.log(`  [${connector.label}] resuming from #${resumeFrom + 1} (skip ${resumeFrom} ids already scraped)`);
+    }
+
+    let saved = resumeFrom;
+    if (saved > 0 && opts.onProgress) await opts.onProgress(saved, target);
+    let sessionRelogins = 0;
+    const MAX_SESSION_RELOGINS = 8;
+
+    async function refreshSession(reason) {
+      if (sessionRelogins >= MAX_SESSION_RELOGINS) throw new Error(`session_relogin_exhausted: ${reason}`);
+      sessionRelogins += 1;
+      console.warn(`  [${connector.label}] ${reason} → fresh login (${sessionRelogins}/${MAX_SESSION_RELOGINS})`);
+      await browser.close().catch(() => {});
+      if (opts.onPhase) await opts.onPhase('login');
+      if (opts.onHeartbeat) await opts.onHeartbeat();
+      sess = await openSession(true);
+      browser = sess.browser;
+      await saveConnectorSession(connector.id, await sess.dumpState());
+      if (opts.onPhase) await opts.onPhase('scraping');
+    }
+
+    for (let i = resumeFrom; i < search.ids.length; i += 1) {
+      const id = search.ids[i];
       if (saved >= target) break;
       await limiter.wait();
+      if (opts.onHeartbeat) await opts.onHeartbeat();
       try {
+        await withTimeout((async () => {
         const url = provider.resumeDetailUrl(id);
         let html = await provider.fetchResumeHtml(sess.request, id, runtime);
         let parsed = provider.parseResumeHtml(html, { sourceUrl: url, index: saved + 1, focusPosition: criteria.position || '-' });
-        // A detail page with no name = a logged-out/gated view (the account's
-        // session was kicked, e.g. someone logged in elsewhere). Force a fresh
-        // login — performLogin clicks ยืนยัน/ตกลง to TAKE OVER and boot the other
-        // session — then refetch. Done at most once per run to avoid a tug-of-war loop.
-        if (!parsed.name && !detailRelogged) {
-          detailRelogged = true;
-          console.warn(`  [${connector.label}] resume ${id}: logged-out/gated view → fresh login (takeover) + refetch`);
-          await browser.close().catch(() => {});
-          sess = await provider.getSession({
-            headless: runtime.headless,
-            debug: runtime.debug,
-            username: connector.username,
-            password: connector.password(),
-            forceLogin: true,
-          });
-          browser = sess.browser;
-          await saveConnectorSession(connector.id, await sess.dumpState());
+        const authBlocked = provider.isResumeAuthBlocked?.(html, url) ?? false;
+        if (authBlocked) {
+          await refreshSession(`resume ${id}: session expired (login page)`);
           html = await provider.fetchResumeHtml(sess.request, id, runtime);
           parsed = provider.parseResumeHtml(html, { sourceUrl: url, index: saved + 1, focusPosition: criteria.position || '-' });
         }
-        // platforms where contacts are masked in HTML (e.g. JobThai) reveal them here
         if (provider.enrichContacts) await provider.enrichContacts(sess.request, id, parsed, runtime);
         const assets = await provider.collectAssetsForDb(sess.request, parsed);
 
@@ -150,6 +187,7 @@ export async function runConnector(connector, criteria, runtime, opts = {}) {
         if (opts.onProgress) await opts.onProgress(saved, target);
         const att = assets.filter((a) => a.kind === 'attachment' && a.download_status === 'success').length;
         console.log(`  [${saved}/${target}] ${parsed.name || '(no name)'} ${isNew ? 'NEW' : 'upd'} | ☎ ${parsed.phone || '-'} 📎 ${att}`);
+        })(), CANDIDATE_TIMEOUT_MS, `resume_${id}`);
       } catch (e) {
         if (e.fatal) {
           status = 'cooldown';
@@ -157,6 +195,17 @@ export async function runConnector(connector, criteria, runtime, opts = {}) {
           await setConnectorCooldown(connector.id, new Date(Date.now() + COOLDOWN_MS).toISOString());
           console.error(`  ⛔ soft-ban detected (${e.message}) — cooldown ${COOLDOWN_MS / 3600000}h`);
           break;
+        }
+        if (isSessionError(e) && sessionRelogins < MAX_SESSION_RELOGINS) {
+          try {
+            await refreshSession(e.message);
+            i -= 1;
+            continue;
+          } catch (re) {
+            failed += 1;
+            console.error(`  id ${id}: relogin failed — ${re.message}`);
+            continue;
+          }
         }
         failed += 1;
         console.error(`  id ${id}: ${e.message}`);

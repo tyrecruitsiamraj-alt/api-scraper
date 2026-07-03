@@ -40,11 +40,12 @@ export async function setConnectorCooldown(id, until) {
   await query('UPDATE connectors SET cooldown_until = $2, updated_at = now() WHERE id = $1', [id, until]);
 }
 
-/** Candidates scraped by this connector since midnight — for the daily cap. */
+/** Candidates scraped by this connector since midnight (Asia/Bangkok) — live from sources. */
 export async function countScrapedToday(connectorId) {
   const { rows } = await query(
-    `SELECT COALESCE(SUM(new_count + updated_count),0)::int AS n
-       FROM scrape_runs WHERE connector_id = $1 AND started_at >= date_trunc('day', now())`,
+    `SELECT count(*)::int AS n FROM candidate_sources
+      WHERE connector_id = $1
+        AND last_seen_at >= ((now() AT TIME ZONE 'Asia/Bangkok')::date::timestamp AT TIME ZONE 'Asia/Bangkok')`,
     [connectorId],
   );
   return rows[0]?.n ?? 0;
@@ -66,11 +67,12 @@ export async function setProviderCap(platform, dailyCap) {
   );
 }
 
-/** Candidates scraped today across ALL connectors of this platform. */
+/** Candidates scraped today across ALL connectors of this platform (live). */
 export async function platformScrapedToday(platform) {
   const { rows } = await query(
-    `SELECT COALESCE(SUM(new_count + updated_count),0)::int n
-       FROM scrape_runs WHERE platform = $1 AND started_at >= date_trunc('day', now())`,
+    `SELECT count(*)::int AS n FROM candidate_sources
+      WHERE platform = $1
+        AND last_seen_at >= ((now() AT TIME ZONE 'Asia/Bangkok')::date::timestamp AT TIME ZONE 'Asia/Bangkok')`,
     [platform],
   );
   return rows[0]?.n ?? 0;
@@ -109,7 +111,14 @@ export async function dueTasks() {
   return rows;
 }
 
-export async function markTaskRunning(id, target) {
+export async function markTaskRunning(id, target, { resume = false } = {}) {
+  if (resume) {
+    await query(
+      `UPDATE scrape_tasks SET status='running', phase='scraping', progress_target=$2, last_error=NULL, updated_at=now() WHERE id=$1`,
+      [id, target],
+    );
+    return;
+  }
   await query(`UPDATE scrape_tasks SET status='running', phase='scraping', progress_got=0, progress_target=$2, last_error=NULL, updated_at=now() WHERE id=$1`, [id, target]);
 }
 /** Move a running task to a new phase and reset its progress counter. */
@@ -119,6 +128,24 @@ export async function setTaskPhase(id, phase, target = 0) {
 export async function bumpTaskProgress(id, got) {
   await query(`UPDATE scrape_tasks SET progress_got=$2, updated_at=now() WHERE id=$1`, [id, got]);
 }
+export async function touchTask(id) {
+  await query(`UPDATE scrape_tasks SET updated_at=now() WHERE id=$1`, [id]);
+}
+export async function setTaskProgressTarget(id, target) {
+  await query(`UPDATE scrape_tasks SET progress_target=$2, updated_at=now() WHERE id=$1`, [id, target]);
+}
+/** Unstick tasks whose worker died or hung (no heartbeat for maxStaleMin). */
+export async function recoverStaleRunningTasks(maxStaleMin = 10) {
+  const { rows } = await query(
+    `UPDATE scrape_tasks
+        SET status='queued', phase='idle', last_error=$2
+      WHERE status='running'
+        AND updated_at < now() - ($1::text || ' minutes')::interval
+      RETURNING id, name`,
+    [String(maxStaleMin), `ค้างนานเกิน ${maxStaleMin} นาที — จะลองรันใหม่อัตโนมัติ`],
+  );
+  return rows;
+}
 export async function finishTask(id, { status, phase, runId, error, nextRunAt }) {
   await query(
     `UPDATE scrape_tasks SET status=$2, phase=$3, last_run_id=$4, last_run_at=now(), last_error=$5, next_run_at=$6, updated_at=now() WHERE id=$1`,
@@ -126,7 +153,7 @@ export async function finishTask(id, { status, phase, runId, error, nextRunAt })
   );
 }
 export async function queueTask(id) {
-  await query(`UPDATE scrape_tasks SET status='queued', phase='idle', updated_at=now() WHERE id=$1`, [id]);
+  await query(`UPDATE scrape_tasks SET status='queued', phase='idle', enabled=true, updated_at=now() WHERE id=$1`, [id]);
 }
 
 // ---------------------------------------------------------------------------

@@ -20,6 +20,15 @@ function reloginError(message) {
   return e;
 }
 
+/** Resume HTML that bounced to login / session-kick dialog instead of a profile. */
+export function isResumeAuthBlocked(html, finalUrl = '') {
+  const head = String(html ?? '').slice(0, 12000);
+  if (/employer_login|\/login\//i.test(finalUrl)) return true;
+  if (/name=["']?username_emp/i.test(head)) return true;
+  if (/ถูกใช้งานอยู่ในระบบ|ใช้งานอยู่ในระบบ/u.test(head)) return true;
+  return false;
+}
+
 /** Resolve a province name (or id) to JobBKK's internal province id. */
 export function resolveProvinceId(input) {
   const v = String(input ?? '').trim();
@@ -143,7 +152,8 @@ export async function searchResumeIds(request, criteria, runtime) {
 
   let pagesScanned = 1;
   let pageNo = 1;
-  while (ids.length < need) {
+  const MAX_PAGES = 40; // hard safety cap — never paginate forever
+  while (ids.length < need && pagesScanned < MAX_PAGES) {
     pageNo += 1;
     await sleep(requestGapMs(runtime));
     let html;
@@ -156,8 +166,16 @@ export async function searchResumeIds(request, criteria, runtime) {
     }
     const pageIds = extractResumeIds(html);
     if (pageIds.length === 0) break;
+    const before = ids.length;
     pushUnique(pageIds);
     pagesScanned += 1;
+    // JobBKK repeats the last page's cards past the real end, so a page can return
+    // 15 ids that are all duplicates. Stop when a page adds NO new ids (results
+    // exhausted) instead of looping forever chasing an unreachable target.
+    if (ids.length === before) {
+      if (runtime.debug) console.log(`  page ${pageNo}: no new ids — results exhausted at ${ids.length}/${need}`);
+      break;
+    }
     if (runtime.debug) console.log(`  page ${pageNo}: +${pageIds.length} (total ${ids.length}/${need})`);
   }
 

@@ -4,8 +4,7 @@ import { revalidatePath } from 'next/cache';
 import { getServerSession } from 'next-auth';
 import { authOptions } from './auth';
 import { encryptSecret } from './crypto';
-import { spawn } from 'node:child_process';
-import path from 'node:path';
+import { kickWorker } from './worker-kick';
 import {
   deleteConnector,
   deleteTask,
@@ -32,26 +31,6 @@ function firstNextRun(cron: string | null): string | null {
   else if (cron === '@daily') sec = 86400;
   if (!sec) return null;
   return new Date(Date.now() + sec * 1000).toISOString();
-}
-
-/**
- * Fire-and-forget: run the tasks-worker once as a detached child of the Next.js
- * node process. Uses node.exe directly (process.execPath) — NOT a .cmd script or
- * scheduled task — so it isn't blocked by the machine's script/scheduler policy,
- * and "Create & Start Now" actually starts scraping with no manual step.
- * Assumes the web app runs from <repo>/web (so the repo root is one level up).
- */
-function kickWorker() {
-  try {
-    const root = path.resolve(process.cwd(), '..'); // web/ -> repo root
-    spawn(process.execPath, ['src/tasks-worker.js'], {
-      cwd: root,
-      detached: true,
-      stdio: 'ignore',
-    }).unref();
-  } catch (e) {
-    console.error('kickWorker failed:', e);
-  }
 }
 
 // ---------------------------------------------------------------------------

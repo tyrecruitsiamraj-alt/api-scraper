@@ -9,7 +9,7 @@ services:
     environment:
       PORT: 8080         # container listens on 8080; host maps it below
     ports:
-      - "8137:8080"     # host 8137 (8080 is used by the So Recruit frontend)
+      - "8137:8080"     # host 8137 (8080 is used by the So Scraping frontend)
     restart: unless-stopped
     command: ["node", "src/api/server.js"]
 

@@ -54,8 +54,8 @@ export function Topbar() {
           <Image src="/logo-SO.webp" alt="SO — SIAMRAJATHANEE" width={32} height={32} className="h-8 w-auto shrink-0" priority />
           <div className="hidden h-7 w-px bg-line sm:block" />
           <div className="min-w-0 leading-tight">
-            <div className="truncate text-[15px] font-semibold tracking-tight">So Recruit</div>
-            <div className="hidden truncate text-[11px] text-muted sm:block">ระบบสรรหากำลังคน</div>
+            <div className="truncate text-[15px] font-semibold tracking-tight">So Scraping</div>
+            <div className="hidden truncate text-[11px] text-muted sm:block">ระบบดึงข้อมูลผู้สมัคร</div>
           </div>
         </div>
 

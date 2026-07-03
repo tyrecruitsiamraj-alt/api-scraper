@@ -1,5 +1,5 @@
 import { getJobbkkSession } from './session.js';
-import { fetchResumeHtml, resumeDetailUrl, searchResumeIds } from './client.js';
+import { fetchResumeHtml, isResumeAuthBlocked, resumeDetailUrl, searchResumeIds } from './client.js';
 import { parseResumeHtml } from './parser.js';
 import { collectAssetsForDb } from './assets.js';
 
@@ -8,6 +8,7 @@ export const jobbkkProvider = {
   label: 'JobBKK',
 
   getSession: getJobbkkSession,
+  isResumeAuthBlocked,
   searchResumeIds,
   fetchResumeHtml,
   resumeDetailUrl,

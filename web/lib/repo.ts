@@ -145,13 +145,17 @@ export async function deleteConnector(id: string) {
 // ---------------------------------------------------------------------------
 // Provider daily caps (provider_limits) — across all connectors of a platform
 // ---------------------------------------------------------------------------
+// Start of calendar day in Asia/Bangkok (for daily quota counters).
+const BANGKOK_DAY_START = `((now() AT TIME ZONE 'Asia/Bangkok')::date::timestamp AT TIME ZONE 'Asia/Bangkok')`;
+
 export type ProviderLimitRow = { platform: string; daily_cap: number; updated_at: string; used_today: number };
 
 export async function listProviderLimits() {
   return q<ProviderLimitRow>(
     `SELECT pl.platform, pl.daily_cap, pl.updated_at,
-            COALESCE((SELECT SUM(r.new_count + r.updated_count)::int FROM scrape_runs r
-                       WHERE r.platform = pl.platform AND r.started_at >= date_trunc('day', now())), 0) AS used_today
+            COALESCE((SELECT count(*)::int FROM candidate_sources s
+                       WHERE s.platform = pl.platform
+                         AND s.last_seen_at >= ${BANGKOK_DAY_START}), 0) AS used_today
        FROM provider_limits pl ORDER BY pl.platform`,
   );
 }
@@ -162,6 +166,18 @@ export async function setProviderCap(platform: string, dailyCap: number) {
      ON CONFLICT (platform) DO UPDATE SET daily_cap = EXCLUDED.daily_cap, updated_at = now()`,
     [platform, dailyCap],
   );
+}
+
+/** True when tasks are queued but no worker seems to be picking them up. */
+export async function hasStaleQueuedTasks(sec = 90) {
+  const rows = await q<{ n: number }>(
+    `SELECT 1 AS n FROM scrape_tasks
+      WHERE status='queued' AND enabled=true
+        AND updated_at < now() - ($1::text || ' seconds')::interval
+      LIMIT 1`,
+    [String(sec)],
+  );
+  return rows.length > 0;
 }
 
 // ---------------------------------------------------------------------------
@@ -219,7 +235,7 @@ export async function insertTask(t: {
 }
 
 export async function queueTask(id: string) {
-  await q(`UPDATE scrape_tasks SET status='queued', phase='idle', updated_at=now() WHERE id=$1`, [id]);
+  await q(`UPDATE scrape_tasks SET status='queued', phase='idle', enabled=true, updated_at=now() WHERE id=$1`, [id]);
 }
 
 export async function setTaskEnabled(id: string, enabled: boolean) {
@@ -232,8 +248,8 @@ export async function deleteTask(id: string) {
 
 /** Compact live status for polling the progress counters. */
 export async function taskStatuses() {
-  return q<{ id: string; status: string; phase: string; progress_got: number; progress_target: number; last_error: string | null; last_run_at: string | null }>(
-    `SELECT id, status, phase, progress_got, progress_target, last_error, last_run_at FROM scrape_tasks`,
+  return q<{ id: string; status: string; phase: string; progress_got: number; progress_target: number; last_error: string | null; last_run_at: string | null; updated_at: string }>(
+    `SELECT id, status, phase, progress_got, progress_target, last_error, last_run_at, updated_at FROM scrape_tasks`,
   );
 }
 

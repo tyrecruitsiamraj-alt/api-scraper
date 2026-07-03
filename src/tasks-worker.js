@@ -1,4 +1,8 @@
+import { resolve } from 'node:path';
+import { pathToFileURL } from 'node:url';
+import { existsSync, mkdirSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
 import { closePool } from './db/pool.js';
+import { PROJECT_ROOT } from './config.js';
 import {
   bumpTaskProgress,
   candidatesForRun,
@@ -10,8 +14,11 @@ import {
   getConnector,
   markTaskRunning,
   pendingExtractionsForRun,
+  recoverStaleRunningTasks,
   saveExtraction,
   setTaskPhase,
+  setTaskProgressTarget,
+  touchTask,
 } from './db/repositories.js';
 import { loadRuntime } from './config.js';
 import { runConnector } from './pipeline.js';
@@ -46,13 +53,18 @@ async function runTask(t, runtime) {
 
   const target = t.mode === 'count' ? t.target_count || connector.scrape_limit : connector.scrape_limit;
   const criteria = { ...(t.criteria || {}), maxCandidates: target, updatedSince: t.updated_since ?? undefined };
+  const resumeFrom = t.progress_got > 0 && t.status === 'queued' ? t.progress_got : 0;
 
   // ---- phase 1: scrape ----
-  await markTaskRunning(t.id, target);
-  console.log(`▶ ${t.name} → ${connector.label} (scrape, target ${target})`);
+  await markTaskRunning(t.id, target, { resume: resumeFrom > 0 });
+  console.log(`▶ ${t.name} → ${connector.label} (scrape, target ${target}${resumeFrom ? `, resume @${resumeFrom}` : ''})`);
   const r = await runConnector(connector, criteria, runtime, {
     taskId: t.id,
+    resumeFrom,
+    onTarget: (n) => setTaskProgressTarget(t.id, n),
     onProgress: (got) => bumpTaskProgress(t.id, got),
+    onHeartbeat: () => touchTask(t.id),
+    onPhase: (phase) => setTaskPhase(t.id, phase, 0),
   });
 
   if (r.status === 'failed' || r.status === 'cooldown') {
@@ -114,8 +126,39 @@ async function runTask(t, runtime) {
   console.log(`  ${t.name}: done | new ${r.newCount}/upd ${r.updatedCount} | ocr ${pending.length} | enriched ${filled}`);
 }
 
-async function main() {
+/**
+ * Run all queued/due tasks once. Exported for the web UI (no subprocess spawn).
+ *
+ * Concurrency guard = a lock FILE judged stale by mtime (not PID). The old check
+ * used process.kill(pid,0), which gave false positives when the OS reused the dead
+ * worker's PID for an unrelated process → the worker refused to run and tasks hung
+ * forever. Here a lock older than LOCK_STALE_MS is treated as abandoned (crashed
+ * worker) and reclaimed. No PID match, no DB connection held — nothing to leak.
+ */
+const LOCK_STALE_MS = 10 * 60_000; // 10 min — longer than any normal run
+export async function runDueTasksOnce() {
+  const lockPath = resolve(PROJECT_ROOT, 'output', 'worker.lock');
+  mkdirSync(resolve(PROJECT_ROOT, 'output'), { recursive: true });
+  if (existsSync(lockPath) && Date.now() - statSync(lockPath).mtimeMs < LOCK_STALE_MS) {
+    console.log('tasks-worker: another instance is running — exit');
+    return;
+  }
+  writeFileSync(lockPath, `${process.pid} ${new Date().toISOString()}`);
+  try {
+    await runDueTasksOnceInner();
+  } finally {
+    try {
+      unlinkSync(lockPath);
+    } catch {
+      /* ignore */
+    }
+  }
+}
+
+async function runDueTasksOnceInner() {
   const runtime = loadRuntime();
+  const recovered = await recoverStaleRunningTasks(10);
+  for (const t of recovered) console.log(`  ↻ recovered stale task: ${t.name}`);
   const tasks = await dueTasks();
   console.log(`\n=== tasks-worker: ${tasks.length} task(s) due ===`);
   for (const t of tasks) {
@@ -129,8 +172,19 @@ async function main() {
   await closePool();
 }
 
-main().catch(async (e) => {
-  console.error('tasks-worker failed:', e.message);
-  await closePool();
-  process.exit(1);
-});
+function isCliMain() {
+  if (!process.argv[1]) return false;
+  try {
+    return import.meta.url === pathToFileURL(resolve(process.argv[1])).href;
+  } catch {
+    return false;
+  }
+}
+
+if (isCliMain()) {
+  runDueTasksOnce().catch(async (e) => {
+    console.error('tasks-worker failed:', e.message);
+    await closePool();
+    process.exit(1);
+  });
+}
