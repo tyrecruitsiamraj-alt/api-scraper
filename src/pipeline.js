@@ -101,7 +101,6 @@ export async function runConnector(connector, criteria, runtime, opts = {}) {
       );
     };
 
-    if (opts.onPhase) await opts.onPhase('scraping');
     let sess = await openSession(false);
     browser = sess.browser;
     activeContext = sess.context;
@@ -127,6 +126,12 @@ export async function runConnector(connector, criteria, runtime, opts = {}) {
     found = search.ids.length;
     console.log(`  [${connector.label}] found ${found} ids (target ${target}, site ~${search.totalAvailable ?? '?'})`);
 
+    // Login + search done — now scraping candidates. Flip the phase to 'scraping'
+    // and re-assert the target (setTaskPhase resets progress_target to 0) so the
+    // status bar narrates "ดึงข้อมูล N/target" instead of staying on "กำลัง login".
+    if (opts.onPhase) await opts.onPhase('scraping');
+    if (opts.onTarget) await opts.onTarget(target);
+
     const resumeFrom = Math.max(0, opts.resumeFrom ?? 0);
     if (resumeFrom > 0) {
       console.log(`  [${connector.label}] resuming from #${resumeFrom + 1} (skip ${resumeFrom} ids already scraped)`);
@@ -149,6 +154,8 @@ export async function runConnector(connector, criteria, runtime, opts = {}) {
       activeContext = sess.context;
       await saveConnectorSession(connector.id, await sess.dumpState());
       if (opts.onPhase) await opts.onPhase('scraping');
+      if (opts.onTarget) await opts.onTarget(target);
+      if (opts.onProgress) await opts.onProgress(saved, target); // restore counter after phase reset
     }
 
     for (let i = resumeFrom; i < search.ids.length; i += 1) {
