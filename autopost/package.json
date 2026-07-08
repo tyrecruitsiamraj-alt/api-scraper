@@ -1,0 +1,43 @@
+{
+  "name": "auto-post",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "start": "node scripts/start-server.js",
+    "dev": "node scripts/start-server.js",
+    "start:raw": "node server/index.js",
+    "migrate": "node scripts/migrate-from-json.js",
+    "migrate:credentials": "node scripts/add-credentials-columns.js",
+    "migrate:fix-4worker": "node scripts/remove-duplicate-4worker.js",
+    "migrate:user-groups": "node scripts/migrate-user-groups.js",
+    "migrate:fb-token": "node scripts/migrate-add-fb-token.js",
+    "migrate:assignment-job-ids": "node scripts/migrate-assignment-job-ids.js",
+    "migrate:assignment-job-id-nullable": "node scripts/drop-assignment-job-id-not-null.js",
+    "migrate:post-logs": "node scripts/migrate-post-logs.js",
+    "migrate:post-settings": "node scripts/migrate-user-post-settings.js",
+    "import:krungsri": "node scripts/import-driver-pack.js krungsri-driver-bank-pack.json",
+    "import:tum": "node scripts/import-driver-pack.js tum-driver-pack.json",
+    "worker:post": "node scripts/post-remote-worker-supervisor.js",
+    "worker:post:raw": "node scripts/post-remote-worker.js",
+    "worker:collect": "node scripts/collect-remote-worker.js",
+    "worker:watch": "node scripts/worker-queue-watch.js",
+    "test": "playwright test --headed --project=GoogleChrome",
+    "test:logic": "playwright test tests/collectPostComments.logic.spec.ts --project=ChromiumCollect",
+    "test:postAll": "playwright test postAll --headed --project=GoogleChrome",
+    "test:post": "playwright test postAll --headed --project=GoogleChrome"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "dotenv": "^16.4.5",
+    "express": "^4.21.0",
+    "pg": "^8.20.0"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.58.2",
+    "@types/node": "^25.2.3"
+  }
+}
