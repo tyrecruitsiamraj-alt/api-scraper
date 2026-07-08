@@ -51,6 +51,7 @@ export async function runConnector(connector, criteria, runtime, opts = {}) {
   let status = 'success';
   let error = null;
   let browser = null;
+  let activeContext = null; // tracked so the finally can log out to free the session
 
   // per-round limit ∩ connector daily cap ∩ PROVIDER daily cap (strict)
   const today = await countScrapedToday(connector.id);
@@ -85,7 +86,9 @@ export async function runConnector(connector, criteria, runtime, opts = {}) {
       console.log(`  [${connector.label}] opening browser session${forceLogin ? ' (fresh login)' : ''}...`);
       return withTimeout(
         provider.getSession({
-          headless: runtime.headless,
+          // Some providers (JobBKK) only work in a visible browser — headless login is
+          // bot-blocked and detail pages render masked. Force headful for those.
+          headless: provider.headful ? false : runtime.headless,
           debug: runtime.debug,
           username: connector.username,
           password: connector.password(),
@@ -101,9 +104,10 @@ export async function runConnector(connector, criteria, runtime, opts = {}) {
     if (opts.onPhase) await opts.onPhase('scraping');
     let sess = await openSession(false);
     browser = sess.browser;
+    activeContext = sess.context;
     await saveConnectorSession(connector.id, await sess.dumpState());
 
-    const runSearch = () => provider.searchResumeIds(sess.request, { ...criteria, maxCandidates: target }, runtime);
+    const runSearch = () => provider.searchResumeIds(sess, { ...criteria, maxCandidates: target }, runtime);
     let search;
     try {
       search = await runSearch();
@@ -116,6 +120,7 @@ export async function runConnector(connector, criteria, runtime, opts = {}) {
       await browser.close().catch(() => {});
       sess = await openSession(true);
       browser = sess.browser;
+      activeContext = sess.context;
       await saveConnectorSession(connector.id, await sess.dumpState());
       search = await runSearch();
     }
@@ -141,6 +146,7 @@ export async function runConnector(connector, criteria, runtime, opts = {}) {
       if (opts.onHeartbeat) await opts.onHeartbeat();
       sess = await openSession(true);
       browser = sess.browser;
+      activeContext = sess.context;
       await saveConnectorSession(connector.id, await sess.dumpState());
       if (opts.onPhase) await opts.onPhase('scraping');
     }
@@ -153,12 +159,15 @@ export async function runConnector(connector, criteria, runtime, opts = {}) {
       try {
         await withTimeout((async () => {
         const url = provider.resumeDetailUrl(id);
-        let html = await provider.fetchResumeHtml(sess.request, id, runtime);
+        // Pass the whole session — providers pick what they need: JobBKK renders
+        // the detail page in the browser context (data is client-side JS), while
+        // JobThai reads it over HTTP via the request context.
+        let html = await provider.fetchResumeHtml(sess, id, runtime);
         let parsed = provider.parseResumeHtml(html, { sourceUrl: url, index: saved + 1, focusPosition: criteria.position || '-' });
         const authBlocked = provider.isResumeAuthBlocked?.(html, url) ?? false;
         if (authBlocked) {
           await refreshSession(`resume ${id}: session expired (login page)`);
-          html = await provider.fetchResumeHtml(sess.request, id, runtime);
+          html = await provider.fetchResumeHtml(sess, id, runtime);
           parsed = provider.parseResumeHtml(html, { sourceUrl: url, index: saved + 1, focusPosition: criteria.position || '-' });
         }
         if (provider.enrichContacts) await provider.enrichContacts(sess.request, id, parsed, runtime);
@@ -223,6 +232,9 @@ export async function runConnector(connector, criteria, runtime, opts = {}) {
     }
     console.error(`  [${connector.label}] run error: ${e.message}`);
   } finally {
+    // Log out so the platform frees the single active session — otherwise the next
+    // run's login collides and JobBKK renders resumes masked (contact hidden).
+    if (provider.logout && activeContext) await provider.logout(activeContext, { debug: runtime.debug }).catch(() => {});
     if (browser) await browser.close().catch(() => {});
   }
 

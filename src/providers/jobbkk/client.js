@@ -2,7 +2,7 @@ import * as cheerio from 'cheerio';
 import { createRequire } from 'node:module';
 import { writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { AUTH_DIR, requestGapMs, sleep } from '../../config.js';
+import { AUTH_DIR, envInt, requestGapMs, sleep } from '../../config.js';
 import { detectSoftBan, fatal, withRetry } from '../../core/anti-ban.js';
 
 const require = createRequire(import.meta.url);
@@ -20,13 +20,33 @@ function reloginError(message) {
   return e;
 }
 
-/** Resume HTML that bounced to login / session-kick dialog instead of a profile. */
+/**
+ * Only TRUE session loss — where a fresh login actually helps: the request bounced
+ * to the login page, or the "logged in elsewhere" (single-session kick) dialog showed.
+ *
+ * NOTE: a masked contact block (`.ownerNoLogin` / "เพื่อดูข้อมูลการติดต่อ") is
+ * deliberately NOT treated as auth-blocked. Testing showed even a clean, exclusive,
+ * fresh login renders masked (JobBKK appears to soft-flag the account after frequent
+ * logins), so relogging in on every masked resume does NOT recover it and only
+ * amplifies the flagging. The caller records the public body as `partial` and moves on
+ * instead — see isResumeMasked().
+ */
 export function isResumeAuthBlocked(html, finalUrl = '') {
-  const head = String(html ?? '').slice(0, 12000);
   if (/employer_login|\/login\//i.test(finalUrl)) return true;
-  if (/name=["']?username_emp/i.test(head)) return true;
-  if (/ถูกใช้งานอยู่ในระบบ|ใช้งานอยู่ในระบบ/u.test(head)) return true;
+  const s = String(html ?? '');
+  if (/ถูกใช้งานอยู่ในระบบ|ใช้งานอยู่ในระบบ/u.test(s.slice(0, 12000))) return true; // logged-in-elsewhere / kick
   return false;
+}
+
+/**
+ * The resume rendered the masked variant — logged-in body is public but name/contact
+ * are hidden behind `.ownerNoLogin` ("กรุณา ล็อคอิน เพื่อดูข้อมูลการติดต่อ"). Distinct
+ * from isResumeAuthBlocked: this is NOT recovered by relogin (suspected rate/anti-abuse),
+ * so callers should log it and keep the partial record rather than storm the login.
+ */
+export function isResumeMasked(html) {
+  const s = String(html ?? '');
+  return /class=["'][^"']*\bownerNoLogin\b/.test(s) || /เพื่อดูข้อมูลการติดต่อ/u.test(s);
 }
 
 /** Resolve a province name (or id) to JobBKK's internal province id. */
@@ -186,8 +206,92 @@ export function resumeDetailUrl(id) {
   return `${BASE}/resumes/preview_new/${id}`;
 }
 
-export async function fetchResumeHtml(request, id, runtime = {}) {
-  return getText(request, resumeDetailUrl(id), runtime);
+const RESUME_GOTO_TIMEOUT_MS = () => envInt('JOBBKK_RESUME_GOTO_TIMEOUT_MS', 45_000);
+const RESUME_READY_TIMEOUT_MS = () => envInt('JOBBKK_RESUME_READY_TIMEOUT_MS', 20_000);
+
+/**
+ * True once the resume detail has SETTLED into one of its two end states, so we can
+ * stop waiting and snapshot:
+ *   - recognised employer → the name/contact is populated (real TEXT). Gate on text,
+ *     NOT a container element or the login-form modal — both exist in the initial
+ *     shell regardless of auth state and would fire too early (empty snapshot).
+ *   - not recognised → the masked `.ownerNoLogin` contact block rendered.
+ * Both are injected by client XHR after the shell paints. Runs in the page context.
+ *
+ * On the masked outcome the caller's isResumeAuthBlocked triggers a fresh-login retry.
+ */
+function resumeSettled() {
+  const txt = (s) => {
+    const el = document.querySelector(s);
+    return el && el.textContent ? el.textContent.trim() : '';
+  };
+  const populated =
+    txt('.rsm-name span').length > 0 ||
+    txt('h3.jobseeker-name').length > 0 ||
+    document.querySelectorAll('.contact-detail .data-member-detail').length > 0;
+  const masked = !!document.querySelector('.ownerNoLogin');
+  return populated || masked;
+}
+
+/**
+ * Fetch a resume detail page as FULLY-RENDERED HTML.
+ *
+ * JobBKK loads the resume body client-side (JS/XHR once the browser is recognised
+ * as a logged-in employer), so a plain HTTP GET of /resumes/preview_new/{id}
+ * returns only a shell — homepage title + login form, no candidate data. So we
+ * open the URL in the authenticated browser context, let the client JS populate
+ * the DOM, then read the resulting HTML. The existing cheerio parser handles the
+ * rest (it already knows the preview_new layout).
+ *
+ * Takes the session (or a raw BrowserContext) — it needs the browser context,
+ * not the request context, so it can render.
+ *
+ * @param {{ context: import('playwright').BrowserContext } | import('playwright').BrowserContext} session
+ */
+export async function fetchResumeHtml(session, id, runtime = {}) {
+  const context = session?.context ?? session; // accept a session object or a raw context
+  const url = resumeDetailUrl(id);
+  return withRetry(
+    async () => {
+      const page = await context.newPage();
+      try {
+        const res = await page.goto(url, { waitUntil: 'domcontentloaded', timeout: RESUME_GOTO_TIMEOUT_MS() });
+        const status = res?.status() ?? 200;
+
+        // NB: do NOT run dismissOverlays here — the resume preview itself renders inside
+        // a modal/overlay, and the generic "press Escape / click .close" heuristics tear
+        // it down before the data paints. A cookie banner doesn't block DOM extraction.
+
+        // Wait for the profile to be genuinely populated (name/contact has TEXT). The
+        // XHR that fills it lands after the shell paints. If it never populates (stale
+        // session), this times out and we snapshot anyway so isResumeAuthBlocked can
+        // trigger a relogin.
+        const populated = await page
+          .waitForFunction(resumeSettled, null, { timeout: RESUME_READY_TIMEOUT_MS(), polling: 300 })
+          .then(() => true)
+          .catch(() => false);
+
+        // let remaining sub-sections (skills / attachments) settle
+        await page.waitForLoadState('networkidle', { timeout: 5_000 }).catch(() => {});
+        await sleep(populated ? 400 : 500);
+
+        const html = await page.content();
+        const finalUrl = page.url();
+
+        // Bounced to login / "logged in elsewhere": NOT a soft ban — let the
+        // pipeline's isResumeAuthBlocked → relogin path handle it. Return as-is.
+        if (isResumeAuthBlocked(html, finalUrl)) return html;
+
+        // Genuine ban signals (429/403/captcha/blocked) → stop + cooldown.
+        const ban = detectSoftBan({ status, finalUrl, body: html });
+        if (ban.banned && ban.reason !== 'redirected_to_login') throw fatal(`soft_ban_on_resume:${ban.reason}`);
+        return html;
+      } finally {
+        await page.close().catch(() => {});
+      }
+    },
+    { debug: runtime.debug, label: `render_resume_${id}`, retries: 2 },
+  );
 }
 
 /** Download a binary asset (profile image / attachment) using the session. */

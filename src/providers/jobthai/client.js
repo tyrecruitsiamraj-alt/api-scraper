@@ -98,7 +98,8 @@ function nextPageUrl(html) {
 }
 
 /** Search + paginate until we have enough resume ids. */
-export async function searchResumeIds(request, criteria, runtime) {
+export async function searchResumeIds(session, criteria, runtime) {
+  const request = session?.request ?? session; // accept a session object or a raw request context
   const need = criteria.maxCandidates;
   const ids = [];
   const seen = new Set();
@@ -129,7 +130,11 @@ export function resumeDetailUrl(id) {
   return `${BASE}/resume/0,${id}.html`;
 }
 
-export async function fetchResumeHtml(request, id, runtime = {}) {
+export async function fetchResumeHtml(session, id, runtime = {}) {
+  // JobThai serves the resume body in the HTTP response, so a plain GET via the
+  // request context is enough (no browser render needed). Accept a session object
+  // or a raw request context.
+  const request = session?.request ?? session;
   return getText(request, resumeDetailUrl(id), runtime);
 }
 

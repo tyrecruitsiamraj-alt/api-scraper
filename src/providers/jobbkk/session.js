@@ -2,10 +2,11 @@ import { chromium } from 'playwright';
 import { mkdir } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
-import { AUTH_DIR, envString, envInt, sleep } from '../../config.js';
+import { AUTH_DIR, envString, envInt, envBool, sleep } from '../../config.js';
 import { detectCaptcha, injectCaptchaToken, solveCaptcha } from '../../captcha.js';
 import { dismissOverlays } from '../../core/popup.js';
 
+const BASE = 'https://www.jobbkk.com';
 const STORAGE_PATH = join(AUTH_DIR, 'jobbkk.json');
 const LOGIN_URL = () => envString('JOBBKK_EMPLOYER_LOGIN_URL', 'https://www.jobbkk.com/login/employer_login');
 const DASHBOARD_URL = () => envString('JOBBKK_DASHBOARD_URL', 'https://www.jobbkk.com/employer/dashboard');
@@ -139,14 +140,62 @@ async function performLogin(context, { username, password, debug, onHeartbeat })
       await passField.press('Enter');
     }
 
-    await waitForLoginComplete(page, context, { debug, onHeartbeat });
+    // Robust login completion. JobBKK enforces ONE active session: a second login shows
+    // an "already logged in elsewhere" dialog (แจ้งเตือน) with a pink "ตกลง" button that
+    // must be clicked to kick the other session and finish login. An HTTP-only check
+    // false-positives here (cookies half-set) while the page is stuck on the dialog, so
+    // we drive the PAGE: confirm the dialog, solve captcha, and wait until the page
+    // actually reaches the employer area.
+    const isPageLoggedIn = () => /\/employer\/(?!.*noLogIn)|\/resumes\//i.test(page.url());
+    const deadline = Date.now() + LOGIN_TIMEOUT_MS();
+    let confirmedKick = false;
+    while (Date.now() < deadline) {
+      if (onHeartbeat) await Promise.resolve(onHeartbeat()).catch(() => {});
+      if (isPageLoggedIn()) break;
 
-    const postChallenge = await detectCaptcha(page);
-    if (postChallenge?.present) {
-      throw new Error('Login still on a CAPTCHA challenge after submit — configure a solver (see captcha.js).');
+      // confirm the single-session "logged in elsewhere" dialog (button text = ตกลง)
+      const okBtn = page.getByText('ตกลง', { exact: true }).first();
+      if (await okBtn.isVisible().catch(() => false)) {
+        if (debug) console.log('  [JobBKK] "logged in elsewhere" dialog — clicking ตกลง to take over...');
+        await okBtn.click({ timeout: 3000 }).catch(() => {});
+        confirmedKick = true;
+        await page.waitForLoadState('domcontentloaded').catch(() => {});
+        await sleep(1500);
+        continue;
+      }
+
+      const challenge = await detectCaptcha(page);
+      if (challenge?.present) {
+        console.log('  [JobBKK] CAPTCHA on login — attempting automated solve...');
+        const token = await solveCaptcha(challenge);
+        await injectCaptchaToken(page, token);
+        const submitAgain = page.locator('#sign_in_emp, button[name="sign_in_emp"]').first();
+        if (await submitAgain.isVisible().catch(() => false)) await submitAgain.click().catch(() => {});
+      }
+
+      // if the login form is gone but URL hasn't updated, nudge to the dashboard
+      const fieldVisible = await page.locator('#username_emp').isVisible().catch(() => false);
+      if (!fieldVisible && !isPageLoggedIn()) {
+        await page.goto(DASHBOARD_URL(), { waitUntil: 'domcontentloaded', timeout: LOGIN_GOTO_TIMEOUT_MS() }).catch(() => {});
+        await page.waitForLoadState('networkidle').catch(() => {});
+      }
+      await sleep(600);
     }
-  } finally {
+
+    // Confirm the session is REAL by loading the dashboard (not the noLogIn bounce).
+    await page.goto(DASHBOARD_URL(), { waitUntil: 'domcontentloaded', timeout: LOGIN_GOTO_TIMEOUT_MS() }).catch(() => {});
+    await page.waitForLoadState('networkidle').catch(() => {});
+    if (debug) console.log(`  [JobBKK] login result: url=${page.url()} (kickConfirmed=${confirmedKick})`);
+    if (/noLogIn|\/login\//i.test(page.url())) {
+      await page.screenshot({ path: join(AUTH_DIR, 'jobbkk-postlogin.png'), fullPage: true }).catch(() => {});
+      throw new Error('Login did not establish an employer session (bounced to noLogIn). See .auth/jobbkk-postlogin.png');
+    }
+
+    // Keep this page OPEN and return it — the premium search must run on the same page.
+    return page;
+  } catch (e) {
     await page.close().catch(() => {});
+    throw e;
   }
 }
 
@@ -176,35 +225,95 @@ export async function getJobbkkSession({ headless = true, debug = false, usernam
   const initialState = forceLogin
     ? undefined
     : storageState ?? (useFile && existsSync(STORAGE_PATH) ? STORAGE_PATH : undefined);
-  const browser = await chromium.launch({ headless });
+  // JobBKK must run in a REAL (non-headless) browser to pass its bot-check and get
+  // UNMASKED contact data. To avoid the window popping up in front of the user during
+  // automated web/worker runs, shove it far off-screen — it's still a real browser,
+  // just invisible. Set JOBBKK_SHOW_BROWSER=true (or run with debug) to watch it.
+  const hideWindow = !headless && !debug && !envBool('JOBBKK_SHOW_BROWSER', false);
+  const browser = await chromium.launch({
+    headless,
+    args: hideWindow ? ['--window-position=-32000,-32000', '--window-size=1536,864'] : [],
+  });
   const context = await browser.newContext({
     locale: 'th-TH',
     acceptDownloads: true,
+    // Desktop viewport — the Resume Search Talent premium UI (#autoComplete-position)
+    // only renders at desktop width; a narrow viewport falls back to a mobile layout
+    // that hides the search fields.
+    viewport: { width: 1536, height: 864 },
     ...(initialState ? { storageState: initialState } : {}),
   });
 
-  let loggedIn = false;
-  if (initialState) {
-    loggedIn = await isLoggedIn(context);
-    if (debug) console.log(`  Reused session: ${loggedIn ? 'valid ✓' : 'expired — re-login'}`);
-  }
-
-  if (!loggedIn) {
-    console.log(`  [JobBKK] logging in as ${creds.username}...`);
-    await performLogin(context, { ...creds, debug, onHeartbeat });
-    if (useFile) {
-      await context.storageState({ path: STORAGE_PATH });
-      if (debug) console.log(`  Logged in & saved session → ${STORAGE_PATH}`);
-    } else if (debug) {
-      console.log('  Logged in (session will be persisted to DB by caller)');
-    }
+  // NOTE: JobBKK always logs in fresh. A reused cookie session passes an HTTP check
+  // but the Resume Search Talent premium page relies on per-page sessionStorage set
+  // during login (storageState can't carry it), so reuse renders masked / redirects.
+  // Fresh headful login on a kept-open page is the only reliable path.
+  console.log(`  [JobBKK] logging in as ${creds.username}...`);
+  const page = await performLogin(context, { ...creds, debug, onHeartbeat });
+  if (useFile) {
+    await context.storageState({ path: STORAGE_PATH });
+    if (debug) console.log(`  Logged in & saved session → ${STORAGE_PATH}`);
+  } else if (debug) {
+    console.log('  Logged in (session will be persisted to DB by caller)');
   }
 
   return {
     browser,
     context,
+    page, // the logged-in page — JobBKK's browser search must run on THIS page
     request: context.request,
-    reused: loggedIn,
+    reused: false,
     dumpState: () => context.storageState(),
   };
+}
+
+/**
+ * Log out server-side so JobBKK releases the single active session.
+ *
+ * JobBKK enforces ONE active employer session: if a previous run just closed the
+ * browser (session left "active" on the server), the NEXT login collides — it lands
+ * as a secondary session that the resume-detail render treats as NOT a logged-in
+ * employer (masked `.ownerNoLogin` contact). Ending each run with an explicit logout
+ * cleanly frees the session so the next run's login is the sole one and gets
+ * recognised. Best-effort + verified; never throws (logout failure must not fail a run).
+ *
+ * Reads the real logout href from the dashboard header, navigates to it, then falls
+ * back to known endpoints. Returns true if we end up logged out.
+ */
+export async function logoutJobbkk(context, { debug = false } = {}) {
+  const page = await context.newPage();
+  try {
+    await page.goto(DASHBOARD_URL(), { waitUntil: 'domcontentloaded', timeout: LOGIN_GOTO_TIMEOUT_MS() }).catch(() => {});
+    // Prefer the real logout link (its href), so a hidden dropdown menu doesn't block a click.
+    const href = await page
+      .locator('a:has-text("ออกจากระบบ"), a[href*="logout" i], a[href*="signout" i]')
+      .first()
+      .getAttribute('href')
+      .catch(() => null);
+    const candidates = [
+      href && new URL(href, BASE).href,
+      `${BASE}/login/logout`,
+      `${BASE}/logout`,
+      `${BASE}/employer/logout`,
+    ].filter(Boolean);
+    for (const u of candidates) {
+      await page.goto(u, { waitUntil: 'domcontentloaded', timeout: LOGIN_GOTO_TIMEOUT_MS() }).catch(() => {});
+      await sleep(400);
+      // logged out when the dashboard now bounces to the login form
+      const res = await context.request.get(DASHBOARD_URL(), { maxRedirects: 5 }).catch(() => null);
+      const body = res ? await res.text().catch(() => '') : '';
+      const loggedOut = !res || /employer_login|\/login\//i.test(res.url()) || /name=["']?username_emp/i.test(body.slice(0, 8000));
+      if (loggedOut) {
+        if (debug) console.log(`  [JobBKK] logged out ✓ (${u})`);
+        return true;
+      }
+    }
+    if (debug) console.log('  [JobBKK] logout: could not confirm logged-out state');
+    return false;
+  } catch (e) {
+    if (debug) console.log(`  [JobBKK] logout error (ignored): ${e.message}`);
+    return false;
+  } finally {
+    await page.close().catch(() => {});
+  }
 }

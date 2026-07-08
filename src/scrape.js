@@ -1,8 +1,9 @@
 import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { OUTPUT_DIR, loadCriteria, loadRuntime, requestGapMs, sleep } from './config.js';
-import { getJobbkkSession } from './providers/jobbkk/session.js';
-import { fetchResumeHtml, resumeDetailUrl, searchResumeIds } from './providers/jobbkk/client.js';
+import { getJobbkkSession, logoutJobbkk } from './providers/jobbkk/session.js';
+import { fetchResumeHtml, isResumeAuthBlocked, isResumeMasked, resumeDetailUrl } from './providers/jobbkk/client.js';
+import { browserSearchResumeIds } from './providers/jobbkk/browser-search.js';
 import { dedupeKey, parseResumeHtml } from './providers/jobbkk/parser.js';
 import { downloadAssets } from './providers/jobbkk/assets.js';
 import { buildReadableMarkdown, writeCsv, writeJsonl } from './export.js';
@@ -12,23 +13,38 @@ async function main() {
   const criteria = loadCriteria();
   const runAt = new Date().toISOString();
 
-  console.log('\n=== api-scraper MVP — JobBKK (hybrid: browser login → HTTP scrape) ===');
+  console.log('\n=== api-scraper MVP — JobBKK (headful: login → filtered browser search → browser-rendered detail) ===');
   console.log(`Criteria: position="${criteria.position}" keyword="${criteria.keyword}" max=${criteria.maxCandidates}`);
   console.log(`Headless: ${runtime.headless} | request gap ${runtime.delayMin}-${runtime.delayMax}ms\n`);
 
   await mkdir(OUTPUT_DIR, { recursive: true });
 
   console.log('[1/4] Acquiring session...');
-  const { browser, context, request } = await getJobbkkSession({ headless: runtime.headless, debug: runtime.debug });
+  // JobBKK must run headful — headless login is bot-blocked and detail renders masked.
+  let sess = await getJobbkkSession({ headless: false, debug: runtime.debug });
 
   const candidates = [];
   const errors = [];
   let totalAvailable = null;
   let foundIds = 0;
+  let relogins = 0;
+  const MAX_RELOGINS = 5;
+
+  // The resume detail renders a masked (contact-hidden) variant whenever the server
+  // doesn't recognise the session as a logged-in employer (stale/kicked session). When
+  // that happens, force a fresh login that re-claims the session and retry — same
+  // self-heal the DB pipeline does.
+  const relogin = async (reason) => {
+    if (relogins >= MAX_RELOGINS) throw new Error(`relogin_exhausted: ${reason}`);
+    relogins += 1;
+    console.warn(`  ↻ ${reason} → fresh login (${relogins}/${MAX_RELOGINS})`);
+    await sess.browser.close().catch(() => {});
+    sess = await getJobbkkSession({ headless: false, debug: runtime.debug, forceLogin: true });
+  };
 
   try {
-    console.log('[2/4] Searching (POST) + paginating (GET)...');
-    const search = await searchResumeIds(request, criteria, runtime);
+    console.log('[2/4] Browser search on Resume Search Talent (filtered)...');
+    const search = await browserSearchResumeIds(sess, criteria, runtime);
     totalAvailable = search.totalAvailable;
     foundIds = search.ids.length;
     console.log(`  Found ${foundIds} resume ids across ${search.pagesScanned} page(s). Site total ~${totalAvailable ?? '?'}`);
@@ -43,7 +59,14 @@ async function main() {
       const id = search.ids[i];
       const url = resumeDetailUrl(id);
       try {
-        const html = await fetchResumeHtml(request, id);
+        let html = await fetchResumeHtml(sess, id, runtime);
+        // Only relogin on TRUE session loss (login redirect / kicked). A masked contact
+        // is NOT fixed by relogin — record the partial and move on (see client.js).
+        if (isResumeAuthBlocked(html, url)) {
+          await relogin(`id ${id}: session lost (login page)`);
+          html = await fetchResumeHtml(sess, id, runtime);
+        }
+        if (isResumeMasked(html)) console.warn(`  [${i + 1}] id ${id}: contact masked (public body only)`);
         const parsed = parseResumeHtml(html, { sourceUrl: url, index: saved + 1, focusPosition: criteria.position || '-' });
 
         const key = dedupeKey(parsed);
@@ -54,7 +77,7 @@ async function main() {
         seen.add(key);
 
         const no = String(saved + 1).padStart(3, '0');
-        await downloadAssets(request, parsed, no, OUTPUT_DIR);
+        await downloadAssets(sess.request, parsed, no, OUTPUT_DIR);
         candidates.push(parsed);
         saved += 1;
         console.log(`  [${saved}/${criteria.maxCandidates}] ${parsed.name || '(no name)'} — ${parsed.parse_status} | ☎ ${parsed.phone || '-'} | 📎 ${parsed.attachments?.length || 0}`);
@@ -65,7 +88,10 @@ async function main() {
       if (saved < criteria.maxCandidates && i < search.ids.length - 1) await sleep(requestGapMs(runtime));
     }
   } finally {
-    await browser.close().catch(() => {});
+    // Log out so JobBKK frees the single active session — otherwise the next run's
+    // login collides and the resume detail renders masked (contact hidden).
+    await logoutJobbkk(sess.context, { debug: runtime.debug }).catch(() => {});
+    await sess.browser.close().catch(() => {});
   }
 
   console.log('[4/4] Exporting...');
