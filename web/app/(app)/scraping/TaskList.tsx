@@ -47,6 +47,29 @@ function scheduleLabel(cron: string | null): string {
   return cron;
 }
 
+/** Human-readable chips for the criteria/filters saved on a task. */
+function filterChips(criteria: Record<string, unknown>): string[] {
+  const c = criteria ?? {};
+  const val = (k: string) => {
+    const v = c[k];
+    return v == null || String(v).trim() === '' ? '' : String(v).trim();
+  };
+  const fmtBaht = (v: string) => (v ? Number(v).toLocaleString('en-US') : v);
+  const chips: string[] = [];
+  if (val('position')) chips.push(`ตำแหน่ง: ${val('position')}`);
+  if (val('keyword')) chips.push(`คำค้น: ${val('keyword')}`);
+  if (val('gender')) chips.push(`เพศ: ${val('gender')}`);
+  if (val('province')) chips.push(`จังหวัด: ${val('province')}`);
+  if (val('education')) chips.push(`วุฒิ: ${val('education')}`);
+  const smin = val('salaryMin');
+  const smax = val('salaryMax');
+  if (smin || smax) chips.push(`เงินเดือน: ${fmtBaht(smin) || '–'} - ${fmtBaht(smax) || '–'}`);
+  const amin = val('ageMin');
+  const amax = val('ageMax');
+  if (amin || amax) chips.push(`อายุ: ${amin || '–'} - ${amax || '–'}`);
+  return chips;
+}
+
 export function TaskList({ initialTasks }: { initialTasks: TaskRow[] }) {
   const [live, setLive] = useState<Record<string, LiveStatus>>({});
 
@@ -143,6 +166,15 @@ export function TaskList({ initialTasks }: { initialTasks: TaskRow[] }) {
                   {t.mode === 'count' ? `จำนวน ${t.target_count ?? '-'}` : `ตั้งแต่ ${t.updated_since ?? '-'}`} ·{' '}
                   {scheduleLabel(t.schedule_cron)}
                 </div>
+                {filterChips(t.criteria).length > 0 && (
+                  <div className="mt-2 flex flex-wrap gap-1.5">
+                    {filterChips(t.criteria).map((chip) => (
+                      <span key={chip} className="pill bg-black/5 text-[11px] text-subtle">
+                        {chip}
+                      </span>
+                    ))}
+                  </div>
+                )}
               </div>
 
               <div className="flex items-center gap-2">

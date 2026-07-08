@@ -1,6 +1,5 @@
 import { chromium } from 'playwright';
 import { mkdir } from 'node:fs/promises';
-import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { AUTH_DIR, envString, envInt, envBool, sleep } from '../../config.js';
 import { detectCaptcha, injectCaptchaToken, solveCaptcha } from '../../captcha.js';
@@ -27,6 +26,60 @@ async function isLoggedIn(context) {
   const body = await res.text().catch(() => '');
   // logged-out pages bounce to the login form
   return !/name=["']?username_emp/i.test(body.slice(0, 8000));
+}
+
+const USERNAME_SELECTORS = ['#username_emp', 'input[name="username_emp"]', 'input[name*="username" i]', 'input[type="email"]'];
+const PASSWORD_SELECTORS = ['#password_emp', 'input[name="password_emp"]', 'input[type="password"]'];
+
+async function findVisibleLoginFields(page) {
+  for (const uSel of USERNAME_SELECTORS) {
+    const userField = page.locator(uSel).first();
+    if (!(await userField.count().catch(() => 0))) continue;
+    if (!(await userField.isVisible().catch(() => false))) continue;
+    for (const pSel of PASSWORD_SELECTORS) {
+      const passField = page.locator(pSel).first();
+      if (!(await passField.count().catch(() => 0))) continue;
+      if (await passField.isVisible().catch(() => false)) return { userField, passField };
+    }
+  }
+  return null;
+}
+
+/** Wait until the employer login form is visible, recovering from cookie redirects. */
+async function waitForLoginFields(page, context, { debug, timeoutMs = LOGIN_TIMEOUT_MS() } = {}) {
+  const deadline = Date.now() + timeoutMs;
+  let loggedOutForFresh = false;
+
+  while (Date.now() < deadline) {
+    await dismissOverlays(page, { debug });
+    const fields = await findVisibleLoginFields(page);
+    if (fields) return fields;
+
+    const url = page.url();
+    const onLoginUrl = /\/login\//i.test(url);
+    const cookieLoggedIn = (await isLoggedIn(context).catch(() => false)) || (/\/employer\//i.test(url) && !onLoginUrl && !/noLogIn/i.test(url));
+
+    // Saved cookies can skip the login form entirely (redirect → dashboard). That
+    // leaves no #username_emp to fill (30s timeout) and no sessionStorage from a
+    // real login. Log out once and reload the login page for a clean credential flow.
+    if (cookieLoggedIn && !loggedOutForFresh) {
+      console.log('  [JobBKK] saved cookies skipped login form — logging out for fresh login...');
+      await logoutJobbkk(context, { debug });
+      loggedOutForFresh = true;
+      await page.goto(LOGIN_URL(), { waitUntil: 'domcontentloaded', timeout: LOGIN_GOTO_TIMEOUT_MS() }).catch(() => {});
+      await sleep(800);
+      continue;
+    }
+
+    if (!onLoginUrl) {
+      await page.goto(LOGIN_URL(), { waitUntil: 'domcontentloaded', timeout: LOGIN_GOTO_TIMEOUT_MS() }).catch(() => {});
+      await sleep(800);
+      continue;
+    }
+
+    await sleep(500);
+  }
+  return null;
 }
 
 /**
@@ -119,11 +172,17 @@ async function performLogin(context, { username, password, debug, onHeartbeat })
     console.log('  [JobBKK] opening login page...');
     await page.goto(LOGIN_URL(), { waitUntil: 'domcontentloaded', timeout: LOGIN_GOTO_TIMEOUT_MS() });
     await sleep(500);
+    await dismissOverlays(page, { debug });
 
-    const userField = page.locator('#username_emp, input[name="username_emp"]').first();
-    const passField = page.locator('#password_emp, input[name="password_emp"]').first();
-    await userField.fill(username);
-    await passField.fill(password);
+    const fields = await waitForLoginFields(page, context, { debug, timeoutMs: LOGIN_TIMEOUT_MS() });
+    if (!fields) {
+      const shot = join(AUTH_DIR, 'jobbkk-login-debug.png');
+      await page.screenshot({ path: shot, fullPage: true }).catch(() => {});
+      throw new Error(`Login form not found (url=${page.url()}). Saved cookies may have redirected away — see ${shot}`);
+    }
+
+    await fields.userField.fill(username);
+    await fields.passField.fill(password);
 
     const challenge = await detectCaptcha(page);
     if (challenge?.present) {
@@ -137,7 +196,7 @@ async function performLogin(context, { username, password, debug, onHeartbeat })
     if (await submit.count()) {
       await submit.click();
     } else {
-      await passField.press('Enter');
+      await fields.passField.press('Enter');
     }
 
     // Robust login completion. JobBKK enforces ONE active session: a second login shows
@@ -219,16 +278,10 @@ export async function getJobbkkSession({ headless = true, debug = false, usernam
   const useFile = !storageState && !forceLogin; // standalone mode persists to .auth file
   if (useFile) await mkdir(AUTH_DIR, { recursive: true });
 
-  // forceLogin: ignore any stored session, start clean, and log in fresh — routes
-  // through performLogin which dismisses the "logged in elsewhere" (ตกลง) dialog
-  // and solves CAPTCHA, so a stale/hijacked session self-heals.
-  const initialState = forceLogin
-    ? undefined
-    : storageState ?? (useFile && existsSync(STORAGE_PATH) ? STORAGE_PATH : undefined);
-  // JobBKK must run in a REAL (non-headless) browser to pass its bot-check and get
-  // UNMASKED contact data. To avoid the window popping up in front of the user during
-  // automated web/worker runs, shove it far off-screen — it's still a real browser,
-  // just invisible. Set JOBBKK_SHOW_BROWSER=true (or run with debug) to watch it.
+  // Never preload saved cookies into the browser context. JobBKK premium search needs
+  // a fresh headful login (sessionStorage is set during login and isn't in
+  // storageState). Preloaded cookies redirect /login/employer_login → dashboard,
+  // so #username_emp never appears and fill() times out after 30s.
   const hideWindow = !headless && !debug && !envBool('JOBBKK_SHOW_BROWSER', false);
   const browser = await chromium.launch({
     headless,
@@ -241,7 +294,6 @@ export async function getJobbkkSession({ headless = true, debug = false, usernam
     // only renders at desktop width; a narrow viewport falls back to a mobile layout
     // that hides the search fields.
     viewport: { width: 1536, height: 864 },
-    ...(initialState ? { storageState: initialState } : {}),
   });
 
   // NOTE: JobBKK always logs in fresh. A reused cookie session passes an HTTP check

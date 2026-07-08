@@ -54,6 +54,27 @@ export async function createTaskAction(formData: FormData) {
   if (position) criteria.position = position;
   if (keyword) criteria.keyword = keyword;
 
+  // Optional filters — keys match what the JobBKK premium search understands
+  // (see src/providers/jobbkk/browser/jobbkk-filters.js). "ไม่ระบุ"/empty = skip.
+  const filterVal = (key: string) => {
+    const v = String(formData.get(key) ?? '').trim();
+    return v && v !== 'ไม่ระบุ' ? v : '';
+  };
+  const gender = filterVal('gender');
+  const province = filterVal('province');
+  const education = filterVal('education');
+  const salaryMin = filterVal('salaryMin');
+  const salaryMax = filterVal('salaryMax');
+  const ageMin = filterVal('ageMin');
+  const ageMax = filterVal('ageMax');
+  if (gender) criteria.gender = gender;
+  if (province) criteria.province = province;
+  if (education) criteria.education = education;
+  if (salaryMin) criteria.salaryMin = salaryMin;
+  if (salaryMax) criteria.salaryMax = salaryMax;
+  if (ageMin) criteria.ageMin = ageMin;
+  if (ageMax) criteria.ageMax = ageMax;
+
   let targetCount: number | null = null;
   let updatedSince: string | null = null;
   if (mode === 'count') {

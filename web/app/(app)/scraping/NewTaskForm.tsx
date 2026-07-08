@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { createTaskAction } from '@/lib/actions';
+import { EDUCATION_LEVELS, GENDERS, PROVINCES, SALARY_LABELS, SALARY_STEPS } from '@/lib/filter-options';
 
 type ConnectorOption = { id: string; platform: string; label: string; scrape_limit: number };
 
@@ -108,6 +109,81 @@ export function NewTaskForm({ connectors }: { connectors: ConnectorOption[] }) {
           </div>
         </div>
       </div>
+
+      {/* filters (gender / province / salary / education / age) */}
+      <details className="mt-4 rounded-lg border border-line/60 bg-black/[0.015] px-4 py-3">
+        <summary className="cursor-pointer select-none text-sm font-medium text-ink">
+          ตัวกรองเพิ่มเติม (เพศ · จังหวัด · เงินเดือน · วุฒิ · อายุ)
+        </summary>
+        <div className="mt-4 grid gap-4 md:grid-cols-3">
+          <div>
+            <label className="label">เพศ</label>
+            <select name="gender" className="field" defaultValue="ไม่ระบุ">
+              {GENDERS.map((g) => (
+                <option key={g} value={g}>
+                  {g}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div>
+            <label className="label">จังหวัด</label>
+            <input name="province" list="province-options" placeholder="เช่น กรุงเทพมหานคร" className="field" />
+            <datalist id="province-options">
+              {PROVINCES.map((p) => (
+                <option key={p} value={p} />
+              ))}
+            </datalist>
+          </div>
+
+          <div>
+            <label className="label">วุฒิการศึกษา (ขั้นต่ำ)</label>
+            <select name="education" className="field" defaultValue="ไม่ระบุ">
+              {EDUCATION_LEVELS.map((e) => (
+                <option key={e} value={e}>
+                  {e}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div>
+            <label className="label">เงินเดือน (บาท/เดือน)</label>
+            <div className="flex items-center gap-2">
+              <select name="salaryMin" className="field" defaultValue="">
+                <option value="">ต่ำสุด</option>
+                {SALARY_STEPS.map((s) => (
+                  <option key={s} value={s}>
+                    {SALARY_LABELS[s]}
+                  </option>
+                ))}
+              </select>
+              <span className="text-subtle">–</span>
+              <select name="salaryMax" className="field" defaultValue="">
+                <option value="">สูงสุด</option>
+                {SALARY_STEPS.map((s) => (
+                  <option key={s} value={s}>
+                    {SALARY_LABELS[s]}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          <div>
+            <label className="label">อายุ (ปี)</label>
+            <div className="flex items-center gap-2">
+              <input name="ageMin" type="number" min={15} max={70} placeholder="ต่ำสุด" className="field" />
+              <span className="text-subtle">–</span>
+              <input name="ageMax" type="number" min={15} max={70} placeholder="สูงสุด" className="field" />
+            </div>
+          </div>
+        </div>
+        <p className="mt-3 text-xs text-subtle">
+          ตัวกรองเหล่านี้ใช้ได้กับทั้ง JobBKK และ JobThai (เงินเดือน/อายุจับเป็นช่วงตามที่แต่ละเว็บกำหนด)
+        </p>
+      </details>
 
       {/* schedule */}
       <div className="mt-4">

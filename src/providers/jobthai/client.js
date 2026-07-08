@@ -1,6 +1,7 @@
 import * as cheerio from 'cheerio';
 import { sleep, requestGapMs } from '../../config.js';
 import { detectSoftBan, fatal, withRetry } from '../../core/anti-ban.js';
+import { regionCode } from './regions.js';
 
 export const BASE = 'https://www3.jobthai.com';
 const SEARCH = `${BASE}/findresume/resume_list.php`;
@@ -20,30 +21,77 @@ function assertAuthed(url, body = '') {
     throw reloginError('session_expired: login page in response');
   }
 }
+function hasValue(v) {
+  return v !== undefined && v !== null && String(v).trim() !== '' && v !== 'ไม่ระบุ';
+}
+
+function digits(v) {
+  const d = String(v ?? '').replace(/[^\d]/g, '');
+  return d ? Number.parseInt(d, 10) : NaN;
+}
+
+// Advanced-search #level_adv codes: 1=ทุกระดับ, 2=สูงกว่าปริญญาตรี, 3=ปริญญาตรี, 4=ต่ำกว่าปริญญาตรี
 function mapLevel(education) {
   const t = String(education ?? '').toLowerCase();
-  if (!t) return '';
-  if (/เอก|doctor|ph\.?d/.test(t)) return '6';
-  if (/โท|master/.test(t)) return '5';
-  if (/ตรี|bachelor/.test(t)) return '4';
-  if (/ปวส|อนุปริญญา|diploma/.test(t)) return '3';
-  if (/ปวช|vocational/.test(t)) return '2';
-  if (/ม\.?6|มัธยม|high ?school/.test(t)) return '1';
+  if (!hasValue(t)) return '';
+  if (/เอก|โท|doctor|ph\.?d|master|สูงกว่า/.test(t)) return '2';
+  if (/ตรี|bachelor/.test(t)) return '3';
+  if (/ปวส|ปวช|อนุปริญญา|diploma|vocational|ม\.?6|ม\.?3|มัธยม|high ?school|ต่ำกว่า/.test(t)) return '4';
   return '';
 }
 
-/** Build the resume_list.php search URL from criteria. */
+// #salary_field brackets keyed by the desired monthly salary (baht).
+function mapSalary(salaryMin, salaryMax) {
+  const min = digits(salaryMin);
+  const max = digits(salaryMax);
+  const ref = Number.isFinite(min) ? min : Number.isFinite(max) ? max : NaN;
+  if (!Number.isFinite(ref)) return '';
+  if (ref <= 10_000) return '1';
+  if (ref <= 15_000) return '2';
+  if (ref <= 20_000) return '3';
+  if (ref <= 30_000) return '4';
+  if (ref <= 50_000) return '5';
+  if (ref <= 100_000) return '6';
+  return '7';
+}
+
+// #age_adv brackets: 1=<20, 2=20-25, 3=25-30, 4=30-35, 5=>35
+function mapAge(ageMin, ageMax) {
+  const min = digits(ageMin);
+  const max = digits(ageMax);
+  const ref = Number.isFinite(min) ? min : Number.isFinite(max) ? max : NaN;
+  if (!Number.isFinite(ref)) return '';
+  if (ref < 20) return '1';
+  if (ref <= 25) return '2';
+  if (ref <= 30) return '3';
+  if (ref <= 35) return '4';
+  return '5';
+}
+
+function mapGender(gender) {
+  if (gender === 'ชาย' || gender === 'M') return 'M';
+  if (gender === 'หญิง' || gender === 'F') return 'F';
+  return '';
+}
+
+/** Build the resume_list.php advanced-search URL from criteria. */
 export function buildSearchUrl(criteria, page = 1) {
-  const kw = [criteria.position, criteria.keyword].filter(Boolean).join(' ').trim();
   const p = new URLSearchParams({
-    'search-section': 'general-search',
+    'search-section': 'advance-search',
     StepSearch: '1',
+    l: 'th',
+    typesearch: 'Adv',
     search: 'Y',
     jobtype: '',
+    position_field: hasValue(criteria.position) ? String(criteria.position).trim() : '',
+    salary: mapSalary(criteria.salaryMin, criteria.salaryMax),
     level: mapLevel(criteria.education),
-    region: '',
-    KeyWord: kw,
-    fieldsearch: 'All',
+    age: mapAge(criteria.ageMin, criteria.ageMax),
+    gender: mapGender(criteria.gender),
+    region: hasValue(criteria.province) ? regionCode(criteria.province) : '',
+    amphoe: 'All',
+    KeyWord: hasValue(criteria.keyword) ? String(criteria.keyword).trim() : '',
+    KWType: '2',
   });
   if (page > 1) p.set('page', String(page));
   return `${SEARCH}?${p.toString()}`;
