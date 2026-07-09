@@ -9,6 +9,7 @@ const NAV = [
   { href: '/dashboard', label: 'ภาพรวม' },
   { href: '/candidates', label: 'ผู้สมัคร' },
   { href: '/scraping', label: 'งาน Scraping' },
+  { href: '/autopost', label: 'Auto-Post' },
   { href: '/connectors', label: 'Connector' },
 ];
 
