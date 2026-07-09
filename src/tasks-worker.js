@@ -44,7 +44,7 @@ function nextRunFrom(cron) {
   return new Date(Date.now() + sec * 1000).toISOString();
 }
 
-async function runTask(t, runtime) {
+export async function runTask(t, runtime) {
   const connector = await getConnector(t.connector_id);
   if (!connector) {
     await finishTask(t.id, { status: 'error', phase: 'error', error: 'connector missing' });

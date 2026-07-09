@@ -16,8 +16,9 @@ import os from 'node:os';
 import { sleep } from '../src/config.js';
 import { loadRuntime } from '../src/config.js';
 import { query, closePool } from '../src/db/pool.js';
-import { getConnector } from '../src/db/repositories.js';
+import { getConnector, getTaskById } from '../src/db/repositories.js';
 import { runConnector } from '../src/pipeline.js';
+import { runTask } from '../src/tasks-worker.js';
 
 const WORKER_ID = `${os.hostname()}#${process.pid}`;
 const POLL_MS = Number.parseInt(process.env.WORKER_POLL_MS ?? '3000', 10);
@@ -31,13 +32,22 @@ function splitConnectorKey(key) {
 
 // ---- handlers: map job.type -> async (job) => result. Only these types get claimed.
 const HANDLERS = {
-  // Real scraper run — reuses the exact same path as tasks-worker (headful for JobBKK).
+  // Real scraper run (headful for JobBKK). If the job references a scrape_task
+  // (ref_id), run the FULL task pipeline (scrape → OCR → enrich) via the same
+  // runTask the tasks-worker uses, so the web UI's task status/progress keeps
+  // working. Otherwise run the connector directly (ad-hoc scrape into the DB).
   async scrape(job) {
+    const runtime = loadRuntime();
+    if (job.ref_id) {
+      const task = await getTaskById(job.ref_id);
+      if (!task) throw new Error(`scrape_task not found: ${job.ref_id}`);
+      await runTask(task, runtime); // manages task status + OCR + enrich itself
+      return { taskId: job.ref_id };
+    }
     const { id: connectorId } = splitConnectorKey(job.connector_key);
     const connector = await getConnector(connectorId);
     if (!connector) throw new Error(`connector not found: ${job.connector_key}`);
-    const criteria = { ...(job.payload || {}) };
-    const r = await runConnector(connector, criteria, loadRuntime(), { taskId: job.ref_id || null });
+    const r = await runConnector(connector, { ...(job.payload || {}) }, runtime, {});
     if (r.status === 'failed' || r.status === 'cooldown') throw new Error(r.error || `run ${r.status}`);
     return r;
   },

@@ -103,12 +103,32 @@ export async function listTasks() {
 /** Tasks to run now: explicitly queued, or scheduled and due. */
 export async function dueTasks() {
   const { rows } = await query(
-    `SELECT * FROM scrape_tasks
-      WHERE enabled = true
-        AND (status = 'queued' OR (schedule_cron IS NOT NULL AND next_run_at IS NOT NULL AND next_run_at <= now() AND status <> 'running'))
-      ORDER BY created_at`,
+    `SELECT * FROM scrape_tasks t
+      WHERE t.enabled = true
+        AND (t.status = 'queued' OR (t.schedule_cron IS NOT NULL AND t.next_run_at IS NOT NULL AND t.next_run_at <= now() AND t.status <> 'running'))
+        -- skip tasks already handled by the unified work_queue runner (no double-run)
+        AND NOT EXISTS (
+          SELECT 1 FROM work_queue w
+           WHERE w.ref_id = t.id::text AND w.status IN ('queued', 'running'))
+      ORDER BY t.created_at`,
   );
   return rows;
+}
+
+/** Fetch a single scrape task by id (used by the work_queue runner via ref_id). */
+export async function getTaskById(id) {
+  const { rows } = await query('SELECT * FROM scrape_tasks WHERE id = $1', [id]);
+  return rows[0] ?? null;
+}
+
+/** Enqueue a job into the unified work_queue. Returns the new row id. */
+export async function enqueueWorkTask({ type, module, connectorKey, refId = null, payload = {}, ownerUser = null, preferredWorker = null, priority = 0 }) {
+  const { rows } = await query(
+    `INSERT INTO work_queue (type, module, connector_key, ref_id, payload, owner_user, preferred_worker, priority)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id`,
+    [type, module, connectorKey, refId, payload, ownerUser, preferredWorker, priority],
+  );
+  return rows[0].id;
 }
 
 export async function markTaskRunning(id, target, { resume = false } = {}) {
