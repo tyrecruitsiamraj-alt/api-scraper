@@ -15,6 +15,7 @@ RUN npm ci --omit=dev
 
 # App source
 COPY src ./src
+COPY workers ./workers
 
 # Chromium is already in the base image; tell Playwright to use it
 ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright

@@ -21,6 +21,17 @@ services:
     profiles: ["manual"]        # `docker compose run --rm worker`
     command: ["node", "src/worker.js"]
 
+  # Unified work_queue runner pool (scrape jobs). One container = one slot; scale
+  # with `docker compose up -d --scale runner=4`. Runs Chromium HEADFUL under Xvfb
+  # (JobBKK's bot-check needs a real browser). The per-connector DB lock keeps an
+  # account to one job at a time, so several runners parallelise across accounts.
+  runner:
+    build: .
+    image: api-scraper:latest
+    env_file: .env
+    restart: unless-stopped
+    command: ["xvfb-run", "-a", "node", "workers/runner.js"]
+
   migrate:
     build: .
     image: api-scraper:latest
