@@ -57,7 +57,10 @@ async function startWorkerProcess(): Promise<void> {
   const logDir = path.join(root, 'output');
   mkdirSync(logDir, { recursive: true });
   const logFd = openSync(path.join(logDir, 'worker.log'), 'a');
-  const child = spawn(process.execPath, ['src/tasks-worker.js'], {
+  // Drain the unified work_queue (scrape jobs enqueued by the task actions). The
+  // per-connector DB lock — not this coarse worker.lock — is what prevents an
+  // account from running twice, so several drains can safely overlap.
+  const child = spawn(process.execPath, ['workers/runner.js', '--drain'], {
     cwd: root,
     stdio: ['ignore', logFd, logFd],
     env: process.env,

@@ -8,6 +8,7 @@ import { kickWorker } from './worker-kick';
 import {
   deleteConnector,
   deleteTask,
+  enqueueScrapeForTask,
   insertConnector,
   insertTask,
   queueTask,
@@ -84,7 +85,7 @@ export async function createTaskAction(formData: FormData) {
     updatedSince = String(formData.get('updatedSince') ?? '').trim() || null;
   }
 
-  await insertTask({
+  const taskId = await insertTask({
     name,
     connectorId,
     mode,
@@ -96,7 +97,10 @@ export async function createTaskAction(formData: FormData) {
     // run-now → queued so the worker picks it up immediately
     status: runNow ? 'queued' : 'idle',
   });
-  if (runNow) kickWorker(); // start scraping immediately, no manual worker run
+  if (runNow) {
+    await enqueueScrapeForTask(taskId); // hand off to the unified work_queue runner
+    kickWorker(); // drain the queue now (no manual worker run needed)
+  }
   revalidatePath('/scraping');
 }
 
@@ -105,7 +109,8 @@ export async function queueTaskAction(formData: FormData) {
   const id = String(formData.get('id') ?? '');
   if (id) {
     await queueTask(id);
-    kickWorker(); // "run now" → kick the worker right away
+    await enqueueScrapeForTask(id); // hand off to the unified work_queue runner
+    kickWorker(); // "run now" → drain the queue right away
   }
   revalidatePath('/scraping');
 }

@@ -125,10 +125,21 @@ async function runOne() {
 
 async function main() {
   const once = process.argv.includes('--once');
-  console.log(`work-queue runner up — id=${WORKER_ID} types=[${SUPPORTED}] ${once ? '(--once)' : `(poll ${POLL_MS}ms)`}`);
+  const drain = process.argv.includes('--drain');
+  const mode = once ? '--once' : drain ? '--drain' : `poll ${POLL_MS}ms`;
+  console.log(`work-queue runner up — id=${WORKER_ID} types=[${SUPPORTED}] (${mode})`);
   if (once) {
     const did = await runOne();
     if (!did) console.log('no runnable job');
+    await closePool();
+    return;
+  }
+  // --drain: process everything currently runnable, then exit (used by the web's
+  // kickWorker for "run now" without needing a persistent worker pool).
+  if (drain) {
+    let n = 0;
+    while (await runOne()) n += 1;
+    console.log(`drained ${n} job(s)`);
     await closePool();
     return;
   }

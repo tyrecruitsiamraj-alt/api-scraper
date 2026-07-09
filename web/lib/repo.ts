@@ -238,6 +238,29 @@ export async function queueTask(id: string) {
   await q(`UPDATE scrape_tasks SET status='queued', phase='idle', enabled=true, updated_at=now() WHERE id=$1`, [id]);
 }
 
+/**
+ * Enqueue a scrape job for a task into the unified work_queue so the work-queue
+ * runner (npm run worker:pool / kickWorker) picks it up. connector_key locks per
+ * account ('<platform>:<connectorId>'). Skips if the task already has a live job.
+ */
+export async function enqueueScrapeForTask(taskId: string, ownerUser: string | null = null) {
+  const rows = await q<{ connector_id: string; platform: string; criteria: Record<string, unknown> }>(
+    `SELECT t.connector_id, t.criteria, c.platform
+       FROM scrape_tasks t JOIN connectors c ON c.id = t.connector_id
+      WHERE t.id = $1`,
+    [taskId],
+  );
+  if (!rows[0]) throw new Error(`task not found: ${taskId}`);
+  const { connector_id, platform, criteria } = rows[0];
+  await q(
+    `INSERT INTO work_queue (type, module, connector_key, ref_id, payload, owner_user)
+     SELECT 'scrape', 'scraper', $1, $2, $3::jsonb, $4
+      WHERE NOT EXISTS (
+        SELECT 1 FROM work_queue w WHERE w.ref_id = $2 AND w.status IN ('queued','running'))`,
+    [`${platform}:${connector_id}`, taskId, JSON.stringify(criteria ?? {}), ownerUser],
+  );
+}
+
 export async function setTaskEnabled(id: string, enabled: boolean) {
   await q('UPDATE scrape_tasks SET enabled=$2, updated_at=now() WHERE id=$1', [id, enabled]);
 }
