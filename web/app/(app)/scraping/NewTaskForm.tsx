@@ -98,15 +98,16 @@ export function NewTaskForm({ connectors }: { connectors: ConnectorOption[] }) {
             <p className="mt-1 text-xs text-subtle">ดึงโปรไฟล์ที่อัปเดตล่าสุดย้อนไปถึงวันที่นี้</p>
           </div>
         )}
-        <div className="grid grid-cols-2 gap-3">
-          <div>
-            <label className="label">ตำแหน่ง (ไม่บังคับ)</label>
-            <input name="position" placeholder="เช่น Developer" className="field" />
-          </div>
-          <div>
-            <label className="label">คำค้น (ไม่บังคับ)</label>
-            <input name="keyword" placeholder="เช่น React" className="field" />
-          </div>
+      </div>
+
+      <div className="mt-4 grid gap-4 md:grid-cols-2">
+        <div>
+          <label className="label">ตำแหน่ง (ไม่บังคับ)</label>
+          <input name="position" placeholder="เช่น Developer" className="field" />
+        </div>
+        <div>
+          <label className="label">คำค้น (ไม่บังคับ)</label>
+          <input name="keyword" placeholder="เช่น React" className="field" />
         </div>
       </div>
 
