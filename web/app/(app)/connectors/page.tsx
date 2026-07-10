@@ -1,4 +1,4 @@
-import { listAllConnectors, listProviderLimits } from '@/lib/repo';
+import { listAllConnectors, listProviderLimits, facebookQuotaSummary } from '@/lib/repo';
 import { deleteConnectorAction, toggleConnectorAction } from '@/lib/actions';
 import { ProviderLimitsPanel } from '@/components/ProviderLimitsPanel';
 import { NewConnectorForm } from './NewConnectorForm';
@@ -23,7 +23,11 @@ function rawId(key: string) {
 }
 
 export default async function ConnectorsPage() {
-  const [connectors, limits] = await Promise.all([listAllConnectors(), listProviderLimits()]);
+  const [connectors, limits, fbQuota] = await Promise.all([
+    listAllConnectors(),
+    listProviderLimits(),
+    facebookQuotaSummary(),
+  ]);
 
   const fb = connectors.filter((c) => c.platform === 'facebook');
   const fbPaused = fb.filter((c) => c.paused_until && new Date(c.paused_until) > new Date()).length;
@@ -142,10 +146,12 @@ export default async function ConnectorsPage() {
       {/* provider daily caps */}
       <section className="space-y-3">
         <div>
-          <h2 className="text-[15px] font-semibold">โควต้าต่อวันระดับแพลตฟอร์ม (Scraping)</h2>
-          <p className="mt-0.5 text-xs text-subtle">เพดานรวมของทุกบัญชีในแพลตฟอร์ม — บังคับใช้แบบเข้มในตัว scraper</p>
+          <h2 className="text-[15px] font-semibold">โควต้าต่อวันระดับแพลตฟอร์ม</h2>
+          <p className="mt-0.5 text-xs text-subtle">
+            Scraping = เพดานรวมทั้งแพลตฟอร์ม · Facebook = เพดานรายบัญชี (รวมทุกบัญชี) — ใช้ในระบบกัน block
+          </p>
         </div>
-        <ProviderLimitsPanel initialLimits={limits} />
+        <ProviderLimitsPanel initialLimits={limits} initialFb={fbQuota} />
       </section>
     </div>
   );

@@ -14,6 +14,7 @@ import {
   queueTask,
   setConnectorEnabled,
   setProviderCap,
+  setFacebookDailyCapForAll,
   setTaskEnabled,
 } from './repo';
 
@@ -175,5 +176,13 @@ export async function setProviderCapAction(formData: FormData) {
   const platform = String(formData.get('platform') ?? '').trim();
   const dailyCap = Number.parseInt(String(formData.get('dailyCap') ?? ''), 10);
   if (platform && Number.isFinite(dailyCap) && dailyCap >= 0) await setProviderCap(platform, dailyCap);
+  revalidatePath('/connectors');
+}
+
+export async function setFacebookDailyCapAction(formData: FormData) {
+  await requireSession();
+  const cap = Number.parseInt(String(formData.get('dailyCap') ?? ''), 10);
+  // เพดานต่อบัญชี — จำกัด 1..50 กันตั้งพลาดจนโดน block (แนะนำ 15)
+  if (Number.isFinite(cap) && cap >= 1 && cap <= 50) await setFacebookDailyCapForAll(cap);
   revalidatePath('/connectors');
 }

@@ -195,6 +195,51 @@ export async function setProviderCap(platform: string, dailyCap: number) {
   );
 }
 
+// Facebook posting quota is PER ACCOUNT (15/account/day), unlike the scraper platforms
+// which have one platform-wide cap. For the platform-quota panel we aggregate ALL FB
+// accounts into one card: posts today (all accounts) vs total capacity (Σ per-account cap).
+// Guarded — returns null if the autopost schema/columns aren't present yet.
+export type FacebookQuotaSummary = {
+  accounts: number;
+  paused: number;
+  posts_today: number;
+  capacity: number;
+  cap_default: number;
+};
+
+export async function facebookQuotaSummary(): Promise<FacebookQuotaSummary | null> {
+  try {
+    const rows = await q<FacebookQuotaSummary>(
+      `SELECT
+         count(*)::int AS accounts,
+         count(*) FILTER (WHERE paused_until IS NOT NULL AND paused_until > now())::int AS paused,
+         COALESCE(sum(COALESCE(daily_cap, 15)), 0)::int AS capacity,
+         COALESCE((
+           SELECT COALESCE(u2.daily_cap, 15)
+             FROM "so_autopost_jobs".users u2
+            GROUP BY COALESCE(u2.daily_cap, 15)
+            ORDER BY count(*) DESC LIMIT 1
+         ), 15)::int AS cap_default,
+         COALESCE((
+           SELECT count(*)::int FROM "so_autopost_jobs".post_logs pl
+            WHERE (pl.created_at AT TIME ZONE 'Asia/Bangkok')::date
+                  = (now() AT TIME ZONE 'Asia/Bangkok')::date
+         ), 0) AS posts_today
+       FROM "so_autopost_jobs".users`,
+    );
+    const r = rows[0];
+    if (!r || r.accounts === 0) return null;
+    return r;
+  } catch {
+    return null; // autopost schema not present
+  }
+}
+
+/** ตั้งเพดานโพสต์ต่อบัญชี/วัน ให้ทุกบัญชี Facebook (จาก panel โควต้า) */
+export async function setFacebookDailyCapForAll(cap: number) {
+  await q(`UPDATE "so_autopost_jobs".users SET daily_cap = $1, updated_at = now()`, [cap]);
+}
+
 /** True when tasks are queued but no worker seems to be picking them up. */
 export async function hasStaleQueuedTasks(sec = 90) {
   const rows = await q<{ n: number }>(
