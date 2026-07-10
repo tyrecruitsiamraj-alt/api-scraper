@@ -1015,12 +1015,13 @@ function startPostRunForUser(userId, assignmentIds = []) {
 async function startPostRun(assignmentIds = []) {
   const ids = Array.isArray(assignmentIds) ? assignmentIds.map(String).filter(Boolean) : [];
   if (USE_REMOTE_POST_WORKER) {
-    const row = await db.enqueuePostRunJob({
+    /** แตกคิว 1 งาน/บัญชี เหมือน /api/run/post — schedule ก็ขนานข้ามบัญชีได้ */
+    const out = await db.enqueuePostRunJobsPerUser({
       assignment_ids: ids,
       requested_by: 'schedule',
-      message: ids.length > 0 ? `queued ${ids.length} assignments (schedule)` : 'queued all assignments (schedule)',
+      message: ids.length > 0 ? `queued from schedule (${ids.length} assignments)` : 'queued from schedule (all assignments)',
     });
-    const runId = row?.id || db.generateRunId();
+    const runId = out.created[0]?.id || db.generateRunId();
     runStatus = {
       ...runStatus,
       running: false,
@@ -1104,11 +1105,13 @@ app.post('/api/run/post', async (req, res) => {
     const assignmentIds = req.body?.assignment_ids;
     if (USE_REMOTE_POST_WORKER) {
       const ids = Array.isArray(assignmentIds) ? assignmentIds : [];
+      let out;
       try {
-        await db.enqueuePostRunJob({
+        /** แตกคิว 1 งาน/บัญชี — ทุกบัญชีโพสต์ขนานกันได้ (worker เปิด Chrome คนละตัว) */
+        out = await db.enqueuePostRunJobsPerUser({
           assignment_ids: ids,
           requested_by: req.ip || 'web',
-          message: ids.length > 0 ? `queued ${ids.length} assignments` : 'queued all assignments',
+          message: ids.length > 0 ? `queued from web (${ids.length} assignments)` : 'queued from web (all assignments)',
         });
         runStatus = {
           ...runStatus,
@@ -1116,7 +1119,7 @@ app.post('/api/run/post', async (req, res) => {
           paused: false,
           started_at: new Date().toISOString(),
           finished_at: null,
-          message: 'รับคิวโพสต์แล้ว รอเครื่อง Worker รับงาน...',
+          message: `รับคิวโพสต์แล้ว ${out.created.length} บัญชี รอเครื่อง Worker รับงาน...`,
         };
       } catch (enqueueErr) {
         logger.error('api.run.post.enqueue', { message: enqueueErr.message || String(enqueueErr) });
@@ -1128,7 +1131,9 @@ app.post('/api/run/post', async (req, res) => {
         ok: true,
         queued: true,
         worker_queue: true,
-        message: 'รับคิวโพสต์แล้ว (รอ Worker บนเครื่องคุณรับงาน)',
+        queued_users: out.created.length,
+        skipped_users: out.skipped,
+        message: `รับคิวโพสต์แล้ว ${out.created.length} บัญชี (รอ Worker บนเครื่องคุณรับงาน)`,
         status: runStatus,
       });
     }
@@ -1489,6 +1494,56 @@ app.get('/api/worker/post/queue-status', async (req, res) => {
       running: summary.running,
       latest: summary.latest,
     });
+  } catch (e) {
+    res.status(500).json({ error: e.message || String(e) });
+  }
+});
+
+/**
+ * รอบโพสต์อัตโนมัติประจำวัน — worker บนเครื่องจริงเรียกตอน 8:00 (Vercel ไม่มี process ค้างไว้ยิงเอง)
+ * idempotent ต่อวัน: บัญชีที่มีงาน auto-daily ของวันนี้แล้วจะไม่ถูกเข้าคิวซ้ำ
+ */
+app.post('/api/worker/post/enqueue-daily', async (req, res) => {
+  try {
+    if (!requirePostWorkerToken(req, res)) return;
+    const out = await db.enqueueDailyPostRunJobs();
+    if (out.created.length > 0) {
+      logger.info('post_queue.enqueue_daily', {
+        created: out.created.length,
+        skipped: out.skipped.length,
+      });
+    }
+    res.json({
+      ok: true,
+      created: out.created.map((r) => ({ id: r.id, user_id: r.user_id })),
+      skipped: out.skipped,
+    });
+  } catch (e) {
+    res.status(500).json({ error: e.message || String(e) });
+  }
+});
+
+/** circuit breaker: postAll แจ้งพักบัญชีเมื่อโพสต์ fail ติดกัน (เผื่อเครื่องรันไม่มี DATABASE_URL ตรง) */
+app.post('/api/worker/post/pause-user', async (req, res) => {
+  try {
+    if (!requirePostWorkerToken(req, res)) return;
+    const userId = String(req.body?.user_id || '').trim();
+    if (!userId) return res.status(400).json({ error: 'user_id required' });
+    const row = await db.pauseUser(userId, Number(req.body?.hours) || 24, req.body?.reason || null);
+    if (!row) return res.status(404).json({ error: 'user not found' });
+    logger.warn('post_user.paused', { user_id: userId, until: row.paused_until, reason: row.pause_reason });
+    res.json({ ok: true, user: row });
+  } catch (e) {
+    res.status(500).json({ error: e.message || String(e) });
+  }
+});
+
+/** ปลดพักบัญชี (จากหน้าเว็บ/มือ) */
+app.post('/api/users/:id/resume-posting', async (req, res) => {
+  try {
+    const row = await db.resumeUser(req.params.id);
+    if (!row) return res.status(404).json({ error: 'user not found' });
+    res.json({ ok: true, user: row });
   } catch (e) {
     res.status(500).json({ error: e.message || String(e) });
   }

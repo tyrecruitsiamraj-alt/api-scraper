@@ -211,6 +211,59 @@ setInterval(() => {
   console.log(`[post-worker] heartbeat activeJobs=${activeJobs}/${CONCURRENCY} (ยังโพสต์อยู่)`);
 }, HEARTBEAT_MS);
 
+/**
+ * รอบโพสต์อัตโนมัติประจำวัน (รวมเสาร์-อาทิตย์) — worker เป็นคนยิงเพราะ server บน Vercel
+ * ไม่มี process ค้างไว้ทำตามเวลา. server ฝั่ง enqueue idempotent ต่อวัน (รีสตาร์ท worker ไม่ enqueue ซ้ำ)
+ */
+const AUTO_POST_DAILY_ENABLED = String(process.env.AUTO_POST_DAILY_ENABLED ?? '1').trim() !== '0';
+const AUTO_POST_HOUR = Math.min(23, Math.max(0, Number(process.env.AUTO_POST_HOUR) || 8));
+const AUTO_POST_MINUTE = Math.min(59, Math.max(0, Number(process.env.AUTO_POST_MINUTE) || 0));
+const AUTO_POST_TZ = process.env.AUTO_POST_TZ || 'Asia/Bangkok';
+let lastAutoEnqueueDate = '';
+
+function bangkokNow() {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: AUTO_POST_TZ,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  }).formatToParts(new Date());
+  const get = (t) => parts.find((p) => p.type === t)?.value || '00';
+  return {
+    date: `${get('year')}-${get('month')}-${get('day')}`,
+    minutes: Number(get('hour')) * 60 + Number(get('minute')),
+  };
+}
+
+async function autoEnqueueDaily() {
+  if (!AUTO_POST_DAILY_ENABLED) return;
+  const now = bangkokNow();
+  if (now.date === lastAutoEnqueueDate) return;
+  if (now.minutes < AUTO_POST_HOUR * 60 + AUTO_POST_MINUTE) return;
+  try {
+    const out = await callApi('/api/worker/post/enqueue-daily', {});
+    lastAutoEnqueueDate = now.date;
+    const created = Array.isArray(out.created) ? out.created.length : 0;
+    const skipped = Array.isArray(out.skipped) ? out.skipped.length : 0;
+    console.log(
+      `[post-worker] รอบอัตโนมัติ ${now.date} ${String(AUTO_POST_HOUR).padStart(2, '0')}:${String(AUTO_POST_MINUTE).padStart(2, '0')} — เข้าคิว ${created} บัญชี (ข้าม ${skipped}: เข้าคิวแล้ว/ไม่มีงาน)`
+    );
+  } catch (e) {
+    /** ไม่ตั้ง lastAutoEnqueueDate — รอบถัดไปลองใหม่จนกว่าจะสำเร็จ (ฝั่ง server กันซ้ำให้แล้ว) */
+    console.error(`[post-worker] enqueue-daily ล้มเหลว จะลองใหม่: ${e.message || e}`);
+  }
+}
+setInterval(autoEnqueueDaily, 60_000);
+autoEnqueueDaily();
+if (AUTO_POST_DAILY_ENABLED) {
+  console.log(
+    `[post-worker] รอบโพสต์อัตโนมัติทุกวันเวลา ${String(AUTO_POST_HOUR).padStart(2, '0')}:${String(AUTO_POST_MINUTE).padStart(2, '0')} (${AUTO_POST_TZ}) — ปิดด้วย AUTO_POST_DAILY_ENABLED=0`
+  );
+}
+
 setInterval(tick, INTERVAL_MS);
 tick();
 

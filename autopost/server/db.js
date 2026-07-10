@@ -1588,46 +1588,404 @@ async function ensurePostRunQueueTable() {
   `);
 }
 
-async function enqueuePostRunJob(data = {}) {
+/** post_run_queue.user_id — 1 คิว = 1 บัญชี (ให้ lock ต่อบัญชี + ขนานข้ามบัญชีได้) */
+async function ensurePostRunQueueUserColumn() {
   await ensurePostRunQueueTable();
+  await query(`ALTER TABLE post_run_queue ADD COLUMN IF NOT EXISTS user_id VARCHAR(50)`);
+  /** DB บังคับ: บัญชีเดียวมีงาน running ได้แถวเดียว (กัน 2 Chrome ใช้บัญชีเดียวพร้อมกัน) */
+  await query(
+    `CREATE UNIQUE INDEX IF NOT EXISTS post_run_queue_one_running_per_user
+     ON post_run_queue (user_id) WHERE status = 'running' AND user_id IS NOT NULL`
+  );
+}
+
+/** users.paused_until / pause_reason / daily_cap — circuit breaker + เพดานโพสต์ต่อวัน */
+async function ensureUsersPostControlColumns() {
+  await query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS paused_until TIMESTAMPTZ`);
+  await query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS pause_reason TEXT`);
+  await query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS daily_cap INTEGER`);
+}
+
+async function enqueuePostRunJob(data = {}) {
+  await ensurePostRunQueueUserColumn();
   const id = generateId();
   const assignmentIds = normalizeIdArray(data.assignment_ids);
   await query(
-    `INSERT INTO post_run_queue (id, assignment_ids, status, requested_by, message)
-     VALUES ($1, $2::jsonb, 'queued', $3, $4)`,
-    [id, JSON.stringify(assignmentIds), data.requested_by || null, data.message || 'queued from web']
+    `INSERT INTO post_run_queue (id, assignment_ids, user_id, status, requested_by, message)
+     VALUES ($1, $2::jsonb, $3, 'queued', $4, $5)`,
+    [
+      id,
+      JSON.stringify(assignmentIds),
+      data.user_id ? String(data.user_id) : null,
+      data.requested_by || null,
+      data.message || 'queued from web',
+    ]
   );
   const { rows } = await query(`SELECT * FROM post_run_queue WHERE id = $1`, [id]);
   return rows[0] || null;
 }
 
+/**
+ * แตกคิวเป็น 1 งานต่อ 1 บัญชี — ทุกบัญชีโพสต์ขนานกันได้ (Chrome คนละตัว)
+ * assignment_ids ว่าง = ทุก assignment ในระบบ. ข้าม user ที่มีงาน queued ค้างอยู่แล้ว (กันกดซ้ำจากหลายคน)
+ */
+async function enqueuePostRunJobsPerUser(data = {}) {
+  await ensurePostRunQueueUserColumn();
+  const wanted = normalizeIdArray(data.assignment_ids);
+  const all = await getAssignments();
+  const source = wanted.length > 0 ? all.filter((a) => wanted.includes(String(a.id))) : all;
+  const missing = wanted.filter((id) => !all.some((a) => String(a.id) === String(id)));
+  if (missing.length > 0) {
+    throw new Error(`ไม่พบ Assignment: ${missing.join(', ')}`);
+  }
+  const byUser = new Map();
+  for (const a of source) {
+    const uid = String(a.user_id || '').trim();
+    if (!uid) continue;
+    if (!byUser.has(uid)) byUser.set(uid, []);
+    byUser.get(uid).push(String(a.id));
+  }
+  const excludeUserIds = new Set((data.exclude_user_ids || []).map(String));
+  const created = [];
+  const skipped = [];
+  for (const [userId, ids] of byUser.entries()) {
+    if (excludeUserIds.has(userId)) {
+      skipped.push({ user_id: userId, reason: 'excluded' });
+      continue;
+    }
+    const { rows } = await query(
+      `SELECT 1 FROM post_run_queue WHERE user_id = $1 AND status = 'queued' LIMIT 1`,
+      [userId]
+    );
+    if (rows.length > 0) {
+      skipped.push({ user_id: userId, reason: 'already_queued' });
+      continue;
+    }
+    const row = await enqueuePostRunJob({
+      assignment_ids: ids,
+      user_id: userId,
+      requested_by: data.requested_by || null,
+      message: data.message || `queued ${ids.length} assignments (per-user)`,
+    });
+    created.push(row);
+  }
+  return { created, skipped };
+}
+
+/**
+ * รอบโพสต์อัตโนมัติประจำวัน (worker เรียกตอน 8:00) — idempotent:
+ * user ที่มีงาน auto-daily ของวันนี้แล้ว (สถานะใดก็ตาม) จะไม่ถูกเข้าคิวซ้ำ
+ */
+async function enqueueDailyPostRunJobs() {
+  await ensurePostRunQueueUserColumn();
+  const { rows } = await query(
+    `SELECT DISTINCT user_id FROM post_run_queue
+     WHERE requested_by = 'auto-daily' AND user_id IS NOT NULL
+       AND (created_at AT TIME ZONE 'Asia/Bangkok')::date = (NOW() AT TIME ZONE 'Asia/Bangkok')::date`
+  );
+  return enqueuePostRunJobsPerUser({
+    assignment_ids: [],
+    requested_by: 'auto-daily',
+    message: 'daily 8:00 auto run',
+    exclude_user_ids: rows.map((r) => String(r.user_id)),
+  });
+}
+
 async function claimNextPostRunJob(workerId, runId) {
-  await ensurePostRunQueueTable();
+  await ensurePostRunQueueUserColumn();
+  await ensureUsersPostControlColumns();
   const wid = String(workerId || '').trim() || 'worker';
   const rid = String(runId || '').trim() || null;
-  const { rows } = await query(
-    `WITH next AS (
-       SELECT id
-       FROM post_run_queue
-       WHERE status = 'queued'
-       ORDER BY created_at ASC
-       LIMIT 1
-       FOR UPDATE SKIP LOCKED
-     )
-     UPDATE post_run_queue q
-     SET status = 'running',
-         worker_id = $1,
-         run_id = COALESCE(q.run_id, $2),
-         started_at = NOW(),
-         updated_at = NOW(),
-         message = 'worker accepted job'
-     FROM next
-     WHERE q.id = next.id
-     RETURNING q.*`,
-    [wid, rid]
-  );
+  let rows;
+  try {
+    ({ rows } = await query(
+      `WITH next AS (
+         SELECT q.id
+         FROM post_run_queue q
+         LEFT JOIN users u ON u.id = q.user_id
+         WHERE q.status = 'queued'
+           /** ข้ามบัญชีที่โดนพัก (circuit breaker) */
+           AND (u.paused_until IS NULL OR u.paused_until <= NOW())
+           /** lock ต่อบัญชี: บัญชีที่มีงาน running อยู่ ห้ามรับงานใหม่ */
+           AND NOT EXISTS (
+             SELECT 1 FROM post_run_queue r
+             WHERE r.status = 'running' AND r.user_id IS NOT NULL AND r.user_id = q.user_id
+           )
+         ORDER BY q.created_at ASC
+         LIMIT 1
+         FOR UPDATE OF q SKIP LOCKED
+       )
+       UPDATE post_run_queue q
+       SET status = 'running',
+           worker_id = $1,
+           run_id = COALESCE(q.run_id, $2),
+           started_at = NOW(),
+           updated_at = NOW(),
+           message = 'worker accepted job'
+       FROM next
+       WHERE q.id = next.id
+       RETURNING q.*`,
+      [wid, rid]
+    ));
+  } catch (e) {
+    /** unique index (one running per user) ชนตอนสอง claim แข่งกันพอดี — ถือว่ารอบนี้ไม่มีงาน */
+    if (e && e.code === '23505') return null;
+    throw e;
+  }
   if (rows.length === 0) return null;
   return rows[0];
+}
+
+/** พักบัญชีชั่วคราว (circuit breaker: โพสต์ fail ติดกัน / โดน checkpoint) */
+async function pauseUser(userId, hours, reason) {
+  await ensureUsersPostControlColumns();
+  const h = Math.min(7 * 24, Math.max(1, Number(hours) || 24));
+  const { rows } = await query(
+    `UPDATE users
+     SET paused_until = NOW() + ($2::int * INTERVAL '1 hour'),
+         pause_reason = $3,
+         updated_at = NOW()
+     WHERE id = $1
+     RETURNING id, name, paused_until, pause_reason`,
+    [String(userId), h, String(reason || '').slice(0, 500) || null]
+  );
+  return rows[0] || null;
+}
+
+async function resumeUser(userId) {
+  await ensureUsersPostControlColumns();
+  const { rows } = await query(
+    `UPDATE users SET paused_until = NULL, pause_reason = NULL, updated_at = NOW()
+     WHERE id = $1 RETURNING id, name`,
+    [String(userId)]
+  );
+  return rows[0] || null;
+}
+
+/** จำนวนที่บัญชีนี้โพสต์ไปแล้ว "วันนี้" (เวลาไทย) */
+async function countPostsTodayByUser(userId) {
+  const { rows } = await query(
+    `SELECT COUNT(*)::int AS c FROM post_logs
+     WHERE user_id = $1
+       AND (created_at AT TIME ZONE 'Asia/Bangkok')::date = (NOW() AT TIME ZONE 'Asia/Bangkok')::date`,
+    [String(userId)]
+  );
+  return Number(rows[0]?.c) || 0;
+}
+
+/**
+ * เพดานโพสต์/วันของบัญชี — daily_cap ของ user > env POST_DAILY_CAP > 15
+ * บัญชีใหม่วอร์มก่อน: อิงอายุจากโพสต์แรกใน post_logs (ไม่เคยโพสต์/<7วัน=5, <14วัน=8, <21วัน=12)
+ */
+async function getEffectiveDailyCap(user) {
+  const capBase = Math.max(
+    1,
+    Number(user?.daily_cap) || Number(process.env.POST_DAILY_CAP) || 15
+  );
+  if (String(process.env.POST_WARMUP_DISABLED || '') === '1') return capBase;
+  const { rows } = await query(
+    `SELECT EXTRACT(EPOCH FROM (NOW() - MIN(created_at))) / 86400.0 AS age_days
+     FROM post_logs WHERE user_id = $1`,
+    [String(user.id)]
+  );
+  const ageDays = Number(rows[0]?.age_days);
+  let ramp;
+  if (!Number.isFinite(ageDays)) ramp = 5; // ไม่เคยโพสต์เลย
+  else if (ageDays < 7) ramp = 5;
+  else if (ageDays < 14) ramp = 8;
+  else if (ageDays < 21) ramp = 12;
+  else ramp = capBase;
+  return Math.min(capBase, ramp);
+}
+
+/** ตารางจองคู่ job+group ต่อวัน — unique(day, job, group) ให้ DB ตัดสินคนแรกชนะ */
+async function ensurePostPlanReservationsTable() {
+  await query(`
+    CREATE TABLE IF NOT EXISTS post_plan_reservations (
+      day DATE NOT NULL,
+      job_id VARCHAR(50) NOT NULL,
+      fb_group_id VARCHAR(100) NOT NULL,
+      user_id VARCHAR(50) NOT NULL,
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      PRIMARY KEY (day, job_id, fb_group_id)
+    )
+  `);
+}
+
+/** จองคู่ (job, group) ของวันนี้ให้บัญชีนี้ — คืน true ถ้าว่างหรือเป็นของบัญชีนี้อยู่แล้ว */
+async function reserveDailyPostPair(jobId, fbGroupId, userId) {
+  await ensurePostPlanReservationsTable();
+  const { rows } = await query(
+    `INSERT INTO post_plan_reservations (day, job_id, fb_group_id, user_id)
+     VALUES ((NOW() AT TIME ZONE 'Asia/Bangkok')::date, $1, $2, $3)
+     ON CONFLICT (day, job_id, fb_group_id) DO UPDATE SET user_id = post_plan_reservations.user_id
+     RETURNING (user_id = $3) AS mine`,
+    [String(jobId), String(fbGroupId), String(userId)]
+  );
+  return rows.length > 0 && rows[0].mine === true;
+}
+
+/**
+ * วางแผนโพสต์รายวันของบัญชี — คืนรายการ (job, กลุ่ม) ที่ควรโพสต์วันนี้ ตามลำดับ
+ * นโยบาย (อิงข้อมูลจริง: คู่ที่เคยได้เบอร์ yield 15-27% vs คู่ใหม่ 5.6%):
+ * 1. budget = เพดาน/วัน - โพสต์ไปแล้ววันนี้
+ * 2. ตัดคู่ job+group ที่เพิ่งโพสต์ภายใน POST_REPOST_MIN_GAP_DAYS (default 2 วัน — ทุกบัญชีนับรวมกัน)
+ * 3. เรียง: คู่เคยได้เบอร์/คอมเมนต์ก่อน (score = phones*3 + comments) → กันงบ ~20% ให้คู่ที่ไม่เคยลอง → คู่เคยโพสต์แต่เงียบ
+ */
+async function buildDailyPostPlan(userId, opts = {}) {
+  await ensureUsersPostControlColumns();
+  await ensurePostPlanReservationsTable();
+  const user = await getUserById(String(userId));
+  if (!user) throw new Error(`ไม่พบ user ${userId}`);
+
+  const empty = (reason, extra = {}) => ({
+    user_id: String(userId),
+    budget: 0,
+    items: [],
+    reason,
+    ...extra,
+  });
+
+  if (user.paused_until && new Date(user.paused_until).getTime() > Date.now()) {
+    return empty('paused', { paused_until: user.paused_until, pause_reason: user.pause_reason || null });
+  }
+
+  const capEffective = await getEffectiveDailyCap(user);
+  const postedToday = await countPostsTodayByUser(userId);
+  const budget = Math.max(0, capEffective - postedToday);
+  if (budget === 0) {
+    return empty('daily_cap_reached', { cap: capEffective, posted_today: postedToday });
+  }
+
+  const wanted = normalizeIdArray(opts.assignment_ids);
+  let assignments = await getAssignmentsByUserId(String(userId));
+  if (wanted.length > 0) {
+    assignments = assignments.filter((a) => wanted.includes(String(a.id)));
+  }
+  const groups = await getGroups();
+  const groupByRowId = new Map(groups.map((g) => [String(g.id), g]));
+
+  /** ผู้สมัครทั้งหมด: (assignment, job, group) ตามลำดับ assignment เดิม; ซ้ำ job+group ข้ามการ์ดเอาตัวแรก */
+  const seen = new Set();
+  const candidates = [];
+  for (const a of assignments) {
+    const jobIds = Array.isArray(a.job_ids) && a.job_ids.length > 0 ? a.job_ids : a.job_id ? [a.job_id] : [];
+    const sourceGroupIds =
+      Array.isArray(a.group_ids) && a.group_ids.length > 0 ? a.group_ids : user.group_ids || [];
+    for (const jid of jobIds) {
+      for (const gid of sourceGroupIds) {
+        const g = groupByRowId.get(String(gid));
+        if (!g || !g.fb_group_id) continue;
+        const key = `${jid}::${g.fb_group_id}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        candidates.push({
+          assignment_id: String(a.id),
+          job_id: String(jid),
+          group_row_id: String(g.id),
+          fb_group_id: String(g.fb_group_id),
+          group_name: g.name || null,
+          sheet_url: g.sheet_url || null,
+        });
+      }
+    }
+  }
+  if (candidates.length === 0) {
+    return empty('no_candidates', { cap: capEffective, posted_today: postedToday });
+  }
+
+  /** สถิติย้อนหลังของทุกคู่ (นับรวมทุกบัญชี — content ซ้ำในกลุ่มเดิมคือซ้ำไม่ว่าใครโพสต์) */
+  const jobIds = [...new Set(candidates.map((c) => c.job_id))];
+  const { rows: statRows } = await query(
+    `SELECT job_id, group_id,
+            COUNT(*)::int AS posts,
+            COUNT(*) FILTER (WHERE customer_phone IS NOT NULL AND customer_phone <> '')::int AS phones,
+            COALESCE(SUM(comment_count), 0)::int AS comments,
+            MAX(created_at) AS last_posted
+     FROM post_logs
+     WHERE job_id = ANY($1)
+     GROUP BY job_id, group_id`,
+    [jobIds]
+  );
+  const statByKey = new Map(statRows.map((s) => [`${s.job_id}::${s.group_id}`, s]));
+
+  const gapDays = Math.max(0, Number(process.env.POST_REPOST_MIN_GAP_DAYS) || 2);
+  const gapMs = gapDays * 86400 * 1000;
+  const now = Date.now();
+
+  const tierProven = [];
+  const tierExplore = [];
+  const tierQuiet = [];
+  let cooldownSkipped = 0;
+  for (const c of candidates) {
+    const s = statByKey.get(`${c.job_id}::${c.fb_group_id}`);
+    if (s && s.last_posted && now - new Date(s.last_posted).getTime() < gapMs) {
+      cooldownSkipped += 1;
+      continue;
+    }
+    if (!s || Number(s.posts) === 0) {
+      tierExplore.push({ ...c, tier: 'explore', score: 0, posts: 0, last_posted: null });
+      continue;
+    }
+    const score = Number(s.phones) * 3 + Number(s.comments);
+    const item = {
+      ...c,
+      tier: score > 0 ? 'proven' : 'quiet',
+      score,
+      posts: Number(s.posts),
+      phones: Number(s.phones),
+      comments: Number(s.comments),
+      last_posted: s.last_posted,
+    };
+    (score > 0 ? tierProven : tierQuiet).push(item);
+  }
+  tierProven.sort(
+    (a, b) => b.score - a.score || new Date(a.last_posted) - new Date(b.last_posted)
+  );
+  tierQuiet.sort((a, b) => new Date(a.last_posted) - new Date(b.last_posted));
+
+  const exploreShare = Math.min(1, Math.max(0, Number(process.env.POST_EXPLORE_SHARE) || 0.2));
+  const exploreSlots = Math.min(tierExplore.length, Math.ceil(budget * exploreShare));
+  const mainSlots = budget - exploreSlots;
+
+  /** pool เรียงตามความสำคัญ: (proven→quiet ตามโควต้าหลัก) → explore ตามโควต้าสำรวจ → ที่เหลือทั้งหมด */
+  const head = [
+    ...tierProven.slice(0, mainSlots),
+    ...tierQuiet.slice(0, Math.max(0, mainSlots - tierProven.length)),
+    ...tierExplore.slice(0, exploreSlots),
+  ];
+  const inHead = new Set(head.map((i) => `${i.job_id}::${i.fb_group_id}`));
+  const pool = [
+    ...head,
+    ...[...tierExplore, ...tierProven, ...tierQuiet].filter(
+      (c) => !inHead.has(`${c.job_id}::${c.fb_group_id}`)
+    ),
+  ];
+
+  /**
+   * จองคู่ job+group ของ "วันนี้" ที่ระดับ DB — กันหลายบัญชีที่รันพร้อมกัน (8:00) วางแผนคู่เดียวกัน
+   * แล้วโพสต์เนื้อหาเดิมลงกลุ่มเดียวกันวันเดียวกัน. จองซ้ำโดยบัญชีเดิมได้ (กรณี retry หลัง Chrome เด้ง)
+   */
+  const items = [];
+  let reservedByOthers = 0;
+  for (const c of pool) {
+    if (items.length >= budget) break;
+    const ok = await reserveDailyPostPair(c.job_id, c.fb_group_id, userId);
+    if (ok) items.push(c);
+    else reservedByOthers += 1;
+  }
+
+  return {
+    reserved_by_others: reservedByOthers,
+    user_id: String(userId),
+    cap: capEffective,
+    posted_today: postedToday,
+    budget,
+    candidates: candidates.length,
+    cooldown_skipped: cooldownSkipped,
+    tiers: { proven: tierProven.length, quiet: tierQuiet.length, explore: tierExplore.length },
+    items,
+  };
 }
 
 async function completePostRunJob(id, data = {}) {
@@ -1967,8 +2325,18 @@ module.exports = {
   updateScheduleByRunId,
   ensurePostRunQueueTable,
   enqueuePostRunJob,
+  enqueuePostRunJobsPerUser,
+  enqueueDailyPostRunJobs,
   claimNextPostRunJob,
   completePostRunJob,
+  pauseUser,
+  resumeUser,
+  countPostsTodayByUser,
+  buildDailyPostPlan,
+  reserveDailyPostPair,
+  ensurePostRunQueueUserColumn,
+  ensureUsersPostControlColumns,
+  ensurePostPlanReservationsTable,
   getPostRunQueueSummary,
   countStaleRunningPostJobs,
   failStaleRunningPostJobs,

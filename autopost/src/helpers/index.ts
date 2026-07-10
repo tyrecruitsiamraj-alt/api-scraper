@@ -17,6 +17,13 @@ export { postToGroupWorker } from './postToGroupWorker';
 export type { PostToGroupOptions } from './postToGroup';
 export { saveToSheet } from './saveToSheet';
 export { runLog } from './runLog';
+export {
+  buildDailyPostPlanForUser,
+  pauseUserPosting,
+  getFailStreakLimit,
+  getPauseHours,
+} from './postPlan';
+export type { DailyPostPlan, DailyPlanItem } from './postPlan';
 export { postLog } from './postLog';
 export {
   extractPhonesFromText,
