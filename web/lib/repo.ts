@@ -263,6 +263,55 @@ export async function setFacebookDailyCapForAll(cap: number) {
   await q(`UPDATE "so_autopost_jobs".users SET daily_cap = $1, updated_at = now()`, [cap]);
 }
 
+// สรุป Auto-Post สำหรับหน้าภาพรวม (รวม dashboard ของ autopost เข้ามา) — guarded
+export type AutopostOverview = {
+  accounts: number;
+  paused: number;
+  over_cap: number;
+  posts_today: number;
+  capacity: number;
+  leads_today: number;
+  leads_14d: number;
+};
+
+export async function autopostOverview(): Promise<AutopostOverview | null> {
+  try {
+    const acc = await q<{ accounts: number; paused: number; over_cap: number; posts_today: number; capacity: number }>(
+      `WITH t AS (
+         SELECT u.id,
+                COALESCE(u.daily_cap, 15) AS cap,
+                (u.paused_until IS NOT NULL AND u.paused_until > now()) AS paused,
+                COALESCE((
+                  SELECT count(*)::int FROM "so_autopost_jobs".post_logs pl
+                   WHERE pl.user_id = u.id
+                     AND (pl.created_at AT TIME ZONE 'Asia/Bangkok')::date
+                         = (now() AT TIME ZONE 'Asia/Bangkok')::date
+                ), 0) AS used
+           FROM "so_autopost_jobs".users u
+       )
+       SELECT count(*)::int AS accounts,
+              count(*) FILTER (WHERE paused)::int AS paused,
+              count(*) FILTER (WHERE used >= cap)::int AS over_cap,
+              COALESCE(sum(used), 0)::int AS posts_today,
+              COALESCE(sum(cap), 0)::int AS capacity
+         FROM t`,
+    );
+    if (!acc[0] || acc[0].accounts === 0) return null;
+    const leads = await q<{ leads_today: number; leads_14d: number }>(
+      `SELECT
+         count(*) FILTER (
+           WHERE (created_at AT TIME ZONE 'Asia/Bangkok')::date = (now() AT TIME ZONE 'Asia/Bangkok')::date
+         )::int AS leads_today,
+         count(*) FILTER (WHERE created_at >= now() - interval '14 days')::int AS leads_14d
+       FROM "so_autopost_jobs".post_logs
+       WHERE customer_phone IS NOT NULL AND customer_phone <> ''`,
+    );
+    return { ...acc[0], leads_today: leads[0]?.leads_today ?? 0, leads_14d: leads[0]?.leads_14d ?? 0 };
+  } catch {
+    return null;
+  }
+}
+
 /** True when tasks are queued but no worker seems to be picking them up. */
 export async function hasStaleQueuedTasks(sec = 90) {
   const rows = await q<{ n: number }>(

@@ -2,22 +2,59 @@
 
 import Image from 'next/image';
 import Link from 'next/link';
-import { usePathname } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
+import { useEffect, useState } from 'react';
 import { signOut, useSession } from 'next-auth/react';
 
-const NAV = [
-  { href: '/dashboard', label: 'ภาพรวม' },
-  { href: '/candidates', label: 'ผู้สมัคร' },
-  { href: '/scraping', label: 'งาน Scraping' },
-  { href: '/autopost', label: 'Auto-Post' },
-  { href: '/connectors', label: 'Connector' },
-];
+type Mode = 'scraping' | 'autopost';
 
-function NavTabs() {
+const NAV: Record<Mode, { href: string; label: string }[]> = {
+  scraping: [
+    { href: '/dashboard', label: 'ภาพรวม' },
+    { href: '/candidates', label: 'ผู้สมัคร' },
+    { href: '/scraping', label: 'งาน Scraping' },
+    { href: '/connectors', label: 'Connector' },
+  ],
+  autopost: [
+    { href: '/dashboard', label: 'ภาพรวม' },
+    { href: '/autopost/jobs', label: 'Jobs' },
+    { href: '/autopost/posting', label: 'ตั้งค่าโพสต์' },
+    { href: '/autopost/collect', label: 'เก็บคอมเมนต์' },
+    { href: '/autopost/reports', label: 'รายงาน' },
+    { href: '/connectors', label: 'Connector' },
+  ],
+};
+
+/** โหมดของ path: /autopost/* = autopost, /candidates|/scraping = scraping, อื่นๆ (ภาพรวม/Connector) = ใช้โหมดที่จำไว้ */
+function deriveMode(pathname: string, stored: Mode): Mode {
+  if (pathname.startsWith('/autopost')) return 'autopost';
+  if (pathname.startsWith('/candidates') || pathname.startsWith('/scraping')) return 'scraping';
+  return stored;
+}
+
+function ModeSwitch({ mode, onSwitch }: { mode: Mode; onSwitch: (m: Mode) => void }) {
+  return (
+    <div className="flex shrink-0 items-center rounded-full border border-line bg-white/70 p-0.5">
+      {(['scraping', 'autopost'] as Mode[]).map((m) => (
+        <button
+          key={m}
+          onClick={() => onSwitch(m)}
+          className={`whitespace-nowrap rounded-full px-3 py-1 text-[12.5px] font-medium transition ${
+            mode === m ? 'bg-accent text-white shadow-sm' : 'text-muted hover:text-ink'
+          }`}
+        >
+          {m === 'scraping' ? 'Scraping' : 'Auto-Post'}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function NavTabs({ mode }: { mode: Mode }) {
   const pathname = usePathname();
   return (
     <nav className="-mx-1 flex items-center gap-1 overflow-x-auto">
-      {NAV.map((item) => {
+      {NAV[mode].map((item) => {
         const active = pathname === item.href || pathname.startsWith(item.href + '/');
         return (
           <Link
@@ -37,6 +74,43 @@ function NavTabs() {
 
 export function Topbar() {
   const { data: session } = useSession();
+  const pathname = usePathname();
+  const router = useRouter();
+  const [stored, setStored] = useState<Mode>('scraping');
+
+  useEffect(() => {
+    const s = localStorage.getItem('so-mode');
+    if (s === 'autopost' || s === 'scraping') setStored(s);
+  }, []);
+
+  // จำโหมดตาม path เมื่ออยู่หน้าที่ผูกโหมดชัดเจน
+  useEffect(() => {
+    let m: Mode | null = null;
+    if (pathname.startsWith('/autopost')) m = 'autopost';
+    else if (pathname.startsWith('/candidates') || pathname.startsWith('/scraping')) m = 'scraping';
+    if (m) {
+      setStored(m);
+      try {
+        localStorage.setItem('so-mode', m);
+      } catch {
+        /* ignore */
+      }
+    }
+  }, [pathname]);
+
+  const mode = deriveMode(pathname, stored);
+
+  const switchMode = (m: Mode) => {
+    setStored(m);
+    try {
+      localStorage.setItem('so-mode', m);
+    } catch {
+      /* ignore */
+    }
+    // ไปหน้าแรกของโหมด: Auto-Post → Jobs, Scraping → ภาพรวม
+    router.push(m === 'autopost' ? '/autopost/jobs' : '/dashboard');
+  };
+
   const user = session?.user;
   const label = user?.name || user?.email || 'ผู้ใช้';
   const initials = label
@@ -50,19 +124,16 @@ export function Topbar() {
   return (
     <header className="glass sticky top-0 z-30 border-b border-line/70">
       <div className="mx-auto flex h-16 max-w-7xl items-center justify-between gap-3 px-4 sm:px-6 lg:px-8">
-        {/* brand */}
+        {/* brand + mode switch */}
         <div className="flex min-w-0 shrink-0 items-center gap-3">
           <Image src="/logo-SO.webp" alt="SO — SIAMRAJATHANEE" width={32} height={32} className="h-8 w-auto shrink-0" priority />
           <div className="hidden h-7 w-px bg-line sm:block" />
-          <div className="min-w-0 leading-tight">
-            <div className="truncate text-[15px] font-semibold tracking-tight">So Scraping</div>
-            <div className="hidden truncate text-[11px] text-muted sm:block">ระบบดึงข้อมูลผู้สมัคร</div>
-          </div>
+          <ModeSwitch mode={mode} onSwitch={switchMode} />
         </div>
 
         {/* nav (center) */}
         <div className="hidden flex-1 justify-center md:flex">
-          <NavTabs />
+          <NavTabs mode={mode} />
         </div>
 
         {/* right */}
@@ -91,7 +162,7 @@ export function Topbar() {
 
       {/* nav (mobile) */}
       <div className="border-t border-line/70 px-3 py-1.5 md:hidden">
-        <NavTabs />
+        <NavTabs mode={mode} />
       </div>
     </header>
   );

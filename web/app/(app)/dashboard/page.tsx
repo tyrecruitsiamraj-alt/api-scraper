@@ -1,4 +1,4 @@
-import { dashboardStats, listProviderLimits, recentRuns } from '@/lib/repo';
+import { dashboardStats, listProviderLimits, recentRuns, autopostOverview } from '@/lib/repo';
 
 export const dynamic = 'force-dynamic';
 
@@ -47,18 +47,40 @@ function Bar({ label, n, total }: { label: string; n: number; total: number }) {
 }
 
 export default async function DashboardPage() {
-  const [{ totals, byPlatform, completeness }, runs, limits] = await Promise.all([
+  const [{ totals, byPlatform, completeness }, runs, limits, autopost] = await Promise.all([
     dashboardStats(),
     recentRuns(12),
     listProviderLimits(),
+    autopostOverview(),
   ]);
 
   return (
     <div className="space-y-6">
       <div>
         <h1 className="text-2xl font-semibold tracking-tight">ภาพรวม</h1>
-        <p className="mt-1 text-sm text-subtle">สถานะคลังผู้สมัครและการดึงข้อมูล</p>
+        <p className="mt-1 text-sm text-subtle">สถานะคลังผู้สมัคร การดึงข้อมูล และการโพสต์ Facebook</p>
       </div>
+
+      {/* Auto-Post (Facebook) — ยุบ dashboard ของ autopost มารวมที่นี่ */}
+      {autopost && (
+        <section className="space-y-3">
+          <h2 className="text-[15px] font-semibold">Auto-Post (Facebook) วันนี้</h2>
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+            <Stat
+              label="โพสต์วันนี้"
+              value={`${autopost.posts_today.toLocaleString()} / ${autopost.capacity.toLocaleString()}`}
+              sub={`${autopost.accounts} บัญชี`}
+            />
+            <Stat
+              label="บัญชีเต็มโควต้า"
+              value={autopost.over_cap.toLocaleString()}
+              sub={autopost.paused > 0 ? `พัก (circuit breaker) ${autopost.paused}` : 'ไม่มีบัญชีถูกพัก'}
+            />
+            <Stat label="Lead วันนี้" value={autopost.leads_today.toLocaleString()} sub="เบอร์จากคอมเมนต์" />
+            <Stat label="Lead 14 วัน" value={autopost.leads_14d.toLocaleString()} />
+          </div>
+        </section>
+      )}
 
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <Stat label="ผู้สมัครทั้งหมด" value={totals.candidates.toLocaleString()} />

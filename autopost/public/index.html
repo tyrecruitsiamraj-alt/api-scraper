@@ -310,6 +310,14 @@
       .app-content { padding: 1.25rem 1.5rem 2.5rem; }
     }
 
+    /* Embed mode — ฝังทีละ tab ในคอนโซล SO Recruitment (?embed=1): ซ่อนเมนู/หัว เหลือแต่เนื้อหา */
+    body.embed-mode .app-sidebar,
+    body.embed-mode #sidebar-overlay,
+    body.embed-mode .app-topbar { display: none !important; }
+    body.embed-mode .app-shell { display: block; }
+    body.embed-mode .app-main { margin: 0 !important; width: 100% !important; }
+    body.embed-mode .app-content { padding-top: 1rem; max-width: none; }
+
     /* Panel / card */
     .card {
       background: #fff;

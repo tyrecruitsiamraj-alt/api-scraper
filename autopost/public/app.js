@@ -5213,5 +5213,14 @@ setInterval(refreshCollectGlobalUI, 3500);
 refreshCollectGlobalUI();
 
 mountVercelSidebarPostHint();
-setActiveTab('users');
+
+// Deep-link + embed: คอนโซล SO Recruitment ฝังทีละ tab ผ่าน ?tab=<x>&embed=1
+// embed=1 → ซ่อน sidebar + topbar ให้เหลือแต่เนื้อหา tab นั้น (ดูเหมือนหน้าเดียวในคอนโซล)
+(function initTabFromUrl() {
+  const params = new URLSearchParams(window.location.search);
+  if (params.get('embed') === '1') document.body.classList.add('embed-mode');
+  const valid = ['dashboard', 'users', 'groups', 'jobs', 'templates', 'assignments', 'schedules', 'lead_collect', 'reports'];
+  const wanted = params.get('tab');
+  setActiveTab(valid.includes(wanted) ? wanted : 'users');
+})();
 
