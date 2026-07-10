@@ -111,6 +111,33 @@ export async function listConnectors() {
   );
 }
 
+// Unified account row across ALL modules (scraper connectors + Facebook accounts),
+// read from the v_connectors view. `key` is '<platform>:<id>'; strip the prefix to
+// get the raw id for scraper toggle/delete. Facebook rows are read-only here.
+export type UnifiedConnectorRow = {
+  key: string;
+  platform: string;
+  label: string;
+  username: string | null;
+  scrape_limit: number | null;
+  daily_cap: number | null;
+  enabled: boolean;
+  cooldown_until: string | null;
+  last_login_at: string | null;
+  created_at: string;
+  paused_until: string | null;
+  pause_reason: string | null;
+  used_today: number | null;
+};
+
+export async function listAllConnectors() {
+  return q<UnifiedConnectorRow>(
+    `SELECT key, platform, label, username, scrape_limit, daily_cap, enabled,
+            cooldown_until, last_login_at, created_at, paused_until, pause_reason, used_today
+       FROM v_connectors ORDER BY platform, label`,
+  );
+}
+
 /** Lightweight options for task-creation dropdown (enabled only). */
 export async function listConnectorOptions() {
   return q<{ id: string; platform: string; label: string; scrape_limit: number }>(

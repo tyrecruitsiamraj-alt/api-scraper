@@ -5,6 +5,14 @@
 export const dynamic = 'force-dynamic';
 
 const AUTOPOST_URL = process.env.AUTOPOST_URL ?? 'http://localhost:3100';
+// AUTO-POST's Express app gates access when AUTOPOST_ACCESS_TOKEN is set. Only this
+// server-side page (behind Azure AD) knows the token; it hands it to the iframe once
+// via ?access_token=, which the app swaps for an HttpOnly cookie. Public visitors to
+// the AUTO-POST URL without the token are blocked. Keep the token server-side only.
+const AUTOPOST_ACCESS_TOKEN = process.env.AUTOPOST_ACCESS_TOKEN ?? '';
+const iframeSrc = AUTOPOST_ACCESS_TOKEN
+  ? `${AUTOPOST_URL}?access_token=${encodeURIComponent(AUTOPOST_ACCESS_TOKEN)}`
+  : AUTOPOST_URL;
 
 export default function AutopostPage() {
   return (
@@ -15,7 +23,7 @@ export default function AutopostPage() {
           <p className="text-[13px] text-muted">โพสต์งานลงกลุ่ม Facebook + เก็บ lead — ระบบ AUTO-POST</p>
         </div>
         <a
-          href={AUTOPOST_URL}
+          href={iframeSrc}
           target="_blank"
           rel="noreferrer"
           className="whitespace-nowrap rounded-full border border-line px-3.5 py-1.5 text-[13px] font-medium text-muted hover:bg-canvas hover:text-ink"
@@ -24,7 +32,7 @@ export default function AutopostPage() {
         </a>
       </div>
       <iframe
-        src={AUTOPOST_URL}
+        src={iframeSrc}
         title="Auto-Post"
         className="w-full rounded-xl border border-line bg-white"
         style={{ height: 'calc(100vh - 12rem)' }}

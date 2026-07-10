@@ -22,6 +22,63 @@ app.use((req, res, next) => {
   next();
 });
 
+/**
+ * ประตูเข้า (Access gate) — ปิดรูรั่วที่ AUTO-POST UI เปิดโล่งบน Vercel (ใครรู้ URL ก็สั่งโพสต์/เห็นบัญชีได้)
+ * เปิดใช้เมื่อ AUTOPOST_ACCESS_TOKEN ถูกตั้ง (ไม่ตั้ง = เปิดเหมือนเดิม กันของเก่าพัง)
+ * ผ่านได้เมื่อ: header x-autopost-token, cookie ap_access, หรือ ?access_token= (จะ set cookie แล้ว redirect ทิ้ง query)
+ * ยกเว้น: health check, /api/worker/* (มี POST_WORKER_TOKEN เอง), /api/run-logs (บอทส่ง log กลับ)
+ * console (Next.js/Azure AD) ฝัง iframe src ด้วย ?access_token=<token> จาก env ฝั่ง server → เฉพาะคนล็อกอินแล้วเข้าถึง
+ */
+const AUTOPOST_ACCESS_TOKEN = String(process.env.AUTOPOST_ACCESS_TOKEN || '').trim();
+const ACCESS_COOKIE = 'ap_access';
+const ACCESS_GATE_EXEMPT = /^\/api\/(health|fb-session-health|worker\/|run-logs)/;
+
+function parseCookies(req) {
+  const raw = String(req.headers.cookie || '');
+  const out = {};
+  for (const part of raw.split(';')) {
+    const i = part.indexOf('=');
+    if (i < 0) continue;
+    out[part.slice(0, i).trim()] = decodeURIComponent(part.slice(i + 1).trim());
+  }
+  return out;
+}
+
+app.use((req, res, next) => {
+  if (!AUTOPOST_ACCESS_TOKEN) return next(); // ไม่ตั้ง token = ไม่เปิดประตู (โหมดเดิม/ dev)
+  const p = req.path || '';
+  if (ACCESS_GATE_EXEMPT.test(p)) return next();
+
+  // ?access_token= ถูกต้อง → ตั้ง cookie แล้ว redirect ทิ้ง query (กัน token ค้างใน URL/แชร์ลิงก์)
+  const qToken = String(req.query.access_token || '').trim();
+  if (qToken && qToken === AUTOPOST_ACCESS_TOKEN) {
+    res.setHeader(
+      'Set-Cookie',
+      `${ACCESS_COOKIE}=${encodeURIComponent(AUTOPOST_ACCESS_TOKEN)}; Path=/; HttpOnly; SameSite=None; Secure; Max-Age=604800`
+    );
+    const clean = (req.path || '/') + '';
+    return res.redirect(302, clean);
+  }
+
+  const headerToken = String(req.get('x-autopost-token') || '').trim();
+  const cookieToken = String(parseCookies(req)[ACCESS_COOKIE] || '').trim();
+  if (headerToken === AUTOPOST_ACCESS_TOKEN || cookieToken === AUTOPOST_ACCESS_TOKEN) {
+    return next();
+  }
+
+  if (p.startsWith('/api')) {
+    return res.status(401).json({ error: 'ต้องมีสิทธิ์เข้าถึง (เปิดผ่านคอนโซล SO Recruitment)' });
+  }
+  res
+    .status(401)
+    .type('html')
+    .send(
+      '<!doctype html><meta charset="utf-8"><title>AUTO-POST</title>' +
+        '<div style="font-family:system-ui;display:flex;min-height:100vh;align-items:center;justify-content:center;background:#0f172a;color:#e2e8f0;text-align:center;padding:24px">' +
+        '<div><p style="font-weight:600">AUTO-POST</p><p>เข้าถึงได้เฉพาะผ่านคอนโซล SO Recruitment (ต้องล็อกอิน)</p></div></div>'
+    );
+});
+
 /** ลงทะเบียนก่อน require db — ใช้ยืนยันว่าโปรเซสรันไฟล์นี้จริง (ถ้า URL นี้ยัง 404 = ไม่ใช่ server/index.js ชุดนี้บนพอร์ตนั้น) */
 const SERVER_BUILD_MARK = 'fb-session-20260407d';
 app.get('/api/fb-session-health', (req, res) => {

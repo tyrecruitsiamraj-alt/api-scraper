@@ -44,10 +44,25 @@ npm run worker:post                            # FB posting worker (spawns Chrom
 ```
 Expose the autopost server URL to the console via `AUTOPOST_URL` (below).
 
+Anti-block posting engine env (worker host — see `autopost/.env.example`):
+- `WORKER_CONCURRENCY=15` → # of Chrome open in parallel = accounts posting at once.
+  Facebook headful Chrome ≈ 0.8–1.2 GB each; **32 GB RAM → start 15, watch Task
+  Manager, push toward ~18–20 if stable.** Parallel is speed-only (shared IP), the
+  block protection is the cap/rotation/breaker below.
+- `POST_DAILY_CAP=15` (per account/day), `POST_REPOST_MIN_GAP_DAYS=2`,
+  `POST_FAIL_STREAK_LIMIT=5` + `POST_PAUSE_HOURS=24` (circuit breaker).
+- `AUTO_POST_HOUR=8` `AUTO_POST_MINUTE=0` → worker enqueues the daily run itself at
+  08:00 Asia/Bangkok **every day incl. weekends** (the Vercel scheduler never fires).
+- **Access gate:** set `AUTOPOST_ACCESS_TOKEN` here AND the same value on the console
+  (below) — closes the public AUTO-POST URL so only the logged-in console can reach it.
+
 ## 4) Console (Vercel)
 Deploy `web/` to Vercel. Env vars:
 - `AUTOPOST_URL` → the autopost server URL on the worker host (e.g. `https://autopost.internal`).
   The `/autopost` tab embeds it in an iframe.
+- `AUTOPOST_ACCESS_TOKEN` → same value as the worker host's, so the console can hand the
+  iframe a one-time token (swapped for an HttpOnly cookie). Without it the AUTO-POST URL
+  is publicly reachable.
 - Azure AD: `AZURE_AD_CLIENT_ID`, `AZURE_AD_CLIENT_SECRET`, `AZURE_AD_TENANT_ID`, `NEXTAUTH_SECRET`, `NEXTAUTH_URL`.
 - DB: `DATABASE_URL` / `PG*`, `DB_SCHEMA=so-candidate-data`, `APP_ENCRYPTION_KEY`.
 
