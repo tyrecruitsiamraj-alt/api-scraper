@@ -3,7 +3,6 @@
 import Image from 'next/image';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
-import { useEffect, useState } from 'react';
 import { signOut, useSession } from 'next-auth/react';
 
 type Mode = 'scraping' | 'autopost';
@@ -16,20 +15,24 @@ const NAV: Record<Mode, { href: string; label: string }[]> = {
     { href: '/connectors', label: 'Connector' },
   ],
   autopost: [
-    { href: '/dashboard', label: 'ภาพรวม' },
+    { href: '/autopost', label: 'ภาพรวม' },
     { href: '/autopost/jobs', label: 'Jobs' },
     { href: '/autopost/posting', label: 'ตั้งค่าโพสต์' },
+    { href: '/autopost/accounts', label: 'บัญชี Facebook' },
     { href: '/autopost/collect', label: 'เก็บคอมเมนต์' },
     { href: '/autopost/reports', label: 'รายงาน' },
-    { href: '/connectors', label: 'Connector' },
   ],
 };
 
-/** โหมดของ path: /autopost/* = autopost, /candidates|/scraping = scraping, อื่นๆ (ภาพรวม/Connector) = ใช้โหมดที่จำไว้ */
-function deriveMode(pathname: string, stored: Mode): Mode {
-  if (pathname.startsWith('/autopost')) return 'autopost';
-  if (pathname.startsWith('/candidates') || pathname.startsWith('/scraping')) return 'scraping';
-  return stored;
+/** ทุกหน้าแยกโหมดชัดเจน: /autopost/* = Auto-Post, ที่เหลือ = Scraping */
+function modeOf(pathname: string): Mode {
+  return pathname.startsWith('/autopost') ? 'autopost' : 'scraping';
+}
+
+/** active tab: match แบบ exact กับ prefix (แต่ /autopost ต้อง exact ไม่งั้นชนทุกหน้า /autopost/*) */
+function isActive(pathname: string, href: string): boolean {
+  if (href === '/autopost') return pathname === '/autopost';
+  return pathname === href || pathname.startsWith(href + '/');
 }
 
 function ModeSwitch({ mode, onSwitch }: { mode: Mode; onSwitch: (m: Mode) => void }) {
@@ -55,7 +58,7 @@ function NavTabs({ mode }: { mode: Mode }) {
   return (
     <nav className="-mx-1 flex items-center gap-1 overflow-x-auto">
       {NAV[mode].map((item) => {
-        const active = pathname === item.href || pathname.startsWith(item.href + '/');
+        const active = isActive(pathname, item.href);
         return (
           <Link
             key={item.href}
@@ -76,39 +79,11 @@ export function Topbar() {
   const { data: session } = useSession();
   const pathname = usePathname();
   const router = useRouter();
-  const [stored, setStored] = useState<Mode>('scraping');
-
-  useEffect(() => {
-    const s = localStorage.getItem('so-mode');
-    if (s === 'autopost' || s === 'scraping') setStored(s);
-  }, []);
-
-  // จำโหมดตาม path เมื่ออยู่หน้าที่ผูกโหมดชัดเจน
-  useEffect(() => {
-    let m: Mode | null = null;
-    if (pathname.startsWith('/autopost')) m = 'autopost';
-    else if (pathname.startsWith('/candidates') || pathname.startsWith('/scraping')) m = 'scraping';
-    if (m) {
-      setStored(m);
-      try {
-        localStorage.setItem('so-mode', m);
-      } catch {
-        /* ignore */
-      }
-    }
-  }, [pathname]);
-
-  const mode = deriveMode(pathname, stored);
+  const mode = modeOf(pathname);
 
   const switchMode = (m: Mode) => {
-    setStored(m);
-    try {
-      localStorage.setItem('so-mode', m);
-    } catch {
-      /* ignore */
-    }
-    // ไปหน้าแรกของโหมด: Auto-Post → Jobs, Scraping → ภาพรวม
-    router.push(m === 'autopost' ? '/autopost/jobs' : '/dashboard');
+    if (m === mode) return;
+    router.push(m === 'autopost' ? '/autopost' : '/dashboard');
   };
 
   const user = session?.user;
