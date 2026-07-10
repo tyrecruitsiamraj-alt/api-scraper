@@ -199,37 +199,60 @@ export async function setProviderCap(platform: string, dailyCap: number) {
 // which have one platform-wide cap. For the platform-quota panel we aggregate ALL FB
 // accounts into one card: posts today (all accounts) vs total capacity (Σ per-account cap).
 // Guarded — returns null if the autopost schema/columns aren't present yet.
+export type FacebookAccountQuota = {
+  id: string;
+  label: string;
+  used_today: number;
+  cap: number;
+  paused: boolean;
+};
 export type FacebookQuotaSummary = {
   accounts: number;
   paused: number;
   posts_today: number;
   capacity: number;
   cap_default: number;
+  /** รายบัญชี เรียงใช้เยอะสุดก่อน (ตัวเสี่ยงโดน block อยู่บนสุด) */
+  list: FacebookAccountQuota[];
 };
 
 export async function facebookQuotaSummary(): Promise<FacebookQuotaSummary | null> {
   try {
-    const rows = await q<FacebookQuotaSummary>(
+    const rows = await q<{ id: string; label: string; cap: number; paused: boolean; used_today: number }>(
       `SELECT
-         count(*)::int AS accounts,
-         count(*) FILTER (WHERE paused_until IS NOT NULL AND paused_until > now())::int AS paused,
-         COALESCE(sum(COALESCE(daily_cap, 15)), 0)::int AS capacity,
-         COALESCE((
-           SELECT COALESCE(u2.daily_cap, 15)
-             FROM "so_autopost_jobs".users u2
-            GROUP BY COALESCE(u2.daily_cap, 15)
-            ORDER BY count(*) DESC LIMIT 1
-         ), 15)::int AS cap_default,
+         u.id AS id,
+         COALESCE(NULLIF(TRIM(u.name), ''), u.email, u.id) AS label,
+         COALESCE(u.daily_cap, 15)::int AS cap,
+         (u.paused_until IS NOT NULL AND u.paused_until > now()) AS paused,
          COALESCE((
            SELECT count(*)::int FROM "so_autopost_jobs".post_logs pl
-            WHERE (pl.created_at AT TIME ZONE 'Asia/Bangkok')::date
+            WHERE pl.user_id = u.id
+              AND (pl.created_at AT TIME ZONE 'Asia/Bangkok')::date
                   = (now() AT TIME ZONE 'Asia/Bangkok')::date
-         ), 0) AS posts_today
-       FROM "so_autopost_jobs".users`,
+         ), 0) AS used_today
+       FROM "so_autopost_jobs".users u
+       ORDER BY used_today DESC, label`,
     );
-    const r = rows[0];
-    if (!r || r.accounts === 0) return null;
-    return r;
+    if (rows.length === 0) return null;
+    const list: FacebookAccountQuota[] = rows.map((r) => ({
+      id: r.id,
+      label: r.label,
+      used_today: Number(r.used_today),
+      cap: Number(r.cap),
+      paused: r.paused,
+    }));
+    // cap ที่พบบ่อยสุด — เป็นค่า prefill ของช่องปรับ cap
+    const capCounts = new Map<number, number>();
+    for (const a of list) capCounts.set(a.cap, (capCounts.get(a.cap) ?? 0) + 1);
+    const cap_default = [...capCounts.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? 15;
+    return {
+      accounts: list.length,
+      paused: list.filter((a) => a.paused).length,
+      posts_today: list.reduce((s, a) => s + a.used_today, 0),
+      capacity: list.reduce((s, a) => s + a.cap, 0),
+      cap_default,
+      list,
+    };
   } catch {
     return null; // autopost schema not present
   }

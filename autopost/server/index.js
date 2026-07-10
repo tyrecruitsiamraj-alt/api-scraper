@@ -256,7 +256,9 @@ db.ensurePostSchedulesTable().catch((err) => {
 // --- API: Users ---
 app.get('/api/users', async (req, res) => {
   try {
-    const users = await db.getUsers();
+    // แนบสถานะโควต้า (posted_today/effective_cap/is_full/is_paused) เพื่อให้ UI ล็อกบัญชีที่เต็ม/พัก
+    // ตอนเลือก. ถ้าคำนวณพลาด (คอลัมน์/ตารางไม่พร้อม) fallback รายชื่อบัญชีปกติ
+    const users = await db.getUsersPostingStatus().catch(() => db.getUsers());
     res.json(users);
   } catch (err) {
     res.status(500).json({ error: err.message });

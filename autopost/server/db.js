@@ -1773,29 +1773,63 @@ async function countPostsTodayByUser(userId) {
   return Number(rows[0]?.c) || 0;
 }
 
+/** เพดานวอร์มบัญชีใหม่ (source of truth เดียว): ไม่เคยโพสต์/<7วัน=5, <14=8, <21=12, ≥21=เต็ม */
+function warmupCap(capBase, ageDays) {
+  if (String(process.env.POST_WARMUP_DISABLED || '') === '1') return capBase;
+  let ramp;
+  if (!Number.isFinite(ageDays)) ramp = 5;
+  else if (ageDays < 7) ramp = 5;
+  else if (ageDays < 14) ramp = 8;
+  else if (ageDays < 21) ramp = 12;
+  else ramp = capBase;
+  return Math.min(capBase, ramp);
+}
+
+function baseDailyCap(user) {
+  return Math.max(1, Number(user?.daily_cap) || Number(process.env.POST_DAILY_CAP) || 15);
+}
+
 /**
  * เพดานโพสต์/วันของบัญชี — daily_cap ของ user > env POST_DAILY_CAP > 15
  * บัญชีใหม่วอร์มก่อน: อิงอายุจากโพสต์แรกใน post_logs (ไม่เคยโพสต์/<7วัน=5, <14วัน=8, <21วัน=12)
  */
 async function getEffectiveDailyCap(user) {
-  const capBase = Math.max(
-    1,
-    Number(user?.daily_cap) || Number(process.env.POST_DAILY_CAP) || 15
-  );
+  const capBase = baseDailyCap(user);
   if (String(process.env.POST_WARMUP_DISABLED || '') === '1') return capBase;
   const { rows } = await query(
     `SELECT EXTRACT(EPOCH FROM (NOW() - MIN(created_at))) / 86400.0 AS age_days
      FROM post_logs WHERE user_id = $1`,
     [String(user.id)]
   );
-  const ageDays = Number(rows[0]?.age_days);
-  let ramp;
-  if (!Number.isFinite(ageDays)) ramp = 5; // ไม่เคยโพสต์เลย
-  else if (ageDays < 7) ramp = 5;
-  else if (ageDays < 14) ramp = 8;
-  else if (ageDays < 21) ramp = 12;
-  else ramp = capBase;
-  return Math.min(capBase, ramp);
+  return warmupCap(capBase, Number(rows[0]?.age_days));
+}
+
+/**
+ * สถานะโควต้าโพสต์ของทุกบัญชี (batched 2 queries) — สำหรับ UI ล็อกบัญชีที่เต็ม/พัก ตอนเลือก
+ * คืน users เดิม + posted_today, effective_cap, is_full, is_paused
+ */
+async function getUsersPostingStatus() {
+  await ensureUsersPostControlColumns();
+  const users = await getUsers();
+  const todayRows = await query(
+    `SELECT user_id, count(*)::int AS c FROM post_logs
+     WHERE user_id IS NOT NULL
+       AND (created_at AT TIME ZONE 'Asia/Bangkok')::date = (now() AT TIME ZONE 'Asia/Bangkok')::date
+     GROUP BY user_id`
+  );
+  const ageRows = await query(
+    `SELECT user_id, EXTRACT(EPOCH FROM (NOW() - MIN(created_at))) / 86400.0 AS age_days
+     FROM post_logs WHERE user_id IS NOT NULL GROUP BY user_id`
+  );
+  const todayMap = new Map(todayRows.rows.map((r) => [String(r.user_id), Number(r.c)]));
+  const ageMap = new Map(ageRows.rows.map((r) => [String(r.user_id), Number(r.age_days)]));
+  const now = Date.now();
+  return users.map((u) => {
+    const cap = warmupCap(baseDailyCap(u), ageMap.has(String(u.id)) ? ageMap.get(String(u.id)) : NaN);
+    const posted = todayMap.get(String(u.id)) || 0;
+    const isPaused = !!(u.paused_until && new Date(u.paused_until).getTime() > now);
+    return { ...u, posted_today: posted, effective_cap: cap, is_full: posted >= cap, is_paused: isPaused };
+  });
 }
 
 /** ตารางจองคู่ job+group ต่อวัน — unique(day, job, group) ให้ DB ตัดสินคนแรกชนะ */
@@ -2332,6 +2366,7 @@ module.exports = {
   pauseUser,
   resumeUser,
   countPostsTodayByUser,
+  getUsersPostingStatus,
   buildDailyPostPlan,
   reserveDailyPostPair,
   ensurePostRunQueueUserColumn,

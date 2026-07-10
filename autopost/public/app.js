@@ -1944,6 +1944,7 @@ async function renderForm(cfg, item) {
       input.className = 'input';
       const opts = await apiGet(f.optionsFrom);
       input.appendChild(new Option('-- เลือก --', ''));
+      const currentVal = item && item[f.key] != null ? String(item[f.key]) : '';
       opts.forEach((opt) => {
         const val = opt.id;
         let label;
@@ -1952,7 +1953,21 @@ async function renderForm(cfg, item) {
         } else {
           label = opt[f.optionLabel || 'name'] || val;
         }
-        input.appendChild(new Option(label, val));
+        const o = new Option(label, val);
+        // ล็อกบัญชีที่เต็มโควต้าวันนี้ / ถูกพัก (circuit breaker) — เลือกไม่ได้ กันโพสต์ทับจนโดน block
+        // ยกเว้นบัญชีที่ถูกเลือกไว้อยู่แล้วในรายการที่กำลังแก้ไข (ไม่งั้น select จะว่าง)
+        if (f.optionsFrom === 'users' && String(val) !== currentVal) {
+          if (opt.is_paused) {
+            o.disabled = true;
+            o.text = `${label} — ⏸ พักอยู่ (circuit breaker)`;
+          } else if (opt.is_full) {
+            o.disabled = true;
+            o.text = `${label} — 🔴 เต็มวันนี้ (${opt.posted_today}/${opt.effective_cap})`;
+          } else if (typeof opt.posted_today === 'number' && opt.effective_cap) {
+            o.text = `${label} (วันนี้ ${opt.posted_today}/${opt.effective_cap})`;
+          }
+        }
+        input.appendChild(o);
       });
       if (item && item[f.key]) input.value = item[f.key];
     } else if (f.type === 'multiselectFrom' && f.optionsFrom) {
