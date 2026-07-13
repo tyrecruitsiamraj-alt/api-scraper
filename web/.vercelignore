@@ -1,0 +1,4 @@
+# Local secrets — never upload to Vercel file system
+.env
+.env.*
+!.env.example
