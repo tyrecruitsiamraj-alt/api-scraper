@@ -139,7 +139,9 @@ test('Dynamic Post: รันโพสต์ตาม Assignments', async ({ pag
     /** แผนวันนี้ของบัญชีนี้: cap/วัน + วอร์มบัญชีใหม่ + cooldown คู่ซ้ำ + เรียงกลุ่มที่เคยได้เบอร์ก่อน */
     const assignmentIds = userAssignments.map((a) => String(a.id));
     let planItems: DailyPlanItem[] = [];
-    const plan = await buildDailyPostPlanForUser(user.id, assignmentIds);
+    // manual + ยืนยัน (worker ตั้ง IGNORE_DAILY_CAP=1 ให้เฉพาะ run ที่คนกด ไม่ใช่รอบ 8:00) → เกิน cap ก็โพสต์ต่อได้
+    const ignoreCap = String(process.env.IGNORE_DAILY_CAP || '') === '1';
+    const plan = await buildDailyPostPlanForUser(user.id, assignmentIds, { ignoreCap });
     if (plan) {
       if (plan.reason === 'no_candidates') {
         console.log(`⏭️ ข้าม ${userLabel}: ไม่พบกลุ่ม/งานที่ใช้โพสต์ (เช็กหน้า Assignment หรือ Users)`);
@@ -158,6 +160,11 @@ test('Dynamic Post: รันโพสต์ตาม Assignments', async ({ pag
         continue;
       }
       anyUserPlanned = true;
+      if (plan.over_cap_override) {
+        console.log(
+          `⚠️ [${userLabel}] เกินโควต้าวันนี้แล้ว (${plan.posted_today}/${plan.cap}) — โพสต์ต่อเพราะสั่งเอง (override) เสี่ยงโดน Facebook จำกัดเพิ่ม`
+        );
+      }
       console.log(
         `🗓️ [${userLabel}] แผนวันนี้ ${plan.items.length} โพสต์ (โควต้า ${plan.cap}/วัน โพสต์แล้ว ${plan.posted_today}, ` +
           `เคยได้ผล ${plan.items.filter((i) => i.tier === 'proven').length} · ลองใหม่ ${plan.items.filter((i) => i.tier === 'explore').length} · ` +

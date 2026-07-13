@@ -1880,13 +1880,16 @@ async function buildDailyPostPlan(userId, opts = {}) {
     ...extra,
   });
 
+  // pause = circuit breaker (fail จริง) — คงเป็น guard เสมอ (ต่างจาก cap ที่ override ได้)
   if (user.paused_until && new Date(user.paused_until).getTime() > Date.now()) {
     return empty('paused', { paused_until: user.paused_until, pause_reason: user.pause_reason || null });
   }
 
   const capEffective = await getEffectiveDailyCap(user);
   const postedToday = await countPostsTodayByUser(userId);
-  const budget = Math.max(0, capEffective - postedToday);
+  const overCap = postedToday >= capEffective;
+  // ignoreCap (manual + ยืนยัน): เกิน cap ก็โพสต์ได้อีก 1 ชุด (สูงสุด = cap) แค่ติดธงเตือน ไม่ข้ามบัญชี
+  const budget = opts.ignoreCap ? capEffective : Math.max(0, capEffective - postedToday);
   if (budget === 0) {
     return empty('daily_cap_reached', { cap: capEffective, posted_today: postedToday });
   }
@@ -2014,6 +2017,7 @@ async function buildDailyPostPlan(userId, opts = {}) {
     user_id: String(userId),
     cap: capEffective,
     posted_today: postedToday,
+    over_cap_override: !!(opts.ignoreCap && overCap), // โพสต์ทั้งที่เกิน cap เพราะผู้ใช้ยืนยัน
     budget,
     candidates: candidates.length,
     cooldown_skipped: cooldownSkipped,

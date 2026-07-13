@@ -29,6 +29,7 @@ export interface DailyPostPlan {
   candidates?: number;
   cooldown_skipped?: number;
   reserved_by_others?: number;
+  over_cap_override?: boolean;
   paused_until?: string;
   pause_reason?: string | null;
   tiers?: { proven: number; quiet: number; explore: number };
@@ -36,12 +37,17 @@ export interface DailyPostPlan {
 
 export async function buildDailyPostPlanForUser(
   userId: string,
-  assignmentIds?: string[]
+  assignmentIds?: string[],
+  opts?: { ignoreCap?: boolean; ignorePause?: boolean }
 ): Promise<DailyPostPlan | null> {
   if (!process.env.DATABASE_URL) return null;
   // eslint-disable-next-line @typescript-eslint/no-var-requires
   const db = require('../../server/db');
-  return db.buildDailyPostPlan(userId, { assignment_ids: assignmentIds || [] });
+  return db.buildDailyPostPlan(userId, {
+    assignment_ids: assignmentIds || [],
+    ignoreCap: !!opts?.ignoreCap,
+    ignorePause: !!opts?.ignorePause,
+  });
 }
 
 /** circuit breaker: พักบัญชีเมื่อโพสต์ fail ติดกัน */
