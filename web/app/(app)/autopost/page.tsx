@@ -1,4 +1,5 @@
-import { autopostOverview } from '@/lib/repo';
+import { autopostOverview, autopostActivity } from '@/lib/repo';
+import { AutopostActivity } from '@/components/AutopostActivity';
 
 export const dynamic = 'force-dynamic';
 
@@ -14,7 +15,7 @@ function Stat({ label, value, sub }: { label: string; value: string | number; su
 }
 
 export default async function AutopostOverviewPage() {
-  const a = await autopostOverview();
+  const [a, activity] = await Promise.all([autopostOverview(), autopostActivity()]);
 
   return (
     <div className="space-y-6">
@@ -46,6 +47,8 @@ export default async function AutopostOverviewPage() {
           </p>
         </>
       )}
+
+      <AutopostActivity initial={activity} />
     </div>
   );
 }

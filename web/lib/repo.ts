@@ -263,6 +263,59 @@ export async function setFacebookDailyCapForAll(cap: number) {
   await q(`UPDATE "so_autopost_jobs".users SET daily_cap = $1, updated_at = now()`, [cap]);
 }
 
+// สถานะการโพสต์ Auto-Post — ให้เห็นว่ากดโพสต์แล้วสำเร็จ/ล้ม/ถูกข้าม + worker ออนไลน์ไหม
+export type AutopostRunRow = {
+  id: string;
+  account: string | null;
+  status: string;
+  worker_id: string | null;
+  error: string | null;
+  message: string | null;
+  requested_by: string | null;
+  created_at: string;
+  started_at: string | null;
+  finished_at: string | null;
+};
+export type AutopostLogRow = { created_at: string; level: string; message: string };
+export type AutopostActivity = {
+  runs: AutopostRunRow[];
+  logs: AutopostLogRow[];
+  worker_last_seen: string | null; // เวลาล่าสุดที่ worker แตะคิว (ประเมินว่า online ไหม)
+  queued: number;
+  running: number;
+};
+
+export async function autopostActivity(): Promise<AutopostActivity | null> {
+  try {
+    const runs = await q<AutopostRunRow>(
+      `SELECT r.id, u.name AS account, r.status, r.worker_id, r.error, r.message, r.requested_by,
+              r.created_at, r.started_at, r.finished_at
+         FROM "so_autopost_jobs".post_run_queue r
+         LEFT JOIN "so_autopost_jobs".users u ON u.id = r.user_id
+        ORDER BY r.created_at DESC LIMIT 8`,
+    );
+    const logs = await q<AutopostLogRow>(
+      `SELECT created_at, level, message FROM "so_autopost_jobs".run_logs
+        ORDER BY created_at DESC LIMIT 15`,
+    );
+    const agg = await q<{ worker_last_seen: string | null; queued: number; running: number }>(
+      `SELECT max(GREATEST(started_at, created_at)) FILTER (WHERE worker_id IS NOT NULL) AS worker_last_seen,
+              count(*) FILTER (WHERE status='queued')::int AS queued,
+              count(*) FILTER (WHERE status='running')::int AS running
+         FROM "so_autopost_jobs".post_run_queue`,
+    );
+    return {
+      runs,
+      logs,
+      worker_last_seen: agg[0]?.worker_last_seen ?? null,
+      queued: agg[0]?.queued ?? 0,
+      running: agg[0]?.running ?? 0,
+    };
+  } catch {
+    return null;
+  }
+}
+
 // สรุป Auto-Post สำหรับหน้าภาพรวม (รวม dashboard ของ autopost เข้ามา) — guarded
 export type AutopostOverview = {
   accounts: number;
