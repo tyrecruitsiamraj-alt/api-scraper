@@ -9,6 +9,8 @@ const FB_STATE_LOCK_POLL_MS = 500;
 /** ล็อกข้ามโปรเซส — กันหลาย Playwright แย่งอ่าน/เขียน facebook-*.json พร้อมกัน */
 async function acquireFacebookStateLock(statePath: string): Promise<() => Promise<void>> {
   const lockPath = `${statePath}.lock`;
+  /** ต้องมีโฟลเดอร์ .auth ก่อน ไม่งั้น open(lockPath,'wx') = ENOENT (โฟลเดอร์ถูก gitignore/ไม่มีบนเครื่องใหม่) */
+  await fs.promises.mkdir(path.dirname(lockPath), { recursive: true }).catch(() => {});
   /** ล็อกค้างเมื่อ worker/Chrome เด้ง — กันค้างที่หน้าโหลดนานเกิน 15 นาที */
   try {
     const st = await fs.promises.stat(lockPath).catch(() => null);
