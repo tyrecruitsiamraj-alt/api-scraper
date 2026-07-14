@@ -176,6 +176,29 @@ export async function queueTask(id) {
   await query(`UPDATE scrape_tasks SET status='queued', phase='idle', enabled=true, updated_at=now() WHERE id=$1`, [id]);
 }
 
+/** Store the AI adjacent-position plan (family + tiers + what was auto-expanded). */
+export async function setTaskAdjacentPlan(id, plan) {
+  await query(`UPDATE scrape_tasks SET adjacent_plan=$2, updated_at=now() WHERE id=$1`, [id, plan]);
+}
+
+// ---------------------------------------------------------------------------
+// Job-family AI cache — avoid re-calling the model for the same position
+// ---------------------------------------------------------------------------
+export async function getCachedFamilyPlan(positionNorm, platform = '') {
+  const { rows } = await query(
+    `SELECT plan FROM job_family_cache WHERE position_norm=$1 AND platform=$2`,
+    [positionNorm, platform],
+  );
+  return rows[0]?.plan ?? null;
+}
+export async function saveCachedFamilyPlan(positionNorm, platform, plan) {
+  await query(
+    `INSERT INTO job_family_cache (position_norm, platform, plan) VALUES ($1,$2,$3)
+       ON CONFLICT (position_norm, platform) DO UPDATE SET plan=EXCLUDED.plan, created_at=now()`,
+    [positionNorm, platform ?? '', plan],
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Asset AI-extraction (Ollama)
 // ---------------------------------------------------------------------------
@@ -211,6 +234,19 @@ export async function pendingExtractionsForRun(runId) {
   return rows;
 }
 
+/** Same as pendingExtractionsForRun but across many runs (adjacent-position expansion). */
+export async function pendingExtractionsForRuns(runIds) {
+  if (!runIds?.length) return [];
+  const { rows } = await query(
+    `SELECT DISTINCT a.id, a.file_type FROM candidate_assets a
+       JOIN candidate_sources s ON s.id = a.candidate_source_id
+      WHERE s.run_id = ANY($1::uuid[]) AND a.kind='attachment' AND a.extract_status='pending' AND a.content IS NOT NULL
+      ORDER BY a.id`,
+    [runIds],
+  );
+  return rows;
+}
+
 // ---------------------------------------------------------------------------
 // Enrich: fill missing candidate contacts from OCR'd attachment text
 // ---------------------------------------------------------------------------
@@ -221,6 +257,18 @@ export async function candidatesForRun(runId) {
        FROM candidates c JOIN candidate_sources s ON s.candidate_id = c.id
       WHERE s.run_id = $1`,
     [runId],
+  );
+  return rows;
+}
+
+/** Same as candidatesForRun but across many runs (adjacent-position expansion). */
+export async function candidatesForRuns(runIds) {
+  if (!runIds?.length) return [];
+  const { rows } = await query(
+    `SELECT DISTINCT c.id, c.email, c.phone, c.line_id
+       FROM candidates c JOIN candidate_sources s ON s.candidate_id = c.id
+      WHERE s.run_id = ANY($1::uuid[])`,
+    [runIds],
   );
   return rows;
 }

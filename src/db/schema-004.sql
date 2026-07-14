@@ -32,6 +32,12 @@ CREATE INDEX IF NOT EXISTS idx_work_queue_conn  ON work_queue (connector_key, st
 -- Unified account list for the console (scrape connectors + FB accounts) WITHOUT
 -- moving data. Guarded: the facebook UNION branch is included only if the autopost
 -- schema/table exists, so this migration never hard-depends on the other module.
+-- DROP first: migration 006 later recreates this view with MORE columns, so on a
+-- re-run CREATE OR REPLACE here would try to shrink the column set and fail with
+-- "cannot drop columns from view". Dropping makes the whole migrate chain idempotent
+-- (006 rebuilds the full version afterwards). v_connectors is a leaf view.
+DROP VIEW IF EXISTS "so-candidate-data".v_connectors;
+
 DO $mig$
 BEGIN
   IF EXISTS (

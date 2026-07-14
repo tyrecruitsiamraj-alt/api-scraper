@@ -7,6 +7,11 @@
 -- ============================================================
 SET search_path TO "so-candidate-data";
 
+-- DROP first (like migration 006) so re-running with a changed column signature
+-- doesn't hit "cannot drop columns from view" from CREATE OR REPLACE. v_contacts is
+-- a read-only leaf view — nothing else depends on it, so this is safe + idempotent.
+DROP VIEW IF EXISTS "so-candidate-data".v_contacts;
+
 DO $mig$
 BEGIN
   IF EXISTS (
