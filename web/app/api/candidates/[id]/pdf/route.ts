@@ -6,6 +6,7 @@ import { buildResumeHtml, htmlToPdf, resumeFileName } from '@/lib/resumePdf';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
+// First PDF may download Chromium pack (~63MB) into /tmp — needs longer timeout.
 export const maxDuration = 60;
 
 function contentDisposition(filename: string): string {

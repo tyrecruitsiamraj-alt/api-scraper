@@ -187,16 +187,21 @@ export async function htmlToPdf(html: string): Promise<Buffer> {
 
   let browser;
   if (isServerless) {
-    const chromiumMod = await import('@sparticuz/chromium');
+    // chromium-min downloads the browser pack to /tmp (avoids Next.js bundler
+    // stripping bin/). Pack URL may be overridden via CHROMIUM_PACK_URL.
+    const chromiumMod = await import('@sparticuz/chromium-min');
     const chromium = chromiumMod.default;
+    const packUrl =
+      process.env.CHROMIUM_PACK_URL ||
+      'https://github.com/Sparticuz/chromium/releases/download/v133.0.0/chromium-v133.0.0-pack.tar';
     browser = await puppeteer.default.launch({
       args: chromium.args,
       defaultViewport: { width: 1280, height: 720 },
-      executablePath: await chromium.executablePath(),
+      executablePath: await chromium.executablePath(packUrl),
       headless: true,
     });
   } else {
-    // Local: prefer Playwright's Chromium if present, else system Chrome/Edge.
+    // Local: prefer system Chrome/Edge.
     const candidates = [
       process.env.PUPPETEER_EXECUTABLE_PATH,
       process.env.CHROME_PATH,
