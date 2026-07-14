@@ -93,9 +93,18 @@ export default async function CampaignDetail({ params }: { params: { id: string 
                     <span className={`pill ${meta.cls}`}>{meta.label}</span>
                   </div>
                   <div className="grid gap-4 sm:grid-cols-[180px_1fr]">
-                    <div className="grid aspect-square place-items-center rounded-lg bg-accent/10 text-center text-xs text-accent">
-                      {ct.has_image ? 'รูปสร้างด้วย AI' : 'ยังไม่มีรูป'}
-                    </div>
+                    {ct.has_image ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        src={`/api/campaign-content/${ct.id}/image`}
+                        alt="รูปคอนเทนต์ที่ AI สร้าง"
+                        className="aspect-square w-full rounded-lg border border-hairline object-cover"
+                      />
+                    ) : (
+                      <div className="grid aspect-square place-items-center rounded-lg bg-accent/10 text-center text-xs text-accent">
+                        ยังไม่มีรูป
+                      </div>
+                    )}
                     <div className="min-w-0">
                       <div className="mb-1 text-xs text-subtle">แคปชัน</div>
                       <div className="whitespace-pre-line rounded-lg border border-hairline bg-black/[0.02] p-3 text-sm">

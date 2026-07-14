@@ -19,6 +19,7 @@ import { query, closePool } from '../src/db/pool.js';
 import { getConnector, getTaskById } from '../src/db/repositories.js';
 import { runConnector } from '../src/pipeline.js';
 import { runTask } from '../src/tasks-worker.js';
+import { generateDraftForCampaign } from '../src/core/orchestrator-draft.js';
 
 const WORKER_ID = `${os.hostname()}#${process.pid}`;
 const POLL_MS = Number.parseInt(process.env.WORKER_POLL_MS ?? '3000', 10);
@@ -50,6 +51,14 @@ const HANDLERS = {
     const r = await runConnector(connector, { ...(job.payload || {}) }, runtime, {});
     if (r.status === 'failed' || r.status === 'cooldown') throw new Error(r.error || `run ${r.status}`);
     return r;
+  },
+  // Content Orchestrator draft: AI คิด caption + รูป + brief สำหรับ 1 campaign
+  // (ใบขอที่หาคนไม่ได้) → เก็บ campaign_contents (draft) → campaign 'pending_approval'.
+  // ไม่ต้องใช้ browser (แค่เรียก API Claude/OpenAI) — connector_key = 'orchestrator:<campaignId>'
+  // ทำให้ campaign เดียวกันมี draft job วิ่งทีละงาน (per-campaign lock).
+  async draft(job) {
+    if (!job.ref_id) throw new Error('draft job missing ref_id (campaign id)');
+    return generateDraftForCampaign(job.ref_id);
   },
   // Plumbing self-test — zero cost, no browser. Proves claim/lock/status transitions.
   async selftest(job) {

@@ -664,3 +664,28 @@ export async function listCampaignContents(campaignId: string) {
 export async function setContentStatus(id: string, status: string, reason: string | null = null) {
   await q(`UPDATE campaign_contents SET status = $2, reject_reason = $3 WHERE id = $1`, [id, status, reason]);
 }
+
+/**
+ * Enqueue งาน AI คิด content ให้ campaign เข้า work_queue (type='draft',
+ * module='orchestrator') ให้ runner บนเครื่อง PC หยิบไปทำ. connector_key
+ * 'orchestrator:<id>' ล็อกต่อ campaign กันคิดซ้ำซ้อน; ข้ามถ้ามี draft job ค้างอยู่แล้ว.
+ */
+export async function enqueueDraftForCampaign(campaignId: string, ownerUser: string | null = null) {
+  await q(
+    `INSERT INTO work_queue (type, module, connector_key, ref_id, payload, owner_user)
+     SELECT 'draft', 'orchestrator', $1, $2, '{}'::jsonb, $3
+      WHERE NOT EXISTS (
+        SELECT 1 FROM work_queue w
+         WHERE w.ref_id = $2 AND w.type = 'draft' AND w.status IN ('queued','running'))`,
+    [`orchestrator:${campaignId}`, campaignId, ownerUser],
+  );
+}
+
+/** image bytes ของร่างคอนเทนต์ (สตรีมผ่าน API route) — null ถ้าไม่มี. */
+export async function getContentImageBytes(id: string) {
+  const rows = await q<{ image_bytes: Buffer | null; image_mime: string | null }>(
+    `SELECT image_bytes, image_mime FROM campaign_contents WHERE id = $1`,
+    [id],
+  );
+  return rows[0] ?? null;
+}

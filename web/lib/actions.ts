@@ -8,6 +8,7 @@ import { kickWorker } from './worker-kick';
 import {
   createAdjacentTask,
   createCampaignFromRequest,
+  enqueueDraftForCampaign,
   setCampaignStatus,
   setContentStatus,
   deleteConnector,
@@ -160,7 +161,13 @@ export async function startCampaignAction(formData: FormData) {
   if (!session) throw new Error('unauthorized');
   const requestNo = String(formData.get('requestNo') ?? '').trim();
   if (requestNo) {
-    await createCampaignFromRequest(requestNo, session.user?.email ?? session.user?.name ?? null);
+    const owner = session.user?.email ?? session.user?.name ?? null;
+    const campaignId = await createCampaignFromRequest(requestNo, owner);
+    if (campaignId) {
+      await setCampaignStatus(campaignId, 'drafting');
+      await enqueueDraftForCampaign(campaignId, owner); // AI คิด content เบื้องหลัง
+      kickWorker(); // drain คิวทันที (บนเครื่องที่รัน worker)
+    }
   }
   revalidatePath('/orchestrator/imports');
   revalidatePath('/orchestrator');
@@ -190,6 +197,8 @@ export async function rejectContentAction(formData: FormData) {
   if (contentId && campaignId) {
     await setContentStatus(contentId, 'rejected', reason);
     await setCampaignStatus(campaignId, 'drafting', reason);
+    await enqueueDraftForCampaign(campaignId, session.user?.email ?? session.user?.name ?? null); // คิด version ใหม่
+    kickWorker();
   }
   revalidatePath(`/orchestrator/${campaignId}`);
   revalidatePath('/orchestrator');
