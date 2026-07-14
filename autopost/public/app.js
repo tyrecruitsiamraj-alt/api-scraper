@@ -1954,15 +1954,17 @@ async function renderForm(cfg, item) {
           label = opt[f.optionLabel || 'name'] || val;
         }
         const o = new Option(label, val);
-        // ล็อกบัญชีที่เต็มโควต้าวันนี้ / ถูกพัก (circuit breaker) — เลือกไม่ได้ กันโพสต์ทับจนโดน block
-        // ยกเว้นบัญชีที่ถูกเลือกไว้อยู่แล้วในรายการที่กำลังแก้ไข (ไม่งั้น select จะว่าง)
-        if (f.optionsFrom === 'users' && String(val) !== currentVal) {
-          if (opt.is_paused) {
+        // บัญชีเต็มโควต้า: เลือกได้ แต่ติดป้ายเตือน — บัญชีที่ถูกพัก (circuit breaker) ยังล็อกอยู่
+        if (f.optionsFrom === 'users') {
+          if (opt.is_paused && String(val) !== currentVal) {
             o.disabled = true;
             o.text = `${label} — ⏸ พักอยู่ (circuit breaker)`;
           } else if (opt.is_full) {
-            o.disabled = true;
-            o.text = `${label} — 🔴 เต็มวันนี้ (${opt.posted_today}/${opt.effective_cap})`;
+            o.dataset.quotaFull = '1';
+            o.dataset.quotaLabel = label;
+            o.dataset.quotaUsed = String(opt.posted_today ?? '');
+            o.dataset.quotaCap = String(opt.effective_cap ?? '');
+            o.text = `${label} — ⚠ เกินโควต้าวันนี้ (${opt.posted_today}/${opt.effective_cap})`;
           } else if (typeof opt.posted_today === 'number' && opt.effective_cap) {
             o.text = `${label} (วันนี้ ${opt.posted_today}/${opt.effective_cap})`;
           }
@@ -1970,6 +1972,30 @@ async function renderForm(cfg, item) {
         input.appendChild(o);
       });
       if (item && item[f.key]) input.value = item[f.key];
+
+      // แจ้งเตือนใต้ select เมื่อเลือกบัญชีที่เกินโควต้าวันนี้
+      if (f.optionsFrom === 'users') {
+        const warn = document.createElement('p');
+        warn.className = 'mt-1.5 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-2.5 py-1.5 hidden';
+        warn.setAttribute('role', 'status');
+        const syncQuotaWarn = () => {
+          const sel = input.options[input.selectedIndex];
+          if (sel && sel.dataset.quotaFull === '1') {
+            const used = sel.dataset.quotaUsed || '?';
+            const cap = sel.dataset.quotaCap || '?';
+            const name = sel.dataset.quotaLabel || sel.textContent || 'บัญชีนี้';
+            warn.textContent = `⚠ บัญชี “${name}” เกินโควต้าวันนี้แล้ว (${used}/${cap}) — เลือกได้ แต่เสี่ยงโดน Facebook จำกัดการโพสต์`;
+            warn.classList.remove('hidden');
+          } else {
+            warn.textContent = '';
+            warn.classList.add('hidden');
+          }
+        };
+        input.addEventListener('change', syncQuotaWarn);
+        // เก็บไว้แปะใต้ select ตอน append field (ดูด้านล่าง)
+        input._quotaWarnEl = warn;
+        syncQuotaWarn();
+      }
     } else if (f.type === 'multiselectFrom' && f.optionsFrom) {
       const opts = await apiGet(f.optionsFrom);
       const selected = item && Array.isArray(item[f.key])
@@ -2595,6 +2621,7 @@ async function renderForm(cfg, item) {
       div.appendChild(wrap);
     } else {
       div.appendChild(input);
+      if (input._quotaWarnEl) div.appendChild(input._quotaWarnEl);
     }
     if (version !== renderFormVersion) return;
     if (datalistEl) div.appendChild(datalistEl);
