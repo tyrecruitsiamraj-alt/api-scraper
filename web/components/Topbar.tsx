@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { signOut, useSession } from 'next-auth/react';
 
-type Mode = 'scraping' | 'autopost';
+type Mode = 'scraping' | 'autopost' | 'orchestrator';
 
 const NAV: Record<Mode, { href: string; label: string }[]> = {
   scraping: [
@@ -22,11 +22,17 @@ const NAV: Record<Mode, { href: string; label: string }[]> = {
     { href: '/autopost/collect', label: 'เก็บคอมเมนต์' },
     { href: '/autopost/reports', label: 'รายงาน' },
   ],
+  orchestrator: [
+    { href: '/orchestrator', label: 'ภาพรวม' },
+    { href: '/orchestrator/imports', label: 'ใบขอจาก ERP' },
+  ],
 };
 
-/** ทุกหน้าแยกโหมดชัดเจน: /autopost/* = Auto-Post, ที่เหลือ = Scraping */
+/** ทุกหน้าแยกโหมดชัดเจน: /autopost/* = Auto-Post, /orchestrator/* = Content, ที่เหลือ = Scraping */
 function modeOf(pathname: string): Mode {
-  return pathname.startsWith('/autopost') ? 'autopost' : 'scraping';
+  if (pathname.startsWith('/autopost')) return 'autopost';
+  if (pathname.startsWith('/orchestrator')) return 'orchestrator';
+  return 'scraping';
 }
 
 /** active tab: match แบบ exact กับ prefix (แต่ /autopost ต้อง exact ไม่งั้นชนทุกหน้า /autopost/*) */
@@ -38,7 +44,7 @@ function isActive(pathname: string, href: string): boolean {
 function ModeSwitch({ mode, onSwitch }: { mode: Mode; onSwitch: (m: Mode) => void }) {
   return (
     <div className="flex shrink-0 items-center rounded-full border border-line bg-white/70 p-0.5">
-      {(['scraping', 'autopost'] as Mode[]).map((m) => (
+      {(['scraping', 'autopost', 'orchestrator'] as Mode[]).map((m) => (
         <button
           key={m}
           onClick={() => onSwitch(m)}
@@ -46,7 +52,7 @@ function ModeSwitch({ mode, onSwitch }: { mode: Mode; onSwitch: (m: Mode) => voi
             mode === m ? 'bg-accent text-white shadow-sm' : 'text-muted hover:text-ink'
           }`}
         >
-          {m === 'scraping' ? 'Scraping' : 'Auto-Post'}
+          {m === 'scraping' ? 'Scraping' : m === 'autopost' ? 'Auto-Post' : 'Content'}
         </button>
       ))}
     </div>
@@ -83,7 +89,7 @@ export function Topbar() {
 
   const switchMode = (m: Mode) => {
     if (m === mode) return;
-    router.push(m === 'autopost' ? '/autopost' : '/dashboard');
+    router.push(m === 'autopost' ? '/autopost' : m === 'orchestrator' ? '/orchestrator' : '/dashboard');
   };
 
   const user = session?.user;

@@ -13,7 +13,8 @@
     "scraper:pool": "node workers/scraper-pool.mjs",
     "extract": "node src/extract-worker.js",
     "api": "node src/api/server.js",
-    "connector": "node src/cli/connector.js"
+    "connector": "node src/cli/connector.js",
+    "erp:sync": "node src/erp/sync.js"
   },
   "license": "UNLICENSED",
   "private": true,
@@ -25,6 +26,7 @@
     "cheerio": "^1.0.0",
     "csv-writer": "^1.6.0",
     "dotenv": "^16.4.7",
+    "mssql": "^12.7.0",
     "pg": "^8.13.1",
     "playwright": "^1.51.1"
   }

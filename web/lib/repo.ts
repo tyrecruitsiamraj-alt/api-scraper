@@ -545,3 +545,93 @@ export async function recentRuns(limit = 12) {
     [limit],
   );
 }
+
+// ---------------------------------------------------------------------------
+// Content Orchestrator — ERP intake staging + campaigns
+// ---------------------------------------------------------------------------
+export type StagedRequest = {
+  request_no: string;
+  title: string | null;
+  province: string | null;
+  qty: number | null;
+  remaining_qty: number | null;
+  request_date: string | null;
+  want_date_from: string | null;
+  snapshot: Record<string, unknown>;
+  synced_at: string;
+};
+
+/** ใบขอจาก ERP ที่ยังไม่ได้สร้าง campaign (staging). */
+export async function listStagedRequests() {
+  return q<StagedRequest>(
+    `SELECT request_no, title, province, qty, remaining_qty, request_date, want_date_from, snapshot, synced_at
+       FROM erp_open_requests
+      WHERE campaign_id IS NULL
+      ORDER BY request_date DESC NULLS LAST, remaining_qty DESC NULLS LAST`,
+  );
+}
+
+export type CampaignRow = {
+  id: string;
+  request_no: string | null;
+  request_snapshot?: Record<string, unknown>;
+  title: string | null;
+  positions: string | null;
+  province: string | null;
+  qty: number | null;
+  remaining_qty: number | null;
+  status: string;
+  status_note: string | null;
+  created_by: string | null;
+  approved_by: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export async function listCampaigns() {
+  return q<CampaignRow>(`SELECT * FROM recruit_campaigns ORDER BY created_at DESC`);
+}
+
+export async function getCampaign(id: string) {
+  const rows = await q<CampaignRow>(`SELECT * FROM recruit_campaigns WHERE id = $1`, [id]);
+  return rows[0] ?? null;
+}
+
+/** สรุปจำนวน campaign แยกตาม pipeline stage สำหรับ dashboard. */
+export async function campaignStats() {
+  const rows = await q<{ status: string; n: number }>(
+    `SELECT status, count(*)::int AS n FROM recruit_campaigns GROUP BY status`,
+  );
+  const byStatus: Record<string, number> = {};
+  let total = 0;
+  for (const r of rows) {
+    byStatus[r.status] = r.n;
+    total += r.n;
+  }
+  return { total, byStatus };
+}
+
+/** สร้าง campaign จากใบขอใน staging (คนกดสั่งต่อใบ) + ผูก staging กันสร้างซ้ำ. */
+export async function createCampaignFromRequest(requestNo: string, createdBy: string | null) {
+  const st = await q<StagedRequest>(`SELECT * FROM erp_open_requests WHERE request_no = $1`, [requestNo]);
+  if (!st[0]) throw new Error(`ไม่พบใบขอ ${requestNo} ใน staging`);
+  const s = st[0];
+  const ins = await q<{ id: string }>(
+    `INSERT INTO recruit_campaigns (request_no, request_snapshot, title, province, qty, remaining_qty, status, created_by)
+     VALUES ($1,$2,$3,$4,$5,$6,'new',$7)
+     ON CONFLICT (request_no) DO NOTHING
+     RETURNING id`,
+    [requestNo, JSON.stringify(s.snapshot ?? {}), s.title, s.province, s.qty, s.remaining_qty, createdBy],
+  );
+  let campaignId = ins[0]?.id;
+  if (!campaignId) {
+    const ex = await q<{ id: string }>(`SELECT id FROM recruit_campaigns WHERE request_no = $1`, [requestNo]);
+    campaignId = ex[0]?.id;
+  }
+  if (campaignId) await q(`UPDATE erp_open_requests SET campaign_id = $2 WHERE request_no = $1`, [requestNo, campaignId]);
+  return campaignId;
+}
+
+export async function setCampaignStatus(id: string, status: string, note: string | null = null) {
+  await q(`UPDATE recruit_campaigns SET status = $2, status_note = $3, updated_at = now() WHERE id = $1`, [id, status, note]);
+}

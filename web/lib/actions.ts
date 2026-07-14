@@ -7,6 +7,7 @@ import { encryptSecret } from './crypto';
 import { kickWorker } from './worker-kick';
 import {
   createAdjacentTask,
+  createCampaignFromRequest,
   deleteConnector,
   deleteTask,
   enqueueScrapeForTask,
@@ -146,6 +147,21 @@ export async function deleteTaskAction(formData: FormData) {
   const id = String(formData.get('id') ?? '');
   if (id) await deleteTask(id);
   revalidatePath('/scraping');
+}
+
+// ---------------------------------------------------------------------------
+// Content Orchestrator
+// ---------------------------------------------------------------------------
+/** คนกดสั่งต่อใบ: สร้าง campaign จากใบขอใน staging เพื่อเข้าโหมดคิด content. */
+export async function startCampaignAction(formData: FormData) {
+  const session = await getServerSession(authOptions);
+  if (!session) throw new Error('unauthorized');
+  const requestNo = String(formData.get('requestNo') ?? '').trim();
+  if (requestNo) {
+    await createCampaignFromRequest(requestNo, session.user?.email ?? session.user?.name ?? null);
+  }
+  revalidatePath('/orchestrator/imports');
+  revalidatePath('/orchestrator');
 }
 
 // ---------------------------------------------------------------------------
