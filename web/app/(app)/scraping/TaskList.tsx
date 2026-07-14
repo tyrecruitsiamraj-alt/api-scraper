@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import type { TaskRow } from '@/lib/repo';
 import { ScrapingStatusBar } from '@/components/ScrapingStatusBar';
-import { deleteTaskAction, queueTaskAction, toggleTaskAction } from '@/lib/actions';
+import { deleteTaskAction, expandAdjacentTaskAction, queueTaskAction, toggleTaskAction } from '@/lib/actions';
 
 type LiveStatus = {
   id: string;
@@ -68,6 +68,53 @@ function filterChips(criteria: Record<string, unknown>): string[] {
   const amax = val('ageMax');
   if (amin || amax) chips.push(`อายุ: ${amin || '–'} - ${amax || '–'}`);
   return chips;
+}
+
+function ExpandBtn({ taskId, position, tone }: { taskId: string; position: string; tone: 'yellow' | 'red' }) {
+  const cls =
+    tone === 'yellow' ? 'bg-amber-50 text-amber-700 hover:bg-amber-100' : 'bg-red-50 text-red-700 hover:bg-red-100';
+  return (
+    <form action={expandAdjacentTaskAction} className="inline">
+      <input type="hidden" name="id" value={taskId} />
+      <input type="hidden" name="position" value={position} />
+      <button className={`pill ${cls}`}>{tone === 'yellow' ? '🟡' : '🔴'} {position} +</button>
+    </form>
+  );
+}
+
+/** Shows the AI Job-Family plan: what was auto-expanded (🟢) and what the user can add (🟡🔴). */
+function AdjacentPlanPanel({ task }: { task: TaskRow }) {
+  const plan = task.adjacent_plan;
+  if (!plan) return null;
+  const green = plan.expanded_green ?? [];
+  const yellow = plan.suggested?.yellow ?? [];
+  const red = plan.suggested?.red ?? [];
+  return (
+    <div className="mt-3 rounded-lg border border-line/60 bg-black/[0.015] px-3 py-2.5 text-xs">
+      <div className="font-medium text-ink">
+        🧭 {plan.family_label ?? plan.family ?? 'Job Family'}
+        {typeof plan.filled === 'number' && plan.target ? (
+          <span className="ml-1 font-normal text-subtle">· เติมได้ {plan.filled}/{plan.target}</span>
+        ) : null}
+      </div>
+      {green.length > 0 && (
+        <div className="mt-1.5 flex flex-wrap items-center gap-1">
+          <span className="text-subtle">ขยายไปแล้ว 🟢</span>
+          {green.map((g) => (
+            <span key={g} className="pill bg-green-50 text-green-700">{g}</span>
+          ))}
+        </div>
+      )}
+      {(yellow.length > 0 || red.length > 0) && (
+        <div className="mt-1.5 flex flex-wrap items-center gap-1">
+          <span className="text-subtle">เสนอเพิ่ม (กดเพื่อค้นตำแหน่งนั้น):</span>
+          {yellow.map((p) => <ExpandBtn key={p} taskId={task.id} position={p} tone="yellow" />)}
+          {red.map((p) => <ExpandBtn key={p} taskId={task.id} position={p} tone="red" />)}
+        </div>
+      )}
+      {plan.reason && <p className="mt-1.5 text-subtle/80">{plan.reason}</p>}
+    </div>
+  );
 }
 
 export function TaskList({ initialTasks }: { initialTasks: TaskRow[] }) {
@@ -262,6 +309,8 @@ export function TaskList({ initialTasks }: { initialTasks: TaskRow[] }) {
             )}
 
             {status === 'error' && error && <p className="mt-2 text-xs text-red-600">⚠ {error}</p>}
+
+            <AdjacentPlanPanel task={t} />
           </div>
         );
       })}

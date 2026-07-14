@@ -380,6 +380,18 @@ export async function hasStaleQueuedTasks(sec = 90) {
 // ---------------------------------------------------------------------------
 // Scrape tasks
 // ---------------------------------------------------------------------------
+export type AdjacentPlan = {
+  family?: string;
+  family_label?: string;
+  gate?: string[];
+  reason?: string;
+  model?: string;
+  expanded_green?: string[];
+  suggested?: { yellow?: string[]; red?: string[]; excluded?: { name: string; reason: string }[] };
+  filled?: number;
+  target?: number;
+};
+
 export type TaskRow = {
   id: string;
   name: string;
@@ -400,6 +412,8 @@ export type TaskRow = {
   next_run_at: string | null;
   last_error: string | null;
   created_at: string;
+  expand_adjacent: boolean;
+  adjacent_plan: AdjacentPlan | null;
 };
 
 export async function listTasks() {
@@ -420,15 +434,35 @@ export async function insertTask(t: {
   scheduleCron: string | null;
   nextRunAt: string | null;
   status: string;
+  expandAdjacent?: boolean;
 }) {
   const rows = await q<{ id: string }>(
     `INSERT INTO scrape_tasks (name, connector_id, mode, target_count, updated_since, criteria,
-                               schedule_cron, next_run_at, status)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id`,
+                               schedule_cron, next_run_at, status, expand_adjacent)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id`,
     [t.name, t.connectorId, t.mode, t.targetCount, t.updatedSince, JSON.stringify(t.criteria),
-     t.scheduleCron, t.nextRunAt, t.status],
+     t.scheduleCron, t.nextRunAt, t.status, t.expandAdjacent ?? true],
   );
   return rows[0].id;
+}
+
+/**
+ * Clone a task to search ONE specific adjacent position the user picked from the
+ * AI's 🟡/🔴 suggestions. The clone targets that position only and does not itself
+ * re-expand (expand_adjacent=false), so it's a deliberate one-shot search.
+ */
+export async function createAdjacentTask(sourceTaskId: string, position: string) {
+  const rows = await q<Record<string, any>>(`SELECT * FROM scrape_tasks WHERE id=$1`, [sourceTaskId]);
+  const src = rows[0];
+  if (!src) throw new Error(`source task not found: ${sourceTaskId}`);
+  const criteria: Record<string, unknown> = { ...(src.criteria ?? {}), position };
+  delete criteria.keyword; // widen: the base skill keyword would over-narrow the adjacent search
+  const ins = await q<{ id: string }>(
+    `INSERT INTO scrape_tasks (name, connector_id, mode, target_count, updated_since, criteria, status, expand_adjacent)
+     VALUES ($1,$2,$3,$4,$5,$6,'queued',false) RETURNING id`,
+    [`${src.name} · ${position}`, src.connector_id, src.mode, src.target_count, src.updated_since, JSON.stringify(criteria)],
+  );
+  return ins[0].id;
 }
 
 export async function queueTask(id: string) {

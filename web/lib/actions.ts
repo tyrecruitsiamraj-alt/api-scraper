@@ -6,6 +6,7 @@ import { authOptions } from './auth';
 import { encryptSecret } from './crypto';
 import { kickWorker } from './worker-kick';
 import {
+  createAdjacentTask,
   deleteConnector,
   deleteTask,
   enqueueScrapeForTask,
@@ -47,6 +48,8 @@ export async function createTaskAction(formData: FormData) {
     | 'date_range';
   const schedule = String(formData.get('schedule') ?? '').trim() || null;
   const runNow = formData.get('runNow') === 'on';
+  // Checkbox is checked by default in the form; absent => user turned it off.
+  const expandAdjacent = formData.get('expandAdjacent') === 'on';
 
   if (!name || !connectorId) throw new Error('กรุณากรอกชื่องานและเลือก connector');
 
@@ -97,6 +100,7 @@ export async function createTaskAction(formData: FormData) {
     nextRunAt: firstNextRun(schedule),
     // run-now → queued so the worker picks it up immediately
     status: runNow ? 'queued' : 'idle',
+    expandAdjacent,
   });
   if (runNow) {
     await enqueueScrapeForTask(taskId); // hand off to the unified work_queue runner
@@ -112,6 +116,19 @@ export async function queueTaskAction(formData: FormData) {
     await queueTask(id);
     await enqueueScrapeForTask(id); // hand off to the unified work_queue runner
     kickWorker(); // "run now" → drain the queue right away
+  }
+  revalidatePath('/scraping');
+}
+
+/** Fire a one-shot scrape for an AI-suggested adjacent position (🟡/🔴) the user picked. */
+export async function expandAdjacentTaskAction(formData: FormData) {
+  await requireSession();
+  const id = String(formData.get('id') ?? '');
+  const position = String(formData.get('position') ?? '').trim();
+  if (id && position) {
+    const newId = await createAdjacentTask(id, position);
+    await enqueueScrapeForTask(newId);
+    kickWorker();
   }
   revalidatePath('/scraping');
 }

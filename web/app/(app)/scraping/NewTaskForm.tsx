@@ -111,6 +111,17 @@ export function NewTaskForm({ connectors }: { connectors: ConnectorOption[] }) {
         </div>
       </div>
 
+      {/* auto-expand to adjacent positions when short of target */}
+      <div className="mt-3 rounded-lg border border-line/60 bg-black/[0.015] px-4 py-3">
+        <label className="flex items-center gap-2 text-sm font-medium text-ink">
+          <input type="checkbox" name="expandAdjacent" defaultChecked className="h-4 w-4 rounded border-hairline" />
+          🧭 หาไม่ครบ → ขยายไปตำแหน่งใกล้เคียงอัตโนมัติ
+        </label>
+        <p className="mt-1 text-xs text-subtle">
+          ถ้าได้ผู้สมัครน้อยกว่าจำนวนที่ต้องการ ระบบจะให้ AI จัดกลุ่มงาน (Job Family) แล้วค้นตำแหน่งใกล้เคียงในกลุ่มเดียวกันเพิ่มให้จนครบ (ต้องตั้ง ANTHROPIC_API_KEY ที่เครื่อง worker)
+        </p>
+      </div>
+
       {/* filters (gender / province / salary / education / age) */}
       <details className="mt-4 rounded-lg border border-line/60 bg-black/[0.015] px-4 py-3">
         <summary className="cursor-pointer select-none text-sm font-medium text-ink">
