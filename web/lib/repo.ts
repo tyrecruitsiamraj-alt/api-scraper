@@ -635,3 +635,32 @@ export async function createCampaignFromRequest(requestNo: string, createdBy: st
 export async function setCampaignStatus(id: string, status: string, note: string | null = null) {
   await q(`UPDATE recruit_campaigns SET status = $2, status_note = $3, updated_at = now() WHERE id = $1`, [id, status, note]);
 }
+
+export type ContentRow = {
+  id: string;
+  campaign_id: string;
+  version: number;
+  platform: string;
+  caption: string | null;
+  video_brief: string | null;
+  gen_model: string | null;
+  status: string;
+  engagement_score: number | null;
+  reject_reason: string | null;
+  created_at: string;
+  has_image: boolean;
+};
+
+/** ร่างคอนเทนต์ทุก version ของ campaign (ใหม่สุดก่อน). image bytes ไม่ดึงมา (สตรีมแยก). */
+export async function listCampaignContents(campaignId: string) {
+  return q<ContentRow>(
+    `SELECT id, campaign_id, version, platform, caption, video_brief, gen_model, status,
+            engagement_score, reject_reason, created_at, (image_bytes IS NOT NULL) AS has_image
+       FROM campaign_contents WHERE campaign_id = $1 ORDER BY version DESC`,
+    [campaignId],
+  );
+}
+
+export async function setContentStatus(id: string, status: string, reason: string | null = null) {
+  await q(`UPDATE campaign_contents SET status = $2, reject_reason = $3 WHERE id = $1`, [id, status, reason]);
+}

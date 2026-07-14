@@ -8,6 +8,8 @@ import { kickWorker } from './worker-kick';
 import {
   createAdjacentTask,
   createCampaignFromRequest,
+  setCampaignStatus,
+  setContentStatus,
   deleteConnector,
   deleteTask,
   enqueueScrapeForTask,
@@ -161,6 +163,35 @@ export async function startCampaignAction(formData: FormData) {
     await createCampaignFromRequest(requestNo, session.user?.email ?? session.user?.name ?? null);
   }
   revalidatePath('/orchestrator/imports');
+  revalidatePath('/orchestrator');
+}
+
+/** อนุมัติร่างคอนเทนต์ → เข้าคิวโพสต์ (สถานะ approved). */
+export async function approveContentAction(formData: FormData) {
+  const session = await getServerSession(authOptions);
+  if (!session) throw new Error('unauthorized');
+  const contentId = String(formData.get('contentId') ?? '');
+  const campaignId = String(formData.get('campaignId') ?? '');
+  if (contentId && campaignId) {
+    await setContentStatus(contentId, 'approved');
+    await setCampaignStatus(campaignId, 'approved');
+  }
+  revalidatePath(`/orchestrator/${campaignId}`);
+  revalidatePath('/orchestrator');
+}
+
+/** ตีกลับร่างคอนเทนต์ → ให้คิดใหม่ (สถานะ campaign กลับไป drafting). */
+export async function rejectContentAction(formData: FormData) {
+  const session = await getServerSession(authOptions);
+  if (!session) throw new Error('unauthorized');
+  const contentId = String(formData.get('contentId') ?? '');
+  const campaignId = String(formData.get('campaignId') ?? '');
+  const reason = String(formData.get('reason') ?? '').trim() || null;
+  if (contentId && campaignId) {
+    await setContentStatus(contentId, 'rejected', reason);
+    await setCampaignStatus(campaignId, 'drafting', reason);
+  }
+  revalidatePath(`/orchestrator/${campaignId}`);
   revalidatePath('/orchestrator');
 }
 
