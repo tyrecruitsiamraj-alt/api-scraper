@@ -41,9 +41,7 @@ export default async function CandidateDetail({ params }: { params: { id: string
       <div className="flex items-center justify-between gap-3">
         <Link href="/candidates" className="text-sm text-subtle hover:text-accent">← กลับไปรายชื่อ</Link>
         <a
-          href={`/print/candidate/${params.id}`}
-          target="_blank"
-          rel="noreferrer"
+          href={`/api/candidates/${params.id}/pdf`}
           className="inline-flex items-center gap-1.5 rounded-lg bg-ink px-3.5 py-2 text-sm font-medium text-white hover:opacity-90"
         >
           ⬇ ดาวน์โหลด PDF

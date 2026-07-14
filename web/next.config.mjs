@@ -2,7 +2,7 @@
 const nextConfig = {
   reactStrictMode: true,
   experimental: {
-    serverComponentsExternalPackages: ['pg', 'playwright', 'cheerio', 'dotenv'],
+    serverComponentsExternalPackages: ['pg', 'playwright', 'cheerio', 'dotenv', 'puppeteer-core', '@sparticuz/chromium'],
   },
 };
 

@@ -1,8 +1,8 @@
 import { getServerSession } from 'next-auth';
 import { redirect, notFound } from 'next/navigation';
+import Link from 'next/link';
 import { authOptions } from '@/lib/auth';
 import { getCandidate } from '@/lib/repo';
-import { AutoPrint } from '@/components/AutoPrint';
 
 export const dynamic = 'force-dynamic';
 
@@ -67,7 +67,20 @@ export default async function PrintResume({ params }: { params: { id: string } }
     <>
       {/* eslint-disable-next-line react/no-danger */}
       <style dangerouslySetInnerHTML={{ __html: CSS }} />
-      <AutoPrint />
+      <div className="no-print fixed right-5 top-5 z-10 flex gap-2">
+        <a
+          href={`/api/candidates/${params.id}/pdf`}
+          className="inline-flex items-center gap-1.5 rounded-lg bg-ink px-4 py-2 text-sm font-medium text-white shadow-lg hover:opacity-90"
+        >
+          ⬇ ดาวน์โหลด PDF
+        </a>
+        <Link
+          href={`/candidates/${params.id}`}
+          className="inline-flex items-center rounded-lg border border-line bg-white px-3 py-2 text-sm text-ink shadow"
+        >
+          กลับ
+        </Link>
+      </div>
       <div className="sheet">
         <header className="head">
           {profile ? (
