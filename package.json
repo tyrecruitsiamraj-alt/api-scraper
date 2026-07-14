@@ -10,6 +10,7 @@
     "worker": "node src/worker.js",
     "tasks": "node src/tasks-worker.js",
     "worker:pool": "node workers/runner.js",
+    "scraper:pool": "node workers/scraper-pool.mjs",
     "extract": "node src/extract-worker.js",
     "api": "node src/api/server.js",
     "connector": "node src/cli/connector.js"
