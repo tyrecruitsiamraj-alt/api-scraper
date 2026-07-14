@@ -9,6 +9,9 @@ import {
   createAdjacentTask,
   createCampaignFromRequest,
   enqueueDraftForCampaign,
+  enqueueApprovedPost,
+  getCampaign,
+  getContentById,
   setCampaignStatus,
   setContentStatus,
   deleteConnector,
@@ -173,15 +176,34 @@ export async function startCampaignAction(formData: FormData) {
   revalidatePath('/orchestrator');
 }
 
-/** อนุมัติร่างคอนเทนต์ → เข้าคิวโพสต์ (สถานะ approved). */
+/**
+ * อนุมัติร่างคอนเทนต์ → ถ้าเลือกบัญชี Facebook: สร้าง job+assignment+คิวโพสต์ใน autopost
+ * (worker บน PC โพสต์จริงพร้อมรูป) แล้วตั้ง campaign 'posting'. ไม่เลือกบัญชี = อนุมัติเฉย ๆ.
+ */
 export async function approveContentAction(formData: FormData) {
   const session = await getServerSession(authOptions);
   if (!session) throw new Error('unauthorized');
   const contentId = String(formData.get('contentId') ?? '');
   const campaignId = String(formData.get('campaignId') ?? '');
+  const fbAccountId = String(formData.get('fbAccountId') ?? '').trim();
   if (contentId && campaignId) {
     await setContentStatus(contentId, 'approved');
-    await setCampaignStatus(campaignId, 'approved');
+    let posting = false;
+    if (fbAccountId) {
+      const [campaign, content] = await Promise.all([getCampaign(campaignId), getContentById(contentId)]);
+      if (campaign && content) {
+        await enqueueApprovedPost({
+          campaign,
+          content,
+          userId: fbAccountId,
+          requestedBy: session.user?.email ?? session.user?.name ?? null,
+        });
+        await setCampaignStatus(campaignId, 'posting');
+        // autopost worker (npm run worker:post) โพล post_run_queue เองทุก ~5 วิ — ไม่ต้อง kick
+        posting = true;
+      }
+    }
+    if (!posting) await setCampaignStatus(campaignId, 'approved');
   }
   revalidatePath(`/orchestrator/${campaignId}`);
   revalidatePath('/orchestrator');

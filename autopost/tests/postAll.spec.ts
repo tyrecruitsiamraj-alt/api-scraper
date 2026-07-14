@@ -8,6 +8,7 @@ import {
   loadDynamicConfig,
   facebookLogin,
   postToGroup,
+  resolveJobImage,
   runLog,
   getBetweenPostsDelaySec,
   getBatchBreakSec,
@@ -233,6 +234,12 @@ test('Dynamic Post: รันโพสต์ตาม Assignments', async ({ pag
         lastJobId = item.job_id;
       }
 
+      /** เฟส 3: แนบรูปจาก image_ref (AI) ถ้ามี — resolve เป็นไฟล์ในเครื่อง worker */
+      const imagePath = job.image_ref ? await resolveJobImage(job.image_ref) : null;
+      if (job.image_ref && !imagePath) {
+        console.log(`⚠️ [${userLabel}] ดึงรูป job "${job.title}" ไม่ได้ (${job.image_ref}) — โพสต์ข้อความล้วน`);
+      }
+
       const postItem = {
         title: job.title,
         owner: job.owner,
@@ -241,6 +248,8 @@ test('Dynamic Post: รันโพสต์ตาม Assignments', async ({ pag
         apply_link: job.apply_link,
         comment_reply: job.comment_reply,
         groupID: [item.fb_group_id],
+        image_ref: job.image_ref,
+        imagePath: imagePath || undefined,
       };
       const gID = item.fb_group_id;
 

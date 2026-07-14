@@ -435,12 +435,14 @@ function normalizeJobRow(row) {
 
 async function getJobs() {
   await ensureJobsProvinceColumns();
+  await ensureJobsImageColumn();
   const { rows } = await query('SELECT * FROM jobs ORDER BY created_at DESC');
   return rows.map(normalizeJobRow);
 }
 
 async function getJobById(id) {
   await ensureJobsProvinceColumns();
+  await ensureJobsImageColumn();
   const { rows } = await query('SELECT * FROM jobs WHERE id = $1', [id]);
   return normalizeJobRow(rows[0]) || null;
 }
@@ -448,6 +450,7 @@ async function getJobById(id) {
 async function createJob(data) {
   await ensureJobsDepartmentColumn();
   await ensureJobsProvinceColumns();
+  await ensureJobsImageColumn();
   if (data.owner) await addJobOwner(data.owner);
   if (data.job_position) await addJobPosition(data.job_position);
   const department = data.department != null ? String(data.department).trim() || null : null;
@@ -458,8 +461,8 @@ async function createJob(data) {
   const provinceNote = rawProvNote != null ? String(rawProvNote).trim() || null : null;
   const id = generateId();
   await query(
-    `INSERT INTO jobs (id, title, job_position, owner, company, department, province, province_note, caption, apply_link, comment_reply, job_type, status)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
+    `INSERT INTO jobs (id, title, job_position, owner, company, department, province, province_note, caption, apply_link, comment_reply, job_type, status, image_ref)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`,
     [
       id,
       data.title,
@@ -474,6 +477,7 @@ async function createJob(data) {
       data.comment_reply || null,
       data.job_type || null,
       data.status || 'pending',
+      data.image_ref || null,
     ]
   );
   return getJobById(id);
@@ -488,6 +492,7 @@ function normJobTextField(v) {
 async function updateJob(id, data) {
   await ensureJobsDepartmentColumn();
   await ensureJobsProvinceColumns();
+  await ensureJobsImageColumn();
   if (data.owner) await addJobOwner(data.owner);
   if (data.job_position) await addJobPosition(data.job_position);
   const ex = await getJobById(id);
@@ -531,6 +536,7 @@ async function updateJob(id, data) {
       apply_link = COALESCE($10, apply_link),
       comment_reply = COALESCE($11, comment_reply),
       status = COALESCE($12, status),
+      image_ref = COALESCE($13, image_ref),
       updated_at = NOW()
     WHERE id = $1
     RETURNING *`,
@@ -547,6 +553,7 @@ async function updateJob(id, data) {
       data.apply_link,
       data.comment_reply,
       data.status,
+      data.image_ref !== undefined ? data.image_ref : null,
     ]
   );
   if (!rowCount) return null;
@@ -923,6 +930,40 @@ async function ensureJobsProvinceColumns() {
     await query(`ALTER TABLE jobs ADD COLUMN IF NOT EXISTS province_note VARCHAR(255)`);
   } catch (e) {
     console.error('ensureJobsProvinceColumns:', e?.message || e);
+  }
+}
+
+/**
+ * jobs.image_ref — ตัวชี้รูปแนบโพสต์ (Content Orchestrator เฟส 3).
+ * รูปแบบที่รองรับตอนนี้: 'campaign-content:<uuid>' → รูปที่ AI สร้างเก็บใน
+ * "so-candidate-data".campaign_contents.image_bytes (worker resolve → temp file → อัปโหลด FB).
+ */
+async function ensureJobsImageColumn() {
+  try {
+    await query(`ALTER TABLE jobs ADD COLUMN IF NOT EXISTS image_ref TEXT`);
+  } catch (_) {
+    // ignore if no permission / table variation
+  }
+}
+
+/**
+ * ดึง image bytes ของร่างคอนเทนต์จาก schema ฝั่ง scraper (cross-schema, DB เดียวกัน).
+ * ใช้ตอน worker แนบรูปเข้าโพสต์. คืน null ถ้าไม่มีรูป/ไม่พบ.
+ * @returns {Promise<null | { bytes: Buffer, mime: string }>}
+ */
+async function getCampaignContentImage(contentId) {
+  const id = String(contentId || '').trim();
+  if (!/^[0-9a-f-]{36}$/i.test(id)) return null;
+  const scraperSchema = process.env.SCRAPER_DB_SCHEMA || 'so-candidate-data';
+  const tbl = scraperSchema.includes('-') ? `"${scraperSchema}".campaign_contents` : `${scraperSchema}.campaign_contents`;
+  try {
+    const { rows } = await query(`SELECT image_bytes, image_mime FROM ${tbl} WHERE id = $1`, [id]);
+    const r = rows[0];
+    if (!r || !r.image_bytes) return null;
+    return { bytes: r.image_bytes, mime: r.image_mime || 'image/png' };
+  } catch (e) {
+    console.error('getCampaignContentImage:', e?.message || e);
+    return null;
   }
 }
 
@@ -2334,6 +2375,8 @@ module.exports = {
   createJob,
   updateJob,
   deleteJob,
+  ensureJobsImageColumn,
+  getCampaignContentImage,
   getTemplates,
   getTemplateById,
   createTemplate,

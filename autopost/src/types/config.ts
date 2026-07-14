@@ -28,6 +28,10 @@ export interface PostItem {
   caption: string;
   comment_reply?: string;
   groupID: string[];
+  /** ตัวชี้รูปแนบ (เช่น 'campaign-content:<uuid>') — worker resolve เป็นไฟล์ก่อนโพสต์ */
+  image_ref?: string;
+  /** path ไฟล์รูปในเครื่อง worker ที่ resolve แล้ว (setInputFiles) */
+  imagePath?: string;
 }
 
 /** Types for Worker Bot config (User4Worker) */
@@ -91,6 +95,7 @@ export interface DynamicJob {
   apply_link?: string;
   comment_reply?: string;
   status?: string;
+  image_ref?: string;
 }
 
 export interface DynamicAssignment {

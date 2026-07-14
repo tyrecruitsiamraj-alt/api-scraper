@@ -71,6 +71,7 @@ async function loadMasterConfigFromDb(userId: number): Promise<MasterConfig> {
     apply_link?: string;
     comment_reply?: string;
     groupID: string[];
+    image_ref?: string;
   }> = [];
 
   const jobIdsFromAssignment = (a: { job_ids?: string[]; job_id?: string }) =>
@@ -93,6 +94,7 @@ async function loadMasterConfigFromDb(userId: number): Promise<MasterConfig> {
         apply_link: job.apply_link || undefined,
         comment_reply: job.comment_reply || undefined,
         groupID: fbGroupIds,
+        image_ref: job.image_ref || undefined,
       });
     }
   }

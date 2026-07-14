@@ -239,6 +239,59 @@ async function dismissPostComposerOverlays(page: Page, userLabel: string): Promi
 }
 
 /**
+ * แนบรูปเข้าช่องสร้างโพสต์ (Content Orchestrator เฟส 3).
+ * FB ซ่อน input[type=file] ไว้ — Playwright setInputFiles ได้แม้ input ถูกซ่อน.
+ * ถ้าไม่พบช่อง/พลาด = คืน false แล้วโพสต์เป็นข้อความล้วนต่อ (ไม่ทำให้ทั้งงานพัง).
+ */
+async function uploadImageToComposer(
+  page: Page,
+  dialog: Locator,
+  imagePath: string,
+  userLabel: string
+): Promise<boolean> {
+  try {
+    let fileInput = dialog.locator('input[type="file"]').first();
+    if (!(await fileInput.count())) {
+      /** บาง layout ต้องกด "รูปภาพ/วิดีโอ" ให้ FB mount input ก่อน */
+      const photoBtn = dialog
+        .locator(
+          'div[aria-label="รูปภาพ/วิดีโอ"][role="button"], div[aria-label="ภาพถ่าย/วิดีโอ"][role="button"], div[aria-label="Photo/video"][role="button"], [aria-label*="รูปภาพ/วิดีโอ"][role="button"], [aria-label*="Photo/video"][role="button"]'
+        )
+        .first();
+      if (await photoBtn.isVisible({ timeout: 3000 }).catch(() => false)) {
+        await humanClick(page, photoBtn).catch(() => {});
+        await page.waitForTimeout(900);
+      }
+      fileInput = dialog.locator('input[type="file"]').first();
+    }
+    if (!(await fileInput.count())) {
+      /** สำรอง: input ระดับหน้า (บางครั้ง FB ผูก input นอก dialog) */
+      fileInput = page.locator('input[type="file"]').last();
+    }
+    if (!(await fileInput.count())) {
+      console.log(`⚠️ [${userLabel}] ไม่พบช่องอัปโหลดรูป — โพสต์เป็นข้อความล้วน`);
+      return false;
+    }
+
+    await fileInput.setInputFiles(imagePath);
+
+    /** รอ preview รูปโผล่ใน dialog (thumbnail / ปุ่มแก้ไข-ลบรูป) */
+    const preview = dialog
+      .locator(
+        'div[aria-label="ลบรูปภาพ"], div[aria-label="ลบภาพ"], div[aria-label="Remove photo"], [aria-label*="แก้ไขทั้งหมด"], [aria-label*="Edit all"], img[src^="blob:"], img[src^="data:"]'
+      )
+      .first();
+    const ok = await preview.waitFor({ state: 'visible', timeout: 15000 }).then(() => true).catch(() => false);
+    await page.waitForTimeout(1200);
+    console.log(ok ? `🖼️ [${userLabel}] แนบรูปแล้ว` : `🖼️ [${userLabel}] อัปโหลดรูป (ไม่พบ preview ชัด — ไปต่อ)`);
+    return true;
+  } catch (e) {
+    console.log(`⚠️ [${userLabel}] แนบรูปไม่สำเร็จ: ${(e as Error).message} — โพสต์เป็นข้อความล้วน`);
+    return false;
+  }
+}
+
+/**
  * โพสต์งานลงกลุ่ม Facebook (Master Bot User 1-8)
  */
 export async function postToGroup(
@@ -382,6 +435,11 @@ export async function postToGroup(
     }
 
     await page.waitForTimeout(200);
+
+    /** แนบรูปก่อนพิมพ์ caption (การพิมพ์จะโฟกัส composer ใหม่อยู่แล้ว) */
+    if (postItem.imagePath) {
+      await uploadImageToComposer(page, composerDialog, postItem.imagePath, userLabel);
+    }
 
     let fullCaption = postItem.caption || '';
     if (postItem.apply_link && blacklistGroups.length > 0 && !blacklistGroups.includes(gID)) {

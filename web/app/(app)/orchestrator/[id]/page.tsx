@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
-import { getCampaign, listCampaignContents } from '@/lib/repo';
+import { getCampaign, listCampaignContents, listFacebookAccounts } from '@/lib/repo';
 import { approveContentAction, rejectContentAction } from '@/lib/actions';
 
 export const dynamic = 'force-dynamic';
@@ -39,6 +39,7 @@ export default async function CampaignDetail({ params }: { params: { id: string 
   if (!c) notFound();
   const snap = (c.request_snapshot ?? {}) as Record<string, any>;
   const contents = await listCampaignContents(params.id);
+  const fbAccounts = await listFacebookAccounts();
 
   return (
     <div className="space-y-6">
@@ -120,10 +121,31 @@ export default async function CampaignDetail({ params }: { params: { id: string 
                     </div>
                   </div>
                   {ct.status === 'draft' && (
-                    <div className="mt-4 flex flex-wrap gap-2">
-                      <form action={approveContentAction}>
+                    <div className="mt-4 flex flex-wrap items-end gap-2">
+                      <form action={approveContentAction} className="flex flex-wrap items-end gap-2">
                         <input type="hidden" name="contentId" value={ct.id} />
                         <input type="hidden" name="campaignId" value={c.id} />
+                        {fbAccounts.length > 0 ? (
+                          <label className="text-xs text-subtle">
+                            <span className="mb-1 block">โพสต์ด้วยบัญชี</span>
+                            <select
+                              name="fbAccountId"
+                              defaultValue=""
+                              className="rounded-lg border border-hairline bg-transparent px-2 py-1.5 text-sm text-ink"
+                            >
+                              <option value="">— อนุมัติเฉย ๆ (ยังไม่โพสต์) —</option>
+                              {fbAccounts.map((a) => (
+                                <option key={a.id} value={a.id}>
+                                  {a.label} ({a.group_count} กลุ่ม)
+                                </option>
+                              ))}
+                            </select>
+                          </label>
+                        ) : (
+                          <span className="text-xs text-subtle">
+                            ยังไม่มีบัญชี Facebook ในระบบ — อนุมัติได้ แต่ยังโพสต์อัตโนมัติไม่ได้
+                          </span>
+                        )}
                         <button className="btn-primary btn-sm">✓ อนุมัติและโพสต์</button>
                       </form>
                       <form action={rejectContentAction}>

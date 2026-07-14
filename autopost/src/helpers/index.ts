@@ -12,6 +12,7 @@ export {
 } from './humanBehavior';
 export type { PostDelaySettings } from './humanBehavior';
 export { postToGroup } from './postToGroup';
+export { resolveJobImage } from './resolveJobImage';
 export { capturePostFailureArtifacts } from './capturePostFailureArtifacts';
 export { postToGroupWorker } from './postToGroupWorker';
 export type { PostToGroupOptions } from './postToGroup';

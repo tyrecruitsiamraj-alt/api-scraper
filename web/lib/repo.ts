@@ -689,3 +689,87 @@ export async function getContentImageBytes(id: string) {
   );
   return rows[0] ?? null;
 }
+
+/** ร่างคอนเทนต์ 1 แถว (caption + มีรูปไหม) สำหรับตอนอนุมัติ→โพสต์. */
+export async function getContentById(id: string) {
+  const rows = await q<{ id: string; campaign_id: string; caption: string | null; has_image: boolean }>(
+    `SELECT id, campaign_id, caption, (image_bytes IS NOT NULL) AS has_image
+       FROM campaign_contents WHERE id = $1`,
+    [id],
+  );
+  return rows[0] ?? null;
+}
+
+// ---------------------------------------------------------------------------
+// Orchestrator → Autopost bridge (cross-schema, DB เดียวกัน)
+// ---------------------------------------------------------------------------
+export type FbAccount = { id: string; label: string; group_count: number };
+
+/** บัญชี Facebook ที่ตั้งไว้ในโมดูล autopost (ให้เลือกตอนอนุมัติ). guarded — [] ถ้า schema ไม่มี. */
+export async function listFacebookAccounts(): Promise<FbAccount[]> {
+  try {
+    return await q<FbAccount>(
+      `SELECT id,
+              COALESCE(NULLIF(TRIM(name), ''), env_key, id) AS label,
+              COALESCE(jsonb_array_length(
+                CASE WHEN jsonb_typeof(group_ids::jsonb) = 'array' THEN group_ids::jsonb ELSE '[]'::jsonb END
+              ), 0) AS group_count
+         FROM "so_autopost_jobs".users
+        ORDER BY label`,
+    );
+  } catch {
+    return [];
+  }
+}
+
+function autopostId(): string {
+  return Date.now().toString(36) + Math.random().toString(36).slice(2);
+}
+
+/**
+ * อนุมัติร่างคอนเทนต์ → ส่งเข้าคิวโพสต์ของ autopost: สร้าง job (+image_ref ชี้รูป AI) +
+ * assignment (บัญชีที่เลือก, กลุ่มว่าง = ใช้กลุ่มที่ตั้งในบัญชี) + post_run_queue (queued).
+ * ทั้งหมดอยู่ schema `so_autopost_jobs` (DB เดียวกัน). แล้วบันทึก campaign_posts ฝั่ง orchestrator
+ * (เตรียมวัดผลเฟส 4). worker บนเครื่อง PC จะหยิบคิวไปโพสต์ FB พร้อมรูป.
+ */
+export async function enqueueApprovedPost(opts: {
+  campaign: CampaignRow;
+  content: { id: string; caption: string | null; has_image: boolean };
+  userId: string;
+  requestedBy: string | null;
+}) {
+  const { campaign, content, userId, requestedBy } = opts;
+  const jobId = autopostId();
+  const assignmentId = autopostId();
+  const queueId = autopostId();
+  const title = (campaign.title || campaign.request_no || 'ประกาศรับสมัครงาน').slice(0, 500);
+  const imageRef = content.has_image ? `campaign-content:${content.id}` : null;
+
+  // เผื่อ schema autopost ยังไม่มีคอลัมน์ image_ref (idempotent)
+  await q(`ALTER TABLE "so_autopost_jobs".jobs ADD COLUMN IF NOT EXISTS image_ref TEXT`);
+
+  await q(
+    `INSERT INTO "so_autopost_jobs".jobs (id, title, owner, company, caption, status, image_ref)
+     VALUES ($1, $2, 'SO Recruitment', 'SO Recruitment', $3, 'pending', $4)`,
+    [jobId, title, content.caption || '', imageRef],
+  );
+  await q(
+    `INSERT INTO "so_autopost_jobs".assignments (id, job_ids, group_ids, user_id)
+     VALUES ($1, $2::jsonb, '[]'::jsonb, $3)`,
+    [assignmentId, JSON.stringify([jobId]), userId],
+  );
+  // requested_by ≠ 'auto-daily' → worker ตั้ง IGNORE_DAILY_CAP=1 (โพสต์แบบสั่งเองข้าม cap ได้)
+  await q(
+    `INSERT INTO "so_autopost_jobs".post_run_queue (id, assignment_ids, user_id, status, requested_by, message)
+     VALUES ($1, $2::jsonb, $3, 'queued', $4, $5)`,
+    [queueId, JSON.stringify([assignmentId]), userId, requestedBy || 'orchestrator', `orchestrator campaign ${campaign.id}`],
+  );
+
+  await q(
+    `INSERT INTO campaign_posts (campaign_id, content_id, platform, account_ref)
+     VALUES ($1, $2, 'facebook', $3)`,
+    [campaign.id, content.id, userId],
+  );
+
+  return { jobId, assignmentId, queueId };
+}
