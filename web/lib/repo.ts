@@ -316,6 +316,87 @@ export async function autopostActivity(): Promise<AutopostActivity | null> {
   }
 }
 
+// --- รอบโพสต์ (Runs): บัญชีไหนโพสต์ที่ worker ไหน + โพสต์ลงกลุ่มไหนจริง ---
+export type AutopostRunListRow = {
+  id: string;
+  run_id: string | null;
+  account: string | null;
+  user_id: string | null;
+  worker_id: string | null;
+  status: string;
+  requested_by: string | null;
+  message: string | null;
+  error: string | null;
+  created_at: string;
+  started_at: string | null;
+  finished_at: string | null;
+  posted: number;
+};
+
+/** รายการรอบโพสต์ล่าสุด — เห็นว่าบัญชีไหน วิ่งที่ worker ไหน สั่งโดยใคร โพสต์ไปกี่กลุ่ม. guarded. */
+export async function autopostRuns(limit = 50): Promise<AutopostRunListRow[]> {
+  try {
+    return await q<AutopostRunListRow>(
+      `SELECT r.id, r.run_id, u.name AS account, r.user_id, r.worker_id, r.status,
+              r.requested_by, r.message, r.error, r.created_at, r.started_at, r.finished_at,
+              COALESCE((
+                SELECT count(*)::int FROM "so_autopost_jobs".post_logs pl
+                 WHERE pl.run_id = r.run_id AND pl.post_link IS NOT NULL AND TRIM(pl.post_link) <> ''
+              ), 0) AS posted
+         FROM "so_autopost_jobs".post_run_queue r
+         LEFT JOIN "so_autopost_jobs".users u ON u.id = r.user_id
+        ORDER BY r.created_at DESC LIMIT $1`,
+      [limit],
+    );
+  } catch {
+    return [];
+  }
+}
+
+export async function autopostRun(id: string): Promise<AutopostRunListRow | null> {
+  try {
+    const rows = await q<AutopostRunListRow>(
+      `SELECT r.id, r.run_id, u.name AS account, r.user_id, r.worker_id, r.status,
+              r.requested_by, r.message, r.error, r.created_at, r.started_at, r.finished_at, 0 AS posted
+         FROM "so_autopost_jobs".post_run_queue r
+         LEFT JOIN "so_autopost_jobs".users u ON u.id = r.user_id
+        WHERE r.id = $1`,
+      [id],
+    );
+    return rows[0] ?? null;
+  } catch {
+    return null;
+  }
+}
+
+export type AutopostRunPostRow = {
+  id: string;
+  job_title: string | null;
+  group_name: string | null;
+  group_id: string | null;
+  post_link: string | null;
+  post_status: string | null;
+  comment_count: number;
+  created_at: string;
+};
+
+/** โพสต์จริงต่อกลุ่มของรอบนี้ (จาก post_logs) — กดลิงก์ดูโพสต์บน Facebook ได้. guarded. */
+export async function autopostRunPosts(runId: string): Promise<AutopostRunPostRow[]> {
+  if (!runId) return [];
+  try {
+    return await q<AutopostRunPostRow>(
+      `SELECT id, job_title, group_name, group_id, post_link, post_status,
+              COALESCE(comment_count, 0) AS comment_count, created_at
+         FROM "so_autopost_jobs".post_logs
+        WHERE run_id = $1
+        ORDER BY created_at DESC`,
+      [runId],
+    );
+  } catch {
+    return [];
+  }
+}
+
 // สรุป Auto-Post สำหรับหน้าภาพรวม (รวม dashboard ของ autopost เข้ามา) — guarded
 export type AutopostOverview = {
   accounts: number;
