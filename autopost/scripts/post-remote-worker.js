@@ -52,6 +52,8 @@ if (!TOKEN) {
 }
 
 const workerId = `${os.hostname()}-${process.pid}`;
+/** ชื่อเครื่องแบบนิ่ง (ไม่มี pid) สำหรับ pin บัญชี→เครื่อง — ตั้ง WORKER_NAME ใน .env ให้จำง่ายได้ */
+const workerName = String(process.env.WORKER_NAME || os.hostname()).trim();
 let activeJobs = 0;
 let claiming = false;
 
@@ -62,6 +64,7 @@ async function callApi(pathname, body) {
       'Content-Type': 'application/json',
       'x-worker-token': TOKEN,
       'x-worker-id': workerId,
+      'x-worker-name': workerName,
     },
     body: JSON.stringify(body || {}),
   });
@@ -165,7 +168,7 @@ async function tick() {
   claiming = true;
   try {
     while (activeJobs < CONCURRENCY) {
-      const claimed = await callApi('/api/worker/post/claim', { worker_id: workerId });
+      const claimed = await callApi('/api/worker/post/claim', { worker_id: workerId, worker_name: workerName });
       const job = claimed?.job || null;
       if (!job) break;
       processJob(job).catch((e) => {
@@ -181,7 +184,7 @@ async function tick() {
 
 console.log('[post-worker] started');
 console.log(`[post-worker] api=${API_BASE}`);
-console.log(`[post-worker] worker_id=${workerId}`);
+console.log(`[post-worker] worker_id=${workerId} worker_name=${workerName} (pin บัญชีที่หน้า "บัญชี Facebook" ด้วยชื่อนี้)`);
 console.log(`[post-worker] concurrency=${CONCURRENCY} (max cap ${CONCURRENCY_MAX})`);
 if (CONCURRENCY >= 20) {
   console.warn(

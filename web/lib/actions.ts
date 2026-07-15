@@ -22,6 +22,7 @@ import {
   insertTask,
   queueTask,
   setConnectorEnabled,
+  setFbAccountWorker,
   setProviderCap,
   setFacebookDailyCapForAll,
   setTaskEnabled,
@@ -239,6 +240,16 @@ export async function rejectContentAction(formData: FormData) {
   }
   revalidatePath(`/orchestrator/${campaignId}`);
   revalidatePath('/orchestrator');
+}
+
+/** ผูก/ปลดบัญชี FB กับเครื่อง (pin — บัญชีวิ่งเครื่องเดิมเสมอ กันสลับ IP โดยไม่ใช้ proxy). */
+export async function setAccountWorkerAction(formData: FormData) {
+  await requireSession();
+  const id = String(formData.get('accountId') ?? '').trim();
+  const worker = String(formData.get('worker') ?? '').trim();
+  if (id) await setFbAccountWorker(id, worker || null);
+  revalidatePath('/autopost/accounts');
+  revalidatePath('/autopost/runs');
 }
 
 // ---------------------------------------------------------------------------

@@ -1647,6 +1647,15 @@ async function ensureUsersPostControlColumns() {
   await query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS daily_cap INTEGER`);
 }
 
+/**
+ * users.preferred_worker — ผูกบัญชี FB กับเครื่อง (pin, กันบัญชีสลับ IP/เครื่อง = ลดเสี่ยง block).
+ * ค่า = ชื่อเครื่อง (WORKER_NAME หรือ hostname ของเครื่องที่รัน worker:post).
+ * NULL/ว่าง = worker เครื่องไหนก็หยิบได้ (พฤติกรรมเดิม).
+ */
+async function ensureUsersPreferredWorkerColumn() {
+  await query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS preferred_worker VARCHAR(255)`);
+}
+
 async function enqueuePostRunJob(data = {}) {
   await ensurePostRunQueueUserColumn();
   const id = generateId();
@@ -1732,11 +1741,14 @@ async function enqueueDailyPostRunJobs() {
   });
 }
 
-async function claimNextPostRunJob(workerId, runId) {
+async function claimNextPostRunJob(workerId, runId, workerName) {
   await ensurePostRunQueueUserColumn();
   await ensureUsersPostControlColumns();
+  await ensureUsersPreferredWorkerColumn();
   const wid = String(workerId || '').trim() || 'worker';
   const rid = String(runId || '').trim() || null;
+  /** ชื่อเครื่องสำหรับเทียบ pin (WORKER_NAME/hostname — ไม่มี pid ต่อท้าย ต่างจาก worker_id) */
+  const wname = String(workerName || '').trim() || null;
   let rows;
   try {
     ({ rows } = await query(
@@ -1747,6 +1759,9 @@ async function claimNextPostRunJob(workerId, runId) {
          WHERE q.status = 'queued'
            /** ข้ามบัญชีที่โดนพัก (circuit breaker) */
            AND (u.paused_until IS NULL OR u.paused_until <= NOW())
+           /** pin บัญชี→เครื่อง: บัญชีที่ผูกเครื่องไว้ ให้เครื่องนั้นหยิบเท่านั้น
+               (บัญชีไม่ผูก = ใครหยิบก็ได้; worker เก่าที่ไม่ส่งชื่อ = หยิบได้เฉพาะบัญชีไม่ผูก) */
+           AND (u.preferred_worker IS NULL OR TRIM(u.preferred_worker) = '' OR u.preferred_worker = $3)
            /** lock ต่อบัญชี: บัญชีที่มีงาน running อยู่ ห้ามรับงานใหม่ */
            AND NOT EXISTS (
              SELECT 1 FROM post_run_queue r
@@ -1766,7 +1781,7 @@ async function claimNextPostRunJob(workerId, runId) {
        FROM next
        WHERE q.id = next.id
        RETURNING q.*`,
-      [wid, rid]
+      [wid, rid, wname]
     ));
   } catch (e) {
     /** unique index (one running per user) ชนตอนสอง claim แข่งกันพอดี — ถือว่ารอบนี้ไม่มีงาน */
@@ -2418,6 +2433,7 @@ module.exports = {
   reserveDailyPostPair,
   ensurePostRunQueueUserColumn,
   ensureUsersPostControlColumns,
+  ensureUsersPreferredWorkerColumn,
   ensurePostPlanReservationsTable,
   getPostRunQueueSummary,
   countStaleRunningPostJobs,

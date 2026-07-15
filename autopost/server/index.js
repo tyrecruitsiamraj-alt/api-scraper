@@ -1499,8 +1499,10 @@ app.post('/api/worker/post/claim', async (req, res) => {
   try {
     if (!requirePostWorkerToken(req, res)) return;
     const workerId = String(req.body?.worker_id || req.get('x-worker-id') || '').trim() || 'worker';
+    /** ชื่อเครื่องแบบนิ่ง (ไม่มี pid) — ใช้เทียบ users.preferred_worker (pin บัญชี→เครื่อง) */
+    const workerName = String(req.body?.worker_name || req.get('x-worker-name') || '').trim() || null;
     const runId = db.generateRunId();
-    const job = await db.claimNextPostRunJob(workerId, runId);
+    const job = await db.claimNextPostRunJob(workerId, runId, workerName);
     if (!job) return res.json({ ok: true, job: null });
     return res.json({ ok: true, job });
   } catch (e) {

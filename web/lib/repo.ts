@@ -316,6 +316,47 @@ export async function autopostActivity(): Promise<AutopostActivity | null> {
   }
 }
 
+// --- Pin บัญชี FB → เครื่อง (กันบัญชีสลับ IP/เครื่อง โดยไม่ต้องใช้ proxy) ---
+export type FbAccountPin = { id: string; label: string; preferred_worker: string | null };
+
+/** บัญชี FB + เครื่องที่ผูกไว้ (สำหรับ panel pin). guarded. */
+export async function listFbAccountPins(): Promise<FbAccountPin[]> {
+  try {
+    await q(`ALTER TABLE "so_autopost_jobs".users ADD COLUMN IF NOT EXISTS preferred_worker VARCHAR(255)`);
+    return await q<FbAccountPin>(
+      `SELECT id, COALESCE(NULLIF(TRIM(name), ''), env_key, id) AS label, preferred_worker
+         FROM "so_autopost_jobs".users
+        ORDER BY label`,
+    );
+  } catch {
+    return [];
+  }
+}
+
+/** ชื่อเครื่อง (worker_name) ที่เคยเห็นในระบบ — จาก worker_id ตัด -pid ท้ายออก. ไว้ทำ datalist. */
+export async function knownWorkerNames(): Promise<string[]> {
+  try {
+    const rows = await q<{ name: string }>(
+      `SELECT DISTINCT regexp_replace(worker_id, '-[0-9]+$', '') AS name
+         FROM "so_autopost_jobs".post_run_queue
+        WHERE worker_id IS NOT NULL AND TRIM(worker_id) <> ''
+        ORDER BY name LIMIT 20`,
+    );
+    return rows.map((r) => r.name).filter(Boolean);
+  } catch {
+    return [];
+  }
+}
+
+/** ตั้ง/ล้าง pin ของบัญชี (worker ว่าง = ปลด pin ให้เครื่องไหนก็หยิบได้). */
+export async function setFbAccountWorker(id: string, worker: string | null) {
+  await q(`ALTER TABLE "so_autopost_jobs".users ADD COLUMN IF NOT EXISTS preferred_worker VARCHAR(255)`);
+  await q(`UPDATE "so_autopost_jobs".users SET preferred_worker = $2, updated_at = now() WHERE id = $1`, [
+    id,
+    worker && worker.trim() ? worker.trim() : null,
+  ]);
+}
+
 // --- รอบโพสต์ (Runs): บัญชีไหนโพสต์ที่ worker ไหน + โพสต์ลงกลุ่มไหนจริง ---
 export type AutopostRunListRow = {
   id: string;
@@ -331,14 +372,17 @@ export type AutopostRunListRow = {
   started_at: string | null;
   finished_at: string | null;
   posted: number;
+  pinned_worker: string | null;
 };
 
 /** รายการรอบโพสต์ล่าสุด — เห็นว่าบัญชีไหน วิ่งที่ worker ไหน สั่งโดยใคร โพสต์ไปกี่กลุ่ม. guarded. */
 export async function autopostRuns(limit = 50): Promise<AutopostRunListRow[]> {
   try {
+    await q(`ALTER TABLE "so_autopost_jobs".users ADD COLUMN IF NOT EXISTS preferred_worker VARCHAR(255)`);
     return await q<AutopostRunListRow>(
       `SELECT r.id, r.run_id, u.name AS account, r.user_id, r.worker_id, r.status,
               r.requested_by, r.message, r.error, r.created_at, r.started_at, r.finished_at,
+              u.preferred_worker AS pinned_worker,
               COALESCE((
                 SELECT count(*)::int FROM "so_autopost_jobs".post_logs pl
                  WHERE pl.run_id = r.run_id AND pl.post_link IS NOT NULL AND TRIM(pl.post_link) <> ''
@@ -355,9 +399,11 @@ export async function autopostRuns(limit = 50): Promise<AutopostRunListRow[]> {
 
 export async function autopostRun(id: string): Promise<AutopostRunListRow | null> {
   try {
+    await q(`ALTER TABLE "so_autopost_jobs".users ADD COLUMN IF NOT EXISTS preferred_worker VARCHAR(255)`);
     const rows = await q<AutopostRunListRow>(
       `SELECT r.id, r.run_id, u.name AS account, r.user_id, r.worker_id, r.status,
-              r.requested_by, r.message, r.error, r.created_at, r.started_at, r.finished_at, 0 AS posted
+              r.requested_by, r.message, r.error, r.created_at, r.started_at, r.finished_at, 0 AS posted,
+              u.preferred_worker AS pinned_worker
          FROM "so_autopost_jobs".post_run_queue r
          LEFT JOIN "so_autopost_jobs".users u ON u.id = r.user_id
         WHERE r.id = $1`,

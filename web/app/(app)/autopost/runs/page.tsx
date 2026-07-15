@@ -65,7 +65,13 @@ export default async function AutopostRunsPage() {
                   <tr key={r.id} className="border-b border-hairline/60 last:border-0 hover:bg-black/[0.015]">
                     <td className="px-4 py-2.5 font-medium">{r.account || r.user_id || '—'}</td>
                     <td className="px-4 py-2.5">
-                      <span className="font-mono text-xs text-subtle">{r.worker_id || '— (ยังไม่ถูกหยิบ)'}</span>
+                      {r.worker_id ? (
+                        <span className="font-mono text-xs text-subtle">{r.worker_id}</span>
+                      ) : r.status === 'queued' && r.pinned_worker ? (
+                        <span className="text-xs text-amber-700">⏳ รอเครื่อง <span className="font-mono">{r.pinned_worker}</span></span>
+                      ) : (
+                        <span className="font-mono text-xs text-subtle">— (ยังไม่ถูกหยิบ)</span>
+                      )}
                     </td>
                     <td className="px-4 py-2.5 text-subtle">{whoRequested(r.requested_by)}</td>
                     <td className="px-4 py-2.5"><span className={`pill ${st.cls}`}>{st.label}</span></td>
