@@ -77,7 +77,12 @@ export default async function OrchestratorPage() {
           <h1 className="text-2xl font-semibold tracking-tight">Content Orchestrator</h1>
           <p className="mt-1 text-sm text-subtle">ใบขอที่หาคนไม่ได้ → คิด content → อนุมัติ → โพสต์ → วัดผล</p>
         </div>
-        <Link href="/orchestrator/imports" className="btn-primary">+ ใบขอจาก ERP</Link>
+        <div className="flex flex-wrap gap-2">
+          <Link href="/orchestrator/flow" className="btn-secondary">
+            ดูการไหล (mock)
+          </Link>
+          <Link href="/orchestrator/imports" className="btn-primary">+ ใบขอจาก ERP</Link>
+        </div>
       </div>
 
       {/* แถบ pipeline — เห็นการไหลของงานซ้าย→ขวา */}

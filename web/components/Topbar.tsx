@@ -25,6 +25,7 @@ const NAV: Record<Mode, { href: string; label: string }[]> = {
   ],
   orchestrator: [
     { href: '/orchestrator', label: 'ภาพรวม' },
+    { href: '/orchestrator/flow', label: 'การไหล' },
     { href: '/orchestrator/imports', label: 'ใบขอจาก ERP' },
   ],
 };
