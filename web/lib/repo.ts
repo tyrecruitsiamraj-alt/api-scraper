@@ -766,10 +766,48 @@ export async function enqueueApprovedPost(opts: {
   );
 
   await q(
-    `INSERT INTO campaign_posts (campaign_id, content_id, platform, account_ref)
-     VALUES ($1, $2, 'facebook', $3)`,
-    [campaign.id, content.id, userId],
+    `INSERT INTO campaign_posts (campaign_id, content_id, platform, account_ref, job_ref)
+     VALUES ($1, $2, 'facebook', $3, $4)`,
+    [campaign.id, content.id, userId, jobId],
   );
 
   return { jobId, assignmentId, queueId };
+}
+
+/** enqueue งานวัดผล engagement ของ campaign (worker draining ทำได้ ไม่ต้อง browser). */
+export async function enqueueMeasureForCampaign(campaignId: string, ownerUser: string | null = null) {
+  await q(
+    `INSERT INTO work_queue (type, module, connector_key, ref_id, payload, owner_user)
+     SELECT 'measure', 'orchestrator', $1, $2, '{}'::jsonb, $3
+      WHERE NOT EXISTS (
+        SELECT 1 FROM work_queue w
+         WHERE w.ref_id = $2 AND w.type = 'measure' AND w.status IN ('queued','running'))`,
+    [`orchestrator:${campaignId}`, campaignId, ownerUser],
+  );
+}
+
+export type CampaignPostRow = {
+  id: string;
+  content_id: string | null;
+  platform: string;
+  account_ref: string | null;
+  post_link: string | null;
+  posted_at: string | null;
+  comments: number;
+  lead_count: number;
+  likes: number;
+  shares: number;
+  engagement_score: number | null;
+  verdict: string;
+  measured_at: string | null;
+};
+
+/** โพสต์จริง + engagement ที่วัดได้ ของ campaign (ใหม่สุดก่อน). */
+export async function listCampaignPosts(campaignId: string) {
+  return q<CampaignPostRow>(
+    `SELECT id, content_id, platform, account_ref, post_link, posted_at,
+            comments, lead_count, likes, shares, engagement_score, verdict, measured_at
+       FROM campaign_posts WHERE campaign_id = $1 ORDER BY created_at DESC`,
+    [campaignId],
+  );
 }

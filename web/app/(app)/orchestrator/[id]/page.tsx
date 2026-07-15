@@ -1,7 +1,7 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
-import { getCampaign, listCampaignContents, listFacebookAccounts } from '@/lib/repo';
-import { approveContentAction, rejectContentAction } from '@/lib/actions';
+import { getCampaign, listCampaignContents, listCampaignPosts, listFacebookAccounts } from '@/lib/repo';
+import { approveContentAction, rejectContentAction, measureCampaignAction } from '@/lib/actions';
 
 export const dynamic = 'force-dynamic';
 
@@ -10,6 +10,12 @@ const CONTENT_STATUS: Record<string, { label: string; cls: string }> = {
   approved: { label: 'อนุมัติแล้ว', cls: 'bg-teal-50 text-teal-700' },
   rejected: { label: 'ตีกลับ', cls: 'bg-red-50 text-red-700' },
   posted: { label: 'โพสต์แล้ว', cls: 'bg-green-50 text-green-700' },
+};
+
+const VERDICT: Record<string, { label: string; cls: string }> = {
+  high: { label: '🔥 คนสนใจเยอะ', cls: 'bg-green-50 text-green-700' },
+  low: { label: '📉 คนสนใจน้อย', cls: 'bg-amber-50 text-amber-700' },
+  pending: { label: 'รอวัดผล', cls: 'bg-black/5 text-ink' },
 };
 
 const STAGE_LABEL: Record<string, string> = {
@@ -40,6 +46,8 @@ export default async function CampaignDetail({ params }: { params: { id: string 
   const snap = (c.request_snapshot ?? {}) as Record<string, any>;
   const contents = await listCampaignContents(params.id);
   const fbAccounts = await listFacebookAccounts();
+  const posts = await listCampaignPosts(params.id);
+  const canMeasure = ['posting', 'measuring', 'low_engagement'].includes(c.status);
 
   return (
     <div className="space-y-6">
@@ -161,6 +169,66 @@ export default async function CampaignDetail({ params }: { params: { id: string 
           </div>
         )}
       </div>
+
+      {(posts.length > 0 || canMeasure) && (
+        <div>
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+            <h2 className="text-base font-semibold">ผลตอบรับ (engagement)</h2>
+            {canMeasure && (
+              <form action={measureCampaignAction}>
+                <input type="hidden" name="campaignId" value={c.id} />
+                <button className="btn-ghost btn-sm">📊 วัดผลตอนนี้</button>
+              </form>
+            )}
+          </div>
+          {posts.length === 0 ? (
+            <div className="card border-dashed p-6 text-center text-sm text-subtle">
+              ยังไม่มีโพสต์ — อนุมัติคอนเทนต์พร้อมเลือกบัญชี Facebook เพื่อให้ระบบโพสต์ก่อน
+            </div>
+          ) : (
+            <div className="card overflow-hidden">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-hairline text-left text-xs text-subtle">
+                    <th className="px-4 py-2.5 font-medium">บัญชี</th>
+                    <th className="px-4 py-2.5 font-medium text-right">คอมเมนต์</th>
+                    <th className="px-4 py-2.5 font-medium text-right">คนทัก/เบอร์</th>
+                    <th className="px-4 py-2.5 font-medium text-right">คะแนน</th>
+                    <th className="px-4 py-2.5 font-medium">ผล</th>
+                    <th className="px-4 py-2.5 font-medium">ลิงก์</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {posts.map((p) => {
+                    const v = VERDICT[p.verdict] ?? VERDICT.pending;
+                    return (
+                      <tr key={p.id} className="border-b border-hairline/60 last:border-0">
+                        <td className="px-4 py-2.5 text-subtle">{p.account_ref || '—'}</td>
+                        <td className="px-4 py-2.5 text-right tabular-nums">{p.comments}</td>
+                        <td className="px-4 py-2.5 text-right tabular-nums font-medium">{p.lead_count}</td>
+                        <td className="px-4 py-2.5 text-right tabular-nums">{p.engagement_score ?? '—'}</td>
+                        <td className="px-4 py-2.5"><span className={`pill ${v.cls}`}>{v.label}</span></td>
+                        <td className="px-4 py-2.5">
+                          {p.post_link ? (
+                            <a href={p.post_link} target="_blank" rel="noreferrer" className="text-accent hover:underline">
+                              เปิดโพสต์
+                            </a>
+                          ) : (
+                            <span className="text-subtle">—</span>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+          <p className="mt-2 text-xs text-subtle">
+            คะแนน = คอมเมนต์ + (คนทัก × 2) · ระบบอ่าน engagement ที่ auto-post collect เก็บไว้ · คนสนใจน้อย = AI คิดคอนเทนต์ใหม่ให้อัตโนมัติ
+          </p>
+        </div>
+      )}
     </div>
   );
 }

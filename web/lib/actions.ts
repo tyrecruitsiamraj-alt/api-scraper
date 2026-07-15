@@ -10,6 +10,7 @@ import {
   createCampaignFromRequest,
   enqueueDraftForCampaign,
   enqueueApprovedPost,
+  enqueueMeasureForCampaign,
   getCampaign,
   getContentById,
   setCampaignStatus,
@@ -204,6 +205,20 @@ export async function approveContentAction(formData: FormData) {
       }
     }
     if (!posting) await setCampaignStatus(campaignId, 'approved');
+  }
+  revalidatePath(`/orchestrator/${campaignId}`);
+  revalidatePath('/orchestrator');
+}
+
+/** สั่งวัดผล engagement ของ campaign (อ่านจาก post_logs → verdict → regen/บันทึกแนวที่เวิร์ค). */
+export async function measureCampaignAction(formData: FormData) {
+  const session = await getServerSession(authOptions);
+  if (!session) throw new Error('unauthorized');
+  const campaignId = String(formData.get('campaignId') ?? '');
+  if (campaignId) {
+    await setCampaignStatus(campaignId, 'measuring');
+    await enqueueMeasureForCampaign(campaignId, session.user?.email ?? session.user?.name ?? null);
+    kickWorker(); // measure ไม่ต้อง browser — worker draining ทำได้ทันที
   }
   revalidatePath(`/orchestrator/${campaignId}`);
   revalidatePath('/orchestrator');

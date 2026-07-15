@@ -7,7 +7,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 
 // Apply schema files in order (all idempotent — CREATE/ALTER ... IF NOT EXISTS).
 async function main() {
-  for (const file of ['schema.sql', 'schema-002.sql', 'schema-003.sql', 'schema-004.sql', 'schema-005.sql', 'schema-006.sql', 'schema-007.sql', 'schema-008.sql']) {
+  for (const file of ['schema.sql', 'schema-002.sql', 'schema-003.sql', 'schema-004.sql', 'schema-005.sql', 'schema-006.sql', 'schema-007.sql', 'schema-008.sql', 'schema-009.sql']) {
     const sql = await readFile(join(__dirname, file), 'utf8');
     console.log(`Applying ${file} ...`);
     await getPool().query(sql);

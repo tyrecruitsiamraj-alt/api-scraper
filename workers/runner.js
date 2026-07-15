@@ -20,6 +20,7 @@ import { getConnector, getTaskById } from '../src/db/repositories.js';
 import { runConnector } from '../src/pipeline.js';
 import { runTask } from '../src/tasks-worker.js';
 import { generateDraftForCampaign } from '../src/core/orchestrator-draft.js';
+import { measureCampaign } from '../src/core/orchestrator-measure.js';
 
 const WORKER_ID = `${os.hostname()}#${process.pid}`;
 const POLL_MS = Number.parseInt(process.env.WORKER_POLL_MS ?? '3000', 10);
@@ -59,6 +60,12 @@ const HANDLERS = {
   async draft(job) {
     if (!job.ref_id) throw new Error('draft job missing ref_id (campaign id)');
     return generateDraftForCampaign(job.ref_id);
+  },
+  // Content Orchestrator วัดผล (เฟส 4): อ่าน engagement จาก post_logs → verdict →
+  // regen (คนสนใจน้อย) / บันทึกแนวที่เวิร์ค (เยอะ). ไม่ต้อง browser (อ่าน DB).
+  async measure(job) {
+    if (!job.ref_id) throw new Error('measure job missing ref_id (campaign id)');
+    return measureCampaign(job.ref_id);
   },
   // Plumbing self-test — zero cost, no browser. Proves claim/lock/status transitions.
   async selftest(job) {
