@@ -792,6 +792,11 @@ export async function setContentStatus(id: string, status: string, reason: strin
   await q(`UPDATE campaign_contents SET status = $2, reject_reason = $3 WHERE id = $1`, [id, status, reason]);
 }
 
+/** แก้ caption ของร่างคอนเทนต์ (คนปรับข้อความก่อนอนุมัติ). แก้ได้เฉพาะที่ยังเป็น draft. */
+export async function updateContentCaption(id: string, caption: string) {
+  await q(`UPDATE campaign_contents SET caption = $2 WHERE id = $1 AND status = 'draft'`, [id, caption]);
+}
+
 /**
  * Enqueue งาน AI คิด content ให้ campaign เข้า work_queue (type='draft',
  * module='orchestrator') ให้ runner บนเครื่อง PC หยิบไปทำ. connector_key

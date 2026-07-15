@@ -1,7 +1,8 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { getCampaign, listCampaignContents, listCampaignPosts, listFacebookAccounts } from '@/lib/repo';
-import { approveContentAction, rejectContentAction, measureCampaignAction } from '@/lib/actions';
+import type { CampaignPostRow } from '@/lib/repo';
+import { approveContentAction, rejectContentAction, editCaptionAction, measureCampaignAction } from '@/lib/actions';
 
 export const dynamic = 'force-dynamic';
 
@@ -14,7 +15,7 @@ const CONTENT_STATUS: Record<string, { label: string; cls: string }> = {
 
 const VERDICT: Record<string, { label: string; cls: string }> = {
   high: { label: '🔥 คนสนใจเยอะ', cls: 'bg-green-50 text-green-700' },
-  low: { label: '📉 คนสนใจน้อย', cls: 'bg-amber-50 text-amber-700' },
+  low: { label: '📉 คนสนใจน้อย → คิดใหม่', cls: 'bg-amber-50 text-amber-700' },
   pending: { label: 'รอวัดผล', cls: 'bg-black/5 text-ink' },
 };
 
@@ -30,6 +31,60 @@ const STAGE_LABEL: Record<string, string> = {
   low_engagement: 'คนสนใจน้อย (คิดใหม่)',
 };
 
+// แถบสเตจบนหน้า detail — ไฮไลต์ว่างานนี้อยู่ช่วงไหน
+const STRIP = [
+  { label: 'งานใหม่' },
+  { label: 'สำรวจแนว' },
+  { label: 'ทำคอนเทนต์' },
+  { label: 'รออนุมัติ' },
+  { label: 'โพสต์' },
+  { label: 'วัดผล' },
+  { label: 'เสร็จ' },
+];
+const STATUS_TO_STEP: Record<string, number> = {
+  new: 0,
+  researching: 1,
+  drafting: 2,
+  low_engagement: 2,
+  pending_approval: 3,
+  approved: 4,
+  posting: 4,
+  measuring: 5,
+  done: 6,
+};
+
+function StageStrip({ status }: { status: string }) {
+  const cur = STATUS_TO_STEP[status] ?? 0;
+  const lowEng = status === 'low_engagement';
+  return (
+    <div className="flex items-center gap-1 overflow-x-auto pb-1">
+      {STRIP.map((s, i) => {
+        const done = i < cur;
+        const active = i === cur;
+        return (
+          <div key={s.label} className="flex items-center gap-1">
+            <span
+              className={`whitespace-nowrap rounded-full px-3 py-1 text-xs ${
+                active
+                  ? lowEng
+                    ? 'bg-red-100 font-medium text-red-700'
+                    : 'bg-accent/15 font-medium text-ink'
+                  : done
+                    ? 'bg-teal-50 text-teal-700'
+                    : 'bg-black/[0.04] text-subtle/60'
+              }`}
+            >
+              {done && '✓ '}
+              {s.label}
+            </span>
+            {i < STRIP.length - 1 && <span className="text-subtle/40">›</span>}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 function Field({ label, value }: { label: string; value?: unknown }) {
   const v = value === null || value === undefined || value === '' ? '—' : String(value);
   return (
@@ -40,6 +95,33 @@ function Field({ label, value }: { label: string; value?: unknown }) {
   );
 }
 
+function Metric({ label, value }: { label: string; value: number }) {
+  return (
+    <div className="text-center">
+      <div className="text-lg font-semibold tabular-nums">{value}</div>
+      <div className="text-[11px] text-subtle">{label}</div>
+    </div>
+  );
+}
+
+type Engagement = { likes: number; comments: number; leads: number; verdict: string; postLink: string | null };
+
+function aggregateByContent(posts: CampaignPostRow[]): Map<string, Engagement> {
+  const map = new Map<string, Engagement>();
+  for (const p of posts) {
+    if (!p.content_id) continue;
+    const e = map.get(p.content_id) ?? { likes: 0, comments: 0, leads: 0, verdict: 'pending', postLink: null };
+    e.likes += p.likes ?? 0;
+    e.comments += p.comments ?? 0;
+    e.leads += p.lead_count ?? 0;
+    if (p.verdict === 'high') e.verdict = 'high';
+    else if (p.verdict === 'low' && e.verdict !== 'high') e.verdict = 'low';
+    if (!e.postLink && p.post_link) e.postLink = p.post_link;
+    map.set(p.content_id, e);
+  }
+  return map;
+}
+
 export default async function CampaignDetail({ params }: { params: { id: string } }) {
   const c = await getCampaign(params.id);
   if (!c) notFound();
@@ -47,6 +129,7 @@ export default async function CampaignDetail({ params }: { params: { id: string 
   const contents = await listCampaignContents(params.id);
   const fbAccounts = await listFacebookAccounts();
   const posts = await listCampaignPosts(params.id);
+  const engByContent = aggregateByContent(posts);
   const canMeasure = ['posting', 'measuring', 'low_engagement'].includes(c.status);
 
   return (
@@ -57,16 +140,25 @@ export default async function CampaignDetail({ params }: { params: { id: string 
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
             <h1 className="text-2xl font-semibold tracking-tight">{c.title || c.request_no || 'Campaign'}</h1>
-            <p className="mt-1 text-sm text-subtle">ใบขอ {c.request_no || '—'}</p>
+            <p className="mt-1 text-sm text-subtle">
+              ใบขอ {c.request_no || '—'}
+              {c.province && ` · ${c.province}`}
+              {c.remaining_qty != null && ` · ยังขาด ${c.remaining_qty} อัตรา`}
+            </p>
           </div>
-          <span className="pill bg-black/5 text-ink">{STAGE_LABEL[c.status] ?? c.status}</span>
+          <div className="flex items-center gap-2">
+            <span className="pill bg-black/5 text-ink">{STAGE_LABEL[c.status] ?? c.status}</span>
+            {canMeasure && (
+              <form action={measureCampaignAction}>
+                <input type="hidden" name="campaignId" value={c.id} />
+                <button className="btn-ghost btn-sm">📊 วัดผลตอนนี้</button>
+              </form>
+            )}
+          </div>
         </div>
-        <dl className="mt-5 grid grid-cols-2 gap-4 sm:grid-cols-4">
-          <Field label="จังหวัด/ไซต์" value={c.province} />
-          <Field label="ต้องการ" value={c.qty} />
-          <Field label="ยังขาด" value={c.remaining_qty} />
-          <Field label="ผู้สร้าง" value={c.created_by} />
-        </dl>
+        <div className="mt-4">
+          <StageStrip status={c.status} />
+        </div>
       </div>
 
       <div className="card p-6">
@@ -85,12 +177,13 @@ export default async function CampaignDetail({ params }: { params: { id: string 
         <h2 className="mb-3 text-base font-semibold">ร่างคอนเทนต์</h2>
         {contents.length === 0 ? (
           <div className="card border-dashed p-6 text-center text-sm text-subtle">
-            ยังไม่มีร่างคอนเทนต์ — ระบบจะให้ AI คิด caption + รูป + แนววิดีโอ ในเฟสถัดไป
+            ยังไม่มีร่างคอนเทนต์ — ระบบจะให้ AI คิด caption + รูป + แนววิดีโอ (ต้องตั้ง ANTHROPIC/OPENAI key บนเครื่อง worker)
           </div>
         ) : (
           <div className="space-y-4">
             {contents.map((ct, idx) => {
               const meta = CONTENT_STATUS[ct.status] ?? { label: ct.status, cls: 'bg-black/5 text-ink' };
+              const eng = engByContent.get(ct.id);
               return (
                 <div key={ct.id} className="card p-5">
                   <div className="mb-3 flex items-center justify-between">
@@ -128,39 +221,78 @@ export default async function CampaignDetail({ params }: { params: { id: string 
                       {ct.reject_reason && <div className="mt-2 text-xs text-red-600">เหตุผลตีกลับ: {ct.reject_reason}</div>}
                     </div>
                   </div>
+
+                  {/* engagement ของเวอร์ชันนี้ (ถ้าเคยโพสต์+วัดผลแล้ว) */}
+                  {eng && (
+                    <div className="mt-4 flex flex-wrap items-center gap-5 rounded-lg border border-hairline bg-black/[0.015] px-4 py-2.5">
+                      <span className="text-xs font-medium text-subtle">ผลตอบรับ</span>
+                      <Metric label="ไลก์" value={eng.likes} />
+                      <Metric label="คอมเมนต์" value={eng.comments} />
+                      <Metric label="คนทัก" value={eng.leads} />
+                      <span className={`pill ${(VERDICT[eng.verdict] ?? VERDICT.pending).cls}`}>
+                        {(VERDICT[eng.verdict] ?? VERDICT.pending).label}
+                      </span>
+                      {eng.postLink && (
+                        <a href={eng.postLink} target="_blank" rel="noreferrer" className="text-xs text-accent hover:underline">
+                          เปิดโพสต์จริง ↗
+                        </a>
+                      )}
+                    </div>
+                  )}
+
                   {ct.status === 'draft' && (
-                    <div className="mt-4 flex flex-wrap items-end gap-2">
-                      <form action={approveContentAction} className="flex flex-wrap items-end gap-2">
-                        <input type="hidden" name="contentId" value={ct.id} />
-                        <input type="hidden" name="campaignId" value={c.id} />
-                        {fbAccounts.length > 0 ? (
-                          <label className="text-xs text-subtle">
-                            <span className="mb-1 block">โพสต์ด้วยบัญชี</span>
-                            <select
-                              name="fbAccountId"
-                              defaultValue=""
-                              className="rounded-lg border border-hairline bg-transparent px-2 py-1.5 text-sm text-ink"
-                            >
-                              <option value="">— อนุมัติเฉย ๆ (ยังไม่โพสต์) —</option>
-                              {fbAccounts.map((a) => (
-                                <option key={a.id} value={a.id}>
-                                  {a.label} ({a.group_count} กลุ่ม)
-                                </option>
-                              ))}
-                            </select>
-                          </label>
-                        ) : (
-                          <span className="text-xs text-subtle">
-                            ยังไม่มีบัญชี Facebook ในระบบ — อนุมัติได้ แต่ยังโพสต์อัตโนมัติไม่ได้
-                          </span>
-                        )}
-                        <button className="btn-primary btn-sm">✓ อนุมัติและโพสต์</button>
-                      </form>
-                      <form action={rejectContentAction}>
-                        <input type="hidden" name="contentId" value={ct.id} />
-                        <input type="hidden" name="campaignId" value={c.id} />
-                        <button className="btn-ghost btn-sm">↻ ตีกลับ ให้คิดใหม่</button>
-                      </form>
+                    <div className="mt-4 space-y-3">
+                      <div className="flex flex-wrap items-end gap-2">
+                        <form action={approveContentAction} className="flex flex-wrap items-end gap-2">
+                          <input type="hidden" name="contentId" value={ct.id} />
+                          <input type="hidden" name="campaignId" value={c.id} />
+                          {fbAccounts.length > 0 ? (
+                            <label className="text-xs text-subtle">
+                              <span className="mb-1 block">โพสต์ด้วยบัญชี</span>
+                              <select
+                                name="fbAccountId"
+                                defaultValue=""
+                                className="rounded-lg border border-hairline bg-transparent px-2 py-1.5 text-sm text-ink"
+                              >
+                                <option value="">— อนุมัติเฉย ๆ (ยังไม่โพสต์) —</option>
+                                {fbAccounts.map((a) => (
+                                  <option key={a.id} value={a.id}>
+                                    {a.label} ({a.group_count} กลุ่ม)
+                                  </option>
+                                ))}
+                              </select>
+                            </label>
+                          ) : (
+                            <span className="text-xs text-subtle">
+                              ยังไม่มีบัญชี Facebook ในระบบ — อนุมัติได้ แต่ยังโพสต์อัตโนมัติไม่ได้
+                            </span>
+                          )}
+                          <button className="btn-primary btn-sm">✓ อนุมัติและโพสต์</button>
+                        </form>
+                        <form action={rejectContentAction}>
+                          <input type="hidden" name="contentId" value={ct.id} />
+                          <input type="hidden" name="campaignId" value={c.id} />
+                          <button className="btn-ghost btn-sm">↻ ตีกลับ ให้ AI คิดใหม่</button>
+                        </form>
+                      </div>
+
+                      {/* แก้แคปชัน — ใช้ <details> เปิด/ปิดได้โดยไม่ต้อง client JS */}
+                      <details className="group">
+                        <summary className="inline-flex cursor-pointer select-none items-center gap-1 text-xs text-subtle hover:text-accent">
+                          ✎ แก้แคปชัน
+                        </summary>
+                        <form action={editCaptionAction} className="mt-2 space-y-2">
+                          <input type="hidden" name="contentId" value={ct.id} />
+                          <input type="hidden" name="campaignId" value={c.id} />
+                          <textarea
+                            name="caption"
+                            defaultValue={ct.caption ?? ''}
+                            rows={6}
+                            className="w-full rounded-lg border border-hairline bg-transparent p-3 text-sm"
+                          />
+                          <button className="btn-secondary btn-sm">บันทึกแคปชัน</button>
+                        </form>
+                      </details>
                     </div>
                   )}
                 </div>
@@ -170,64 +302,10 @@ export default async function CampaignDetail({ params }: { params: { id: string 
         )}
       </div>
 
-      {(posts.length > 0 || canMeasure) && (
-        <div>
-          <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-            <h2 className="text-base font-semibold">ผลตอบรับ (engagement)</h2>
-            {canMeasure && (
-              <form action={measureCampaignAction}>
-                <input type="hidden" name="campaignId" value={c.id} />
-                <button className="btn-ghost btn-sm">📊 วัดผลตอนนี้</button>
-              </form>
-            )}
-          </div>
-          {posts.length === 0 ? (
-            <div className="card border-dashed p-6 text-center text-sm text-subtle">
-              ยังไม่มีโพสต์ — อนุมัติคอนเทนต์พร้อมเลือกบัญชี Facebook เพื่อให้ระบบโพสต์ก่อน
-            </div>
-          ) : (
-            <div className="card overflow-hidden">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b border-hairline text-left text-xs text-subtle">
-                    <th className="px-4 py-2.5 font-medium">บัญชี</th>
-                    <th className="px-4 py-2.5 font-medium text-right">คอมเมนต์</th>
-                    <th className="px-4 py-2.5 font-medium text-right">คนทัก/เบอร์</th>
-                    <th className="px-4 py-2.5 font-medium text-right">คะแนน</th>
-                    <th className="px-4 py-2.5 font-medium">ผล</th>
-                    <th className="px-4 py-2.5 font-medium">ลิงก์</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {posts.map((p) => {
-                    const v = VERDICT[p.verdict] ?? VERDICT.pending;
-                    return (
-                      <tr key={p.id} className="border-b border-hairline/60 last:border-0">
-                        <td className="px-4 py-2.5 text-subtle">{p.account_ref || '—'}</td>
-                        <td className="px-4 py-2.5 text-right tabular-nums">{p.comments}</td>
-                        <td className="px-4 py-2.5 text-right tabular-nums font-medium">{p.lead_count}</td>
-                        <td className="px-4 py-2.5 text-right tabular-nums">{p.engagement_score ?? '—'}</td>
-                        <td className="px-4 py-2.5"><span className={`pill ${v.cls}`}>{v.label}</span></td>
-                        <td className="px-4 py-2.5">
-                          {p.post_link ? (
-                            <a href={p.post_link} target="_blank" rel="noreferrer" className="text-accent hover:underline">
-                              เปิดโพสต์
-                            </a>
-                          ) : (
-                            <span className="text-subtle">—</span>
-                          )}
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          )}
-          <p className="mt-2 text-xs text-subtle">
-            คะแนน = คอมเมนต์ + (คนทัก × 2) · ระบบอ่าน engagement ที่ auto-post collect เก็บไว้ · คนสนใจน้อย = AI คิดคอนเทนต์ใหม่ให้อัตโนมัติ
-          </p>
-        </div>
+      {posts.length > 0 && (
+        <p className="text-xs text-subtle">
+          คะแนนผล = คอมเมนต์ + (คนทัก × 2) · “ไลก์” จะมีเมื่อเปิดการอ่าน reactions ในตัวเก็บคอมเมนต์ (งานย่อยที่เหลือ) · คนสนใจน้อย = AI คิดคอนเทนต์ใหม่อัตโนมัติ
+        </p>
       )}
     </div>
   );

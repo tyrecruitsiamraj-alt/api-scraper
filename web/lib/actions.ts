@@ -15,6 +15,7 @@ import {
   getContentById,
   setCampaignStatus,
   setContentStatus,
+  updateContentCaption,
   deleteConnector,
   deleteTask,
   enqueueScrapeForTask,
@@ -209,6 +210,17 @@ export async function approveContentAction(formData: FormData) {
   }
   revalidatePath(`/orchestrator/${campaignId}`);
   revalidatePath('/orchestrator');
+}
+
+/** แก้แคปชันของร่างคอนเทนต์ (ก่อนอนุมัติ). */
+export async function editCaptionAction(formData: FormData) {
+  const session = await getServerSession(authOptions);
+  if (!session) throw new Error('unauthorized');
+  const contentId = String(formData.get('contentId') ?? '');
+  const campaignId = String(formData.get('campaignId') ?? '');
+  const caption = String(formData.get('caption') ?? '').trim();
+  if (contentId && caption) await updateContentCaption(contentId, caption);
+  revalidatePath(`/orchestrator/${campaignId}`);
 }
 
 /** สั่งวัดผล engagement ของ campaign (อ่านจาก post_logs → verdict → regen/บันทึกแนวที่เวิร์ค). */
