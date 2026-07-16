@@ -53,15 +53,19 @@ const TOOL = {
  * @returns {Promise<null | { caption:string, videoBrief:string, imagePrompt:string, model:string }>}
  */
 export async function generateContent(campaign = {}) {
+  // เลือก AI ที่ใช้คิดข้อความ: 'anthropic' (Claude, ต้องมี key) หรือ 'ollama'
+  // (server บริษัท ฟรี ไม่ต้อง key). ไม่ตั้ง CONTENT_TEXT_PROVIDER = เลือกอัตโนมัติ:
+  // มี ANTHROPIC_API_KEY → anthropic, ไม่มีแต่มี OLLAMA_BASE_URL → ollama, ไม่มีทั้งคู่ → ปิด
   const apiKey = envString('ANTHROPIC_API_KEY');
-  if (!apiKey) return null; // feature off — ไม่มี key
+  const ollamaBase = envString('OLLAMA_BASE_URL');
+  const provider = envString('CONTENT_TEXT_PROVIDER', apiKey ? 'anthropic' : ollamaBase ? 'ollama' : '');
+  if (!provider) return null; // feature off — ไม่มีทั้ง key และ ollama
+  if (provider === 'anthropic' && !apiKey) return null;
+  if (provider === 'ollama' && !ollamaBase) return null;
 
   const snap = campaign.snapshot ?? {};
   const position = String(campaign.title || snap.request_name || snap.job_description_name || '').trim();
   if (!position) return null; // ไม่มีตำแหน่งให้คิด
-
-  const model = envString('CONTENT_TEXT_MODEL', 'claude-sonnet-5');
-  const client = new Anthropic({ apiKey });
 
   const ctx = [
     `ตำแหน่ง/งาน: ${position}`,
@@ -82,26 +86,24 @@ export async function generateContent(campaign = {}) {
       wins.map((w, i) => `ตัวอย่าง ${i + 1}:\n${w}`).join('\n---\n')
     : '';
 
-  let msg;
+  const userMsg = `เขียนคอนเทนต์สรรหาสำหรับใบขอนี้:\n${ctx}${winsBlock}`;
+
+  let out = null;
+  let modelUsed = '';
   try {
-    msg = await client.messages.create({
-      model,
-      max_tokens: 1500,
-      system: SYSTEM,
-      tools: [TOOL],
-      tool_choice: { type: 'tool', name: TOOL.name },
-      messages: [{ role: 'user', content: `เขียนคอนเทนต์สรรหาสำหรับใบขอนี้:\n${ctx}${winsBlock}` }],
-    });
+    if (provider === 'ollama') {
+      ({ out, modelUsed } = await callOllama({ base: ollamaBase, userMsg }));
+    } else {
+      ({ out, modelUsed } = await callAnthropic({ apiKey, userMsg }));
+    }
   } catch (e) {
-    console.warn(`  [content-gen] AI call failed: ${e.message} — ข้ามการคิด content`);
+    console.warn(`  [content-gen] AI call failed (${provider}): ${e.message} — ข้ามการคิด content`);
     return null;
   }
 
-  const block = msg.content?.find((b) => b.type === 'tool_use' && b.name === TOOL.name);
-  const out = block?.input;
   const caption = String(out?.caption ?? '').trim();
   if (!caption) {
-    console.warn('  [content-gen] AI คืนผลไม่ถูกรูปแบบ (caption ว่าง) — ข้าม');
+    console.warn(`  [content-gen] AI (${provider}) คืนผลไม่ถูกรูปแบบ (caption ว่าง) — ข้าม`);
     return null;
   }
 
@@ -109,6 +111,60 @@ export async function generateContent(campaign = {}) {
     caption,
     videoBrief: String(out.video_brief ?? '').trim(),
     imagePrompt: String(out.image_prompt ?? '').trim(),
-    model,
+    model: modelUsed,
   };
+}
+
+/** Claude — structured tool output (พฤติกรรมเดิมเป๊ะ) */
+async function callAnthropic({ apiKey, userMsg }) {
+  const model = envString('CONTENT_TEXT_MODEL', 'claude-sonnet-5');
+  const client = new Anthropic({ apiKey });
+  const msg = await client.messages.create({
+    model,
+    max_tokens: 1500,
+    system: SYSTEM,
+    tools: [TOOL],
+    tool_choice: { type: 'tool', name: TOOL.name },
+    messages: [{ role: 'user', content: userMsg }],
+  });
+  const block = msg.content?.find((b) => b.type === 'tool_use' && b.name === TOOL.name);
+  return { out: block?.input ?? null, modelUsed: model };
+}
+
+/**
+ * Ollama (server บริษัท, ฟรี ไม่ต้อง key) — บังคับ JSON ตาม schema ผ่าน `format`.
+ * โมเดล default = qwen3.5:9b (ตัวที่ jarvis ใช้อยู่ อุ่นเครื่องแล้วบน server).
+ */
+async function callOllama({ base, userMsg }) {
+  const model = envString('OLLAMA_MODEL', 'qwen3.5:9b');
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 180_000); // โมเดลใหญ่/โหลดครั้งแรกช้าได้
+  try {
+    const res = await fetch(`${base.replace(/\/$/, '')}/api/chat`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      signal: controller.signal,
+      body: JSON.stringify({
+        model,
+        stream: false,
+        options: { temperature: 0.7 },
+        format: TOOL.input_schema, // Ollama บังคับ output เป็น JSON ตาม schema เดียวกับ tool ของ Claude
+        messages: [
+          { role: 'system', content: SYSTEM + '\nตอบเป็นภาษาไทย และตอบเป็น JSON ตามโครงสร้างที่กำหนดเท่านั้น' },
+          { role: 'user', content: userMsg },
+        ],
+      }),
+    });
+    if (!res.ok) throw new Error(`ollama HTTP ${res.status}`);
+    const json = await res.json();
+    let out = null;
+    try {
+      out = JSON.parse(json?.message?.content ?? '');
+    } catch {
+      throw new Error('ollama ตอบไม่ใช่ JSON ที่ parse ได้');
+    }
+    return { out, modelUsed: `ollama:${model}` };
+  } finally {
+    clearTimeout(timer);
+  }
 }
