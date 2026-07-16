@@ -724,6 +724,34 @@ export async function getCampaign(id: string) {
   return rows[0] ?? null;
 }
 
+// --- Pool pre-check: มีคนใน So Recruit (jarvis_rm) สำหรับใบขอนี้หรือยัง ---
+// อ่านอย่างเดียว เชื่อมด้วย jobs.request_no = campaign.request_no (ตัวเชื่อมเดียวที่มีจริง
+// ในสคีมา). ไม่ตั้งกติกา matching เอง, ไม่ตัดสินใจแทนคน. guarded — null ถ้าเข้าไม่ได้.
+export type SoRecruitMatch = {
+  found: boolean;
+  totalAssigned: number;
+  jobs: { id: string; status: string | null; unit_name: string | null; location: string | null; assigned: number }[];
+};
+
+export async function soRecruitCheck(requestNo: string | null): Promise<SoRecruitMatch | null> {
+  const rn = (requestNo ?? '').trim();
+  if (!rn) return { found: false, totalAssigned: 0, jobs: [] };
+  try {
+    const jobs = await q<{ id: string; status: string | null; unit_name: string | null; location: string | null; assigned: number }>(
+      `SELECT j.id, j.status, j.unit_name, j.location_address AS location,
+              (SELECT count(*)::int FROM "jarvis_rm".job_assignments ja
+                WHERE ja.job_id = j.id AND COALESCE(ja.status, '') <> 'cancelled') AS assigned
+         FROM "jarvis_rm".jobs j
+        WHERE j.request_no = $1`,
+      [rn],
+    );
+    const totalAssigned = jobs.reduce((s, j) => s + (j.assigned ?? 0), 0);
+    return { found: jobs.length > 0, totalAssigned, jobs };
+  } catch {
+    return null; // สคีมา/สิทธิ์ไม่พร้อม
+  }
+}
+
 /** สรุปจำนวน campaign แยกตาม pipeline stage สำหรับ dashboard. */
 export async function campaignStats() {
   const rows = await q<{ status: string; n: number }>(

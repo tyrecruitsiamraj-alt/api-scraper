@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
-import { getCampaign, listCampaignContents, listCampaignPosts, listFacebookAccounts } from '@/lib/repo';
+import { getCampaign, listCampaignContents, listCampaignPosts, listFacebookAccounts, soRecruitCheck } from '@/lib/repo';
 import type { CampaignPostRow } from '@/lib/repo';
 import { approveContentAction, rejectContentAction, editCaptionAction, measureCampaignAction } from '@/lib/actions';
 
@@ -131,6 +131,7 @@ export default async function CampaignDetail({ params }: { params: { id: string 
   const posts = await listCampaignPosts(params.id);
   const engByContent = aggregateByContent(posts);
   const canMeasure = ['posting', 'measuring', 'low_engagement'].includes(c.status);
+  const pool = await soRecruitCheck(c.request_no);
 
   return (
     <div className="space-y-6">
@@ -159,6 +160,37 @@ export default async function CampaignDetail({ params }: { params: { id: string 
         <div className="mt-4">
           <StageStrip status={c.status} />
         </div>
+      </div>
+
+      {/* Pool pre-check: มีคนใน So Recruit สำหรับใบขอนี้หรือยัง (อ่านอย่างเดียว คนตัดสินใจเอง) */}
+      <div className="card p-4">
+        <div className="flex flex-wrap items-center gap-2 text-sm">
+          <span className="font-medium">So Recruit:</span>
+          {pool === null ? (
+            <span className="text-subtle">เชื่อมข้อมูล So Recruit ไม่ได้ (สิทธิ์/สคีมา)</span>
+          ) : !pool.found ? (
+            <span className="text-subtle">
+              ยังไม่พบใบขอนี้ใน So Recruit (jobs.request_no ยังไม่ผูก) — ถือว่ายังไม่มีคน → ควรคิด content
+            </span>
+          ) : pool.totalAssigned > 0 ? (
+            <span className="rounded-md bg-green-50 px-2 py-0.5 text-green-700">
+              ✅ มีคนแล้ว {pool.totalAssigned} — อาจไม่ต้องคิด content (ตรวจก่อนอนุมัติ)
+            </span>
+          ) : (
+            <span className="rounded-md bg-amber-50 px-2 py-0.5 text-amber-700">
+              พบงานใน So Recruit แต่ยังไม่มีคนถูก assign → ควรคิด content
+            </span>
+          )}
+        </div>
+        {pool?.found && pool.jobs.length > 0 && (
+          <div className="mt-2 text-xs text-subtle">
+            {pool.jobs.map((j) => (
+              <span key={j.id} className="mr-3">
+                · {j.unit_name || j.location || 'งาน'} [{j.status || '—'}] · assign {j.assigned}
+              </span>
+            ))}
+          </div>
+        )}
       </div>
 
       <div className="card p-6">
