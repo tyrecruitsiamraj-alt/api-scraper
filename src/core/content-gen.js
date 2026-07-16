@@ -46,7 +46,10 @@ const TOOL = {
 
 /**
  * @param {{ title?:string, positions?:string, province?:string, qty?:number,
- *   remaining_qty?:number, snapshot?:Record<string,any> }} campaign
+ *   remaining_qty?:number, snapshot?:Record<string,any>,
+ *   winningExamples?: string[] }} campaign
+ *   winningExamples = แคปชันที่เคยได้ engagement สูง (จาก content_winning_patterns)
+ *   ใส่เป็นแรงบันดาลใจให้ AI คิดตามแนวที่เคยเวิร์ค — ไม่มีก็ gen ได้ปกติ
  * @returns {Promise<null | { caption:string, videoBrief:string, imagePrompt:string, model:string }>}
  */
 export async function generateContent(campaign = {}) {
@@ -69,6 +72,16 @@ export async function generateContent(campaign = {}) {
     snap.department_code ? `แผนก: ${snap.department_code}` : '',
   ].filter(Boolean).join('\n');
 
+  // แนวที่เคยเวิร์ค (engagement สูง) — ให้เป็นแรงบันดาลใจ ไม่ใช่ลอก
+  const wins = (campaign.winningExamples ?? [])
+    .map((s) => String(s ?? '').trim())
+    .filter(Boolean)
+    .slice(0, 2);
+  const winsBlock = wins.length
+    ? `\n\nแคปชันที่เคยได้ผลดี (คนสนใจเยอะ) — ใช้เป็นแนวทางโทน/โครงสร้าง ห้ามลอกคำต่อคำ:\n` +
+      wins.map((w, i) => `ตัวอย่าง ${i + 1}:\n${w}`).join('\n---\n')
+    : '';
+
   let msg;
   try {
     msg = await client.messages.create({
@@ -77,7 +90,7 @@ export async function generateContent(campaign = {}) {
       system: SYSTEM,
       tools: [TOOL],
       tool_choice: { type: 'tool', name: TOOL.name },
-      messages: [{ role: 'user', content: `เขียนคอนเทนต์สรรหาสำหรับใบขอนี้:\n${ctx}` }],
+      messages: [{ role: 'user', content: `เขียนคอนเทนต์สรรหาสำหรับใบขอนี้:\n${ctx}${winsBlock}` }],
     });
   } catch (e) {
     console.warn(`  [content-gen] AI call failed: ${e.message} — ข้ามการคิด content`);

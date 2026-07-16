@@ -23,6 +23,19 @@ export async function generateDraftForCampaign(campaignId) {
 
   await query(`UPDATE recruit_campaigns SET status='drafting', status_note=NULL, updated_at=now() WHERE id=$1`, [campaignId]);
 
+  // แนวที่เคยเวิร์ค: เอาแคปชันจริงของ content ที่ engagement สูงสุด มาเป็นแรงบันดาลใจ
+  // (เรียงให้ตำแหน่งใกล้เคียงมาก่อน แล้วค่อยตามคะแนน; ตารางว่าง = [] ไม่กระทบ gen)
+  const winningExamples = await query(
+    `SELECT cc.caption
+       FROM content_winning_patterns wp
+       JOIN campaign_contents cc ON cc.id = wp.sample_content_id
+      WHERE cc.caption IS NOT NULL AND TRIM(cc.caption) <> ''
+      ORDER BY (wp.position_family IS NOT NULL AND $1 <> '' AND wp.position_family ILIKE '%' || $1 || '%') DESC,
+               wp.engagement_score DESC NULLS LAST
+      LIMIT 2`,
+    [String(c.title ?? '').trim()],
+  ).then((r) => r.rows.map((x) => x.caption)).catch(() => []);
+
   const content = await generateContent({
     title: c.title,
     positions: c.positions,
@@ -30,6 +43,7 @@ export async function generateDraftForCampaign(campaignId) {
     qty: c.qty,
     remaining_qty: c.remaining_qty,
     snapshot: c.request_snapshot ?? {},
+    winningExamples,
   });
 
   if (!content) {
