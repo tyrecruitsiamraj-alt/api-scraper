@@ -445,8 +445,8 @@ module.exports = {
   pauseCollectRun,
   resumeCollectRun,
   cancelCollectRun,
-  updatePostLogFromCollect: (id, commentCount, customerPhone) =>
-    db.updatePostLogCollectResult(id, commentCount, customerPhone),
+  updatePostLogFromCollect: (id, commentCount, customerPhone, reactions, shares) =>
+    db.updatePostLogCollectResult(id, commentCount, customerPhone, reactions, shares),
   onCollectPatchDone,
   getLiveCsvBody,
   hasCollectExport: (runId) => collectExportByRunId.has(String(runId || '').trim()),

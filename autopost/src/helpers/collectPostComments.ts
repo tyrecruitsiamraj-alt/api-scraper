@@ -139,11 +139,51 @@ function normalizedPhoneSetFromText(text: string): Set<string> {
 /**
  * เปิดลิงก์โพสต์ ขยาย/เลื่อน comment แล้วรวมข้อความจาก article
  */
+/**
+ * อ่านจำนวน reactions (ไลก์รวมทุกแบบ) + shares ของโพสต์ — best-effort.
+ * FB เปลี่ยน markup บ่อย จึงจับจากหลายทาง (aria-label + ข้อความ) และคืน 0 ถ้าไม่เจอ
+ * (ไม่ throw — การเก็บคอมเมนต์/เบอร์เดิมต้องไม่พังเพราะอ่านตัวเลขนี้ไม่ได้).
+ */
+async function readReactionsAndShares(page: Page): Promise<{ reactions: number; shares: number }> {
+  try {
+    return await page.evaluate(() => {
+      const thaiNum = (s: string): number => {
+        const m = String(s).match(/([\d.,]+)\s*([KMกพลพันหมื่นแสนล้าน]*)/i);
+        if (!m) return 0;
+        let n = parseFloat(m[1].replace(/,/g, '')) || 0;
+        const u = (m[2] || '').toLowerCase();
+        if (u.includes('k') || u.includes('พัน')) n *= 1e3;
+        else if (u.includes('m') || u.includes('ล้าน')) n *= 1e6;
+        else if (u.includes('หมื่น')) n *= 1e4;
+        else if (u.includes('แสน')) n *= 1e5;
+        return Math.round(n);
+      };
+      // reactions: ปุ่ม/ป้ายจำนวนคนที่แสดงความรู้สึก
+      let reactions = 0;
+      const reactSel = document.querySelector(
+        '[aria-label*="reaction" i], [aria-label*="คนที่แสดงความรู้สึก"], [aria-label*="ถูกใจ"]'
+      );
+      if (reactSel) {
+        const lab = reactSel.getAttribute('aria-label') || reactSel.textContent || '';
+        reactions = thaiNum(lab);
+      }
+      // shares: ข้อความ "N shares" / "แชร์ N ครั้ง" / "N การแชร์"
+      let shares = 0;
+      const body = document.body.innerText || '';
+      const sm = body.match(/([\d.,]+[KMก-๙]*)\s*(shares?|การแชร์|ครั้ง)/i) || body.match(/แชร์\s*([\d.,]+[KMก-๙]*)/i);
+      if (sm) shares = thaiNum(sm[1]);
+      return { reactions: reactions || 0, shares: shares || 0 };
+    });
+  } catch {
+    return { reactions: 0, shares: 0 };
+  }
+}
+
 export async function scrapeCommentsAndPhones(
   page: Page,
   postUrl: string,
   opts?: { excludeAuthorNames?: string[] }
-): Promise<{ phones: string[]; commentCount: number; postBodyPhones: string[] }> {
+): Promise<{ phones: string[]; commentCount: number; postBodyPhones: string[]; reactions: number; shares: number }> {
   if (page.isClosed()) {
     throw new Error('Target page, context or browser has been closed');
   }
@@ -326,5 +366,6 @@ export async function scrapeCommentsAndPhones(
 
   const commentCount =
     commentBlocks.length > 0 ? commentBlocks.length : Math.max(0, n - 1);
-  return { phones, commentCount, postBodyPhones };
+  const { reactions, shares } = await readReactionsAndShares(page);
+  return { phones, commentCount, postBodyPhones, reactions, shares };
 }

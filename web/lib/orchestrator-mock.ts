@@ -37,7 +37,7 @@ export const FLOW_COLUMNS: { key: FlowStage; label: string; hint: string }[] = [
   { key: 'drafting', label: '③ คิด content', hint: 'AI เขียนแคปชัน + สร้างรูป' },
   { key: 'pending_approval', label: '④ รออนุมัติ', hint: 'คนต้องกดอนุมัติหรือตีกลับ' },
   { key: 'approved', label: '⑤ อนุมัติแล้ว', hint: 'พร้อมเข้าคิวโพสต์' },
-  { key: 'posting', label: '⑥ กำลังโพสต์', hint: 'Autopost ลงกลุ่ม Facebook' },
+  { key: 'posting', label: '⑥ Post งาน', hint: 'ลงกลุ่ม Facebook ผ่าน Autopost' },
   { key: 'measuring', label: '⑦ วัดผล', hint: 'ดู comment / คนทัก / leads' },
   { key: 'low_engagement', label: '↩ คนสนใจน้อย', hint: 'วนกลับไปเช็ค Data เก่า แล้วคิด content ใหม่' },
   { key: 'done', label: '⑧ เสร็จ', hint: 'ปิดงาน + เก็บแนวที่เวิร์ค' },

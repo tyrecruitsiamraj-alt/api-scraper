@@ -1263,14 +1263,37 @@ async function getPostLogsByIdsForUser(ids, userId) {
   return rows;
 }
 
-async function updatePostLogCollectResult(id, commentCount, customerPhone) {
+/** post_logs.reactions / shares — engagement เพิ่ม (ไลก์/แชร์) จากตัวเก็บคอมเมนต์ */
+async function ensurePostLogsEngagementColumns() {
+  try {
+    await query(`ALTER TABLE post_logs ADD COLUMN IF NOT EXISTS reactions INT DEFAULT 0`);
+    await query(`ALTER TABLE post_logs ADD COLUMN IF NOT EXISTS shares INT DEFAULT 0`);
+  } catch (_) {
+    // ignore if no permission / table variation
+  }
+}
+
+/**
+ * บันทึกผลเก็บคอมเมนต์ลง post_logs. reactions/shares เป็น optional (backward-compatible —
+ * ผู้เรียกเก่าที่ส่งแค่ 3 ตัวยังทำงานเหมือนเดิม, ไม่ทับค่า reactions/shares เดิม).
+ */
+async function updatePostLogCollectResult(id, commentCount, customerPhone, reactions, shares) {
   const phoneStr =
     customerPhone != null && String(customerPhone).trim() ? String(customerPhone).trim().slice(0, 2000) : null;
-  await query(`UPDATE post_logs SET comment_count = $2, customer_phone = $3 WHERE id = $1`, [
-    String(id),
-    commentCount == null ? 0 : Math.max(0, parseInt(String(commentCount), 10) || 0),
-    phoneStr,
-  ]);
+  const toInt = (v) => (v == null ? null : Math.max(0, parseInt(String(v), 10) || 0));
+  await ensurePostLogsEngagementColumns();
+  await query(
+    `UPDATE post_logs SET comment_count = $2, customer_phone = $3,
+            reactions = COALESCE($4, reactions), shares = COALESCE($5, shares)
+      WHERE id = $1`,
+    [
+      String(id),
+      commentCount == null ? 0 : Math.max(0, parseInt(String(commentCount), 10) || 0),
+      phoneStr,
+      toInt(reactions),
+      toInt(shares),
+    ],
+  );
 }
 
 /** รายงานโพสต์: JOIN users + assignments (ผู้ทำ) + นับ total + แยกตามวัน/เจ้าของงาน */
@@ -2410,6 +2433,7 @@ module.exports = {
   getPostLogsForCommentCollect,
   getPostLogsByIdsForUser,
   updatePostLogCollectResult,
+  ensurePostLogsEngagementColumns,
   getPostReports,
   getDashboardSummary,
   ensurePostSchedulesTable,

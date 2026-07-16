@@ -56,17 +56,29 @@ export async function measureCampaign(campaignId) {
       continue;
     }
     // รวม engagement ทุกกลุ่มที่ job นี้ถูกโพสต์ (1 job → หลาย post_logs)
+    // reactions/shares อาจยังไม่มีคอลัมน์ (collect เวอร์ชันเก่า) — COALESCE 0 กันพัง
     const { rows: logs } = await query(
-      `SELECT comment_count, customer_phone, post_link, created_at
+      `SELECT comment_count, customer_phone, post_link, created_at,
+              COALESCE(reactions, 0) AS reactions, COALESCE(shares, 0) AS shares
          FROM "so_autopost_jobs".post_logs WHERE job_id = $1`,
       [p.job_ref],
-    );
+    ).catch(async () => {
+      // ถ้าคอลัมน์ reactions/shares ยังไม่มีจริง — fallback query แบบไม่มีสองคอลัมน์นั้น
+      const r = await query(
+        `SELECT comment_count, customer_phone, post_link, created_at, 0 AS reactions, 0 AS shares
+           FROM "so_autopost_jobs".post_logs WHERE job_id = $1`,
+        [p.job_ref],
+      );
+      return r;
+    });
     if (logs.length === 0) {
       anyPending = true; // โพสต์แล้วแต่ collect ยังไม่เก็บ (หรือยังไม่โพสต์เสร็จ)
       continue;
     }
 
     const comments = logs.reduce((s, r) => s + (Number(r.comment_count) || 0), 0);
+    const likes = logs.reduce((s, r) => s + (Number(r.reactions) || 0), 0);
+    const shares = logs.reduce((s, r) => s + (Number(r.shares) || 0), 0);
     const leads = countLeads(logs.map((r) => r.customer_phone));
     const postLink = logs.find((r) => r.post_link && String(r.post_link).trim())?.post_link ?? null;
     const postedAt = logs.reduce((min, r) => (r.created_at && (!min || r.created_at < min) ? r.created_at : min), null);
@@ -77,9 +89,9 @@ export async function measureCampaign(campaignId) {
       `UPDATE campaign_posts
           SET comments = $2, lead_count = $3, post_link = COALESCE($4, post_link),
               posted_at = COALESCE(posted_at, $5), engagement_score = $6,
-              verdict = $7, measured_at = now()
+              verdict = $7, likes = $8, shares = $9, measured_at = now()
         WHERE id = $1`,
-      [p.id, comments, leads, postLink, postedAt, score, verdict],
+      [p.id, comments, leads, postLink, postedAt, score, verdict, likes, shares],
     );
 
     measured += 1;

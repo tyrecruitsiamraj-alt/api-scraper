@@ -41,7 +41,7 @@ function readPlan(): CollectPlan {
 
 async function patchCollectResult(
   postLogId: string,
-  body: { comment_count: number; customer_phone: string }
+  body: { comment_count: number; customer_phone: string; reactions?: number; shares?: number }
 ): Promise<void> {
   const base = (process.env.RUN_LOG_API_URL || 'http://127.0.0.1:3000').replace(/\/$/, '');
   const token = process.env.COLLECT_PATCH_TOKEN || '';
@@ -105,7 +105,7 @@ test('collectComments', async ({ page }) => {
   const excludedPhones = buildExcludedPhoneSet((user as { contact_phone?: string }).contact_phone);
   const pendingByPost = new Map<
     string,
-    { commentCount: number; phones: string[]; item: CollectPlan['posts'][number] }
+    { commentCount: number; phones: string[]; reactions: number; shares: number; item: CollectPlan['posts'][number] }
   >();
   const CUSTOMER_PHONE_MAX_LEN = Math.min(2000, Math.max(100, Number(process.env.COLLECT_CUSTOMER_PHONE_MAX_LEN) || 2000));
 
@@ -130,7 +130,7 @@ test('collectComments', async ({ page }) => {
       const ownerNames = [user.poster_name || '', user.name || '', item.owner || '', item.company || '', item.poster_name || '']
         .map((x) => String(x || '').trim())
         .filter(Boolean);
-      const { phones, commentCount, postBodyPhones } = await scrapeCommentsAndPhones(active, item.post_link, {
+      const { phones, commentCount, postBodyPhones, reactions, shares } = await scrapeCommentsAndPhones(active, item.post_link, {
         excludeAuthorNames: ownerNames,
       });
       const excludedForThisPost = new Set(excludedPhones);
@@ -143,7 +143,7 @@ test('collectComments', async ({ page }) => {
         .forEach((x) => excludedForThisPost.add(x));
       // ด่านแรก: ตัดเบอร์ต้องห้าม (เจ้าของงาน/โพสต์/caption)
       const kept = filterPhonesForCollect(phones, { excluded: excludedForThisPost, seenToday: new Set<string>() });
-      pendingByPost.set(item.post_log_id, { commentCount, phones: kept, item });
+      pendingByPost.set(item.post_log_id, { commentCount, phones: kept, reactions, shares, item });
       await runLog({
         level: 'success',
         message: `[${idx}/${plan.posts.length}] สแกนเสร็จ — Comment ${commentCount}, พบเบอร์ผู้สนใจ ${kept.length} รายการ`,
@@ -186,12 +186,14 @@ test('collectComments', async ({ page }) => {
   }
 
   for (const item of plan.posts) {
-    const st = pendingByPost.get(item.post_log_id) || { commentCount: 0, phones: [], item };
+    const st = pendingByPost.get(item.post_log_id) || { commentCount: 0, phones: [], reactions: 0, shares: 0, item };
     const phonesFinal = st.phones || [];
     const phoneStr = phonesFinal.length ? phonesFinal.join(', ').slice(0, CUSTOMER_PHONE_MAX_LEN) : '';
     await patchCollectResult(item.post_log_id, {
       comment_count: st.commentCount,
       customer_phone: phoneStr,
+      reactions: st.reactions,
+      shares: st.shares,
     });
   }
   await runLog({

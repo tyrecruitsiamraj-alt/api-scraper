@@ -1402,8 +1402,8 @@ app.patch('/api/post-logs/:id/collect-result', async (req, res) => {
     if (!leadCollectBot.isCollectPatchTokenValid(token) && !workerAuthed) {
       return res.status(403).json({ error: 'Forbidden' });
     }
-    const { comment_count, customer_phone } = req.body || {};
-    await leadCollectBot.updatePostLogFromCollect(req.params.id, comment_count, customer_phone);
+    const { comment_count, customer_phone, reactions, shares } = req.body || {};
+    await leadCollectBot.updatePostLogFromCollect(req.params.id, comment_count, customer_phone, reactions, shares);
     if (leadCollectBot.isCollectPatchTokenValid(token)) {
       await leadCollectBot.onCollectPatchDone(token);
     }
