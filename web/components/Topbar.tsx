@@ -12,7 +12,6 @@ const NAV: Record<Mode, { href: string; label: string }[]> = {
     { href: '/dashboard', label: 'ภาพรวม' },
     { href: '/candidates', label: 'ผู้สมัคร' },
     { href: '/scraping', label: 'งาน Scraping' },
-    { href: '/connectors', label: 'Connector' },
   ],
   autopost: [
     { href: '/autopost', label: 'ภาพรวม' },
@@ -121,6 +120,17 @@ export function Topbar() {
 
         {/* right */}
         <div className="flex shrink-0 items-center gap-2 sm:gap-3">
+          <Link
+            href="/settings"
+            className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-2 text-[12.5px] font-medium transition ${
+              pathname.startsWith('/settings')
+                ? 'border-accent bg-accent text-white'
+                : 'border-line bg-white/70 text-muted hover:bg-white hover:text-ink'
+            }`}
+          >
+            <span aria-hidden>⚙</span>
+            <span className="hidden lg:inline">ตั้งค่า</span>
+          </Link>
           <div className="flex items-center gap-2.5 rounded-full border border-line bg-white/70 py-1 pl-1 pr-1.5 sm:pr-3">
             {user?.image ? (
               // eslint-disable-next-line @next/next/no-img-element

@@ -1,582 +1,873 @@
-# Talent Scraper — Developer Handbook
+# SO Recruitment Platform — Project Handbook
 
-> คู่มือสำหรับนักพัฒนา ครอบคลุมทุกอย่างในโฟลเดอร์ `api-scraper/`
-> อัปเดตล่าสุด: 2026-06-30 · เขียนจากการวิเคราะห์ source code โดยตรง
+> ฉบับปรับปรุงจากโค้ดจริง ณ 17 กรกฎาคม 2026
+> Repository: `api-scraper`
+> กลุ่มผู้อ่าน: Developer, Operator, HR Admin และผู้รับช่วงดูแลระบบ
 
-ระบบนี้คือ **เครื่องมือ scrape ข้อมูลผู้สมัครงาน (resume / CV)** จากเว็บหางานไทย (JobBKK, JobThai) โดยใช้บัญชี employer ที่ได้รับอนุญาต แล้วเก็บข้อมูลแบบ deduplicated ลง PostgreSQL พร้อมรูปโปรไฟล์และไฟล์แนบ
-
-> ⚠️ **ใช้กับบัญชีและสิทธิ์ที่ได้รับอนุญาตเท่านั้น** ข้อมูลผู้สมัครเป็นข้อมูลส่วนบุคคล (PDPA) — ดูหัวข้อ [กฎหมายและจริยธรรม](#14-กฎหมายและจริยธรรม)
-
----
-
-## สารบัญ
-
-1. [ภาพรวมโฟลเดอร์ — มีกี่โปรเจกต์](#1-ภาพรวมโฟลเดอร์)
-2. [โครงสร้างไฟล์](#2-โครงสร้างไฟล์)
-3. [Project A — `demo-scaping` (terminal demo)](#3-project-a--demo-scaping-terminal-demo)
-4. [Project B — `api-scraper` (production hybrid scraper)](#4-project-b--api-scraper-production-hybrid-scraper)
-5. [ฐานข้อมูล (PostgreSQL schema)](#5-ฐานข้อมูล-postgresql-schema)
-6. [Data pipeline — `runConnector()`](#6-data-pipeline--runconnector)
-7. [Workers — worker / tasks / extract](#7-workers)
-8. [Providers — JobBKK vs JobThai + วิธีเพิ่มใหม่](#8-providers)
-9. [Anti-ban, Crypto, OCR](#9-anti-ban-crypto-ocr)
-10. [Control API & CLI](#10-control-api--cli)
-11. [Web Console — So Recruit (Next.js)](#11-web-console--so-recruit-nextjs)
-12. [ทุกชิ้นเชื่อมกันอย่างไร](#12-ทุกชิ้นเชื่อมกันอย่างไร)
-13. [Runbook — งานที่ทำบ่อย](#13-runbook--งานที่ทำบ่อย)
-14. [กฎหมายและจริยธรรม](#14-กฎหมายและจริยธรรม)
-15. [Quick Reference](#15-quick-reference)
-16. [ข้อควรระวัง / Known issues](#16-ข้อควรระวัง--known-issues)
+เอกสารนี้อธิบายระบบปัจจุบันที่อยู่ใน repository นี้ ไม่ใช่เฉพาะ scraper เดิม หากข้อมูลในเอกสารขัดกับโค้ด ให้ยึดลำดับความน่าเชื่อถือดังนี้: **code และ migration → `.env.example` → Handbook → README/DEPLOY เก่า**
 
 ---
 
-## 1. ภาพรวมโฟลเดอร์
+## 1. Executive summary
 
-โฟลเดอร์นี้มี **2 โปรเจกต์** ที่เป็น "คนละรุ่น" ของไอเดียเดียวกัน:
+โปรเจกต์นี้คือแพลตฟอร์มงานสรรหาที่รวม 4 งานไว้ใน repository เดียว:
 
-| | Project A — `demo-scaping` | Project B — `api-scraper` |
-|---|---|---|
-| **ตำแหน่ง** | ย้ายไป `legacy-demo/` แล้ว | **root ของ repo** (โปรเจกต์หลัก) |
-| **ชื่อใน package.json** | `demo-scaping` v1.0.0 | `api-scraper` v0.1.0 + `so-recruit-web` |
-| **วิธีทำงาน** | เปิด browser (Playwright) คุมทุกหน้า | login ครั้งเดียวด้วย browser แล้ว scrape ผ่าน **HTTP ตรง** |
-| **เก็บข้อมูล** | ไฟล์ (Markdown / CSV / JSONL) | **PostgreSQL** (dedupe + รูป + ไฟล์แนบ) |
-| **คนใช้งาน** | คนนั่งดู: popup → กด Start → เห็น browser ทำงาน | อัตโนมัติเต็ม: connector + worker + web UI |
-| **Human interaction** | มี (CAPTCHA/OTP แก้มือ) | Human = 0 (ออกแบบให้ไม่ต้องแตะ) |
-| **ขนาด/ความสมบูรณ์** | demo / prototype | MVP ใกล้ production (Docker + Web) |
+1. **Candidate Scraping** — ดึงประวัติผู้สมัครจาก JobBKK และ JobThai, รวมข้อมูลซ้ำ, เก็บไฟล์แนบ และ OCR
+2. **So Recruit Web Console** — หน้าจอ Next.js สำหรับดูผู้สมัคร, connector, งาน scraping, quota และดาวน์โหลด resume PDF
+3. **Facebook Auto‑Post** — จัดการบัญชี/กลุ่ม/งานโพสต์, เปิด browser โพสต์จริง, เก็บคอมเมนต์และเบอร์โทร
+4. **Recruitment Content Orchestrator** — รับใบขอกำลังคนจาก ERP, ให้ AI สร้างข้อความ/รูป, ขออนุมัติ, ส่งไป Auto‑Post และวัด engagement เพื่อวนสร้างเวอร์ชันใหม่
 
-**สรุปสั้น ๆ:** Project A คือ prototype ที่ขับ browser ทั้งหมดและ export เป็นไฟล์ — ใช้เดโม่/ทดลอง selector ส่วน Project B คือสถาปัตยกรรมจริงที่ตั้งใจรันยาว ๆ: login ผ่าน browser นาน ๆ ครั้ง แล้ว scrape ผ่าน HTTP เร็ว ๆ เก็บลง DB กลาง มี Web Console (So Recruit) ให้ทีม HR ใช้
+ระบบใช้ PostgreSQL กลางหนึ่งฐานข้อมูล แต่แยก schema เพื่อให้แต่ละโมดูลเสียหายแยกจากกัน:
 
-> 💡 **Project B ถูกเลื่อนขึ้นเป็น root ของ repo แล้ว (โปรเจกต์หลัก)** ส่วน Project A ย้ายไปเก็บใน `legacy-demo/` เป็น reference ของ selector/flow — งานพัฒนาใหม่ทั้งหมดทำที่ root
+- `DB_SCHEMA` — ข้อมูลผู้สมัครและ orchestrator; ค่าแนะนำปัจจุบันคือ `so-candidate-data`
+- `AUTOPOST_SCHEMA` ใน root/web และ `DB_SCHEMA` ภายใน `autopost/` — ข้อมูล Auto‑Post; ค่าแนะนำปัจจุบันคือ `so_autopost_apiscraper`
+
+Browser worker ต้องรันบนเครื่องหรือ VM ที่เปิดต่อเนื่องและเข้าถึงเว็บเป้าหมายได้ ไม่ควรวางตัว browser bot บน Vercel ส่วน Web Console สามารถรันบน Vercel ได้
 
 ---
 
-## 2. โครงสร้างไฟล์
+## 2. ภาพระบบ
 
-```
-api-scraper/                          ← repo root = Project B (โปรเจกต์หลัก)
-├── src/
-│   ├── config.js                     # env + criteria + runtime
-│   ├── db/                           # schema*.sql, pool, crypto, migrate, repositories
-│   ├── connectors/registry.js        # platform → provider
-│   ├── core/                         # anti-ban, contacts, ollama, popup
-│   ├── providers/jobbkk|jobthai/     # session/client/parser/assets/index
-│   ├── pipeline.js                   # ★ runConnector() → DB
-│   ├── worker.js                     # รัน connector ทุกตัว 1 รอบ
-│   ├── tasks-worker.js               # รัน scrape_tasks (scrape→ocr→enrich)
-│   ├── extract-worker.js             # OCR ไฟล์แนบผ่าน Ollama (แยก process)
-│   ├── api/server.js                 # Control API (http เปล่า, port 8080)
-│   ├── cli/connector.js              # CLI add/list connector
-│   └── captcha.js / login.js / scrape.js / export.js   # legacy/utility
-├── web/                              # So Recruit — Next.js 14 console
-│   ├── app/(app)/                    # dashboard, candidates, scraping, connectors
-│   ├── app/api/                      # auth(NextAuth), scrape-tasks, assets/[id]
-│   ├── lib/                          # db, repo, actions, auth, crypto
-│   ├── components/                   # Topbar, AttachmentViewer, ...
-│   ├── .env                          # ← Azure AD + PG* + APP_ENCRYPTION_KEY (สร้างแล้ว)
-│   └── .env.example
-├── Dockerfile / docker-compose.yml / .dockerignore
-├── .env                              # ← backend: PG* / criteria / APP_ENCRYPTION_KEY (สร้างแล้ว)
-├── .env.example
-├── package.json                      # name: api-scraper
-├── HANDBOOK.md                       # ← คู่มือเล่มนี้
-└── legacy-demo/                      # Project A (demo-scaping) — เก็บเป็น reference
-    ├── scrape.js / auth.js / download.js / config-popup.js
-    ├── jobbkk-filters.js / resume-premium-search.js / scrape-timing.js
-    ├── candidate-assets.js
-    ├── core/        # env, platform-resolve, scrape-pipeline, candidate-dedupe, candidate-export
-    ├── providers/   # registry, provider-contract, stub, jobbkk/, jobthai/, jobdb/, facebook/
-    ├── scripts/     # explore-jobthai*.js, test-*.js (R&D)
-    └── package.json # name: demo-scaping
+```mermaid
+flowchart LR
+    U["HR / Operator"] --> W["Web Console\nNext.js + Entra ID"]
+    W --> PG[("PostgreSQL")]
+
+    ERP["ERP / SQL Server"] --> ES["erp:sync"]
+    ES --> PG
+
+    W --> Q["work_queue"]
+    Q --> R["Unified runner pool"]
+    R --> JB["JobBKK"]
+    R --> JT["JobThai"]
+    R --> AI["Claude / Ollama / OpenAI Image"]
+    JB --> PG
+    JT --> PG
+    AI --> PG
+
+    W --> APDB["Auto-Post schema"]
+    APDB --> APW["Post / Collect workers"]
+    APW --> FB["Facebook"]
+    FB --> APW
+    APW --> APDB
+
+    APDB --> M["Engagement measurement"]
+    M --> PG
 ```
 
----
+แนวคิดสำคัญ:
 
-## 3. Project A — `demo-scaping` (terminal demo)
-
-> 📁 ทุกไฟล์ในหัวข้อนี้อยู่ใต้ `legacy-demo/` แล้ว (เช่น `legacy-demo/scrape.js`, `legacy-demo/core/`)
-
-### 3.1 ทำอะไร
-
-Playwright-based scraper บน terminal: เปิด Chromium → popup เก็บเงื่อนไขค้นหา → login employer → ใส่ filter → ค้นหา → เก็บลิงก์ resume → scrape ทีละหน้า → export เป็นไฟล์ UI เป็นภาษาไทยทั้งหมด
-
-- **Platform จริง:** `jobbkk`, `jobthai`
-- **Platform stub (ยังไม่ทำ):** `jobdb`, `facebook` — เรียกแล้ว throw
-
-### 3.2 คำสั่ง (npm scripts)
-
-| คำสั่ง | ไฟล์ | ทำอะไร |
-|---|---|---|
-| `npm run scrape` | `scrape.js` | **entry หลัก** อ่าน `SCRAPE_PLATFORM` แล้วเรียก `runTalentScrape()` |
-| `npm run auth` | `auth.js` | เปิด browser ให้ login มือ → เซฟ `context.storageState()` ลง `.auth/jobbkk.json` ⚠️ *(ดู [§16](#16-ข้อควรระวัง--known-issues) — ไฟล์นี้ไม่ถูกใช้ที่อื่น)* |
-| `npm run download` | `download.js` | อ่าน `output/candidates.jsonl` เดิม → login JobBKK → re-download รูป/ไฟล์แนบ (ไม่ scrape ใหม่) |
-
-### 3.3 Flow ตั้งแต่ต้นจนจบ (`npm run scrape`)
-
-ขับโดย `runTalentScrape()` ที่ [core/scrape-pipeline.js:328](legacy-demo/core/scrape-pipeline.js):
-
-1. **Resolve platform** — `normalizePlatformMode(SCRAPE_PLATFORM)` → `['jobbkk']` / `['jobthai']` / ทั้งคู่
-2. **Preflight** — เช็ค env, credentials, URL; เตือนถ้า delay น้อยไปหรือ `DEBUG_MODE=true`
-3. **เปิด Chromium** — default ไม่ headless, locale `th-TH`, `acceptDownloads`
-4. **Config popup** — `collectSharedCriteria()` แสดง HTML page (ผ่าน `page.setContent`, ไม่ใช่หน้าเว็บจริง) ผู้ใช้กรอกเงื่อนไข + กด **Start** → เซฟ `output/search-criteria.json`
-5. **ต่อ platform** (`runPlatformScrapePhase`):
-   - `provider.prepareSession()` — login + ไปหน้า resume search
-   - `provider.applyFilters()` — ใส่ filter → เซฟ `filter-apply-report.json`
-   - `provider.runSearch()` — กดค้นหา
-   - `provider.collectResumeLinks()` — เก็บลิงก์ (มี buffer เกิน maxCandidates ~50%) → `result-links.txt`
-   - ถ้า 0 ลิงก์ → เปิด browser ค้างไว้ + เขียน `page-inspection.txt`
-   - **วนเก็บ candidate** — เปิดหน้า detail → `parseResumeDetailPage()` → `dedupe()` → `downloadAssets()` (มี jitter คั่น)
-   - **Export** — `candidates-readable.md`, `candidates.csv`, `candidates.jsonl`, `run_summary.json`
-6. **Output dir** — platform เดียว → `output/`; หลาย platform → `output/<platformId>/`
-
-### 3.4 Provider system (Project A)
-
-- `provider-contract.js` = **JSDoc typedef เท่านั้น** (ไม่มี runtime code) นิยาม method ที่ provider ต้องมี: `prepareSession`, `applyFilters`, `runSearch`, `collectResumeLinks`, `parseResumeDetailPage`, `downloadAssets`, ฯลฯ
-- `registry.js` → `resolveProvider(platformId)` แปลง id เป็น provider object (throw ถ้าไม่รู้จัก)
-- `platform-resolve.js` → `PLATFORM_IDS = ['jobbkk','jobthai']` (flow ปกติเลือกได้แค่ 2 ตัวนี้)
-- `stub-provider.js` → ใช้กับ jobdb/facebook (throw ทุก method)
-
-### 3.5 Config (env) — Project A
-
-ดู `.env.example` คีย์สำคัญ:
-
-| ตัวแปร | ความหมาย | default |
-|---|---|---|
-| `SCRAPE_PLATFORM` | `jobbkk` / `jobthai` / `both` | `jobbkk` |
-| `JOBBKK_EMPLOYER_LOGIN_URL` | หน้า login employer | (required) |
-| `JOBBKK_RESUME_SEARCH_URL` | หน้า premium resume search | (required) |
-| `JOBBKK_USERNAME` / `JOBBKK_PASSWORD` | บัญชี JobBKK | (required) |
-| `JOBTHAI_LOGIN_URL` / `JOBTHAI_USERNAME` / `JOBTHAI_PASSWORD` | บัญชี JobThai | — |
-| `HEADLESS` | รัน browser แบบ headless | `false` |
-| `DEFAULT_MAX_CANDIDATES` | จำนวน resume เริ่มต้นใน popup | `15` |
-| `DEBUG_MODE` | เซฟ PNG/HTML ทุกขั้น (ช้าลง) | `false` *(code)* |
-| `PAUSE_AT_END` | เปิด browser ค้างจนกด Enter | `false` *(code)* |
-| `DELAY_MS_MIN` / `DELAY_MS_MAX` | jitter คั่น candidate | `1200` / `2200` |
-
-> ⚠️ ค่า default ใน README ของ Project A ขัดกับ `.env.example`/code บางตัว (`PAUSE_AT_END`, `DEBUG_MODE`) — **ยึดค่าใน code** (`scrape-pipeline.js:333-336`)
-
-### 3.6 ไฟล์ output (Project A)
-
-`search-criteria.json`, `filter-apply-report.json`, `result-links.txt`, `candidates-readable.md`, `candidates.csv`, `candidates.jsonl` (มี `raw_text` เต็ม), `run_summary.json`, รูป/ไฟล์แนบใน `candidates/<NNN>/`, และ debug PNG/HTML เมื่อ `DEBUG_MODE=true`
-
-### 3.7 `scripts/` คืออะไร
-
-7 ไฟล์ R&D สำหรับ JobThai โดยเฉพาะ (`explore-jobthai*.js`, `test-jobthai-*.js`) — ใช้ตอน reverse-engineer selector ของ JobThai ที่ตอนนี้อยู่ใน `providers/jobthai/` รันมือด้วย `node scripts/<file>.js` (ไม่มี npm alias) **ไม่ใช่ส่วนของ production flow**
+- Web ทำหน้าที่สั่งงานและอ่านข้อมูล ไม่ควรเปิด browser bot เอง
+- `work_queue` รับงาน `scrape`, `draft`, `measure` และล็อกทีละ `connector_key`
+- งาน Facebook ใช้ `post_run_queue`/คิวของ Auto‑Post แยกต่างหาก
+- ข้อมูลผู้สมัครหนึ่งคนมี canonical row ใน `candidates` และมีหลายแหล่งที่มาใน `candidate_sources`
+- ข้อมูลลับของ connector ถูกเข้ารหัสด้วย AES‑256‑GCM ผ่าน `APP_ENCRYPTION_KEY`
 
 ---
 
-## 4. Project B — `api-scraper` (production hybrid scraper)
+## 3. โครงสร้าง repository
 
-### 4.1 โมเดล "login once, scrape over HTTP"
+```text
+api-scraper/
+├─ src/                     backend scraper, DB, ERP และ orchestrator
+│  ├─ api/server.js         Control API แบบ Node HTTP
+│  ├─ cli/                  CLI จัดการ connector/utility
+│  ├─ connectors/           registry ของ provider
+│  ├─ core/                 anti-ban, OCR, AI content, job family, measurement
+│  ├─ db/                   pool, repositories, crypto, schema 001–009
+│  ├─ erp/                  SQL Server intake และ sync เข้า PostgreSQL
+│  ├─ providers/            JobBKK และ JobThai
+│  ├─ pipeline.js           scrape connector หนึ่งตัวตั้งแต่ต้นจนจบ
+│  └─ tasks-worker.js       scrape → OCR → enrich → adjacent expansion
+├─ workers/
+│  ├─ runner.js             unified work_queue runner
+│  └─ scraper-pool.mjs      autoscale runner ตามจำนวนบัญชี scraper
+├─ web/                     Next.js 14 Web Console
+│  ├─ app/                  pages และ API routes
+│  ├─ components/           UI components
+│  └─ lib/                  auth, DB access, server actions, PDF, worker kick
+├─ autopost/                Express + Playwright Facebook automation
+│  ├─ server/               API, DB layer, comment collector
+│  ├─ src/helpers/          login, posting, human behavior, collection
+│  ├─ scripts/              workers, migrations, maintenance และ POC
+│  ├─ tests/                Playwright/logic tests
+│  └─ public/               SPA เดิมของ Auto‑Post
+├─ docs/                    runbook และแผนปฏิบัติการเฉพาะเรื่อง
+├─ legacy-demo/             prototype เก่า ใช้อ้างอิง selector/flow เท่านั้น
+├─ scripts/                 diagnose/test utilities ของระบบหลัก
+├─ Dockerfile
+├─ docker-compose.yml
+├─ start-workers.bat        launcher สำหรับเครื่อง Windows 24 ชั่วโมง
+└─ HANDBOOK.md              เอกสารฉบับนี้
+```
 
-จุดต่างหลักจาก scraper ที่ขับ browser ทุกหน้า:
+### ส่วนที่เป็น production path
 
-1. **Browser login (นาน ๆ ครั้ง)** — Playwright headless login 1 ครั้งต่อ connector แล้วเก็บ `storageState` (cookies/localStorage) ลง DB (`connectors.session_state`)
-2. **HTTP scraping (ทางหลัก)** — search / pagination / detail ทำผ่าน **HTTP request ตรง** ที่แนบ session ที่เก็บไว้ — เร็ว เบา ตรวจจับยากกว่า browser automation มาก
+- ใช้งานใหม่ให้เริ่มที่ `src/`, `workers/`, `web/`, `autopost/`
+- `legacy-demo/` ไม่ใช่ entry point สำหรับ production
+- สคริปต์ชื่อ `patch-*`, `fix-*`, `assign-*` ใน `autopost/scripts/` เป็น maintenance แบบครั้งเดียว อย่ารันเหมารวม
 
-browser จะถูกเรียกใหม่ก็ต่อเมื่อ session ตายจริง ๆ (logic `needsRelogin` / takeover ใน [pipeline.js](src/pipeline.js)) กลยุทธ์ CAPTCHA คือ "login ให้น้อยจน CAPTCHA แทบไม่โผล่" ([captcha.js](src/captcha.js))
+---
 
-### 4.2 คำสั่ง (npm scripts)
+## 4. Technology stack
 
-| คำสั่ง | ทำอะไร |
+| ส่วน | เทคโนโลยีหลัก |
 |---|---|
-| `npm run migrate` | สร้าง/อัปเดต schema (`schema.sql` → `002` → `003`, idempotent) |
-| `npm run connector add -- --platform jobbkk --label X --username U --password P --limit 15 --daily 200` | เพิ่ม connector (เข้ารหัส password) |
-| `npm run connector list` | list connector ทั้งหมด |
-| `npm run worker` | รันทุก connector ที่ enabled 1 รอบ ด้วย criteria จาก `.env` (`PLATFORM=jobbkk` จำกัดได้) |
-| `npm run tasks` | รัน `scrape_tasks` ที่ถึงคิว เป็น pipeline เต็ม (scrape → ocr → enrich) |
-| `npm run extract` | OCR ไฟล์แนบที่ค้าง 1 batch ผ่าน Ollama |
-| `npm run api` | เปิด Control API (default port 8080) |
-| `npm run scrape` / `npm run login` | legacy standalone (เขียนไฟล์, JobBKK only) / pre-warm session |
+| Scraper backend | Node.js ESM, Playwright, Cheerio, PostgreSQL `pg` |
+| Web Console | Next.js 14 App Router, React 18, TypeScript, Tailwind, NextAuth |
+| Authentication | Microsoft Entra ID / Azure AD, JWT session อายุ 8 ชั่วโมง |
+| Auto‑Post | Node.js CommonJS, Express, Playwright Test, PostgreSQL |
+| OCR | Ollama + Typhoon OCR; PDF ใช้ `pdftoppm` |
+| Content text | Anthropic API หรือ Ollama ภายในบริษัท |
+| Content image | OpenAI Images adapter |
+| ERP intake | Microsoft SQL Server ผ่าน `mssql` |
+| Deployment | Vercel สำหรับ web; Windows worker หรือ Docker/Xvfb สำหรับ browser workers |
 
-**Dependencies:** `cheerio`, `csv-writer`, `dotenv`, `pg`, `playwright` (OCR ใช้ `fetch` ตรงไป Ollama ไม่มี SDK)
+Node.js ขั้นต่ำของ root คือ 18 ขึ้นไป เพราะใช้ native `fetch` และ ESM
 
 ---
 
-## 5. ฐานข้อมูล (PostgreSQL schema)
+## 5. Candidate scraping flow
 
-- **Schema name:** `"so-candidate-data"` (มี hyphen → ต้อง double-quote เสมอ) ตั้งผ่าน env `DB_SCHEMA`
-- ทุก connection ตั้ง `search_path="<schema>",public` ([db/pool.js:9](src/db/pool.js))
-- ต้องมี extension `pgcrypto` (ใช้ `gen_random_uuid()`)
-- ใช้ DB ร่วมกันทั้ง backend และ web
+### 5.1 จุดเริ่มต้น
 
-### 5.1 ตารางหลัก (`schema.sql`)
+งาน scraping ปกติเริ่มจาก Web Console หน้า `/scraping`:
 
-| ตาราง | หน้าที่ | คอลัมน์เด่น |
+1. ผู้ใช้สร้าง `scrape_tasks`
+2. ถ้าเลือก Run now, Web เพิ่มงาน `type='scrape'` เข้า `work_queue`
+3. `workers/runner.js` claim งานแบบ atomic
+4. ถ้างานมี `ref_id`, runner เรียก `runTask()` ใน `src/tasks-worker.js`
+5. `runTask()` เรียก `runConnector()` ใน `src/pipeline.js`
+
+ทางเลือกสำหรับ operator/developer:
+
+- `npm run worker` — scrape connector ที่เปิดใช้งานทั้งหมดหนึ่งรอบ
+- `npm run tasks` — ประมวลผล task ที่ queued/due แบบ legacy fallback
+- `npm run worker:pool` — unified runner หนึ่ง process
+- `npm run scraper:pool` — autoscale unified runner ตามจำนวน connector
+- `POST /runs` ที่ Control API — ad-hoc run แบบ asynchronous
+
+### 5.2 สิ่งที่ `runConnector()` ทำ
+
+1. เลือก provider จาก `src/connectors/registry.js`
+2. สร้าง `scrape_runs` สถานะ `running`
+3. คำนวณ target ที่ต่ำที่สุดจาก:
+   - จำนวนที่งานขอ
+   - `connectors.scrape_limit`
+   - quota รายบัญชี `connectors.daily_cap`
+   - quota รวม platform ใน `provider_limits`
+4. เปิด session และ reuse `connectors.session_state`
+5. login ใหม่เมื่อ session เสีย และบันทึก state กลับ DB
+6. ค้นหา resume IDs
+7. ดึงรายละเอียดทีละคนตาม random delay
+8. parse ข้อมูล, reveal contact ถ้า provider รองรับ, ดาวน์โหลด assets
+9. ใน transaction เดียว: dedupe/upsert candidate → upsert source → save assets
+10. logout เพื่อคืน active session ให้ platform และปิด browser
+11. ปิด `scrape_runs` เป็น `success`, `partial`, `failed` หรือ `cooldown`
+
+ค่าป้องกันการค้างหลัก:
+
+- login timeout เริ่มต้น 5 นาที
+- candidate timeout เริ่มต้น 3 นาทีต่อ resume
+- relogin ระหว่าง run ได้สูงสุด 8 ครั้ง
+- soft-ban cooldown 2 ชั่วโมง
+
+### 5.3 Provider behavior
+
+| Provider | Search/detail | ประเด็นสำคัญ |
 |---|---|---|
-| **`connectors`** | 1 แถว = 1 บัญชี platform (1 platform มีหลาย connector ได้) | `platform`, `label`, `username`, `password_enc` (AES-256-GCM), `scrape_limit`, `daily_cap`, `enabled`, `session_state` jsonb, `cooldown_until`; UNIQUE `(platform, label)` |
-| **`scrape_runs`** | 1 แถว = 1 รอบ scrape | `connector_id`→connectors, `criteria` jsonb, `status` (running/success/partial/failed/cooldown), `requested/found/new_count/updated_count/failed`, `started_at/finished_at` |
-| **`candidates`** | คนคนเดียว (deduped ข้าม platform) | **`dedupe_key` UNIQUE**, ชื่อ, `phone`+`phone_norm`, `email`+`email_norm`, `line_id`, demographics, job prefs, jsonb arrays `education`/`work_experience`/`hard_skills`/`soft_skills`/`language_skills` |
-| **`candidate_sources`** | "tag" ที่มา — หลายแถวต่อ 1 candidate | `candidate_id`, `platform`, `connector_id`, `external_id`, `source_url`, `raw_text`; UNIQUE **`(platform, external_id)`** |
-| **`candidate_assets`** | รูปโปรไฟล์ + ไฟล์แนบ | `kind` (profile/attachment), `file_type`, `mime`, `sha256`, `storage_kind` (default `db`=bytea), `content` bytea; UNIQUE **`(candidate_id, sha256)`** |
+| JobBKK | ค้นผ่าน browser แบบ headful; detail ใช้ browser session | contact ที่ไม่ mask ต้องมาจาก browser จริง; headless มักติด bot check |
+| JobThai | ค้น/detail ผ่าน HTTP ใน Playwright request context | reveal contact ผ่าน AJAX หนึ่งครั้ง และอาจใช้ view quota ของบัญชี |
 
-### 5.2 Migration 002 (`schema-002.sql`) เพิ่ม
+Provider interface ที่ pipeline คาดหวังประกอบด้วย `getSession`, `searchResumeIds`, `fetchResumeHtml`, `resumeDetailUrl`, `parseResumeHtml`, `collectAssetsForDb`, `externalId` และ optional `enrichContacts`, `logout`, `isResumeAuthBlocked`
 
-- **`provider_limits`** — daily cap ต่อ **platform** (รวมทุก connector) seed: jobbkk=200, jobthai=150
-- **`scrape_tasks`** — งาน schedule ได้ ผูกกับ 1 connector: `mode` (count/date_range), `target_count`, `updated_since`, `criteria`, `schedule_cron`, `status` (idle/queued/running/done/error), `progress_got/target`, `next_run_at`
-- `scrape_runs.task_id` → ผูก run กลับไปที่ task
-- คอลัมน์ AI ใน `candidate_assets`: `extracted_text`, `extracted` jsonb, `extract_status`, `extracted_at`
+### 5.4 Dedupe
 
-### 5.3 Migration 003 (`schema-003.sql`) เพิ่ม
+ลำดับ match ผู้สมัคร:
 
-- `scrape_tasks.phase` (idle/scraping/ocr/enrich/done/error) — ให้ UI แสดง progress แบบหลายเฟส
+1. `phone_norm`
+2. `email_norm`
+3. `dedupe_key` แบบ `name:<name>:<birth_date>`
 
-### 5.4 Dedupe ทำงานยังไง
+เมื่อพบคนเดิม ระบบเติม field ที่มีข้อมูลและ refresh array ที่ไม่ว่าง ไม่สร้าง canonical candidate ใหม่ แต่จะ upsert แหล่งที่มาใน `candidate_sources`
 
-[repositories.js](src/db/repositories.js) `upsertCandidate()`:
+ข้อควรเข้าใจ: source uniqueness คือ `(platform, external_id)` จึงติดตามว่าคนเดียวกันเคยพบจากหลาย platform/connector ได้
 
-1. สร้าง `dedupe_key`: `phone:<digits>` → ถ้าไม่มีใช้ `email:<lower>` → ถ้าไม่มีใช้ `name:<name>:<birth_date>`
-2. หา candidate เดิมตามลำดับ `phone_norm` → `email_norm` → `dedupe_key`
-3. **ถ้าเจอ → update** (เติมเฉพาะคอลัมน์ที่ว่าง, refresh jsonb array ที่ไม่ใช่ `[]`) ไม่สร้างซ้ำ
-4. ทุกที่ที่เจอ candidate คนนี้ → เพิ่มแถวใน `candidate_sources` (tag: platform + connector + external_id + url)
+### 5.5 Multi-phase task
 
----
+`runTask()` แสดง progress 3 เฟส:
 
-## 6. Data pipeline — `runConnector()`
-
-หัวใจอยู่ที่ [`runConnector(connector, criteria, runtime, opts)`](src/pipeline.js) (ชื่อ export คือ `runConnector` ไม่ใช่ `run`):
-
+```text
+login/scraping → ocr → enrich → done
 ```
-startRun → คำนวณ cap → getSession → search → (paginate ภายใน provider)
-   → loop detail: limiter.wait → fetchHtml → parseHtml
-        → [enrichContacts ถ้ามี] → collectAssetsForDb
-        → withTransaction(upsertCandidate + upsertSource + saveAsset)
-   → finishRun
+
+- **scraping** — ดึงและบันทึก candidate/assets
+- **ocr** — อ่าน attachment ที่ `extract_status='pending'`
+- **enrich** — เติมเฉพาะ email/phone/line ที่ยังว่างจากข้อความ OCR; ไม่ overwrite ข้อมูลเดิม
+
+### 5.6 Adjacent-position expansion
+
+ถ้า `expand_adjacent=true` และได้คนไม่ครบ target:
+
+1. ส่งตำแหน่งไปจัด Job Family A–F ด้วย Anthropic
+2. cache ผลใน `job_family_cache`
+3. auto-run เฉพาะ tier สีเขียว
+4. บันทึกสีเหลือง/แดงเป็นคำแนะนำใน `scrape_tasks.adjacent_plan`
+5. จำกัดรอบด้วย `MAX_ADJACENT_ROUNDS`
+
+ถ้าไม่มี `ANTHROPIC_API_KEY` ฟีเจอร์นี้ปิดตัวเองและงาน scrape หลักยังทำต่อได้
+
+---
+
+## 6. Queue, locking และ concurrency
+
+### 6.1 Unified `work_queue`
+
+Runner ปัจจุบันรองรับ handler:
+
+| type | module | handler |
+|---|---|---|
+| `scrape` | `scraper` | scrape task หรือ ad-hoc connector |
+| `draft` | `orchestrator` | สร้าง content draft + รูป |
+| `measure` | `orchestrator` | อ่าน engagement และตัดสินผล |
+| `selftest` | utility | ตรวจ plumbing ของคิว |
+
+`post` และ `collect` ยังไม่ได้ลง handler ใน unified runner โดยตั้งใจ งาน Facebook จึงอยู่ในคิวของ Auto‑Post เอง
+
+### 6.2 Per-account lock
+
+`connector_key` มีรูป `<platform>:<id>` เช่น:
+
+```text
+jobbkk:<connector-uuid>
+jobthai:<connector-uuid>
+orchestrator:<campaign-uuid>
 ```
 
-จุดสำคัญ:
+runner ใช้ `FOR UPDATE SKIP LOCKED` และไม่ claim งานเมื่อ key เดียวกันมีงาน `running` อยู่ ดังนั้น:
 
-- **Cap = `min(requested, connectorRemaining, providerRemaining)`** — `requested` จาก criteria หรือ `connector.scrape_limit`; `connectorRemaining = daily_cap − ที่ scrape วันนี้`; `providerRemaining = provider_limits − ที่ทั้ง platform scrape วันนี้` ถ้า `cap ≤ 0` → status `cooldown`
-- **Session self-heal:** search error ที่ `e.needsRelogin` → force login ใหม่ (takeover) แล้ว retry 1 ครั้ง; detail ที่ parse แล้วไม่มี `name` → force login + refetch 1 ครั้ง (กันโดน kick session)
-- **`enrichContacts` hook (optional):** สำหรับ platform ที่ซ่อน contact ใน HTML (เช่น JobThai) — pipeline เรียกหลัง parse
-- **Soft-ban:** error ที่ `e.fatal` → status `cooldown` + `setConnectorCooldown(+2h)` แล้วหยุด loop
-- `opts.onProgress(saved, target)` — ให้ tasks-worker อัปเดต progress
+- account เดียวไม่ถูกเปิดพร้อมกันสองงาน
+- account คนละตัวทำงานขนานได้
+- เพิ่มจำนวน runner เพื่อเพิ่ม throughput ข้าม account
 
----
+งาน `running` ที่ lock เก่ากว่า `WORKER_STALE_SECONDS` จะถูกคืนเป็น `queued`
 
-## 7. Workers
+### 6.3 Worker modes
 
-มี 3 entry point แยกหน้าที่:
+```powershell
+node workers/runner.js           # daemon, poll ต่อเนื่อง
+node workers/runner.js --once    # ทำหนึ่งงานแล้วออก
+node workers/runner.js --drain   # ทำงานที่รองรับจนคิวว่างแล้วออก
+```
 
-| Worker | ไฟล์ | บทบาท |
-|---|---|---|
-| **worker** | [worker.js](src/worker.js) | batch ง่าย ๆ: list connector ที่ enabled (ข้ามตัวที่ยัง cooldown) แล้ว `runConnector` ทีละตัวด้วย criteria จาก `.env` ไม่มี queue |
-| **tasks-worker** | [tasks-worker.js](src/tasks-worker.js) | queue/scheduler: ดึง `dueTasks()` แล้วรันเป็น 3 เฟส **scraping → ocr → enrich** พร้อมรายงาน progress |
-| **extract-worker** | [extract-worker.js](src/extract-worker.js) | OCR แยก process: ดึง asset ที่ `extract_status='pending'` 1 batch (`EXTRACT_BATCH`=20) ส่งเข้า Ollama แยกไว้เพื่อไม่ให้ OCR ถ่วง scrape |
-
-**Task queue model (`scrape_tasks`):** task ผูกกับ 1 connector มี `mode` (count/date_range), criteria, `schedule_cron` (option) — `dueTasks()` เลือกตัวที่ `enabled` และ (`status='queued'` หรือถึงเวลาตาม cron)
-
-**เฟสใน tasks-worker:**
-- **scraping** — `runConnector(..., {taskId, onProgress})`
-- **ocr** — สำหรับแต่ละ asset ของ run นี้: `extractAttachment(content, file_type)` → `saveExtraction` (model `typhoon-ocr`)
-- **enrich** — candidate ที่ขาด email/phone/line: ดึง OCR text รวม → `contactsFromText` → `fillCandidateContacts` (เติมเฉพาะที่ขาด)
-
-> Scheduling เขียนเอง (ไม่มี cron library): `nextRunFrom(cron)` รองรับแค่ `every:<sec>`, `@hourly`, `@daily` อื่น ๆ → `null` (รันมือ/ครั้งเดียว)
+Web มี `kickWorker()` เพื่อเรียก `--drain` บนเครื่องที่มี source code แต่ production ยังควรมี persistent runner pool เพราะ Vercel ไม่ใช่เครื่อง browser worker
 
 ---
 
-## 8. Providers
+## 7. Auto‑Post flow
 
-### 8.1 สัญญา (interface) ที่ pipeline เรียก
+Auto‑Post เป็น subsystem ที่ vendored อยู่ใน `autopost/` และมีฐานข้อมูล/worker ของตนเอง
 
-provider = object ที่ export จาก `src/providers/<platform>/index.js`:
+### 7.1 โครงข้อมูลหลัก
 
-| Member | หน้าที่ | จำเป็น? |
-|---|---|---|
-| `id`, `label` | identity | ✅ |
-| `getSession(opts)` → `{browser, context, request, reused, dumpState}` | login + คืน `context.request` (HTTP client) | ✅ |
-| `searchResumeIds(request, criteria, runtime)` → `{ids, totalAvailable}` | search + paginate (ภายใน) | ✅ |
-| `resumeDetailUrl(id)` / `fetchResumeHtml(request, id)` | ดึง HTML หน้า detail | ✅ |
-| `parseResumeHtml(html, ctx)` → candidate record | parse ด้วย cheerio | ✅ |
-| `collectAssetsForDb(request, record)` → asset[] | ดาวน์โหลดรูป/ไฟล์เป็น bytea | ✅ |
-| `externalId(url)` | id เสถียรของ platform | ✅ |
-| `enrichContacts(request, id, record, runtime)` | เผย contact ที่ถูกซ่อน | ⬜ optional |
+- `users` — บัญชี Facebook, credential, cap, pause/circuit-breaker, worker pin
+- `groups` — กลุ่ม Facebook
+- `jobs` — เนื้อหาที่จะโพสต์
+- `assignments` — งาน × กลุ่ม × บัญชี
+- `post_run_queue` — คิวรอบโพสต์จริง
+- `post_logs` — ผลโพสต์, link, comment, lead, reactions, shares
+- `post_schedules` — ตารางเวลา
+- `run_logs` — operational logs
 
-> **กุญแจสำคัญ:** `getSession` คืน `context.request` (Playwright APIRequestContext) — ทุก method หลังจากนั้นทำผ่าน HTTP บน object นี้ ไม่เปิดหน้า browser อีก
+หลายตาราง/คอลัมน์ถูก ensure โดย `autopost/server/db.js` ตอน server เริ่ม นอกเหนือจาก `autopost/database/schema.sql`
 
-### 8.2 JobBKK vs JobThai
+### 7.2 การรัน
 
-| ด้าน | JobBKK | JobThai |
-|---|---|---|
-| **Login** | form login (`#username_emp`/`#password_emp`) ที่ `/login/employer_login` | **OAuth** auth-code ที่ `auth.jobthai.com/companies/login` → redirect `/callback` |
-| **CAPTCHA** | detect **และ solve อัตโนมัติ** | detect แต่ **throw** (ไม่มี solver) |
-| **"login ที่อื่นอยู่"** | จัดการ — กด `ตกลง`/`ยืนยัน` เพื่อ takeover | ไม่จัดการ |
-| **Search** | **POST** form ไป `/resumes/premium` แล้ว GET หน้าถัดไป | **GET** query string ไป `resume_list.php` แล้วตาม next link |
-| **ดึง id** | cheerio `data-id` บน anchor | regex `/resume/<n>,<id>` |
-| **Detail URL** | `/resumes/preview_new/{id}` (รองรับ 2 layout) | `/resume/0,{id}.html` |
-| **Contact** | **อยู่ใน HTML** parse ด้วย icon + text fallback (ไม่มี enrichContacts) | **ถูก mask** → เผยผ่าน `ajaxCheckViewStatusV2.php` |
-| **Assets** | รูป + **ไฟล์แนบหลายไฟล์** (PDF/DOC/DOCX) เช็ค magic bytes | **รูปโปรไฟล์อย่างเดียว** ผ่าน `resume_image.php?...&unlock=1` |
-| **Quota** | ไม่มีปัญหาเฉพาะ | ⚠️ **เผย contact กิน view quota / first-view-only** |
-| **Province** | `provinces.json` แปลงชื่อ→id | ไม่ใช้ |
+```powershell
+cd autopost
+npm ci
+npm start                  # Express UI/API
+npm run worker:post        # supervisor + posting worker
+npm run worker:collect     # comment/lead collection worker
+```
 
-### 8.3 ⚠️ JobThai — เรื่องที่ต้องระวังมาก
+Posting worker:
 
-- Contact ถูกซ่อนใน HTML → เผยด้วย **1 request เดียว** `GET .../common/ajaxCheckViewStatusV2.php?resumecode={id}&type=mobile` ที่คืนทุก contact คั่นด้วย `####` (`####phone####email####line####...`)
-- **View quota:** JobThai ให้ resume detail เต็ม **เฉพาะการเปิดครั้งแรก** การเปิดซ้ำได้หน้าที่ถูกตัดข้อมูล และน่าจะกิน quota การดู resume ของบัญชี → **scrape แต่ละ resume ครั้งเดียว** pipeline เก็บ text ครั้งแรกไว้ใน `candidate_sources.raw_text` เพื่อ re-parse offline
-- การออกแบบให้เรียก contact ครั้งเดียว (แทน 3 ครั้งแยก phone/email/line) ก็เพื่อประหยัด quota นี้
-- Education parser **over-capture** (เก็บเกินดีกว่าพลาด) — กรองเฉพาะที่มีวุฒิจริง/GPA, ตัด `หลักสูตร` (training)
+- poll API ตาม `WORKER_POLL_MS`
+- รันหลายบัญชีพร้อมกันตาม `WORKER_CONCURRENCY`
+- มี per-account daily cap, repost gap และ circuit breaker
+- schedule รอบอัตโนมัติทุกวันตาม `AUTO_POST_HOUR`, `AUTO_POST_MINUTE`, `AUTO_POST_TZ`
+- pin บัญชีกับ `WORKER_NAME` เพื่อให้บัญชีเดิมใช้เครื่อง/IP เดิม
 
-### 8.4 วิธีเพิ่ม provider ใหม่
+### 7.3 Anti-block controls
 
-1. สร้าง `src/providers/<platform>/` เลียนแบบ JobBKK (อ้างอิงครบสุด):
-   - `session.js` → `get<Platform>Session(opts)` คืน `{browser, context, request, reused, dumpState}`
-   - `client.js` → `searchResumeIds`, `resumeDetailUrl`, `fetchResumeHtml`, `fetchAsset` (ใช้ `withRetry`/`detectSoftBan`/`fatal` จาก `core/anti-ban.js`)
-   - `parser.js` → `parseResumeHtml`, `externalId`
-   - `assets.js` → `collectAssetsForDb`
-   - `index.js` → รวมเป็น provider object (ใส่ `enrichContacts` เฉพาะถ้า contact ถูกซ่อน)
-2. **register** ใน [src/connectors/registry.js](src/connectors/registry.js) — เพิ่ม key ใน `PROVIDERS` map (จุดเดียว) ไม่ต้องแก้ pipeline
+- human-like click/type/browse delays
+- random delay ระหว่างโพสต์และ batch break
+- daily cap รายบัญชี
+- หยุดบัญชีเมื่อ fail streak ถึง threshold
+- stable session state ใน `autopost/.auth/`
+- stable worker/IP ต่อบัญชีผ่าน preferred worker
+
+อย่าเพิ่ม concurrency โดยดูแค่ CPU: Chromium แต่ละตัวใช้ RAM สูง และ Facebook ประเมินทั้งพฤติกรรมบัญชีและ IP
 
 ---
 
-## 9. Anti-ban, Crypto, OCR
+## 8. Content Orchestrator flow
 
-### 9.1 Anti-ban — [core/anti-ban.js](src/core/anti-ban.js)
+```text
+ERP request
+  → erp_open_requests
+  → recruit_campaigns
+  → AI draft
+  → pending approval
+  → approved + Auto-Post queue
+  → Facebook posts
+  → collect engagement
+  → measure
+      ├─ high: done + save winning pattern
+      ├─ low: enqueue new draft version
+      └─ no data: remain measuring
+```
 
-ปรัชญา: "ทำตัวเหมือนคนระมัดระวัง, fail safe"
+### 8.1 ERP intake
 
-- **`RateLimiter`** — เว้นช่วง request แบบสุ่ม `minMs + random*(maxMs-minMs)` (ไม่เป็นจังหวะคงที่)
-- **`withRetry(fn, {retries=3, baseMs=1500})`** — exponential backoff + jitter; หยุดทันทีถ้า `e.fatal`
-- **`detectSoftBan({status, finalUrl, body})`** — 429/403, redirect ไป login, หรือ body มี captcha/"please log in"/"blocked"/"too many requests"
-- **`fatal(msg)`** — ติด `.fatal=true` → withRetry หยุด + pipeline เข้า cooldown 2h
-- **Caps:** round limit ∩ connector daily cap ∩ provider daily cap (บังคับใน pipeline)
+`npm run erp:sync` query ใบขอเปิดจาก SQL Server แล้ว upsert เข้า `erp_open_requests` ใน PostgreSQL เพื่อให้ Vercel อ่านได้โดยไม่ต้องต่อ network ภายในโดยตรง
 
-### 9.2 Crypto — [db/crypto.js](src/db/crypto.js)
+ใบขอที่หายจากผล ERP ล่าสุดจะถูกลบจาก staging เฉพาะรายการที่ยังไม่สร้าง campaign
 
-- **AES-256-GCM** key = `SHA-256(APP_ENCRYPTION_KEY)` (ไม่มี salt)
-- output = `base64( iv(12) | authTag(16) | ciphertext )`
-- ⚠️ **`APP_ENCRYPTION_KEY` ห้ามเปลี่ยนเมื่อมี connector แล้ว** ไม่งั้น password เดิม decrypt ไม่ได้
-- web (`web/lib/crypto.ts`) ใช้ scheme **เดียวกันเป๊ะ** เพื่อให้ worker decrypt ที่ web เข้ารหัสได้
+### 8.2 Draft
 
-### 9.3 OCR / Ollama — [core/ollama.js](src/core/ollama.js)
+เมื่อผู้ใช้สร้าง campaign:
 
-- endpoint `OLLAMA_HOST` (default `http://110.49.94.180:11434`), model `OCR_MODEL` (default `scb10x/typhoon-ocr1.5-3b:latest`)
-- `extractAttachment(buffer, fileType)`: รูป → OCR ตรง; PDF → `pdftoppm` (poppler) แปลงเป็น PNG ทีละหน้า (สูงสุด `OCR_MAX_PAGES`=6) แล้ว OCR; อื่น ๆ → `skipped`
-- `core/contacts.js` `contactsFromText()` — ดึง email/phone/LINE จาก OCR text (ทิ้ง `@jobbkk.com`, กรอง LINE id เข้ม)
+1. Web สร้าง `recruit_campaigns`
+2. enqueue `work_queue.type='draft'`
+3. runner เรียก `generateDraftForCampaign()`
+4. text provider สร้าง caption, video brief และ image prompt
+5. image provider สร้างรูปถ้ามี key
+6. บันทึก `campaign_contents` version ใหม่
+7. campaign เปลี่ยนเป็น `pending_approval`
+
+Text provider:
+
+- `CONTENT_TEXT_PROVIDER=anthropic` ใช้ `ANTHROPIC_API_KEY`
+- `CONTENT_TEXT_PROVIDER=ollama` ใช้ `OLLAMA_BASE_URL`
+- ถ้าเว้นว่าง ระบบเลือก Anthropic ก่อน ถ้าไม่มี key จึงเลือก Ollama
+
+Image provider ปัจจุบันรองรับ `openai` ผ่าน `OPENAI_API_KEY`; ถ้าไม่มี key draft ยังสำเร็จแต่ไม่มีรูป
+
+### 8.3 Approval และ Auto‑Post bridge
+
+เมื่ออนุมัติพร้อมเลือกบัญชี Facebook, Web สร้าง row ข้าม schema ได้แก่ `jobs`, `assignments`, `post_run_queue` และสร้าง `campaign_posts` ฝั่ง orchestrator เพื่อเก็บ link กลับด้วย `job_ref`
+
+ค่าชื่อ schema ข้ามระบบต้องตรงกัน:
+
+```text
+root/web: AUTOPOST_SCHEMA=so_autopost_apiscraper
+autopost: DB_SCHEMA=so_autopost_apiscraper
+```
+
+### 8.4 Engagement feedback
+
+คะแนนปัจจุบัน:
+
+```text
+score = comments + unique_leads × ENGAGE_LEAD_WEIGHT
+```
+
+ถ้า score ถึง `ENGAGE_HIGH_SCORE` ถือว่า high และบันทึก content ลง `content_winning_patterns`; ถ้าต่ำทุกโพสต์และไม่มีรายการ pending จะ enqueue draft version ใหม่
+
+Likes และ shares ถูกบันทึกเพื่อแสดงผล แต่ยังไม่อยู่ในสูตร score ปัจจุบัน
 
 ---
 
-## 10. Control API & CLI
+## 9. Database map
 
-### 10.1 Control API — [api/server.js](src/api/server.js)
+### 9.1 Candidate/orchestrator schema
 
-Node `http` เปล่า (ไม่มี Express), port `PORT` (default 8080):
+| ตาราง | หน้าที่ |
+|---|---|
+| `connectors` | บัญชี provider, encrypted password, session, cap, cooldown |
+| `scrape_runs` | execution history ของแต่ละ scrape |
+| `candidates` | canonical candidate หลัง dedupe |
+| `candidate_sources` | provenance ต่อ platform/external ID/run |
+| `candidate_assets` | รูป/เอกสาร bytea และผล OCR |
+| `provider_limits` | cap รวมต่อ platform |
+| `scrape_tasks` | task, schedule, phase, progress, adjacent plan |
+| `work_queue` | unified queue สำหรับ scraper/orchestrator |
+| `job_family_cache` | cache adjacent-position AI |
+| `erp_open_requests` | staging ใบขอจาก ERP |
+| `recruit_campaigns` | campaign ต่อใบขอ |
+| `campaign_contents` | draft หลาย version |
+| `campaign_posts` | post reference และ engagement |
+| `content_winning_patterns` | content ที่ผลดีสำหรับ reuse |
+
+Views:
+
+- `v_connectors` — legacy unified view; หน้า Settings ปัจจุบัน query scraper schema และ `AUTOPOST_SCHEMA` โดยตรงเพื่อรองรับการแยก schema
+- `v_contacts` — candidate phone + Facebook leads
+
+### 9.2 Migration policy
+
+Root migration รันไฟล์ `schema.sql` และ `schema-002.sql` ถึง `schema-009.sql` ตามลำดับ ทุกไฟล์ออกแบบให้ idempotent
+
+```powershell
+npm run migrate
+```
+
+ก่อน deploy code ที่อ่าน column/table ใหม่ ต้องรัน migration ก่อน และต้อง backup ฐานข้อมูลตามนโยบายองค์กร
+
+---
+
+## 10. Web Console
+
+### 10.1 Mode และหน้าใช้งาน
+
+**Scraping**
+
+- `/dashboard` — ภาพรวม
+- `/candidates` และ `/candidates/[id]` — ค้นหา/ดูผู้สมัครและไฟล์แนบ
+- `/scraping` — สร้าง/รัน/ติดตาม task
+- `/settings` — ศูนย์กลาง Connector: ดูและเพิ่ม JobBKK, JobThai และ Facebook พร้อม daily quota
+- `/connectors` — URL เดิม; redirect ไป `/settings`
+
+**Auto‑Post**
+
+- `/autopost` — ภาพรวม
+- `/autopost/runs` — รอบโพสต์และผลรายกลุ่ม
+- `/autopost/jobs` — งานโพสต์
+- `/autopost/posting` — ตั้งค่าการโพสต์
+- `/autopost/accounts` — บัญชี Facebook และ worker pin
+- `/autopost/collect` — เก็บคอมเมนต์
+- `/autopost/reports` — รายงาน
+
+**Content**
+
+- `/orchestrator` — campaign dashboard
+- `/orchestrator/imports` — ใบขอจาก ERP
+- `/orchestrator/[id]` — draft/approval/post/measurement
+- `/orchestrator/flow` — flow board; ปัจจุบันมีข้อมูล mock บางส่วนเพื่อสื่อสถานะ
+
+### 10.2 Authentication
+
+- sign-in ผ่าน Microsoft Entra ID
+- NextAuth ใช้ JWT cookie ไม่ใช้ shared server session
+- server actions ที่แก้ข้อมูลเรียก `requireSession()`
+- app layout redirect ผู้ใช้ที่ไม่มี session
+
+### 10.3 PDF
+
+Resume PDF สร้าง server-side ด้วย Chromium; local ใช้ browser ที่ติดตั้ง ส่วน Vercel ใช้ `@sparticuz/chromium-min` และ remote pack
+
+### 10.4 Root Control API
 
 | Method | Path | หน้าที่ |
 |---|---|---|
-| GET | `/health` | liveness → `{ok:true}` |
-| GET | `/connectors` | list connector |
-| GET | `/candidates?limit=&offset=&platform=` | list candidate (limit cap 200) |
-| GET | `/candidates/:id` | candidate + sources + asset metadata (id ต้อง match UUID) |
-| GET | `/assets/:id` | stream ไฟล์ดิบจาก bytea (`Content-Disposition: inline`) |
-| POST | `/runs` `{connectorId, criteria?}` | trigger scrape (async, คืน 202) |
+| GET | `/health` | liveness |
+| GET | `/connectors` | list scraper connectors |
+| GET | `/candidates` | list candidate; รองรับ limit/offset/platform |
+| GET | `/candidates/:id` | candidate detail |
+| GET | `/assets/:id` | stream asset bytes |
+| POST | `/runs` | trigger ad-hoc connector run |
 
-> API นี้ **trigger ad-hoc run** ได้อย่างเดียว — CRUD `scrape_tasks` อยู่ที่ Web Console
+Control API ไม่มี auth layer ในตัว ห้าม expose สู่ public internet โดยไม่มี reverse proxy authentication/network restriction
 
-### 10.2 CLI — [cli/connector.js](src/cli/connector.js)
-
-- `add --platform --label --username --password [--limit 15] [--daily 200]` — เข้ารหัส password แล้วสร้าง connector
-- `list` — แสดง id/platform/label/user/limit/daily/enabled/cooldown
+Auto‑Post มี Express API จำนวนมากใน `autopost/server/index.js`; ให้ถือ UI/worker เป็น consumer หลักและดู route implementation ก่อนเรียกจากระบบใหม่
 
 ---
 
-## 11. Web Console — So Recruit (Next.js)
+## 11. Environment configuration
 
-`web/` คือหน้าจอให้ทีมงานใช้: จัดการ connector, สร้าง/ดู task, เปิดดู candidate — อ่าน/เขียน **DB เดียวกับ backend**
+ห้าม copy ค่า secret ลงเอกสาร, issue หรือ log ใช้ `.env.example`, `web/.env.example`, `autopost/.env.example` เป็น template
 
-### 11.1 Stack
+### Root/backend
 
-- **Next.js 14.2** (App Router, server components), **NextAuth 4.24**, **pg 8.13** (ไม่มี ORM), React 18, Tailwind
-- `next.config.mjs`: `serverComponentsExternalPackages: ['pg']` (กัน pg เข้า client bundle)
-- Scripts: `dev`/`start` port **3000**, `build`, `lint`
-- Design tokens: SIAMRAJ brand แดง `#e41c24`, font Kanit
+- PostgreSQL: `DATABASE_URL` หรือ `PGHOST`, `PGPORT`, `PGUSER`, `PGPASSWORD`, `PGDATABASE`
+- schema: `DB_SCHEMA`, `AUTOPOST_SCHEMA`
+- encryption: `APP_ENCRYPTION_KEY`
+- runtime: `HEADLESS`, `DEBUG`, `REQUEST_DELAY_MIN_MS`, `REQUEST_DELAY_MAX_MS`
+- default criteria: `POSITION`, `KEYWORD`, `MAX_CANDIDATES`, `PROVINCE`, salary/age/gender
+- AI/OCR: `ANTHROPIC_API_KEY`, `OLLAMA_BASE_URL`, `OLLAMA_MODEL`, `OLLAMA_HOST`, `OCR_MODEL`, `OCR_MAX_PAGES`, `OPENAI_API_KEY`
+- orchestrator: `CONTENT_TEXT_PROVIDER`, `CONTENT_TEXT_MODEL`, `CONTENT_IMAGE_PROVIDER`, `CONTENT_IMAGE_MODEL`, `ENGAGE_*`
+- ERP: `MSSQL_*`
 
-### 11.2 Authentication — Azure AD / Entra ID (ไม่ใช่ username/password)
+### Web
 
-- [lib/auth.ts](web/lib/auth.ts): `AzureADProvider` (`AZURE_AD_CLIENT_ID/SECRET/TENANT_ID`, scope `openid profile email User.Read`)
-- หน้า login เรียก `signIn('azure-ad')` — ปุ่ม "เข้าสู่ระบบด้วย Microsoft" ไม่มีฟอร์มรหัสผ่าน → **user มาจาก Azure AD tenant ขององค์กร**
-- Session: JWT (httpOnly cookie, อายุ 8h), ไม่มี server-side store
-- ป้องกัน route 3 ชั้น: `middleware.ts` (matcher `/candidates|/scraping|/connectors|/dashboard`), server guard ใน `(app)/layout.tsx` (`getServerSession` → redirect ถ้าไม่มี), และทุก action/API re-check session
+- `NEXTAUTH_URL`, `NEXTAUTH_SECRET`
+- `AZURE_AD_CLIENT_ID`, `AZURE_AD_CLIENT_SECRET`, `AZURE_AD_TENANT_ID`
+- PostgreSQL + `DB_SCHEMA`
+- `AUTOPOST_SCHEMA`
+- `APP_ENCRYPTION_KEY`
+- `AUTOPOST_URL` และ access token ถ้าใช้ embedded Auto‑Post app
 
-### 11.3 หน้าจอ (ทั้งหมดภาษาไทย)
+### Auto‑Post
 
-| Route | แสดงอะไร |
-|---|---|
-| `/dashboard` | สถิติรวม (candidate/source/asset/quota วันนี้), กราฟ candidate ต่อ platform + ความครบของข้อมูล, ตาราง recent runs |
-| `/candidates` | list ค้นหา/filter platform/แบ่งหน้า (40/หน้า) |
-| `/candidates/[id]` | detail: รูป, contact, การศึกษา, ประสบการณ์, ไฟล์แนบ (`AttachmentViewer`), skills |
-| `/connectors` | จัดการบัญชี platform (เพิ่ม/เปิด-ปิด/ลบ) + ตั้ง daily cap ต่อ platform |
-| `/scraping` | สร้าง task (`NewTaskForm`) + `TaskList` ที่ poll สถานะทุก 2.5s แสดง 3 เฟส scraping→ocr→enrich |
+- `DATABASE_URL`
+- `DB_SCHEMA` — ต้องตรงกับ root/web `AUTOPOST_SCHEMA`
+- `WORKER_API_BASE`, `POST_WORKER_TOKEN`, `WORKER_NAME`
+- `WORKER_CONCURRENCY`, `WORKER_COLLECT_CONCURRENCY`, polling/timeout vars
+- `POST_DAILY_CAP`, repost gap, fail streak และ pause hours
+- auto schedules สำหรับ post/collect
+- Facebook credentials หรือ credential columns ใน DB
 
-### 11.4 Data layer & การเชื่อม DB
+### กฎของ `APP_ENCRYPTION_KEY`
 
-- [lib/db.ts](web/lib/db.ts): `pg.Pool` (cached, max 5) ตั้ง `search_path="${DB_SCHEMA}",public` → ชี้ schema เดียวกับ backend (`server-only`)
-- [lib/repo.ts](web/lib/repo.ts): SQL ทั้งหมดต่อตารางร่วม (candidates/sources/assets/connectors/provider_limits/scrape_tasks/scrape_runs)
-- [lib/actions.ts](web/lib/actions.ts): server actions (`'use server'`) ทุกตัวเรียก `requireSession()` ก่อน
-  - **สร้าง connector:** `createConnectorAction` → `encryptSecret(password)` → `insertConnector` (เก็บแค่ `password_enc`)
-  - **สร้าง task:** `createTaskAction` ตั้ง `status: runNow ? 'queued' : 'idle'` → tasks-worker หยิบไปรัน
-- [api/assets/[id]/route.ts](web/app/api/assets/[id]/route.ts): stream bytea (auth-gated, validate UUID, cache `private, max-age=300`)
-
-### 11.5 Config — `web/.env.example`
-
-`NEXTAUTH_URL`, `NEXTAUTH_SECRET`, `AZURE_AD_CLIENT_ID/SECRET/TENANT_ID`, `PGHOST/PGPORT/PGUSER/PGPASSWORD/PGDATABASE`, `DB_SCHEMA` (ต้องตรงกับ backend), `APP_ENCRYPTION_KEY` (**ต้องตรงกับ backend เป๊ะ**), `OLLAMA_HOST`/`OCR_MODEL` (อ้างอิงเฉย ๆ web ไม่อ่าน)
-
-> ⚠️ `.env.example` ใส่ `NEXTAUTH_URL=http://localhost:3100` แต่ script รัน port **3000** — ปรับให้ตรงกัน
+- ใช้ค่าเดียวกันใน backend และ web
+- หลังสร้าง connector แล้วห้ามเปลี่ยนโดยไม่มีแผน re-encrypt
+- ถ้าหาย password เดิมใน DB จะถอดไม่ได้
 
 ---
 
-## 12. ทุกชิ้นเชื่อมกันอย่างไร
+## 12. Setup และคำสั่งหลัก
 
-```
-              ┌──────────────── Web Console (Next.js :3000) ───────────────┐
-              │  Azure AD login → จัดการ connector / สร้าง task / ดู candidate │
-              └───────────────┬───────────────────────────┬────────────────┘
-                              │ encryptSecret               │ insertTask(status=queued)
-                              ▼                             ▼
-   ┌──────────────────────────────────────────────────────────────────────────┐
-   │           PostgreSQL  "so-candidate-data"  (DB กลาง — ใช้ร่วมกัน)            │
-   │  connectors · scrape_tasks · scrape_runs · candidates · candidate_sources   │
-   │  candidate_assets · provider_limits                                         │
-   └───────▲───────────────▲───────────────────────────▲──────────────────┬─────┘
-           │ runConnector   │ dueTasks                   │ pending assets    │ read
-   ┌───────┴──────┐  ┌──────┴────────┐  ┌────────────────┴───────┐  ┌───────┴──────┐
-   │  worker.js   │  │ tasks-worker  │  │   extract-worker.js     │  │ api/server.js│
-   │ (ทุก conn.)  │  │ scrape→ocr→   │  │   (OCR via Ollama)      │  │ Control API  │
-   │              │  │ enrich        │  │                         │  │  :8080       │
-   └──────┬───────┘  └──────┬────────┘  └─────────────────────────┘  └──────────────┘
-          │ getSession      │
-          ▼                 ▼
-   ┌──────────────────────────────┐         login ครั้งเดียว (browser) → reuse session
-   │  providers/jobbkk · jobthai  │ ──HTTP──▶  JobBKK / JobThai
-   └──────────────────────────────┘
-```
+### 12.1 Local backend
 
-**2 สัญญาที่ web กับ backend ต้องตรงกันเสมอ:**
-1. **PostgreSQL schema** (`DB_SCHEMA` + ชื่อตาราง/คอลัมน์)
-2. **AES-256-GCM scheme** (`APP_ENCRYPTION_KEY` + layout `base64(iv|tag|ciphertext)`)
-
-web เป็น **ผู้ผลิต** connector/task — worker เป็น **ผู้บริโภค**
-
----
-
-## 13. Runbook — งานที่ทำบ่อย
-
-### 13.1 ตั้งค่า Project B ครั้งแรก (local)
-
-```bash
-# คำสั่งทั้งหมดรันที่ root ของ repo (โฟลเดอร์ api-scraper)
-npm install
-npx playwright install chromium        # ครั้งแรกครั้งเดียว
-cp .env.example .env                    # ตั้ง PGPASSWORD + APP_ENCRYPTION_KEY
-npm run migrate                         # สร้าง schema
-npm run connector add -- --platform jobbkk --label "JobBKK-HR1" \
-     --username USER --password PASS --limit 15 --daily 200
-npm run worker                          # scrape ทุก connector → DB
-npm run api                             # เปิด Control API :8080
-```
-
-### 13.2 รันด้วย Docker
-
-```bash
-docker compose run --rm migrate         # schema ครั้งเดียว
-docker compose run --rm worker          # scrape 1 รอบ (cron ที่ host)
-docker compose up -d api                # Control API ที่ host :8137 → container :8080
-```
-
-> Postgres เป็น **external** (ไม่อยู่ใน compose) — `api`/`worker`/`migrate` ใช้ image เดียวกัน, อ่าน `.env`
-
-### 13.3 รัน Web Console
-
-```bash
-cd web
-npm install
-cp .env.example .env                    # ตั้ง Azure AD + PG* + APP_ENCRYPTION_KEY (ตรงกับ backend)
-npm run dev                             # http://localhost:3000
-```
-
-### 13.4 รัน pipeline เต็ม (scrape + OCR + เติม contact)
-
-```bash
-# สร้าง task ผ่าน Web (/scraping) หรือ insert scrape_tasks ตรง ๆ
-npm run tasks            # tasks-worker: scrape → ocr → enrich
-# หรือแยก OCR ออกมา:
-npm run extract          # OCR asset ที่ค้าง 1 batch
-```
-
-### 13.5 รัน Project A (demo)
-
-```bash
-cd legacy-demo
-npm install
+```powershell
+npm ci
 npx playwright install chromium
-cp .env.example .env     # ตั้ง JOBBKK_* / JOBTHAI_*
-npm run scrape           # popup → Start → ดู browser ทำงาน → ไฟล์ใน output/
+Copy-Item .env.example .env
+npm run migrate
+npm run connector -- list
+npm run worker:pool
 ```
 
----
+เพิ่ม connector:
 
-## 14. กฎหมายและจริยธรรม
+```powershell
+npm run connector -- add --platform jobbkk --label "JobBKK-HR1" --username USER --password PASS --limit 15 --daily 200
+```
 
-- ใช้กับ **บัญชี employer ที่ได้รับอนุญาตเท่านั้น** ห้าม bypass CAPTCHA/OTP/access control ของผู้อื่น
-- ข้อมูล candidate = **ข้อมูลส่วนบุคคล** → อยู่ภายใต้ **PDPA** และ ToS ของแต่ละ platform
-- password ของ connector **เข้ารหัสที่ rest** (AES-256-GCM)
-- JobThai: เคารพ **view quota** — scrape แต่ละ resume ครั้งเดียว
-- ออกแบบให้รันบน **host ที่ IP คงที่** (ไม่ใช่ Vercel/datacenter IP ที่โดนแบนง่าย)
+### 12.2 Web
 
----
+```powershell
+cd web
+npm ci
+Copy-Item .env.example .env.local
+npm run dev
+```
 
-## 15. Quick Reference
+ค่า port ตาม script ปัจจุบันคือ 3000 แต่ `NEXTAUTH_URL` ต้องตรงกับ URL/port ที่ใช้งานจริง
 
-### Env vars หลัก (Project B + web)
+### 12.3 Worker เครื่อง Windows
 
-| ตัวแปร | ใช้ที่ | หมายเหตุ |
-|---|---|---|
-| `PGHOST/PGPORT/PGUSER/PGPASSWORD/PGDATABASE` | backend + web | DB เดียวกัน |
-| `DB_SCHEMA` | backend + web | default `so-candidate-data` — **ต้องตรงกัน** |
-| `APP_ENCRYPTION_KEY` | backend + web | **ต้องตรงกัน & ห้ามเปลี่ยน** |
-| `POSITION/KEYWORD/MAX_CANDIDATES/PROVINCE/...` | backend | criteria เริ่มต้นของ worker |
-| `REQUEST_DELAY_MIN_MS/MAX_MS` | backend | anti-ban (.env.example=2500/6000, code=600/1400) |
-| `PORT` | backend API | default 8080 |
-| `PLATFORM` | worker | จำกัด worker เฉพาะ platform |
-| `OLLAMA_HOST/OCR_MODEL/OCR_MAX_PAGES/EXTRACT_BATCH` | OCR | ไม่อยู่ใน .env.example |
-| `NEXTAUTH_URL/SECRET`, `AZURE_AD_*` | web | auth |
+`start-workers.bat` ทำ `git pull` แล้วเปิด 2 หน้าต่าง:
 
-### DB tables
+1. Scraper autoscaling pool
+2. Auto‑Post posting worker supervisor
 
-`connectors` · `scrape_runs` · `candidates` · `candidate_sources` · `candidate_assets` · `provider_limits` · `scrape_tasks`
+ไฟล์นี้ **ไม่เปิด** Express Auto‑Post server, collect worker หรือ ERP sync ให้ ตรวจว่าบริการเหล่านั้นถูกรันด้วย process manager/Task Scheduler ตาม topology ที่เลือก
 
-### Control API
+### 12.4 Docker
 
-`GET /health` · `GET /connectors` · `GET /candidates` · `GET /candidates/:id` · `GET /assets/:id` · `POST /runs`
+```powershell
+docker compose build
+docker compose run --rm migrate
+docker compose up -d api
+docker compose up -d --scale runner=4 runner
+```
 
-### ไฟล์ที่ควรเริ่มอ่าน
+Docker image root มี Playwright และ `pdftoppm` แต่ไม่ได้ copy `web/` หรือ `autopost/`; compose นี้จึงครอบคลุม root API/scraper runner เท่านั้น
 
-- Project B orchestration: [src/pipeline.js](src/pipeline.js)
-- DB layer: [src/db/repositories.js](src/db/repositories.js), [src/db/schema.sql](src/db/schema.sql)
-- Provider ตัวอย่าง: [src/providers/jobbkk/](src/providers/jobbkk/)
-- Web data layer: [web/lib/repo.ts](web/lib/repo.ts), [web/lib/actions.ts](web/lib/actions.ts)
-- Project A orchestration: [core/scrape-pipeline.js](legacy-demo/core/scrape-pipeline.js)
+### 12.5 คำสั่ง npm root
 
----
-
-## 16. ข้อควรระวัง / Known issues
-
-ปัญหา/ความไม่สอดคล้องที่เจอจากการอ่าน code (ควรรู้ก่อนแก้):
-
-**Project A**
-- **`auth.js` เซฟ storageState แต่ไม่มีใครใช้** — flow `scrape`/`download` login ใหม่ด้วย username/password ทุกครั้ง ไม่ได้โหลด `.auth/jobbkk.json`
-- **`PLATFORM_IDS` นิยาม 2 ที่ไม่ตรงกัน** — `core/platform-resolve.js` = `['jobbkk','jobthai']`, `providers/registry.js` = 4 ตัว → flow ปกติเลือกได้แค่ 2 platform จริง
-- **`download.js` hardcode JobBKK** — re-download candidate JobThai ไม่ถูกต้อง
-- README defaults เพี้ยนจาก `.env.example`/code (`PAUSE_AT_END`, `DEBUG_MODE`, `DELAY_MS`)
-
-**Project B**
-- **มี 2 ทาง scrape:** legacy `src/scrape.js` (JobBKK only, เขียนไฟล์, ไม่แตะ DB) กับ DB pipeline (`worker`/`tasks`/`api`) — งานใหม่ใช้ DB pipeline
-- **delay default ไม่ตรง:** code (`config.js`) = 600/1400ms แต่ `.env.example` = 2500/6000ms (ค่าใน `.env` ชนะ) → ค่าปลอดภัยคือใช้ตาม `.env.example`
-- **Control API ไม่มี CRUD `scrape_tasks`** — จัดการ task ได้ที่ Web Console เท่านั้น
-- env `OLLAMA_HOST/OCR_MODEL/OCR_MAX_PAGES/EXTRACT_BATCH` ใช้ใน code แต่ไม่อยู่ใน `.env.example`
-
-**Web**
-- `NEXTAUTH_URL` ใน `.env.example` = port 3100 แต่ script รัน 3000 — ปรับให้ตรง
-- JobThai `getSession` ไม่รับ `forceLogin` (ต่างจาก JobBKK) — pipeline ยัง takeover ได้เพราะไม่ส่ง `storageState` แต่จะไม่ปิด dialog "login ที่อื่น" ถ้า JobThai เพิ่ม gate นี้ในอนาคตต้อง implement เพิ่ม
+| คำสั่ง | ใช้เมื่อ |
+|---|---|
+| `npm run migrate` | apply schema 001–009 |
+| `npm run connector -- ...` | จัดการ scraper connector |
+| `npm run worker` | scrape enabled connectors หนึ่งรอบ |
+| `npm run tasks` | fallback task worker |
+| `npm run worker:pool` | unified runner daemon |
+| `npm run scraper:pool` | autoscale runner ตามบัญชี |
+| `npm run extract` | OCR pending assets แบบ standalone |
+| `npm run api` | root Control API |
+| `npm run erp:sync` | sync ใบขอจาก SQL Server |
+| `npm run scrape` | standalone/utility path; ไม่ใช่ Web task flow หลัก |
 
 ---
 
-*คู่มือนี้สร้างจากการวิเคราะห์ source code ทั้งหมดในโฟลเดอร์ หากแก้ code แล้ว behavior เปลี่ยน อย่าลืมอัปเดตเอกสารนี้ด้วย*
+## 13. Operations runbook
+
+### เริ่มระบบประจำวัน
+
+1. ตรวจ PostgreSQL และ network ไป ERP/Ollama ถ้าใช้งาน
+2. ตรวจ Auto‑Post server/API health
+3. เปิด scraper runner pool
+4. เปิด post worker และ collect worker ตามแผน
+5. ตรวจหน้า Settings ว่าบัญชีไม่ cooldown/paused และ quota ยังเหลือ
+6. ตรวจ `work_queue`/`post_run_queue` ว่าไม่มีงาน `running` เก่าผิดปกติ
+
+### ตรวจ queue
+
+```sql
+SELECT type, status, count(*)
+FROM "so-candidate-data".work_queue
+GROUP BY type, status
+ORDER BY type, status;
+```
+
+ดูงาน error ล่าสุด:
+
+```sql
+SELECT id, type, connector_key, last_error, finished_at
+FROM "so-candidate-data".work_queue
+WHERE status = 'error'
+ORDER BY finished_at DESC
+LIMIT 20;
+```
+
+### ตรวจ scrape task ค้าง
+
+```sql
+SELECT id, name, status, phase, progress_got, progress_target, updated_at, last_error
+FROM "so-candidate-data".scrape_tasks
+WHERE status IN ('queued', 'running', 'error')
+ORDER BY updated_at;
+```
+
+### Deploy order ที่ปลอดภัย
+
+1. backup DB
+2. apply root migration
+3. start/update Auto‑Post server ให้ ensure schema ใหม่
+4. deploy worker code
+5. deploy web
+6. smoke test queue ด้วย `selftest`
+7. scrape จำนวนน้อยหนึ่งงาน
+8. test draft โดยไม่โพสต์จริง
+9. ตรวจ Auto‑Post queue ก่อนอนุมัติงานจริง
+
+---
+
+## 14. Troubleshooting
+
+### JobBKK login timeout / contact ถูก mask
+
+- ต้องใช้ headful browser
+- ตรวจว่าบัญชีเดียวไม่ได้ login จากหลายเครื่อง
+- ตรวจ `.auth/` และ screenshot debug
+- เพิ่ม login timeout เฉพาะเมื่อหน้าเว็บช้า ไม่ใช่ใช้ซ่อน CAPTCHA
+- worker ควร logout ตอนจบ; ถ้า process ถูก kill อาจต้องรอหรือ login takeover
+
+### Task อยู่ queued ไม่ขยับ
+
+- ตรวจ persistent runner ว่าทำงาน
+- ตรวจ `work_queue` มีงาน type ที่ runner รองรับ
+- ตรวจ `preferred_worker` ตรงกับ worker ID หรือไม่
+- ตรวจงาน key เดียวกันที่ `running`
+- ตรวจ DB/network และ `last_error`
+
+### Task ค้างที่ login/scraping
+
+- ดู `scrape_tasks.updated_at`; runner มี heartbeat ระหว่างงาน
+- ตรวจ screenshot/debug ของ provider
+- stale task fallback จะ recover ที่ 10 นาที แต่ unified queue stale ค่าเริ่มต้น 30 นาที
+- อย่าแก้ status ด้วยมือก่อนเก็บ log/หลักฐาน
+
+### OCR ไม่ทำงาน
+
+- ตรวจ `OLLAMA_HOST`/`OLLAMA_BASE_URL` ตามโมดูลที่เรียก
+- ตรวจ model มีอยู่บน Ollama
+- PDF ต้องมี `pdftoppm`
+- ดู `candidate_assets.extract_status`
+
+### Auto‑Post session หมด
+
+- ใช้ session check ของ UI
+- login/verify/checkpoint ให้จบ
+- ตรวจว่า `.auth` เขียนได้และไม่มี stale lock
+- รักษา worker/IP เดิมของบัญชี
+
+### ได้ผู้สมัครน้อยกว่า target
+
+- ดู `scrape_runs.found` และ site total ก่อนสรุปว่าเป็น bug
+- filter position + keyword + province อาจแคบเกินไป
+- ตรวจ provider quota/account cap/platform cap
+- ดู `adjacent_plan`; ระบบ auto-run เฉพาะ tier เขียว
+- ใช้ `node scripts/diagnose-jobthai.js` สำหรับ JobThai
+
+---
+
+## 15. Security, PDPA และ operational safety
+
+- ข้อมูล candidate, resume, phone, email และ attachment เป็นข้อมูลส่วนบุคคล
+- ใช้เฉพาะบัญชีนายจ้างที่ได้รับอนุญาตและตาม ToS ของ provider
+- จำกัดสิทธิ์ DB, backup, log และ asset routes ตามหน้าที่
+- `.env`, `.auth`, output, Auto‑Post config และ logs ถูก ignore แล้ว; ตรวจอีกครั้งก่อน commit
+- Password ของ scraper เข้ารหัสด้วย `APP_ENCRYPTION_KEY`; Password Facebook ยังใช้รูปแบบเดิมของ Auto‑Post ที่ worker อ่านจาก DB โดยตรง จึงต้องจำกัดสิทธิ์ schema/backup อย่างเข้มและควรวางแผน encryption migration
+- อย่าพิมพ์ connector password หรือ token ใน command history/CI log ถ้าหลีกเลี่ยงได้
+- Control API root ต้องอยู่หลัง private network/auth proxy
+- Auto‑Post public endpoint ต้องมี access token/worker token และ rate/network control
+- กำหนด retention/deletion policy สำหรับ candidate assets และ Facebook leads
+- การ scrape/post automation มีความเสี่ยงต่อ account ban; cap และ delay เป็น safety control ไม่ใช่ค่าปรับ performance อย่างเดียว
+
+---
+
+## 16. Testing และ verification
+
+สถานะ test suite ปัจจุบัน:
+
+- root ไม่มี `test` script และไม่มี unit test suite ที่ครอบคลุม pipeline/repositories
+- web มี build/type validation ผ่าน `next build`; script `lint` ต้องตรวจ compatibility กับ Next.js version
+- Auto‑Post มี Playwright specs สำหรับ posting, collect, Facebook session และ logic บางส่วน
+
+คำสั่งที่ใช้บ่อย:
+
+```powershell
+# syntax check ไฟล์ JS ที่แก้
+node --check workers/runner.js
+node --check src/pipeline.js
+
+# web compile
+cd web
+npm run build
+
+# logic test ที่ไม่ควรโพสต์จริง
+cd autopost
+npm run test:logic
+```
+
+อย่ารัน `npm test`, `test:post` หรือ browser test ที่มี credential/plan จริงบน production account จนกว่าจะอ่าน spec และยืนยัน target เพราะอาจเปิด Facebook และสร้างผลข้างเคียงจริง
+
+---
+
+## 17. Project analysis: strengths, risks และ technical debt
+
+### จุดแข็ง
+
+- provenance และ dedupe model เหมาะกับข้อมูลผู้สมัครหลายแหล่ง
+- per-account lock และ `SKIP LOCKED` ช่วย scale ข้ามบัญชีโดยไม่ชน session
+- quota มีทั้งรายบัญชีและระดับ platform
+- pipeline แยก phase และบันทึก progress ทำให้ operator เห็นสถานะจริง
+- AI integrations fail soft: ไม่มี key แล้วงานหลักไม่จำเป็นต้องพัง
+- แยก scraper และ Auto‑Post schema ช่วยลด blast radius
+- orchestrator มี feedback loop และเก็บหลาย content version
+
+### Critical — ควรแก้ก่อนใช้ measurement production
+
+1. `src/core/orchestrator-measure.js` ใช้ `${AP}` ใน SQL แต่ไม่มีการประกาศ `AP` ในโมดูล ทำให้ `measureCampaign()` เกิด `ReferenceError` เมื่อถึง query ของ Auto‑Post
+2. migration `schema-004.sql`, `schema-005.sql`, `schema-006.sql` ยังอ้าง schema `so_autopost_jobs` แบบ hard-code ขณะที่ config ปัจจุบันแนะนำ `so_autopost_apiscraper` ผลคือ `v_connectors`/`v_contacts` อาจไม่รวมข้อมูล Auto‑Post หลังแยก schema
+
+แนวแก้ที่ควรใช้: สร้าง helper สำหรับ validate/quote schema identifier แล้วใช้ `AUTOPOST_SCHEMA` ให้สอดคล้องกันทั้ง worker, web และ migration/view rebuild พร้อม integration test สอง schema
+
+### High
+
+- README และ DEPLOY บางส่วนยังกล่าวถึง port/schema/topology รุ่นก่อน จึงไม่ควรเป็น source of truth เดี่ยว
+- root scraper/orchestrator ไม่มี automated test สำหรับ dedupe, caps, queue claim, adjacent expansion และ measurement
+- Web action `kickWorker()` เป็น local-process convenience; บน Vercel ต้องพึ่ง persistent external runner
+- Auto‑Post schema evolution กระจายทั้ง SQL file และ runtime `ALTER/CREATE` ใน DB layer ทำให้ audit migration ยาก
+- `.env.example` ฝั่ง root ยังไม่แสดง `OLLAMA_HOST`, `OCR_MODEL`, `OCR_MAX_PAGES` ทั้งที่ OCR worker ใช้ค่าดังกล่าวและมี internal host เป็น default ใน code
+
+### Medium
+
+- `autopost/server/index.js` และ `autopost/public/app.js` มีขนาดใหญ่และรวมหลาย responsibility
+- schedule ของ scraper รองรับเพียง `every:<sec>`, `@hourly`, `@daily` ไม่ใช่ cron parser เต็มรูปแบบ
+- Control API ไม่มี authentication
+- likes/shares ถูกเก็บแต่ไม่รวมใน engagement score
+- CAPTCHA solver ใน `src/captcha.js` ยังเป็น stub
+- flow page ของ orchestrator มี mock data บางส่วน จึงไม่ใช่ production status source ทั้งหมด
+- `web/next.config.mjs` วาง `outputFileTracingIncludes` ในตำแหน่งที่ Next.js 14.2.15 แจ้งว่าไม่รู้จัก จึงควรแก้และยืนยันว่า PDF Chromium package ถูก bundle บน Vercel จริง
+
+### ลำดับปรับปรุงแนะนำ
+
+1. แก้ schema reference และ measurement runtime defect
+2. เพิ่ม smoke/integration test ที่สร้าง temporary schema แล้วทดสอบ migration + queue + measure
+3. รวม migration ของ Auto‑Post ให้มี version table และลำดับชัดเจน
+4. ปรับ README/DEPLOY ให้ชี้กลับ Handbook ฉบับนี้
+5. ใส่ auth/network guard ให้ Control API
+6. แยก Auto‑Post API/UI monolith ตาม domain
+
+---
+
+## 18. วิธีเพิ่มความสามารถ
+
+### เพิ่ม scraper provider
+
+1. สร้าง `src/providers/<provider>/`
+2. implement provider interface ตามหัวข้อ 5.3
+3. register ใน `src/connectors/registry.js`
+4. เพิ่ม filter mapping และ parser fixtures
+5. เพิ่ม provider limit default ใน migration ใหม่
+6. ทดสอบ session loss, soft-ban, empty result และ duplicate candidate
+
+### เพิ่ม work queue job type
+
+1. นิยาม payload/ref semantics
+2. เพิ่ม handler ใน `HANDLERS` ของ `workers/runner.js`
+3. เลือก `connector_key` ที่ล็อก resource ถูกระดับ
+4. ทำ enqueue แบบกัน duplicate
+5. กำหนด stale/retry/idempotency behavior
+6. เพิ่ม test claim พร้อม runner สองตัว
+
+### เพิ่ม AI provider
+
+- text: เพิ่ม adapter ใน `src/core/content-gen.js`
+- image: เพิ่ม adapter ใน `src/core/ai-image.js`
+- ต้องคืน normalized shape เดิมและ fail soft
+- ห้าม log prompt ที่มีข้อมูลส่วนบุคคลเกินจำเป็น
+
+---
+
+## 19. Onboarding checklist
+
+### อ่านโค้ดตามลำดับ
+
+1. `package.json` และ `.env.example`
+2. `src/pipeline.js`
+3. `src/tasks-worker.js`
+4. `workers/runner.js`
+5. `src/db/schema*.sql` และ `src/db/repositories.js`
+6. provider ที่รับผิดชอบ
+7. `web/lib/actions.ts` และ `web/lib/repo.ts`
+8. `autopost/server/index.js`, `autopost/server/db.js` และ remote workers
+9. orchestrator core และ ERP sync
+
+### งานทดลองที่ปลอดภัย
+
+- รัน syntax check
+- อ่าน migration โดยไม่ต่อ production DB
+- ใช้ `selftest` queue ใน dev DB
+- scrape ด้วย account ทดสอบและ target ต่ำ
+- สร้าง draft โดยไม่เลือกบัญชี Facebook
+- รัน Auto‑Post logic test ที่ไม่โพสต์จริง
+
+### ก่อนรับ on-call
+
+- รู้ตำแหน่ง secret store และเจ้าของ credential
+- รู้ว่า worker เครื่องใดรับผิดชอบ account ใด
+- เข้าถึง DB/log/monitoring ตามสิทธิ์
+- รู้ขั้นตอน pause Facebook account และ disable scraper connector
+- รู้ backup/restore และ escalation contact
+- อ่าน `docs/new-worker-setup.md` และ `docs/cutover-runbook.md`
+
+---
+
+## 20. Glossary
+
+| คำ | ความหมายในระบบนี้ |
+|---|---|
+| Connector | บัญชีเชื่อมต่อหนึ่งบัญชี; ใน UI รวม scraper และ Facebook ส่วนตาราง `connectors` ใช้เฉพาะ scraper |
+| Provider | implementation ของเว็บหางาน เช่น JobBKK/JobThai |
+| Candidate | canonical person หลัง dedupe |
+| Source | ร่องรอยว่าพบ candidate ที่ platform/external ID ใด |
+| Asset | รูปหรือ attachment ของ candidate |
+| Task | งาน scraping ที่ user สร้างและติดตาม progress ได้ |
+| Run | execution หนึ่งครั้งของ connector |
+| Work item | row ใน unified `work_queue` |
+| Assignment | ความสัมพันธ์งานโพสต์ × กลุ่ม × บัญชีใน Auto‑Post |
+| Campaign | ใบขอ ERP ที่เข้าสู่ content pipeline |
+| Draft version | รุ่นของ caption/image/video brief ใน campaign |
+| Lead | เบอร์โทรที่เก็บได้จากคอมเมนต์ Facebook |
+| Cooldown | การหยุด scraper ชั่วคราวเมื่อ quota เต็มหรือพบ soft-ban |
+| Pause | การหยุดบัญชี Auto‑Post จาก cap/circuit breaker/operator |
+
+---
+
+## 21. เอกสารประกอบ
+
+- `README.md` — quick start เดิมของ scraper
+- `DEPLOY.md` — topology/deploy notes; ตรวจ schema/port กับ Handbook ก่อนใช้
+- `docs/new-worker-setup.md` — ติดตั้งเครื่อง worker ใหม่
+- `docs/cutover-runbook.md` — ลำดับ cutover ระบบ
+- `docs/autopost-cloud-plan.md` — แนวทางย้าย Auto‑Post ขึ้น cloud
+- `autopost/README.md` และ `autopost/docs/` — คู่มือย่อยของ subsystem
+
+เมื่อเปลี่ยน schema, queue type, environment contract, worker topology หรือสถานะ pipeline ต้องแก้ Handbook นี้ใน pull request เดียวกับ code change

@@ -20,6 +20,7 @@ import {
   deleteTask,
   enqueueScrapeForTask,
   insertConnector,
+  insertFacebookConnector,
   insertTask,
   queueTask,
   setConnectorEnabled,
@@ -273,10 +274,29 @@ export async function createConnectorAction(formData: FormData) {
   const label = String(formData.get('label') ?? '').trim();
   const username = String(formData.get('username') ?? '').trim();
   const password = String(formData.get('password') ?? '');
-  const scrapeLimit = Number.parseInt(String(formData.get('scrapeLimit') ?? '15'), 10) || 15;
-  const dailyCap = Number.parseInt(String(formData.get('dailyCap') ?? '200'), 10) || 200;
+  const requestedScrapeLimit = Number.parseInt(String(formData.get('scrapeLimit') ?? '15'), 10);
+  const requestedDailyCap = Number.parseInt(String(formData.get('dailyCap') ?? (platform === 'facebook' ? '15' : '200')), 10);
 
   if (!platform || !label || !username || !password) throw new Error('กรุณากรอกข้อมูล connector ให้ครบ');
+  if (!['jobbkk', 'jobthai', 'facebook'].includes(platform)) throw new Error('แพลตฟอร์มไม่ถูกต้อง');
+
+  if (platform === 'facebook') {
+    const dailyCap = Number.isFinite(requestedDailyCap) ? Math.min(50, Math.max(1, requestedDailyCap)) : 15;
+    await insertFacebookConnector({
+      label,
+      username,
+      password,
+      posterName: String(formData.get('posterName') ?? '').trim(),
+      contactPhone: String(formData.get('contactPhone') ?? '').trim(),
+      dailyCap,
+    });
+    revalidatePath('/settings');
+    revalidatePath('/autopost/accounts');
+    return;
+  }
+
+  const dailyCap = Number.isFinite(requestedDailyCap) ? Math.min(2000, Math.max(1, requestedDailyCap)) : 200;
+  const scrapeLimit = Number.isFinite(requestedScrapeLimit) ? Math.min(100, Math.max(1, requestedScrapeLimit)) : 15;
 
   await insertConnector({
     platform,
@@ -287,6 +307,7 @@ export async function createConnectorAction(formData: FormData) {
     dailyCap,
   });
   revalidatePath('/connectors');
+  revalidatePath('/settings');
 }
 
 export async function toggleConnectorAction(formData: FormData) {
@@ -295,6 +316,7 @@ export async function toggleConnectorAction(formData: FormData) {
   const enabled = formData.get('enabled') === 'true';
   if (id) await setConnectorEnabled(id, enabled);
   revalidatePath('/connectors');
+  revalidatePath('/settings');
 }
 
 export async function deleteConnectorAction(formData: FormData) {
@@ -302,6 +324,7 @@ export async function deleteConnectorAction(formData: FormData) {
   const id = String(formData.get('id') ?? '');
   if (id) await deleteConnector(id);
   revalidatePath('/connectors');
+  revalidatePath('/settings');
 }
 
 export async function setProviderCapAction(formData: FormData) {
@@ -310,6 +333,7 @@ export async function setProviderCapAction(formData: FormData) {
   const dailyCap = Number.parseInt(String(formData.get('dailyCap') ?? ''), 10);
   if (platform && Number.isFinite(dailyCap) && dailyCap >= 0) await setProviderCap(platform, dailyCap);
   revalidatePath('/connectors');
+  revalidatePath('/settings');
 }
 
 export async function setFacebookDailyCapAction(formData: FormData) {
@@ -318,4 +342,5 @@ export async function setFacebookDailyCapAction(formData: FormData) {
   // เพดานต่อบัญชี — จำกัด 1..50 กันตั้งพลาดจนโดน block (แนะนำ 15)
   if (Number.isFinite(cap) && cap >= 1 && cap <= 50) await setFacebookDailyCapForAll(cap);
   revalidatePath('/connectors');
+  revalidatePath('/settings');
 }

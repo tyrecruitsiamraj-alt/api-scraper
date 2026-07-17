@@ -1,9 +1,14 @@
 import 'server-only';
+import { randomUUID } from 'node:crypto';
 import { q } from './db';
 
 // schema ของ autopost — แยกต่อ project ได้ผ่าน env (ไม่ตั้ง = so_autopost_jobs เดิม)
 // ใช้กับทุก query ข้าม schema ไปฝั่ง autopost. ค่าจาก env เราคุมเอง (ไม่ใช่ input ผู้ใช้)
-const AP = `"${process.env.AUTOPOST_SCHEMA || 'so_autopost_jobs'}"`;
+const AP_SCHEMA = process.env.AUTOPOST_SCHEMA || 'so_autopost_jobs';
+if (!/^[A-Za-z_][A-Za-z0-9_-]*$/.test(AP_SCHEMA)) {
+  throw new Error(`AUTOPOST_SCHEMA ไม่ถูกต้อง: ${AP_SCHEMA}`);
+}
+const AP = `"${AP_SCHEMA}"`;
 
 export type CandidateRow = {
   id: string;
@@ -115,9 +120,8 @@ export async function listConnectors() {
   );
 }
 
-// Unified account row across ALL modules (scraper connectors + Facebook accounts),
-// read from the v_connectors view. `key` is '<platform>:<id>'; strip the prefix to
-// get the raw id for scraper toggle/delete. Facebook rows are read-only here.
+// Unified account row across ALL modules (scraper connectors + Facebook accounts).
+// `key` is '<platform>:<id>'; strip the prefix to get the raw scraper connector id.
 export type UnifiedConnectorRow = {
   key: string;
   platform: string;
@@ -135,10 +139,56 @@ export type UnifiedConnectorRow = {
 };
 
 export async function listAllConnectors() {
-  return q<UnifiedConnectorRow>(
-    `SELECT key, platform, label, username, scrape_limit, daily_cap, enabled,
-            cooldown_until, last_login_at, created_at, paused_until, pause_reason, used_today
-       FROM v_connectors ORDER BY platform, label`,
+  // Query both schemas directly instead of v_connectors: the view belongs to an
+  // older fixed autopost schema, while AUTOPOST_SCHEMA is now configurable.
+  const scraper = await q<UnifiedConnectorRow>(
+    `SELECT platform || ':' || id::text AS key, platform, label, username,
+            scrape_limit, daily_cap, enabled, cooldown_until, last_login_at, created_at,
+            NULL::timestamptz AS paused_until, NULL::text AS pause_reason,
+            NULL::integer AS used_today
+       FROM connectors`,
+  );
+
+  let facebook: UnifiedConnectorRow[] = [];
+  try {
+    facebook = await q<UnifiedConnectorRow>(
+      `SELECT 'facebook:' || u.id::text AS key, 'facebook'::text AS platform,
+              COALESCE(NULLIF(TRIM(u.name), ''), u.email, u.env_key, u.id) AS label,
+              COALESCE(u.email, u.env_key) AS username,
+              NULL::integer AS scrape_limit, COALESCE(u.daily_cap, 15)::integer AS daily_cap,
+              true AS enabled, NULL::timestamptz AS cooldown_until,
+              NULL::timestamptz AS last_login_at, u.created_at,
+              u.paused_until, u.pause_reason,
+              COALESCE((
+                SELECT count(*)::int FROM ${AP}.post_logs pl
+                 WHERE pl.user_id = u.id
+                   AND (pl.created_at AT TIME ZONE 'Asia/Bangkok')::date
+                       = (now() AT TIME ZONE 'Asia/Bangkok')::date
+              ), 0) AS used_today
+         FROM ${AP}.users u`,
+    );
+  } catch {
+    // Schema รุ่นแรกอาจยังไม่มี daily_cap/paused columns หรือ post_logs.
+    // ยังแสดงบัญชีพื้นฐานได้ เพื่อให้ Settings ไม่ล่มทั้งหน้า.
+    try {
+      facebook = await q<UnifiedConnectorRow>(
+        `SELECT 'facebook:' || u.id::text AS key, 'facebook'::text AS platform,
+                COALESCE(NULLIF(TRIM(u.name), ''), u.email, u.env_key, u.id) AS label,
+                COALESCE(u.email, u.env_key) AS username,
+                NULL::integer AS scrape_limit, 15::integer AS daily_cap,
+                true AS enabled, NULL::timestamptz AS cooldown_until,
+                NULL::timestamptz AS last_login_at, u.created_at,
+                NULL::timestamptz AS paused_until, NULL::text AS pause_reason,
+                0::integer AS used_today
+           FROM ${AP}.users u`,
+      );
+    } catch {
+      facebook = [];
+    }
+  }
+
+  return [...scraper, ...facebook].sort((a, b) =>
+    `${a.platform}:${a.label}`.localeCompare(`${b.platform}:${b.label}`, 'th'),
   );
 }
 
@@ -163,6 +213,37 @@ export async function insertConnector(c: {
     [c.platform, c.label, c.username, c.passwordEnc, c.scrapeLimit, c.dailyCap],
   );
   return rows[0].id;
+}
+
+/** Add one Facebook posting account to the configured Auto-Post schema. */
+export async function insertFacebookConnector(c: {
+  label: string;
+  username: string;
+  password: string;
+  posterName?: string;
+  contactPhone?: string;
+  dailyCap: number;
+}) {
+  // These control columns are runtime migrations in the legacy Auto-Post server.
+  // Ensure the one needed by this native Settings form before inserting.
+  await q(`ALTER TABLE ${AP}.users ADD COLUMN IF NOT EXISTS daily_cap INTEGER`);
+  const id = `fb_${randomUUID().replace(/-/g, '').slice(0, 24)}`;
+  await q(
+    `INSERT INTO ${AP}.users
+       (id, env_key, name, poster_name, email, password, group_ids, blacklist_groups,
+        post_settings, contact_phone, daily_cap)
+     VALUES ($1,$1,$2,$3,$4,$5,'[]'::jsonb,'[]'::jsonb,'{}'::jsonb,$6,$7)`,
+    [
+      id,
+      c.label,
+      c.posterName || c.label,
+      c.username,
+      c.password,
+      c.contactPhone || null,
+      c.dailyCap,
+    ],
+  );
+  return id;
 }
 
 export async function setConnectorEnabled(id: string, enabled: boolean) {
