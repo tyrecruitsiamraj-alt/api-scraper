@@ -1,6 +1,13 @@
 import { query } from '../db/pool.js';
 import { envInt } from '../config.js';
 
+// schema ของ autopost (แยกต่อ project ผ่าน env — ต้องตรงกับ web/lib/repo.ts)
+const AP_SCHEMA = process.env.AUTOPOST_SCHEMA || 'so_autopost_apiscraper';
+if (!/^[A-Za-z_][A-Za-z0-9_-]*$/.test(AP_SCHEMA)) {
+  throw new Error(`AUTOPOST_SCHEMA ไม่ถูกต้อง: ${AP_SCHEMA}`);
+}
+const AP = `"${AP_SCHEMA}"`;
+
 /**
  * เฟส 4 — วัดผล engagement ของโพสต์ใน campaign แล้ววน feedback loop:
  *   - อ่าน engagement ที่ autopost collect เก็บไว้ (${AP}.post_logs:

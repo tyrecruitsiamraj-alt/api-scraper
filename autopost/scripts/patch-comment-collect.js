@@ -134,21 +134,21 @@ s = fs.readFileSync(dbPath, 'utf8');
 if (!s.includes('ensureUsersContactPhoneColumn')) {
   s = s.replace(
     `async function ensurePostLogsGroupNameText() {
-  const SCHEMA = process.env.DB_SCHEMA || 'so_autopost_jobs';
+  const SCHEMA = process.env.DB_SCHEMA || 'so_autopost_apiscraper';
   const schemaName = SCHEMA.includes('-') ? \`"\${SCHEMA}"\` : SCHEMA;
   await query(\`ALTER TABLE \${schemaName}.post_logs ALTER COLUMN group_name TYPE TEXT\`).catch(() => {});
 }
 
 async function initSchema()`,
     `async function ensurePostLogsGroupNameText() {
-  const SCHEMA = process.env.DB_SCHEMA || 'so_autopost_jobs';
+  const SCHEMA = process.env.DB_SCHEMA || 'so_autopost_apiscraper';
   const schemaName = SCHEMA.includes('-') ? \`"\${SCHEMA}"\` : SCHEMA;
   await query(\`ALTER TABLE \${schemaName}.post_logs ALTER COLUMN group_name TYPE TEXT\`).catch(() => {});
 }
 
 /** เพิ่ม users.contact_phone สำหรับ DB เดิมที่ยังไม่มีคอลัมน์ */
 async function ensureUsersContactPhoneColumn() {
-  const SCHEMA = process.env.DB_SCHEMA || 'so_autopost_jobs';
+  const SCHEMA = process.env.DB_SCHEMA || 'so_autopost_apiscraper';
   const schemaName = SCHEMA.includes('-') ? \`"\${SCHEMA}"\` : SCHEMA;
   await query(\`ALTER TABLE \${schemaName}.users ADD COLUMN IF NOT EXISTS contact_phone VARCHAR(64)\`).catch(() => {});
 }

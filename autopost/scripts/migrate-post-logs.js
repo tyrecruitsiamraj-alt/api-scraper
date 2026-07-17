@@ -6,7 +6,7 @@ const fs = require('fs');
 const path = require('path');
 
 const DATABASE_URL = process.env.DATABASE_URL;
-const SCHEMA = process.env.DB_SCHEMA || 'so_autopost_jobs';
+const SCHEMA = process.env.DB_SCHEMA || 'so_autopost_apiscraper';
 
 async function run() {
   if (!DATABASE_URL) {

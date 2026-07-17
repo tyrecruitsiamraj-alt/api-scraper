@@ -5,7 +5,7 @@ require('dotenv').config();
 const { Pool } = require('pg');
 
 const DATABASE_URL = process.env.DATABASE_URL;
-const SCHEMA = process.env.DB_SCHEMA || 'so_autopost_jobs';
+const SCHEMA = process.env.DB_SCHEMA || 'so_autopost_apiscraper';
 const ASSIGNMENTS_TABLE = SCHEMA.includes('-') ? `"${SCHEMA}".assignments` : `${SCHEMA}.assignments`;
 
 let pool = null;
@@ -2330,21 +2330,21 @@ async function getDynamicConfig() {
 
 /** ย้าย group_name เป็น TEXT (ชื่อกลุ่มยาว) — เรียกตอนสตาร์ทเซิร์ฟเวอร์ / initSchema */
 async function ensurePostLogsGroupNameText() {
-  const SCHEMA = process.env.DB_SCHEMA || 'so_autopost_jobs';
+  const SCHEMA = process.env.DB_SCHEMA || 'so_autopost_apiscraper';
   const schemaName = SCHEMA.includes('-') ? `"${SCHEMA}"` : SCHEMA;
   await query(`ALTER TABLE ${schemaName}.post_logs ALTER COLUMN group_name TYPE TEXT`).catch(() => {});
 }
 
 /** เพิ่ม users.contact_phone สำหรับ DB เดิมที่ยังไม่มีคอลัมน์ */
 async function ensureUsersContactPhoneColumn() {
-  const SCHEMA = process.env.DB_SCHEMA || 'so_autopost_jobs';
+  const SCHEMA = process.env.DB_SCHEMA || 'so_autopost_apiscraper';
   const schemaName = SCHEMA.includes('-') ? `"${SCHEMA}"` : SCHEMA;
   await query(`ALTER TABLE ${schemaName}.users ADD COLUMN IF NOT EXISTS contact_phone VARCHAR(64)`).catch(() => {});
 }
 
 /** เก็บหลายเบอร์ใน customer_phone — ขยายจาก VARCHAR(100) */
 async function ensurePostLogsCustomerPhoneWide() {
-  const SCHEMA = process.env.DB_SCHEMA || 'so_autopost_jobs';
+  const SCHEMA = process.env.DB_SCHEMA || 'so_autopost_apiscraper';
   const schemaName = SCHEMA.includes('-') ? `"${SCHEMA}"` : SCHEMA;
   await query(`ALTER TABLE ${schemaName}.post_logs ALTER COLUMN customer_phone TYPE VARCHAR(2000)`).catch(() => {});
 }

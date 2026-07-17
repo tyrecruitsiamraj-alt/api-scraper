@@ -6,7 +6,7 @@ require('dotenv').config();
 const { Pool } = require('pg');
 
 const DATABASE_URL = process.env.DATABASE_URL;
-const SCHEMA = process.env.DB_SCHEMA || 'so_autopost_jobs';
+const SCHEMA = process.env.DB_SCHEMA || 'so_autopost_apiscraper';
 const tableRef = SCHEMA.includes('-') ? `"${SCHEMA}".assignments` : `${SCHEMA}.assignments`;
 
 async function main() {

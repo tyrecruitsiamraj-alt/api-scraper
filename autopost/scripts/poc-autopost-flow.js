@@ -46,7 +46,7 @@ async function humanType(page, text) {
 
 async function pickPlan(pool, account) {
   const Q = (s, a) => pool.query(s, a).then((r) => r.rows);
-  await pool.query('SET search_path TO so_autopost_jobs');
+  await pool.query(`SET search_path TO ${process.env.DB_SCHEMA || 'so_autopost_apiscraper'}`);
   const u = (await Q(`SELECT id, name FROM users WHERE name = $1 OR poster_name = $1 LIMIT 1`, [account]))[0];
   if (!u) throw new Error(`ไม่พบบัญชี "${account}"`);
 
