@@ -427,16 +427,19 @@ npm run migrate
 - `/dashboard` — ภาพรวม
 - `/candidates` และ `/candidates/[id]` — ค้นหา/ดูผู้สมัครและไฟล์แนบ
 - `/scraping` — สร้าง/รัน/ติดตาม task
-- `/settings` — ศูนย์กลาง Connector: ดูและเพิ่ม JobBKK, JobThai และ Facebook พร้อม daily quota
+- `/settings` — ศูนย์กลางการตั้งค่า มีเมนูย่อย Connector, Job และตั้งค่าโพสต์
+- `/settings/connectors` — ดูและเพิ่ม JobBKK, JobThai และ Facebook พร้อม daily quota; บัญชี Facebook เลือก worker pin ได้ตั้งแต่ตอนเพิ่ม
+- `/settings/jobs` — งานโพสต์
+- `/settings/posting` — ตั้งค่าการโพสต์
 - `/connectors` — URL เดิม; redirect ไป `/settings`
 
 **Auto‑Post**
 
 - `/autopost` — ภาพรวม
 - `/autopost/runs` — รอบโพสต์และผลรายกลุ่ม
-- `/autopost/jobs` — งานโพสต์
-- `/autopost/posting` — ตั้งค่าการโพสต์
-- `/autopost/accounts` — บัญชี Facebook และ worker pin
+- `/autopost/jobs` — redirect ไป `/settings/jobs`
+- `/autopost/posting` — redirect ไป `/settings/posting`
+- `/autopost/accounts` — redirect ไป `/settings/connectors`; หน้า iframe จัดการบัญชีเดิมถูกถอดออก
 - `/autopost/collect` — เก็บคอมเมนต์
 - `/autopost/reports` — รายงาน
 

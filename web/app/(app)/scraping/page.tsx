@@ -18,8 +18,8 @@ export default async function ScrapingPage() {
       {connectors.length === 0 ? (
         <div className="card px-5 py-12 text-center">
           <p className="text-subtle">ยังไม่มี connector — ต้องเพิ่มบัญชีแพลตฟอร์มก่อนจึงจะสร้างงานได้</p>
-          <Link href="/settings" className="btn-primary mt-4 inline-flex">
-            ไปหน้า Settings
+          <Link href="/settings/connectors" className="btn-primary mt-4 inline-flex">
+            ไปหน้า Connector
           </Link>
         </div>
       ) : (

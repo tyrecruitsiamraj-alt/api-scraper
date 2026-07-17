@@ -9,7 +9,7 @@ const PLATFORMS = [
   { value: 'facebook', label: 'Facebook', detail: 'Auto-Post', color: 'border-indigo-200 bg-indigo-50/60' },
 ];
 
-export function NewUnifiedConnectorForm() {
+export function NewUnifiedConnectorForm({ workers = [] }: { workers?: string[] }) {
   const [open, setOpen] = useState(false);
   const [platform, setPlatform] = useState('jobbkk');
   const [submitting, setSubmitting] = useState(false);
@@ -94,6 +94,21 @@ export function NewUnifiedConnectorForm() {
               <label className="label">เบอร์ของบัญชีเอง</label>
               <input name="contactPhone" placeholder="ใช้ตัดเบอร์ตัวเองออกจาก Lead" className="field" />
             </div>
+            <div className="md:col-span-2">
+              <label className="label">ผูกบัญชีกับเครื่อง (Pin)</label>
+              <input
+                name="preferredWorker"
+                list="facebook-worker-names"
+                placeholder="ชื่อเครื่อง เช่น SONB-RM009"
+                className="field font-mono"
+              />
+              <datalist id="facebook-worker-names">
+                {workers.map((worker) => <option key={worker} value={worker} />)}
+              </datalist>
+              <p className="mt-1.5 text-xs text-subtle">
+                เลือกเครื่องเดิมให้บัญชีนี้เพื่อไม่ให้ IP สลับ · เว้นว่างได้หากยังไม่ทราบชื่อเครื่อง
+              </p>
+            </div>
           </>
         )}
       </div>
@@ -117,7 +132,7 @@ export function NewUnifiedConnectorForm() {
 
       {facebook && (
         <p className="mt-4 rounded-xl bg-amber-50 px-3 py-2 text-xs text-amber-800">
-          บัญชี Facebook ยังต้องเข้า “Session / Pin” หลังเพิ่ม เพื่อเปิด Chrome และยืนยันตัวตนครั้งแรก รหัสผ่านถูกเก็บตามระบบ Auto‑Post เดิมเพื่อให้ worker ล็อกอินได้
+          Worker จะใช้ข้อมูลนี้เปิด Chrome และล็อกอินเมื่อรับงานครั้งแรก หาก Facebook ขอ OTP ให้ยืนยันบนเครื่องที่ Pin ไว้
         </p>
       )}
       {error && <p className="mt-4 rounded-xl bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}

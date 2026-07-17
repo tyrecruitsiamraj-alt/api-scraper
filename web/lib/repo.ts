@@ -136,6 +136,7 @@ export type UnifiedConnectorRow = {
   paused_until: string | null;
   pause_reason: string | null;
   used_today: number | null;
+  preferred_worker: string | null;
 };
 
 export async function listAllConnectors() {
@@ -145,7 +146,7 @@ export async function listAllConnectors() {
     `SELECT platform || ':' || id::text AS key, platform, label, username,
             scrape_limit, daily_cap, enabled, cooldown_until, last_login_at, created_at,
             NULL::timestamptz AS paused_until, NULL::text AS pause_reason,
-            NULL::integer AS used_today
+            NULL::integer AS used_today, NULL::text AS preferred_worker
        FROM connectors`,
   );
 
@@ -164,7 +165,8 @@ export async function listAllConnectors() {
                  WHERE pl.user_id = u.id
                    AND (pl.created_at AT TIME ZONE 'Asia/Bangkok')::date
                        = (now() AT TIME ZONE 'Asia/Bangkok')::date
-              ), 0) AS used_today
+              ), 0) AS used_today,
+              NULLIF(to_jsonb(u)->>'preferred_worker', '') AS preferred_worker
          FROM ${AP}.users u`,
     );
   } catch {
@@ -179,7 +181,8 @@ export async function listAllConnectors() {
                 true AS enabled, NULL::timestamptz AS cooldown_until,
                 NULL::timestamptz AS last_login_at, u.created_at,
                 NULL::timestamptz AS paused_until, NULL::text AS pause_reason,
-                0::integer AS used_today
+                0::integer AS used_today,
+                NULLIF(to_jsonb(u)->>'preferred_worker', '') AS preferred_worker
            FROM ${AP}.users u`,
       );
     } catch {
@@ -223,16 +226,18 @@ export async function insertFacebookConnector(c: {
   posterName?: string;
   contactPhone?: string;
   dailyCap: number;
+  preferredWorker?: string;
 }) {
   // These control columns are runtime migrations in the legacy Auto-Post server.
   // Ensure the one needed by this native Settings form before inserting.
   await q(`ALTER TABLE ${AP}.users ADD COLUMN IF NOT EXISTS daily_cap INTEGER`);
+  await q(`ALTER TABLE ${AP}.users ADD COLUMN IF NOT EXISTS preferred_worker VARCHAR(255)`);
   const id = `fb_${randomUUID().replace(/-/g, '').slice(0, 24)}`;
   await q(
     `INSERT INTO ${AP}.users
        (id, env_key, name, poster_name, email, password, group_ids, blacklist_groups,
-        post_settings, contact_phone, daily_cap)
-     VALUES ($1,$1,$2,$3,$4,$5,'[]'::jsonb,'[]'::jsonb,'{}'::jsonb,$6,$7)`,
+        post_settings, contact_phone, daily_cap, preferred_worker)
+     VALUES ($1,$1,$2,$3,$4,$5,'[]'::jsonb,'[]'::jsonb,'{}'::jsonb,$6,$7,$8)`,
     [
       id,
       c.label,
@@ -241,6 +246,7 @@ export async function insertFacebookConnector(c: {
       c.password,
       c.contactPhone || null,
       c.dailyCap,
+      c.preferredWorker?.trim() || null,
     ],
   );
   return id;

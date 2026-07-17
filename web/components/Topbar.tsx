@@ -16,9 +16,6 @@ const NAV: Record<Mode, { href: string; label: string }[]> = {
   autopost: [
     { href: '/autopost', label: 'ภาพรวม' },
     { href: '/autopost/runs', label: 'รอบโพสต์' },
-    { href: '/autopost/jobs', label: 'Jobs' },
-    { href: '/autopost/posting', label: 'ตั้งค่าโพสต์' },
-    { href: '/autopost/accounts', label: 'บัญชี Facebook' },
     { href: '/autopost/collect', label: 'เก็บคอมเมนต์' },
     { href: '/autopost/reports', label: 'รายงาน' },
   ],

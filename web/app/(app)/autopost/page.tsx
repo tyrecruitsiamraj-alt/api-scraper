@@ -43,7 +43,7 @@ export default async function AutopostOverviewPage() {
             <Stat label="Lead 14 วัน" value={a.leads_14d.toLocaleString()} />
           </div>
           <p className="text-xs text-subtle">
-            ดูโควต้ารายบัญชีและจัดการบัญชีได้ที่หน้า “บัญชี Facebook” · ตั้งค่างาน/กลุ่ม/มอบหมาย ที่ “ตั้งค่าโพสต์”
+            จัดการ Connector, Job และการตั้งค่าโพสต์ได้จากเมนู “ตั้งค่า” ด้านบน
           </p>
         </>
       )}

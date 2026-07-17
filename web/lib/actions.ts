@@ -263,6 +263,7 @@ export async function setAccountWorkerAction(formData: FormData) {
   if (id) await setFbAccountWorker(id, worker || null);
   revalidatePath('/autopost/accounts');
   revalidatePath('/autopost/runs');
+  revalidatePath('/settings/connectors');
 }
 
 // ---------------------------------------------------------------------------
@@ -289,8 +290,10 @@ export async function createConnectorAction(formData: FormData) {
       posterName: String(formData.get('posterName') ?? '').trim(),
       contactPhone: String(formData.get('contactPhone') ?? '').trim(),
       dailyCap,
+      preferredWorker: String(formData.get('preferredWorker') ?? '').trim(),
     });
     revalidatePath('/settings');
+    revalidatePath('/settings/connectors');
     revalidatePath('/autopost/accounts');
     return;
   }
@@ -308,6 +311,7 @@ export async function createConnectorAction(formData: FormData) {
   });
   revalidatePath('/connectors');
   revalidatePath('/settings');
+  revalidatePath('/settings/connectors');
 }
 
 export async function toggleConnectorAction(formData: FormData) {
@@ -317,6 +321,7 @@ export async function toggleConnectorAction(formData: FormData) {
   if (id) await setConnectorEnabled(id, enabled);
   revalidatePath('/connectors');
   revalidatePath('/settings');
+  revalidatePath('/settings/connectors');
 }
 
 export async function deleteConnectorAction(formData: FormData) {
@@ -325,6 +330,7 @@ export async function deleteConnectorAction(formData: FormData) {
   if (id) await deleteConnector(id);
   revalidatePath('/connectors');
   revalidatePath('/settings');
+  revalidatePath('/settings/connectors');
 }
 
 export async function setProviderCapAction(formData: FormData) {
@@ -334,6 +340,7 @@ export async function setProviderCapAction(formData: FormData) {
   if (platform && Number.isFinite(dailyCap) && dailyCap >= 0) await setProviderCap(platform, dailyCap);
   revalidatePath('/connectors');
   revalidatePath('/settings');
+  revalidatePath('/settings/connectors');
 }
 
 export async function setFacebookDailyCapAction(formData: FormData) {
@@ -343,4 +350,5 @@ export async function setFacebookDailyCapAction(formData: FormData) {
   if (Number.isFinite(cap) && cap >= 1 && cap <= 50) await setFacebookDailyCapForAll(cap);
   revalidatePath('/connectors');
   revalidatePath('/settings');
+  revalidatePath('/settings/connectors');
 }
