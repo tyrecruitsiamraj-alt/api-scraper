@@ -3,7 +3,7 @@ import { envInt } from '../config.js';
 
 /**
  * เฟส 4 — วัดผล engagement ของโพสต์ใน campaign แล้ววน feedback loop:
- *   - อ่าน engagement ที่ autopost collect เก็บไว้ ("so_autopost_jobs".post_logs:
+ *   - อ่าน engagement ที่ autopost collect เก็บไว้ (${AP}.post_logs:
  *     comment_count + customer_phone=คนทัก/ให้เบอร์ + post_link) join ด้วย campaign_posts.job_ref
  *   - คำนวณคะแนน = comments + leads*น้ำหนัก → verdict high/low ต่อโพสต์
  *   - campaign: มีโพสต์ "high" → done + บันทึก content_winning_patterns;
@@ -60,13 +60,13 @@ export async function measureCampaign(campaignId) {
     const { rows: logs } = await query(
       `SELECT comment_count, customer_phone, post_link, created_at,
               COALESCE(reactions, 0) AS reactions, COALESCE(shares, 0) AS shares
-         FROM "so_autopost_jobs".post_logs WHERE job_id = $1`,
+         FROM ${AP}.post_logs WHERE job_id = $1`,
       [p.job_ref],
     ).catch(async () => {
       // ถ้าคอลัมน์ reactions/shares ยังไม่มีจริง — fallback query แบบไม่มีสองคอลัมน์นั้น
       const r = await query(
         `SELECT comment_count, customer_phone, post_link, created_at, 0 AS reactions, 0 AS shares
-           FROM "so_autopost_jobs".post_logs WHERE job_id = $1`,
+           FROM ${AP}.post_logs WHERE job_id = $1`,
         [p.job_ref],
       );
       return r;

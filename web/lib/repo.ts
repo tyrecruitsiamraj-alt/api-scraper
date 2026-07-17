@@ -1,6 +1,10 @@
 import 'server-only';
 import { q } from './db';
 
+// schema ของ autopost — แยกต่อ project ได้ผ่าน env (ไม่ตั้ง = so_autopost_jobs เดิม)
+// ใช้กับทุก query ข้าม schema ไปฝั่ง autopost. ค่าจาก env เราคุมเอง (ไม่ใช่ input ผู้ใช้)
+const AP = `"${process.env.AUTOPOST_SCHEMA || 'so_autopost_jobs'}"`;
+
 export type CandidateRow = {
   id: string;
   full_name: string | null;
@@ -225,12 +229,12 @@ export async function facebookQuotaSummary(): Promise<FacebookQuotaSummary | nul
          COALESCE(u.daily_cap, 15)::int AS cap,
          (u.paused_until IS NOT NULL AND u.paused_until > now()) AS paused,
          COALESCE((
-           SELECT count(*)::int FROM "so_autopost_jobs".post_logs pl
+           SELECT count(*)::int FROM ${AP}.post_logs pl
             WHERE pl.user_id = u.id
               AND (pl.created_at AT TIME ZONE 'Asia/Bangkok')::date
                   = (now() AT TIME ZONE 'Asia/Bangkok')::date
          ), 0) AS used_today
-       FROM "so_autopost_jobs".users u
+       FROM ${AP}.users u
        ORDER BY used_today DESC, label`,
     );
     if (rows.length === 0) return null;
@@ -260,7 +264,7 @@ export async function facebookQuotaSummary(): Promise<FacebookQuotaSummary | nul
 
 /** ตั้งเพดานโพสต์ต่อบัญชี/วัน ให้ทุกบัญชี Facebook (จาก panel โควต้า) */
 export async function setFacebookDailyCapForAll(cap: number) {
-  await q(`UPDATE "so_autopost_jobs".users SET daily_cap = $1, updated_at = now()`, [cap]);
+  await q(`UPDATE ${AP}.users SET daily_cap = $1, updated_at = now()`, [cap]);
 }
 
 // สถานะการโพสต์ Auto-Post — ให้เห็นว่ากดโพสต์แล้วสำเร็จ/ล้ม/ถูกข้าม + worker ออนไลน์ไหม
@@ -290,19 +294,19 @@ export async function autopostActivity(): Promise<AutopostActivity | null> {
     const runs = await q<AutopostRunRow>(
       `SELECT r.id, u.name AS account, r.status, r.worker_id, r.error, r.message, r.requested_by,
               r.created_at, r.started_at, r.finished_at
-         FROM "so_autopost_jobs".post_run_queue r
-         LEFT JOIN "so_autopost_jobs".users u ON u.id = r.user_id
+         FROM ${AP}.post_run_queue r
+         LEFT JOIN ${AP}.users u ON u.id = r.user_id
         ORDER BY r.created_at DESC LIMIT 8`,
     );
     const logs = await q<AutopostLogRow>(
-      `SELECT created_at, level, message FROM "so_autopost_jobs".run_logs
+      `SELECT created_at, level, message FROM ${AP}.run_logs
         ORDER BY created_at DESC LIMIT 15`,
     );
     const agg = await q<{ worker_last_seen: string | null; queued: number; running: number }>(
       `SELECT max(GREATEST(started_at, created_at)) FILTER (WHERE worker_id IS NOT NULL) AS worker_last_seen,
               count(*) FILTER (WHERE status='queued')::int AS queued,
               count(*) FILTER (WHERE status='running')::int AS running
-         FROM "so_autopost_jobs".post_run_queue`,
+         FROM ${AP}.post_run_queue`,
     );
     return {
       runs,
@@ -322,10 +326,10 @@ export type FbAccountPin = { id: string; label: string; preferred_worker: string
 /** บัญชี FB + เครื่องที่ผูกไว้ (สำหรับ panel pin). guarded. */
 export async function listFbAccountPins(): Promise<FbAccountPin[]> {
   try {
-    await q(`ALTER TABLE "so_autopost_jobs".users ADD COLUMN IF NOT EXISTS preferred_worker VARCHAR(255)`);
+    await q(`ALTER TABLE ${AP}.users ADD COLUMN IF NOT EXISTS preferred_worker VARCHAR(255)`);
     return await q<FbAccountPin>(
       `SELECT id, COALESCE(NULLIF(TRIM(name), ''), env_key, id) AS label, preferred_worker
-         FROM "so_autopost_jobs".users
+         FROM ${AP}.users
         ORDER BY label`,
     );
   } catch {
@@ -338,7 +342,7 @@ export async function knownWorkerNames(): Promise<string[]> {
   try {
     const rows = await q<{ name: string }>(
       `SELECT DISTINCT regexp_replace(worker_id, '-[0-9]+$', '') AS name
-         FROM "so_autopost_jobs".post_run_queue
+         FROM ${AP}.post_run_queue
         WHERE worker_id IS NOT NULL AND TRIM(worker_id) <> ''
         ORDER BY name LIMIT 20`,
     );
@@ -350,8 +354,8 @@ export async function knownWorkerNames(): Promise<string[]> {
 
 /** ตั้ง/ล้าง pin ของบัญชี (worker ว่าง = ปลด pin ให้เครื่องไหนก็หยิบได้). */
 export async function setFbAccountWorker(id: string, worker: string | null) {
-  await q(`ALTER TABLE "so_autopost_jobs".users ADD COLUMN IF NOT EXISTS preferred_worker VARCHAR(255)`);
-  await q(`UPDATE "so_autopost_jobs".users SET preferred_worker = $2, updated_at = now() WHERE id = $1`, [
+  await q(`ALTER TABLE ${AP}.users ADD COLUMN IF NOT EXISTS preferred_worker VARCHAR(255)`);
+  await q(`UPDATE ${AP}.users SET preferred_worker = $2, updated_at = now() WHERE id = $1`, [
     id,
     worker && worker.trim() ? worker.trim() : null,
   ]);
@@ -378,17 +382,17 @@ export type AutopostRunListRow = {
 /** รายการรอบโพสต์ล่าสุด — เห็นว่าบัญชีไหน วิ่งที่ worker ไหน สั่งโดยใคร โพสต์ไปกี่กลุ่ม. guarded. */
 export async function autopostRuns(limit = 50): Promise<AutopostRunListRow[]> {
   try {
-    await q(`ALTER TABLE "so_autopost_jobs".users ADD COLUMN IF NOT EXISTS preferred_worker VARCHAR(255)`);
+    await q(`ALTER TABLE ${AP}.users ADD COLUMN IF NOT EXISTS preferred_worker VARCHAR(255)`);
     return await q<AutopostRunListRow>(
       `SELECT r.id, r.run_id, u.name AS account, r.user_id, r.worker_id, r.status,
               r.requested_by, r.message, r.error, r.created_at, r.started_at, r.finished_at,
               u.preferred_worker AS pinned_worker,
               COALESCE((
-                SELECT count(*)::int FROM "so_autopost_jobs".post_logs pl
+                SELECT count(*)::int FROM ${AP}.post_logs pl
                  WHERE pl.run_id = r.run_id AND pl.post_link IS NOT NULL AND TRIM(pl.post_link) <> ''
               ), 0) AS posted
-         FROM "so_autopost_jobs".post_run_queue r
-         LEFT JOIN "so_autopost_jobs".users u ON u.id = r.user_id
+         FROM ${AP}.post_run_queue r
+         LEFT JOIN ${AP}.users u ON u.id = r.user_id
         ORDER BY r.created_at DESC LIMIT $1`,
       [limit],
     );
@@ -399,13 +403,13 @@ export async function autopostRuns(limit = 50): Promise<AutopostRunListRow[]> {
 
 export async function autopostRun(id: string): Promise<AutopostRunListRow | null> {
   try {
-    await q(`ALTER TABLE "so_autopost_jobs".users ADD COLUMN IF NOT EXISTS preferred_worker VARCHAR(255)`);
+    await q(`ALTER TABLE ${AP}.users ADD COLUMN IF NOT EXISTS preferred_worker VARCHAR(255)`);
     const rows = await q<AutopostRunListRow>(
       `SELECT r.id, r.run_id, u.name AS account, r.user_id, r.worker_id, r.status,
               r.requested_by, r.message, r.error, r.created_at, r.started_at, r.finished_at, 0 AS posted,
               u.preferred_worker AS pinned_worker
-         FROM "so_autopost_jobs".post_run_queue r
-         LEFT JOIN "so_autopost_jobs".users u ON u.id = r.user_id
+         FROM ${AP}.post_run_queue r
+         LEFT JOIN ${AP}.users u ON u.id = r.user_id
         WHERE r.id = $1`,
       [id],
     );
@@ -433,7 +437,7 @@ export async function autopostRunPosts(runId: string): Promise<AutopostRunPostRo
     return await q<AutopostRunPostRow>(
       `SELECT id, job_title, group_name, group_id, post_link, post_status,
               COALESCE(comment_count, 0) AS comment_count, created_at
-         FROM "so_autopost_jobs".post_logs
+         FROM ${AP}.post_logs
         WHERE run_id = $1
         ORDER BY created_at DESC`,
       [runId],
@@ -462,12 +466,12 @@ export async function autopostOverview(): Promise<AutopostOverview | null> {
                 COALESCE(u.daily_cap, 15) AS cap,
                 (u.paused_until IS NOT NULL AND u.paused_until > now()) AS paused,
                 COALESCE((
-                  SELECT count(*)::int FROM "so_autopost_jobs".post_logs pl
+                  SELECT count(*)::int FROM ${AP}.post_logs pl
                    WHERE pl.user_id = u.id
                      AND (pl.created_at AT TIME ZONE 'Asia/Bangkok')::date
                          = (now() AT TIME ZONE 'Asia/Bangkok')::date
                 ), 0) AS used
-           FROM "so_autopost_jobs".users u
+           FROM ${AP}.users u
        )
        SELECT count(*)::int AS accounts,
               count(*) FILTER (WHERE paused)::int AS paused,
@@ -483,7 +487,7 @@ export async function autopostOverview(): Promise<AutopostOverview | null> {
            WHERE (created_at AT TIME ZONE 'Asia/Bangkok')::date = (now() AT TIME ZONE 'Asia/Bangkok')::date
          )::int AS leads_today,
          count(*) FILTER (WHERE created_at >= now() - interval '14 days')::int AS leads_14d
-       FROM "so_autopost_jobs".post_logs
+       FROM ${AP}.post_logs
        WHERE customer_phone IS NOT NULL AND customer_phone <> ''`,
     );
     return { ...acc[0], leads_today: leads[0]?.leads_today ?? 0, leads_14d: leads[0]?.leads_14d ?? 0 };
@@ -874,7 +878,7 @@ export async function listFacebookAccounts(): Promise<FbAccount[]> {
               COALESCE(jsonb_array_length(
                 CASE WHEN jsonb_typeof(group_ids::jsonb) = 'array' THEN group_ids::jsonb ELSE '[]'::jsonb END
               ), 0) AS group_count
-         FROM "so_autopost_jobs".users
+         FROM ${AP}.users
         ORDER BY label`,
     );
   } catch {
@@ -906,21 +910,21 @@ export async function enqueueApprovedPost(opts: {
   const imageRef = content.has_image ? `campaign-content:${content.id}` : null;
 
   // เผื่อ schema autopost ยังไม่มีคอลัมน์ image_ref (idempotent)
-  await q(`ALTER TABLE "so_autopost_jobs".jobs ADD COLUMN IF NOT EXISTS image_ref TEXT`);
+  await q(`ALTER TABLE ${AP}.jobs ADD COLUMN IF NOT EXISTS image_ref TEXT`);
 
   await q(
-    `INSERT INTO "so_autopost_jobs".jobs (id, title, owner, company, caption, status, image_ref)
+    `INSERT INTO ${AP}.jobs (id, title, owner, company, caption, status, image_ref)
      VALUES ($1, $2, 'SO Recruitment', 'SO Recruitment', $3, 'pending', $4)`,
     [jobId, title, content.caption || '', imageRef],
   );
   await q(
-    `INSERT INTO "so_autopost_jobs".assignments (id, job_ids, group_ids, user_id)
+    `INSERT INTO ${AP}.assignments (id, job_ids, group_ids, user_id)
      VALUES ($1, $2::jsonb, '[]'::jsonb, $3)`,
     [assignmentId, JSON.stringify([jobId]), userId],
   );
   // requested_by ≠ 'auto-daily' → worker ตั้ง IGNORE_DAILY_CAP=1 (โพสต์แบบสั่งเองข้าม cap ได้)
   await q(
-    `INSERT INTO "so_autopost_jobs".post_run_queue (id, assignment_ids, user_id, status, requested_by, message)
+    `INSERT INTO ${AP}.post_run_queue (id, assignment_ids, user_id, status, requested_by, message)
      VALUES ($1, $2::jsonb, $3, 'queued', $4, $5)`,
     [queueId, JSON.stringify([assignmentId]), userId, requestedBy || 'orchestrator', `orchestrator campaign ${campaign.id}`],
   );

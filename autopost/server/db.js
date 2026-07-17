@@ -2353,8 +2353,13 @@ async function initSchema() {
   const fs = require('fs');
   const path = require('path');
   const sql = fs.readFileSync(path.join(__dirname, '../database/schema.sql'), 'utf-8');
+  const schemaName = SCHEMA.includes('-') ? `"${SCHEMA}"` : SCHEMA;
   const client = await getPool().connect();
   try {
+    // สร้าง schema ตาม DB_SCHEMA แล้วตั้ง search_path ก่อนรัน schema.sql
+    // (schema.sql ไม่ hardcode ชื่อ schema แล้ว → แต่ละ deploy แยก schema กันได้)
+    await client.query(`CREATE SCHEMA IF NOT EXISTS ${schemaName}`);
+    await client.query(`SET search_path TO ${schemaName}`);
     await client.query(sql);
   } finally {
     client.release();

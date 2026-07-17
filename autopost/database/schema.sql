@@ -1,8 +1,6 @@
 -- AUTO-POST Database Schema
--- Schema: so_autopost_jobs (ตั้ง DB_SCHEMA ใน .env ถ้าต้องการเปลี่ยน)
-
-CREATE SCHEMA IF NOT EXISTS so_autopost_jobs;
-SET search_path TO so_autopost_jobs;
+-- Schema มาจาก DB_SCHEMA ใน .env (initSchema() ตั้ง search_path ให้ก่อนรันไฟล์นี้)
+-- ไม่ hardcode ชื่อ schema ที่นี่ เพื่อให้แต่ละ deploy ใช้ schema แยกกันได้
 
 -- Users (บัญชี Facebook สำหรับโพสต์) - group_ids = กลุ่ม FB ที่ User นี้ผูกไว้
 CREATE TABLE IF NOT EXISTS users (
