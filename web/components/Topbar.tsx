@@ -20,9 +20,8 @@ const NAV: Record<Mode, { href: string; label: string }[]> = {
     { href: '/autopost/reports', label: 'รายงาน' },
   ],
   orchestrator: [
-    { href: '/orchestrator', label: 'ภาพรวม' },
-    { href: '/orchestrator/flow', label: 'การไหล' },
-    { href: '/orchestrator/imports', label: 'ใบขอจาก ERP' },
+    { href: '/orchestrator', label: 'กระดานงาน' },
+    { href: '/orchestrator/imports', label: 'คำขอ So Recruit' },
   ],
 };
 
