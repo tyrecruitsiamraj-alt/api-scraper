@@ -214,6 +214,7 @@ export async function approveContentAction(formData: FormData) {
   }
   revalidatePath(`/orchestrator/${campaignId}`);
   revalidatePath('/orchestrator');
+  revalidatePath('/autopost'); // อนุมัติจากหน้า Auto-Post ได้ด้วย → รีเฟรช section คิว
 }
 
 /** แก้แคปชันของร่างคอนเทนต์ (ก่อนอนุมัติ). */

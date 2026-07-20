@@ -138,12 +138,20 @@ export function NewTaskForm({ connectors }: { connectors: ConnectorOption[] }) {
         </p>
       </div>
 
-      {/* filters (gender / province / salary / education / age) */}
-      <details className="mt-4 rounded-lg border border-line/60 bg-black/[0.015] px-4 py-3">
-        <summary className="cursor-pointer select-none text-sm font-medium text-ink">
-          ตัวกรองเพิ่มเติม (เพศ · จังหวัด · เงินเดือน · วุฒิ · อายุ)
-        </summary>
+      {/* filters (province ก่อน · gender · salary · education · age) — กางให้เห็นตลอด */}
+      <div className="mt-4 rounded-lg border border-line/60 bg-black/[0.015] px-4 py-3">
+        <div className="text-sm font-medium text-ink">ตัวกรอง (เลือกได้ตามต้องการ — ไม่บังคับ)</div>
         <div className="mt-4 grid gap-4 md:grid-cols-3">
+          <div>
+            <label className="label">จังหวัด</label>
+            <input name="province" list="province-options" placeholder="เช่น กรุงเทพมหานคร" className="field" />
+            <datalist id="province-options">
+              {PROVINCES.map((p) => (
+                <option key={p} value={p} />
+              ))}
+            </datalist>
+          </div>
+
           <div>
             <label className="label">เพศ</label>
             <select name="gender" className="field" defaultValue="ไม่ระบุ">
@@ -153,16 +161,6 @@ export function NewTaskForm({ connectors }: { connectors: ConnectorOption[] }) {
                 </option>
               ))}
             </select>
-          </div>
-
-          <div>
-            <label className="label">จังหวัด</label>
-            <input name="province" list="province-options" placeholder="เช่น กรุงเทพมหานคร" className="field" />
-            <datalist id="province-options">
-              {PROVINCES.map((p) => (
-                <option key={p} value={p} />
-              ))}
-            </datalist>
           </div>
 
           <div>
@@ -209,9 +207,9 @@ export function NewTaskForm({ connectors }: { connectors: ConnectorOption[] }) {
           </div>
         </div>
         <p className="mt-3 text-xs text-subtle">
-          ตัวกรองเหล่านี้ใช้ได้กับทั้ง JobBKK และ JobThai (เงินเดือน/อายุจับเป็นช่วงตามที่แต่ละเว็บกำหนด)
+          ตัวกรองเหล่านี้ใช้ได้กับทั้ง JobBKK และ JobThai (เงินเดือน/อายุจับเป็นช่วงตามที่แต่ละเว็บกำหนด) · ยิ่งกรองแคบยิ่งได้คนน้อย
         </p>
-      </details>
+      </div>
 
       {/* schedule */}
       <div className="mt-4">

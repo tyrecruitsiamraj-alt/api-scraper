@@ -789,6 +789,40 @@ export async function listStagedRequests() {
   );
 }
 
+// --- Intake จาก So Recruit: "คำขอโพสหางานใหม่" (หน้า matching กดส่งมา) ---
+// อ่าน jarvis_rm.job_posting_requests (Postgres เดียวกัน คนละ schema) เฉพาะ pending
+// ที่ยังไม่ได้เริ่ม campaign; LEFT JOIN erp_open_requests เผื่อ staging มีรายละเอียดใบขอเต็ม
+// (ตำแหน่ง/จังหวัด/จำนวน — จะมีเมื่อ MSSQL creds มาแล้ว erp:sync วิ่ง). guarded — [] ถ้าเข้าไม่ได้.
+export type PostingRequest = {
+  id: string;
+  request_no: string;
+  job_id: string | null;
+  reason: string | null;
+  notes: string | null;
+  requested_by_name: string | null;
+  created_at: string;
+  erp_title: string | null;
+  erp_province: string | null;
+  erp_qty: number | null;
+  erp_remaining: number | null;
+};
+
+export async function listSoRecruitPostingRequests(): Promise<PostingRequest[]> {
+  try {
+    return await q<PostingRequest>(
+      `SELECT r.id, r.request_no, r.job_id, r.reason, r.notes, r.requested_by_name, r.created_at,
+              e.title AS erp_title, e.province AS erp_province, e.qty AS erp_qty, e.remaining_qty AS erp_remaining
+         FROM "jarvis_rm".job_posting_requests r
+         LEFT JOIN recruit_campaigns c ON c.request_no = r.request_no
+         LEFT JOIN erp_open_requests e ON e.request_no = r.request_no
+        WHERE r.status = 'pending' AND c.id IS NULL
+        ORDER BY r.created_at DESC`,
+    );
+  } catch {
+    return []; // สคีมา/สิทธิ์ไม่พร้อม — หน้า imports โชว์ empty state
+  }
+}
+
 export type CampaignRow = {
   id: string;
   request_no: string | null;
@@ -857,24 +891,79 @@ export async function campaignStats() {
   return { total, byStatus };
 }
 
-/** สร้าง campaign จากใบขอใน staging (คนกดสั่งต่อใบ) + ผูก staging กันสร้างซ้ำ. */
+/**
+ * สร้าง campaign จากใบขอ (คนกดสั่งต่อใบ) + ผูกกันสร้างซ้ำ.
+ * แหล่งใบขอ 2 ทาง (เรียงตามความครบของข้อมูล):
+ *   1. erp_open_requests (staging จาก MSSQL) — มีตำแหน่ง/จังหวัด/จำนวนครบ → ผูก campaign_id กันสร้างซ้ำ
+ *   2. jarvis_rm.job_posting_requests (So Recruit ส่งมาจากหน้า matching) — มีแค่เลขใบขอ+เหตุผล;
+ *      สร้าง campaign snapshot={source:'so_recruit',...} title=request_no แล้ว **เขียนสถานะกลับ**
+ *      เป็น in_progress ให้ทีม matching เห็นว่ารับเรื่องแล้ว (guarded — พังไม่ block campaign)
+ */
 export async function createCampaignFromRequest(requestNo: string, createdBy: string | null) {
   const st = await q<StagedRequest>(`SELECT * FROM erp_open_requests WHERE request_no = $1`, [requestNo]);
-  if (!st[0]) throw new Error(`ไม่พบใบขอ ${requestNo} ใน staging`);
-  const s = st[0];
+
+  let snapshot: unknown;
+  let title: string | null;
+  let province: string | null = null;
+  let qty: number | null = null;
+  let remaining: number | null = null;
+  let fromErp = false;
+  let fromSoRecruit = false;
+
+  if (st[0]) {
+    const s = st[0];
+    fromErp = true;
+    snapshot = s.snapshot ?? {};
+    title = s.title;
+    province = s.province;
+    qty = s.qty;
+    remaining = s.remaining_qty;
+  } else {
+    // ไม่มีใน ERP staging → ลองหยิบจากคำขอ So Recruit
+    let pr: PostingRequest[] = [];
+    try {
+      pr = await q<PostingRequest>(
+        `SELECT id, request_no, job_id, reason, notes, requested_by_name, created_at,
+                NULL::text AS erp_title, NULL::text AS erp_province, NULL::int AS erp_qty, NULL::int AS erp_remaining
+           FROM "jarvis_rm".job_posting_requests WHERE request_no = $1`,
+        [requestNo],
+      );
+    } catch {
+      pr = [];
+    }
+    if (!pr[0]) throw new Error(`ไม่พบใบขอ ${requestNo} (ทั้ง ERP staging และ So Recruit)`);
+    const p = pr[0];
+    fromSoRecruit = true;
+    snapshot = { source: 'so_recruit', job_id: p.job_id, reason: p.reason, requested_by_name: p.requested_by_name };
+    title = p.request_no; // ยังไม่มีชื่อตำแหน่ง (อยู่ MSSQL) — ใช้เลขใบขอไปก่อน
+  }
+
   const ins = await q<{ id: string }>(
     `INSERT INTO recruit_campaigns (request_no, request_snapshot, title, province, qty, remaining_qty, status, created_by)
      VALUES ($1,$2,$3,$4,$5,$6,'new',$7)
      ON CONFLICT (request_no) DO NOTHING
      RETURNING id`,
-    [requestNo, JSON.stringify(s.snapshot ?? {}), s.title, s.province, s.qty, s.remaining_qty, createdBy],
+    [requestNo, JSON.stringify(snapshot ?? {}), title, province, qty, remaining, createdBy],
   );
   let campaignId = ins[0]?.id;
   if (!campaignId) {
     const ex = await q<{ id: string }>(`SELECT id FROM recruit_campaigns WHERE request_no = $1`, [requestNo]);
     campaignId = ex[0]?.id;
   }
-  if (campaignId) await q(`UPDATE erp_open_requests SET campaign_id = $2 WHERE request_no = $1`, [requestNo, campaignId]);
+  if (campaignId && fromErp) {
+    await q(`UPDATE erp_open_requests SET campaign_id = $2 WHERE request_no = $1`, [requestNo, campaignId]);
+  }
+  if (campaignId && fromSoRecruit) {
+    // เขียนสถานะกลับให้ So Recruit (guarded — ถ้าเขียนไม่ได้ก็ไม่ทำให้ campaign ล้ม)
+    try {
+      await q(
+        `UPDATE "jarvis_rm".job_posting_requests SET status = 'in_progress', updated_at = now() WHERE request_no = $1`,
+        [requestNo],
+      );
+    } catch (e) {
+      console.warn(`[orchestrator] เขียนสถานะกลับ So Recruit ไม่สำเร็จ (${requestNo}): ${(e as Error).message}`);
+    }
+  }
   return campaignId;
 }
 
@@ -1023,6 +1112,60 @@ export async function enqueueApprovedPost(opts: {
   );
 
   return { jobId, assignmentId, queueId };
+}
+
+// --- หน้า /autopost: Content รออนุมัติ + คิวโพสต์ ---
+export type PendingApproval = {
+  id: string;
+  campaign_id: string;
+  version: number;
+  caption: string | null;
+  has_image: boolean;
+  title: string | null;
+  request_no: string | null;
+};
+
+/** ร่างคอนเทนต์ที่รออนุมัติ (campaign อยู่สถานะ pending_approval) — เก่าก่อน. */
+export async function listPendingApprovalContents(): Promise<PendingApproval[]> {
+  try {
+    return await q<PendingApproval>(
+      `SELECT cc.id, cc.campaign_id, cc.version, cc.caption,
+              (cc.image_bytes IS NOT NULL) AS has_image, c.title, c.request_no
+         FROM campaign_contents cc
+         JOIN recruit_campaigns c ON c.id = cc.campaign_id
+        WHERE cc.status = 'draft' AND c.status = 'pending_approval'
+        ORDER BY cc.created_at ASC`,
+    );
+  } catch {
+    return [];
+  }
+}
+
+export type PostQueueRow = {
+  id: string;
+  status: string;
+  account: string | null;
+  job_title: string | null;
+  created_at: string;
+};
+
+/** คิวโพสต์ (queued/running) เรียงตามเวลาเข้าคิว — worker รันตามลำดับนี้ บัญชีละ 1 งานพร้อมกัน. guarded — [] ถ้า schema ไม่พร้อม. */
+export async function postQueueList(): Promise<PostQueueRow[]> {
+  try {
+    return await q<PostQueueRow>(
+      `SELECT q.id, q.status, q.created_at,
+              COALESCE(NULLIF(TRIM(u.name), ''), u.env_key, u.id) AS account,
+              j.title AS job_title
+         FROM ${AP}.post_run_queue q
+         LEFT JOIN ${AP}.users u ON u.id = q.user_id
+         LEFT JOIN ${AP}.assignments a ON a.id = (q.assignment_ids->>0)
+         LEFT JOIN ${AP}.jobs j ON j.id = (a.job_ids->>0)
+        WHERE q.status IN ('queued', 'running')
+        ORDER BY q.created_at ASC`,
+    );
+  } catch {
+    return [];
+  }
 }
 
 /** enqueue งานวัดผล engagement ของ campaign (worker draining ทำได้ ไม่ต้อง browser). */

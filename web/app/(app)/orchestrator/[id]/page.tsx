@@ -193,17 +193,33 @@ export default async function CampaignDetail({ params }: { params: { id: string 
         )}
       </div>
 
-      <div className="card p-6">
-        <h2 className="mb-4 text-sm font-semibold uppercase tracking-wide text-subtle">ข้อมูลใบขอ (จาก ERP)</h2>
-        <dl className="grid grid-cols-2 gap-4 sm:grid-cols-3">
-          <Field label="ไซต์" value={snap.site_name} />
-          <Field label="รหัสไซต์" value={snap.site_code} />
-          <Field label="แผนก" value={snap.department_code} />
-          <Field label="ประเภทใบขอ" value={snap.request_name} />
-          <Field label="ผู้ขอ" value={snap.requester_name} />
-          <Field label="สถานที่ทำงาน" value={snap.work_addr} />
-        </dl>
-      </div>
+      {snap.source === 'so_recruit' ? (
+        <div className="card p-6">
+          <h2 className="mb-4 text-sm font-semibold uppercase tracking-wide text-subtle">ข้อมูลคำขอ (จาก So Recruit)</h2>
+          <dl className="grid grid-cols-2 gap-4 sm:grid-cols-3">
+            <Field label="ผู้ขอ" value={snap.requested_by_name} />
+            <Field label="อ้างอิงงาน" value={snap.job_id} />
+            <div className="col-span-2 sm:col-span-3">
+              <Field label="เหตุผลที่ขอโพส" value={snap.reason} />
+            </div>
+          </dl>
+          <p className="mt-4 text-xs text-subtle">
+            รายละเอียดตำแหน่ง/จังหวัด/จำนวน อยู่ในระบบ ERP — จะเติมให้อัตโนมัติเมื่อเชื่อม ERP (MSSQL) แล้ว
+          </p>
+        </div>
+      ) : (
+        <div className="card p-6">
+          <h2 className="mb-4 text-sm font-semibold uppercase tracking-wide text-subtle">ข้อมูลใบขอ (จาก ERP)</h2>
+          <dl className="grid grid-cols-2 gap-4 sm:grid-cols-3">
+            <Field label="ไซต์" value={snap.site_name} />
+            <Field label="รหัสไซต์" value={snap.site_code} />
+            <Field label="แผนก" value={snap.department_code} />
+            <Field label="ประเภทใบขอ" value={snap.request_name} />
+            <Field label="ผู้ขอ" value={snap.requester_name} />
+            <Field label="สถานที่ทำงาน" value={snap.work_addr} />
+          </dl>
+        </div>
+      )}
 
       <div>
         <h2 className="mb-3 text-base font-semibold">ร่างคอนเทนต์</h2>

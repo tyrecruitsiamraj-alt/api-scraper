@@ -81,7 +81,7 @@ export default async function OrchestratorPage() {
           <Link href="/orchestrator/flow" className="btn-secondary">
             ดูการไหล (mock)
           </Link>
-          <Link href="/orchestrator/imports" className="btn-primary">+ ใบขอจาก ERP</Link>
+          <Link href="/orchestrator/imports" className="btn-primary">+ คำขอโพสจาก So Recruit</Link>
         </div>
       </div>
 
@@ -123,7 +123,7 @@ export default async function OrchestratorPage() {
         <h2 className="mb-3 text-base font-semibold">งานทั้งหมด ({stats.total})</h2>
         {campaigns.length === 0 ? (
           <div className="card px-5 py-16 text-center text-subtle">
-            ยังไม่มีงาน — เริ่มจากหน้า <Link href="/orchestrator/imports" className="text-accent hover:underline">ใบขอจาก ERP</Link>
+            ยังไม่มีงาน — เริ่มจากหน้า <Link href="/orchestrator/imports" className="text-accent hover:underline">คำขอโพสจาก So Recruit</Link>
           </div>
         ) : (
           <div className="card overflow-x-auto">
