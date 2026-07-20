@@ -49,7 +49,7 @@ function ModeSwitch({ mode, onSwitch }: { mode: Mode; onSwitch: (m: Mode) => voi
             mode === m ? 'bg-accent text-white shadow-sm' : 'text-muted hover:text-ink'
           }`}
         >
-          {m === 'scraping' ? 'Scraping' : m === 'autopost' ? 'Auto-Post' : 'Content'}
+          {m === 'scraping' ? 'Scraping' : m === 'autopost' ? 'Auto-Post' : 'ศูนย์งาน'}
         </button>
       ))}
     </div>

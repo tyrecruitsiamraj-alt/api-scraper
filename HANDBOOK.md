@@ -329,9 +329,15 @@ ERP request
       └─ no data: remain measuring
 ```
 
-### 8.1 ERP intake
+### 8.1 So Recruit intake และ ERP enrichment
 
-`npm run erp:sync` query ใบขอเปิดจาก SQL Server แล้ว upsert เข้า `erp_open_requests` ใน PostgreSQL เพื่อให้ Vercel อ่านได้โดยไม่ต้องต่อ network ภายในโดยตรง
+หน้า Matching ของ So Recruit สร้าง `jarvis_rm.job_posting_requests` โดยระบุ `request_type` เป็น `content` หรือ `scraping` แล้วหน้า `/orchestrator` แสดงคำขอทั้งสองชนิดในศูนย์งานเดียวกัน
+
+- Content: อนุมัติรับงานแล้วสร้าง `recruit_campaigns` และ enqueue AI Draft
+- Scraping: ผู้อนุมัติเลือก Connector แล้วระบบสร้าง `scrape_tasks`, enqueue `work_queue` และรอตรวจรับผล
+- สถานะถูกเขียนกลับ So Recruit เป็น `in_progress`, `posted` หรือ `completed` ตาม flow
+
+`npm run erp:sync` ยังใช้ enrich รายละเอียดใบขอจาก SQL Server เข้า `erp_open_requests` เช่น ตำแหน่ง จังหวัด และจำนวนเป้าหมาย โดยไม่ต้องให้ Web ต่อ network ภายในโดยตรง
 
 ใบขอที่หายจากผล ERP ล่าสุดจะถูกลบจาก staging เฉพาะรายการที่ยังไม่สร้าง campaign
 
@@ -392,7 +398,7 @@ Likes และ shares ถูกบันทึกเพื่อแสดงผ
 | `candidate_sources` | provenance ต่อ platform/external ID/run |
 | `candidate_assets` | รูป/เอกสาร bytea และผล OCR |
 | `provider_limits` | cap รวมต่อ platform |
-| `scrape_tasks` | task, schedule, phase, progress, adjacent plan |
+| `scrape_tasks` | task, schedule, phase, progress, adjacent plan, So Recruit source และสถานะตรวจรับ |
 | `work_queue` | unified queue สำหรับ scraper/orchestrator |
 | `job_family_cache` | cache adjacent-position AI |
 | `erp_open_requests` | staging ใบขอจาก ERP |
@@ -408,7 +414,7 @@ Views:
 
 ### 9.2 Migration policy
 
-Root migration รันไฟล์ `schema.sql` และ `schema-002.sql` ถึง `schema-009.sql` ตามลำดับ ทุกไฟล์ออกแบบให้ idempotent
+Root migration รันไฟล์ `schema.sql` และ `schema-002.sql` ถึง `schema-010.sql` ตามลำดับ ทุกไฟล์ออกแบบให้ idempotent โดย `schema-010.sql` เพิ่มการผูก Scraping task กับคำขอ So Recruit และ result review
 
 ```powershell
 npm run migrate
@@ -443,12 +449,11 @@ npm run migrate
 - `/autopost/collect` — เก็บคอมเมนต์
 - `/autopost/reports` — รายงาน
 
-**Content**
+**ศูนย์งาน**
 
-- `/orchestrator` — campaign dashboard
-- `/orchestrator/imports` — ใบขอจาก ERP
+- `/orchestrator` — ศูนย์งานรวม Content และ Scraping แยกแท็บรอตรวจรับ/กำลังทำ/รอตรวจผล/สำเร็จ/ต้องดำเนินการ
+- `/orchestrator/imports` — คำขอ Content/Scraping จาก So Recruit พร้อมเลือก Connector สำหรับ Scraping
 - `/orchestrator/[id]` — draft/approval/post/measurement
-- `/orchestrator/flow` — flow board; ปัจจุบันมีข้อมูล mock บางส่วนเพื่อสื่อสถานะ
 
 ### 10.2 Authentication
 
@@ -744,12 +749,13 @@ npm run test:logic
 - แยก scraper และ Auto‑Post schema ช่วยลด blast radius
 - orchestrator มี feedback loop และเก็บหลาย content version
 
-### Critical — ควรแก้ก่อนใช้ measurement production
+### แก้แล้วในเดือนกรกฎาคม 2026
 
-1. `src/core/orchestrator-measure.js` ใช้ `${AP}` ใน SQL แต่ไม่มีการประกาศ `AP` ในโมดูล ทำให้ `measureCampaign()` เกิด `ReferenceError` เมื่อถึง query ของ Auto‑Post
-2. migration `schema-004.sql`, `schema-005.sql`, `schema-006.sql` ยังอ้าง schema `so_autopost_jobs` แบบ hard-code ขณะที่ config ปัจจุบันแนะนำ `so_autopost_apiscraper` ผลคือ `v_connectors`/`v_contacts` อาจไม่รวมข้อมูล Auto‑Post หลังแยก schema
+- `src/core/orchestrator-measure.js` ประกาศและ validate `AUTOPOST_SCHEMA` แล้ว
+- Auto‑Post scripts และ default schema เปลี่ยนเป็น `so_autopost_apiscraper` แล้ว
+- หน้า flow mock ถูกลบ และ `/orchestrator` ใช้ข้อมูลจริงจาก So Recruit, campaign และ scrape task
 
-แนวแก้ที่ควรใช้: สร้าง helper สำหรับ validate/quote schema identifier แล้วใช้ `AUTOPOST_SCHEMA` ให้สอดคล้องกันทั้ง worker, web และ migration/view rebuild พร้อม integration test สอง schema
+ก่อนเปิด Workflow ใหม่ต้อง apply migration ทั้งสอง repository: `jarvis-main/migrations/046_job_posting_request_type.sql` และ `api-scraper/src/db/schema-010.sql`
 
 ### High
 
@@ -766,13 +772,12 @@ npm run test:logic
 - Control API ไม่มี authentication
 - likes/shares ถูกเก็บแต่ไม่รวมใน engagement score
 - CAPTCHA solver ใน `src/captcha.js` ยังเป็น stub
-- flow page ของ orchestrator มี mock data บางส่วน จึงไม่ใช่ production status source ทั้งหมด
 - `web/next.config.mjs` วาง `outputFileTracingIncludes` ในตำแหน่งที่ Next.js 14.2.15 แจ้งว่าไม่รู้จัก จึงควรแก้และยืนยันว่า PDF Chromium package ถูก bundle บน Vercel จริง
 
 ### ลำดับปรับปรุงแนะนำ
 
-1. แก้ schema reference และ measurement runtime defect
-2. เพิ่ม smoke/integration test ที่สร้าง temporary schema แล้วทดสอบ migration + queue + measure
+1. เพิ่ม smoke/integration test ที่สร้าง temporary schema แล้วทดสอบ migration + queue + measure
+2. เพิ่ม reconciliation ระหว่างสถานะ So Recruit กับ task/campaign กรณี cross-schema update ล้มเหลว
 3. รวม migration ของ Auto‑Post ให้มี version table และลำดับชัดเจน
 4. ปรับ README/DEPLOY ให้ชี้กลับ Handbook ฉบับนี้
 5. ใส่ auth/network guard ให้ Control API

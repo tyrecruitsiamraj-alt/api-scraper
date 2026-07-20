@@ -632,6 +632,10 @@ export type TaskRow = {
   created_at: string;
   expand_adjacent: boolean;
   adjacent_plan: AdjacentPlan | null;
+  source_request_no: string | null;
+  review_status: 'not_required' | 'pending' | 'approved' | 'rejected';
+  reviewed_by: string | null;
+  reviewed_at: string | null;
 };
 
 export async function listTasks() {
@@ -796,6 +800,7 @@ export async function listStagedRequests() {
 export type PostingRequest = {
   id: string;
   request_no: string;
+  request_type: 'content' | 'scraping';
   job_id: string | null;
   reason: string | null;
   notes: string | null;
@@ -811,15 +816,130 @@ export async function listSoRecruitPostingRequests(): Promise<PostingRequest[]> 
   try {
     return await q<PostingRequest>(
       `SELECT r.id, r.request_no, r.job_id, r.reason, r.notes, r.requested_by_name, r.created_at,
-              e.title AS erp_title, e.province AS erp_province, e.qty AS erp_qty, e.remaining_qty AS erp_remaining
+              COALESCE(NULLIF(to_jsonb(r)->>'request_type', ''), 'content') AS request_type,
+              COALESCE(e.title, NULLIF(to_jsonb(j)->>'job_description_code_1', ''),
+                       NULLIF(to_jsonb(j)->>'staff_title_name', ''), j.job_type, j.unit_name) AS erp_title,
+              COALESCE(e.province, j.location_address) AS erp_province,
+              e.qty AS erp_qty, e.remaining_qty AS erp_remaining
          FROM "jarvis_rm".job_posting_requests r
+         LEFT JOIN "jarvis_rm".jobs j ON j.id::text = r.job_id
          LEFT JOIN recruit_campaigns c ON c.request_no = r.request_no
+         LEFT JOIN scrape_tasks st ON st.source_request_no = r.request_no
          LEFT JOIN erp_open_requests e ON e.request_no = r.request_no
-        WHERE r.status = 'pending' AND c.id IS NULL
+        WHERE r.status = 'pending' AND c.id IS NULL AND st.id IS NULL
         ORDER BY r.created_at DESC`,
     );
   } catch {
     return []; // สคีมา/สิทธิ์ไม่พร้อม — หน้า imports โชว์ empty state
+  }
+}
+
+/** สร้าง Scraping task จากคำขอ So Recruit แบบ idempotent แล้วส่ง id กลับให้ action enqueue. */
+export async function createScrapeTaskFromSoRecruit(requestNo: string, connectorId: string): Promise<string> {
+  const existing = await q<{ id: string }>(
+    `SELECT id FROM scrape_tasks WHERE source_request_no = $1 LIMIT 1`,
+    [requestNo],
+  );
+  if (existing[0]) return existing[0].id;
+
+  const req = await q<{
+    request_type: string;
+    reason: string | null;
+    erp_title: string | null;
+    erp_province: string | null;
+    erp_qty: number | null;
+    erp_remaining: number | null;
+  }>(
+    `SELECT COALESCE(NULLIF(to_jsonb(r)->>'request_type', ''), 'content') AS request_type,
+            r.reason,
+            COALESCE(e.title, NULLIF(to_jsonb(j)->>'job_description_code_1', ''),
+                     NULLIF(to_jsonb(j)->>'staff_title_name', ''), j.job_type, j.unit_name) AS erp_title,
+            COALESCE(e.province, j.location_address) AS erp_province,
+            e.qty AS erp_qty, e.remaining_qty AS erp_remaining
+       FROM "jarvis_rm".job_posting_requests r
+       LEFT JOIN "jarvis_rm".jobs j ON j.id::text = r.job_id
+       LEFT JOIN erp_open_requests e ON e.request_no = r.request_no
+      WHERE r.request_no = $1 AND r.status = 'pending'
+      LIMIT 1`,
+    [requestNo],
+  );
+  if (!req[0]) throw new Error(`ไม่พบคำขอ Scraping ที่รอดำเนินการ: ${requestNo}`);
+  if (req[0].request_type !== 'scraping') throw new Error(`คำขอ ${requestNo} ไม่ใช่ประเภท Scraping`);
+
+  const connector = await q<{ platform: string }>(
+    `SELECT platform FROM connectors WHERE id = $1 AND enabled = true`,
+    [connectorId],
+  );
+  if (!connector[0]) throw new Error('Connector ไม่พร้อมใช้งาน');
+
+  const criteria: Record<string, string> = {};
+  if (req[0].erp_title) criteria.position = req[0].erp_title;
+  if (req[0].erp_province) criteria.province = req[0].erp_province;
+  const target = Math.max(1, req[0].erp_remaining || req[0].erp_qty || 20);
+
+  const inserted = await q<{ id: string }>(
+    `INSERT INTO scrape_tasks
+       (name, connector_id, mode, target_count, criteria, status, enabled,
+        expand_adjacent, source_request_no, review_status)
+     VALUES ($1,$2,'count',$3,$4::jsonb,'queued',true,true,$5,'pending')
+     ON CONFLICT DO NOTHING
+     RETURNING id`,
+    [`${requestNo} · ${req[0].erp_title || 'Scraping งาน'}`, connectorId, target, JSON.stringify(criteria), requestNo],
+  );
+  let taskId = inserted[0]?.id;
+  if (!taskId) {
+    const raced = await q<{ id: string }>(`SELECT id FROM scrape_tasks WHERE source_request_no = $1`, [requestNo]);
+    taskId = raced[0]?.id;
+  }
+  if (!taskId) throw new Error(`สร้าง Scraping task ไม่สำเร็จ: ${requestNo}`);
+
+  try {
+    await q(
+      `UPDATE "jarvis_rm".job_posting_requests
+          SET status = 'in_progress', updated_at = now()
+        WHERE request_no = $1 AND status = 'pending'`,
+      [requestNo],
+    );
+  } catch (e) {
+    console.warn(`[scraping] เขียนสถานะกลับ So Recruit ไม่สำเร็จ (${requestNo}): ${(e as Error).message}`);
+  }
+  return taskId;
+}
+
+/** ตรวจรับผล Scraping จากศูนย์งาน; ข้อมูลเดิมไม่ได้รับผลกระทบเพราะมี source_request_no เท่านั้น. */
+export async function approveScrapeTaskResult(taskId: string, reviewedBy: string | null) {
+  const rows = await q<{ source_request_no: string | null }>(
+    `UPDATE scrape_tasks
+        SET review_status = 'approved', reviewed_by = $2, reviewed_at = now(), updated_at = now()
+      WHERE id = $1 AND status = 'done' AND review_status = 'pending'
+      RETURNING source_request_no`,
+    [taskId, reviewedBy],
+  );
+  if (!rows[0]) throw new Error('งานยังไม่เสร็จหรือถูกตรวจรับไปแล้ว');
+  if (rows[0].source_request_no) {
+    try {
+      await q(
+        `UPDATE "jarvis_rm".job_posting_requests
+            SET status = 'completed', updated_at = now()
+          WHERE request_no = $1`,
+        [rows[0].source_request_no],
+      );
+    } catch (e) {
+      console.warn(`[scraping] ปิดคำขอ So Recruit ไม่สำเร็จ (${rows[0].source_request_no}): ${(e as Error).message}`);
+    }
+  }
+}
+
+/** เปลี่ยนสถานะคำขอ So Recruit แบบ guarded เพื่อให้ระบบต้นทางเห็นความคืบหน้า. */
+export async function setSoRecruitRequestStatus(requestNo: string | null, status: 'in_progress' | 'posted' | 'completed') {
+  if (!requestNo) return;
+  try {
+    await q(
+      `UPDATE "jarvis_rm".job_posting_requests SET status = $2, updated_at = now() WHERE request_no = $1`,
+      [requestNo, status],
+    );
+  } catch (e) {
+    console.warn(`[orchestrator] เขียนสถานะกลับ So Recruit ไม่สำเร็จ (${requestNo}): ${(e as Error).message}`);
   }
 }
 
@@ -924,6 +1044,7 @@ export async function createCampaignFromRequest(requestNo: string, createdBy: st
     try {
       pr = await q<PostingRequest>(
         `SELECT id, request_no, job_id, reason, notes, requested_by_name, created_at,
+                COALESCE(NULLIF(to_jsonb(job_posting_requests)->>'request_type', ''), 'content') AS request_type,
                 NULL::text AS erp_title, NULL::text AS erp_province, NULL::int AS erp_qty, NULL::int AS erp_remaining
            FROM "jarvis_rm".job_posting_requests WHERE request_no = $1`,
         [requestNo],
@@ -933,6 +1054,7 @@ export async function createCampaignFromRequest(requestNo: string, createdBy: st
     }
     if (!pr[0]) throw new Error(`ไม่พบใบขอ ${requestNo} (ทั้ง ERP staging และ So Recruit)`);
     const p = pr[0];
+    if (p.request_type !== 'content') throw new Error(`คำขอ ${requestNo} ไม่ใช่ประเภท Content`);
     fromSoRecruit = true;
     snapshot = { source: 'so_recruit', job_id: p.job_id, reason: p.reason, requested_by_name: p.requested_by_name };
     title = p.request_no; // ยังไม่มีชื่อตำแหน่ง (อยู่ MSSQL) — ใช้เลขใบขอไปก่อน

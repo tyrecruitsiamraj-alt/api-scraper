@@ -7,6 +7,7 @@ import { encryptSecret } from './crypto';
 import { kickWorker } from './worker-kick';
 import {
   createAdjacentTask,
+  createScrapeTaskFromSoRecruit,
   createCampaignFromRequest,
   enqueueDraftForCampaign,
   enqueueApprovedPost,
@@ -28,6 +29,8 @@ import {
   setProviderCap,
   setFacebookDailyCapForAll,
   setTaskEnabled,
+  approveScrapeTaskResult,
+  setSoRecruitRequestStatus,
 } from './repo';
 
 async function requireSession() {
@@ -183,6 +186,34 @@ export async function startCampaignAction(formData: FormData) {
   revalidatePath('/orchestrator');
 }
 
+/** อนุมัติรับคำขอ Scraping จาก So Recruit → สร้าง task, ผูก Connector และส่งเข้า worker queue. */
+export async function startSoRecruitScrapeAction(formData: FormData) {
+  const session = await getServerSession(authOptions);
+  if (!session) throw new Error('unauthorized');
+  const requestNo = String(formData.get('requestNo') ?? '').trim();
+  const connectorId = String(formData.get('connectorId') ?? '').trim();
+  if (!requestNo || !connectorId) throw new Error('กรุณาเลือก Connector ก่อนอนุมัติ');
+  const owner = session.user?.email ?? session.user?.name ?? null;
+  const taskId = await createScrapeTaskFromSoRecruit(requestNo, connectorId);
+  await enqueueScrapeForTask(taskId, owner);
+  kickWorker();
+  revalidatePath('/orchestrator');
+  revalidatePath('/orchestrator/imports');
+  revalidatePath('/scraping');
+}
+
+/** ตรวจรับผล Scraping หลัง worker ทำครบ เพื่อปิดคำขอกลับไปยัง So Recruit. */
+export async function approveScrapeResultAction(formData: FormData) {
+  const session = await getServerSession(authOptions);
+  if (!session) throw new Error('unauthorized');
+  const taskId = String(formData.get('taskId') ?? '').trim();
+  if (taskId) {
+    await approveScrapeTaskResult(taskId, session.user?.email ?? session.user?.name ?? null);
+  }
+  revalidatePath('/orchestrator');
+  revalidatePath('/scraping');
+}
+
 /**
  * อนุมัติร่างคอนเทนต์ → ถ้าเลือกบัญชี Facebook: สร้าง job+assignment+คิวโพสต์ใน autopost
  * (worker บน PC โพสต์จริงพร้อมรูป) แล้วตั้ง campaign 'posting'. ไม่เลือกบัญชี = อนุมัติเฉย ๆ.
@@ -206,6 +237,7 @@ export async function approveContentAction(formData: FormData) {
           requestedBy: session.user?.email ?? session.user?.name ?? null,
         });
         await setCampaignStatus(campaignId, 'posting');
+        await setSoRecruitRequestStatus(campaign.request_no, 'posted');
         // autopost worker (npm run worker:post) โพล post_run_queue เองทุก ~5 วิ — ไม่ต้อง kick
         posting = true;
       }
