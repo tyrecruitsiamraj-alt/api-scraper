@@ -654,6 +654,7 @@ async function selectOptionsInPopover(page, options, checkboxIdPrefix, fieldType
   if (!labels.length) return;
 
   const popover = (await getOpenPopoverContainer(page)) ?? page;
+  let selectedCount = 0;
 
   for (const option of labels) {
     const variants = expandOptionVariants(option);
@@ -667,11 +668,16 @@ async function selectOptionsInPopover(page, options, checkboxIdPrefix, fieldType
           const lbl = labelLocator.nth(i);
           if (!(await isTrulyVisible(lbl))) continue;
           const radio = lbl.locator('input[type="radio"]').first();
-          if ((await radio.count()) > 0) {
-            await radio.check({ force: true }).catch(async () => { await lbl.click({ force: true }); });
-            checked = true;
-            break;
+          if ((await radio.count()) === 0) continue;
+          // เลือก + "ยืนยันว่าติดจริง" (JobBKK บางครั้ง radio ไม่รับคลิกแรก → ลองซ้ำสูงสุด 3 ครั้ง)
+          for (let attempt = 0; attempt < 3 && !checked; attempt += 1) {
+            await radio.check({ force: true }).catch(() => {});
+            if (await radio.isChecked().catch(() => false)) { checked = true; break; }
+            await lbl.click({ force: true }).catch(() => {});
+            await sleep(150);
+            if (await radio.isChecked().catch(() => false)) { checked = true; break; }
           }
+          if (checked) break;
         }
         if (checked) break;
       }
@@ -728,9 +734,11 @@ async function selectOptionsInPopover(page, options, checkboxIdPrefix, fieldType
       }
     }
 
+    if (checked) selectedCount += 1;
     console.log(checked ? `    ✓ selected: ${option}` : `    ✗ not found: ${option}`);
     await sleep(200);
   }
+  return selectedCount;
 }
 
 async function confirmPopover(page) {
@@ -762,9 +770,14 @@ async function fillPopoverField(page, fieldDef, criteria) {
   if (!opened) return false;
 
   const fieldType = fieldDef.key === 'gender' ? 'radio' : 'checkbox';
-  await selectOptionsInPopover(page, values, fieldDef.checkboxIdPrefix, fieldType);
+  const selected = await selectOptionsInPopover(page, values, fieldDef.checkboxIdPrefix, fieldType);
   await confirmPopover(page);
-  console.log(`  [filled] ${fieldDef.key}: ${values.join(', ')}`);
+  // radio (เช่น เพศ) ที่เลือกไม่ติดสักตัว = filter ไม่ถูก apply → รายงานล้มเหลว (อย่า skip เงียบ)
+  if (fieldType === 'radio' && selected === 0) {
+    console.warn(`  ⚠️ [filter-fail] ${fieldDef.key}: เลือก radio ไม่สำเร็จ — ผลลัพธ์จะไม่ถูกกรองตาม "${fieldDef.key}"`);
+    return false;
+  }
+  console.log(`  [filled] ${fieldDef.key}: ${values.join(', ')} (เลือกได้ ${selected})`);
   return true;
 }
 
