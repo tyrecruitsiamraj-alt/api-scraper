@@ -66,9 +66,12 @@ export async function createTaskAction(formData: FormData) {
 
   const position = String(formData.get('position') ?? '').trim();
   const keyword = String(formData.get('keyword') ?? '').trim();
+  const jobDescription = String(formData.get('jobDescription') ?? '').trim();
   const criteria: Record<string, unknown> = {};
   if (position) criteria.position = position;
   if (keyword) criteria.keyword = keyword;
+  // โหมดเนื้องาน: worker จะให้ AI แปลงเป็นชุดตำแหน่งแล้ววนค้นจนครบ (ดู src/tasks-worker.js)
+  if (jobDescription) criteria.job_description = jobDescription;
 
   // Optional filters — keys match what the JobBKK premium search understands
   // (see src/providers/jobbkk/browser/jobbkk-filters.js). "ไม่ระบุ"/empty = skip.

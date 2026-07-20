@@ -2,15 +2,18 @@ import Anthropic from '@anthropic-ai/sdk';
 import { envString } from '../config.js';
 
 /**
- * AI Job-Family classifier + adjacent-position suggester.
+ * AI Job-Family classifier + adjacent-position suggester + เนื้องาน→ตำแหน่ง.
  *
- * เมื่อ scrape ตำแหน่งหนึ่งได้ผู้สมัครไม่ครบ target ระบบเรียกโมดูลนี้เพื่อถาม
- * Claude ว่า "ตำแหน่งนี้อยู่ Job Family ไหน และมีตำแหน่งใกล้เคียงอะไรที่ดึงมา
- * ค้นเพิ่มได้ โดยไม่ข้าม Family". อ้างอิงหลักการจาก Skill `candidate-spec-analyzer`
- * (Job Family taxonomy A–F + adjacent positions 3 tier ผ่าน Gate).
+ * ใช้ได้ 2 โหมด:
+ *   1. suggestAdjacentPositions({position}) — จัดตำแหน่งเข้า Family แล้วเสนอตำแหน่ง
+ *      ใกล้เคียง 3 tier (ใช้ตอน scrape ตำแหน่งหนึ่งได้ไม่ครบ target แล้วขยาย)
+ *   2. positionsFromDescription({description}) — รับ "เนื้องาน" (คำอธิบายงาน) แล้ว
+ *      คืน "ชุดคำค้นตำแหน่ง" ที่ค้นผู้สมัครในเว็บหางานได้จริง เรียงจากตรงสุด→ใกล้เคียง
+ *      (ใช้ตอนผู้ใช้กรอกเนื้องานแทนตำแหน่ง แล้วอยากได้ครบ N คนจากตำแหน่งไหนก็ได้ที่เข้าข่าย)
  *
+ * Provider เลือกอัตโนมัติเหมือน src/core/content-gen.js:
+ *   มี ANTHROPIC_API_KEY → anthropic, ไม่มีแต่มี OLLAMA_BASE_URL → ollama (ฟรี), ไม่มีทั้งคู่ → ปิดเงียบ (คืน null).
  * เป็น pure caller — ไม่แตะ DB. การ cache/persist ทำที่ผู้เรียก (tasks-worker).
- * ถ้าไม่มี ANTHROPIC_API_KEY จะคืน null เงียบ ๆ (feature ปิดตัวเอง งาน scrape เดิมไม่พัง).
  */
 
 // สรุปแกนของ Skill — ฝังเป็น context ให้โมเดล reasoning ตามบริบท (ไม่ใช่ lookup ตายตัว)
@@ -64,6 +67,27 @@ const TOOL = {
   },
 };
 
+// โหมดเนื้องาน → ชุดคำค้นตำแหน่ง (เรียงจากตรงสุด→ใกล้เคียง)
+const DESC_TOOL = {
+  name: 'positions_from_description',
+  description: 'แปลงคำอธิบายเนื้องาน (ภาระงาน/หน้าที่) เป็นชุดคำค้นตำแหน่งที่ใช้หาผู้สมัครในเว็บหางานได้จริง',
+  input_schema: {
+    type: 'object',
+    properties: {
+      family: { type: 'string', enum: ['A', 'B', 'C', 'D', 'E', 'F'], description: 'Job Family ที่เนื้องานนี้สังกัด' },
+      family_label: { type: 'string', description: 'ชื่อ Family พร้อม emoji' },
+      positions: {
+        type: 'array',
+        items: { type: 'string' },
+        description:
+          'คำค้นตำแหน่งภาษาไทยสั้น ๆ ที่ตรงกับเนื้องานนี้ ค้นในเว็บหางานได้จริง อย่างน้อย 6 คำ รวมคำพ้องและตำแหน่งใกล้เคียงในสาย Family เดียวกัน เรียงจากตรงสุดก่อน ไม่ใช่ประโยคอธิบาย',
+      },
+      reason: { type: 'string', description: 'เหตุผลสั้น ๆ ว่าทำไมเนื้องานนี้ควรค้นด้วยตำแหน่งเหล่านี้' },
+    },
+    required: ['family', 'family_label', 'positions', 'reason'],
+  },
+};
+
 const FAMILIES = new Set(['A', 'B', 'C', 'D', 'E', 'F']);
 
 function cleanList(v) {
@@ -80,6 +104,91 @@ function cleanList(v) {
   return out;
 }
 
+/** เลือก provider เหมือน content-gen: anthropic (มี key) / ollama (มี base, ฟรี) / ปิด */
+function pickProvider() {
+  const apiKey = envString('ANTHROPIC_API_KEY');
+  const ollamaBase = envString('OLLAMA_BASE_URL');
+  const provider = envString('JOBFAMILY_PROVIDER', apiKey ? 'anthropic' : ollamaBase ? 'ollama' : '');
+  return { provider, apiKey, ollamaBase };
+}
+
+/** parse JSON แบบทนทาน — เผื่อโมเดลใส่ reasoning/```json fence/ข้อความนำหน้า */
+function parseJsonLoose(raw) {
+  const s = String(raw ?? '').trim();
+  if (!s) return null;
+  try { return JSON.parse(s); } catch { /* ลองวิธีอื่น */ }
+  // ตัด <think>…</think> + code fence ออก
+  const cleaned = s.replace(/<think>[\s\S]*?<\/think>/gi, '').replace(/```(?:json)?/gi, '').trim();
+  try { return JSON.parse(cleaned); } catch { /* ลอง extract {…} */ }
+  const i = cleaned.indexOf('{');
+  const j = cleaned.lastIndexOf('}');
+  if (i >= 0 && j > i) {
+    try { return JSON.parse(cleaned.slice(i, j + 1)); } catch { /* ยอมแพ้ */ }
+  }
+  return null;
+}
+
+/** Claude — structured tool output */
+async function callAnthropic({ apiKey, system, tool, userMsg }) {
+  const model = envString('JOBFAMILY_MODEL', 'claude-haiku-4-5');
+  const client = new Anthropic({ apiKey });
+  const msg = await client.messages.create({
+    model,
+    max_tokens: 1024,
+    system,
+    tools: [tool],
+    tool_choice: { type: 'tool', name: tool.name },
+    messages: [{ role: 'user', content: userMsg }],
+  });
+  const block = msg.content?.find((b) => b.type === 'tool_use' && b.name === tool.name);
+  return { out: block?.input ?? null, modelUsed: model };
+}
+
+/** Ollama (server บริษัท ฟรี) — บังคับ JSON ตาม schema ผ่าน `format` (เหมือน content-gen) */
+async function callOllama({ base, system, tool, userMsg }) {
+  const model = envString('OLLAMA_MODEL', 'qwen3.5:9b');
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 180_000);
+  try {
+    const res = await fetch(`${base.replace(/\/$/, '')}/api/chat`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      signal: controller.signal,
+      body: JSON.stringify({
+        model,
+        stream: false,
+        think: false, // qwen3.5 เป็น thinking model — ปิด reasoning ไม่ให้กิน token จนไม่เหลือออก JSON
+        options: { temperature: 0.4, num_predict: 2048 },
+        format: tool.input_schema,
+        messages: [
+          { role: 'system', content: system + '\nตอบเป็นภาษาไทย และตอบเป็น JSON ตามโครงสร้างที่กำหนดเท่านั้น ห้ามอธิบายนำ' },
+          { role: 'user', content: userMsg },
+        ],
+      }),
+    });
+    if (!res.ok) throw new Error(`ollama HTTP ${res.status}`);
+    const json = await res.json();
+    const out = parseJsonLoose(json?.message?.content ?? '');
+    if (!out) throw new Error(`ollama ตอบไม่ใช่ JSON (done_reason=${json?.done_reason ?? '?'})`);
+    return { out, modelUsed: `ollama:${model}` };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/** เรียกโมเดลตาม provider ที่เลือก — คืน {out, modelUsed} หรือ null (ปิด/ล้มเหลว) */
+async function callModel({ system, tool, userMsg }) {
+  const { provider, apiKey, ollamaBase } = pickProvider();
+  if (!provider) return null;
+  try {
+    if (provider === 'ollama') return await callOllama({ base: ollamaBase, system, tool, userMsg });
+    return await callAnthropic({ apiKey, system, tool, userMsg });
+  } catch (e) {
+    console.warn(`  [job-family] AI call failed (${provider}): ${e.message} — ข้าม`);
+    return null;
+  }
+}
+
 /**
  * @returns {Promise<null | {
  *   family: string, familyLabel: string, gate: string[],
@@ -88,12 +197,8 @@ function cleanList(v) {
  * }>}
  */
 export async function suggestAdjacentPositions({ position, keyword, province, platform } = {}) {
-  const apiKey = envString('ANTHROPIC_API_KEY');
   const src = String(position || keyword || '').trim();
-  if (!apiKey || !src) return null; // feature off / nothing to classify
-
-  const model = envString('JOBFAMILY_MODEL', 'claude-haiku-4-5');
-  const client = new Anthropic({ apiKey });
+  if (!src) return null;
 
   const ctx = [
     `ตำแหน่งต้นทาง: "${src}"`,
@@ -102,29 +207,18 @@ export async function suggestAdjacentPositions({ position, keyword, province, pl
     platform ? `เว็บหางาน: ${platform}` : '',
   ].filter(Boolean).join('\n');
 
-  let msg;
-  try {
-    msg = await client.messages.create({
-      model,
-      max_tokens: 1024,
-      system: TAXONOMY,
-      tools: [TOOL],
-      tool_choice: { type: 'tool', name: 'adjacent_positions' },
-      messages: [{ role: 'user', content: `จัด Job Family และเสนอตำแหน่งใกล้เคียงสำหรับ:\n${ctx}` }],
-    });
-  } catch (e) {
-    console.warn(`  [job-family] AI call failed: ${e.message} — ข้ามการขยายตำแหน่ง`);
-    return null;
-  }
-
-  const block = msg.content?.find((b) => b.type === 'tool_use' && b.name === TOOL.name);
-  const out = block?.input;
+  const res = await callModel({
+    system: TAXONOMY,
+    tool: TOOL,
+    userMsg: `จัด Job Family และเสนอตำแหน่งใกล้เคียงสำหรับ:\n${ctx}`,
+  });
+  if (!res) return null;
+  const out = res.out;
   if (!out || !FAMILIES.has(String(out.family))) {
     console.warn('  [job-family] AI คืนผลไม่ถูกรูปแบบ (family นอก A–F) — ข้าม');
     return null;
   }
 
-  // อย่าเสนอตำแหน่งต้นทางซ้ำ
   const drop = new Set([src, keyword].filter(Boolean).map((s) => s.trim()));
   const filt = (list) => cleanList(list).filter((x) => !drop.has(x));
 
@@ -141,6 +235,47 @@ export async function suggestAdjacentPositions({ position, keyword, province, pl
         : [],
     },
     reason: String(out.reason || '').trim(),
-    model,
+    model: res.modelUsed,
+  };
+}
+
+/**
+ * โหมดเนื้องาน: รับคำอธิบายภาระงาน คืนชุดคำค้นตำแหน่งที่ค้นผู้สมัครได้จริง
+ * (เรียงจากตรงสุด→ใกล้เคียงใน Family เดียวกัน).
+ * @param {{ description: string, province?: string, platform?: string }} args
+ * @returns {Promise<null | { family:string, familyLabel:string, positions:string[], reason:string, model:string }>}
+ */
+export async function positionsFromDescription({ description, province, platform } = {}) {
+  const desc = String(description || '').trim();
+  if (!desc) return null;
+
+  const ctx = [
+    `เนื้องาน/ภาระงานที่ต้องการหาคนมาทำ:\n"${desc}"`,
+    province ? `จังหวัดที่ทำงาน: ${province}` : '',
+    platform ? `เว็บหางาน: ${platform}` : '',
+  ].filter(Boolean).join('\n');
+
+  const res = await callModel({
+    system:
+      TAXONOMY +
+      '\n\n## งานตอนนี้\nผู้ใช้ให้ "เนื้องาน" (ไม่ใช่ชื่อตำแหน่ง) มา จงสรุปว่าเนื้องานนี้อยู่ Family ไหน แล้วเสนอ "คำค้นตำแหน่ง" ที่คนทำงานเนื้อแบบนี้มักใช้ตั้งชื่อตำแหน่งในเรซูเม่ เรียงจากตรงที่สุดไปใกล้เคียง เพื่อเอาไปค้นในเว็บหางานให้ได้ผู้สมัครมากที่สุด\nเป้าหมายคือ "กวาดผู้สมัครให้ได้จำนวนมาก" ให้คำค้นหลากหลายอย่างน้อย 6 คำ ครอบคลุมคำพ้องและตำแหน่งใกล้เคียงในสาย Family เดียวกัน ห้ามหลุดนอก Family' +
+      '\n\n## รูปแบบคำตอบ (บังคับ)\nตอบเป็น JSON object เดียว ใช้ key เป๊ะ ๆ 4 ตัวนี้เท่านั้น ห้ามใช้ชื่อ key อื่น (ห้ามใช้ job_family หรือ reasoning):\n{"family":"D","family_label":"📋 Service-Operational","positions":["พนักงานคลังสินค้า","พนักงานสโตร์","พนักงานแพ็คสินค้า","พนักงานขับโฟล์คลิฟท์","ธุรการคลัง","เจ้าหน้าที่จัดส่ง"],"reason":"..."}',
+    tool: DESC_TOOL,
+    userMsg: `แปลงเนื้องานนี้เป็นชุดคำค้นตำแหน่ง:\n${ctx}`,
+  });
+  if (!res) return null;
+  const out = res.out;
+  const positions = cleanList(out?.positions);
+  if (!out || positions.length === 0) {
+    console.warn('  [job-family] แปลงเนื้องานไม่สำเร็จ (ไม่ได้ตำแหน่ง) — ข้าม');
+    return null;
+  }
+
+  return {
+    family: FAMILIES.has(String(out.family)) ? out.family : '',
+    familyLabel: String(out.family_label || out.family || ''),
+    positions,
+    reason: String(out.reason || '').trim(),
+    model: res.modelUsed,
   };
 }

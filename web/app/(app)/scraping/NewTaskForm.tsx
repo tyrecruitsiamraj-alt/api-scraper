@@ -100,6 +100,22 @@ export function NewTaskForm({ connectors }: { connectors: ConnectorOption[] }) {
         )}
       </div>
 
+      {/* โหมดเนื้องาน: กรอกภาระงาน แล้วให้ AI หาตำแหน่งเอง (ใช้แทนตำแหน่ง/คำค้น) */}
+      <div className="mt-4 rounded-lg border border-line/60 bg-black/[0.015] px-4 py-3">
+        <label className="label">🧠 บอกเป็น “เนื้องาน” (ไม่บังคับ — ใช้แทนตำแหน่ง)</label>
+        <textarea
+          name="jobDescription"
+          rows={2}
+          placeholder="เช่น ยกของ จัดเรียงสินค้าในคลัง เช็คสต็อก ขับโฟล์คลิฟท์ แพ็คของส่ง"
+          className="field"
+        />
+        <p className="mt-1 text-xs text-subtle">
+          กรอกภาระงานที่อยากได้คนมาทำ → AI จะหาว่าควรค้นตำแหน่งอะไรบ้าง แล้วกวาดผู้สมัครจากทุกตำแหน่งที่เนื้องานใกล้เคียงกันจนครบจำนวนที่ต้องการ
+          <br />
+          <span className="text-ink/70">ถ้ากรอกช่องนี้ ระบบจะใช้แทน “ตำแหน่ง/คำค้น” ด้านล่าง</span>
+        </p>
+      </div>
+
       <div className="mt-4 grid gap-4 md:grid-cols-2">
         <div>
           <label className="label">ตำแหน่ง (ไม่บังคับ)</label>
@@ -118,7 +134,7 @@ export function NewTaskForm({ connectors }: { connectors: ConnectorOption[] }) {
           🧭 หาไม่ครบ → ขยายไปตำแหน่งใกล้เคียงอัตโนมัติ
         </label>
         <p className="mt-1 text-xs text-subtle">
-          ถ้าได้ผู้สมัครน้อยกว่าจำนวนที่ต้องการ ระบบจะให้ AI จัดกลุ่มงาน (Job Family) แล้วค้นตำแหน่งใกล้เคียงในกลุ่มเดียวกันเพิ่มให้จนครบ (ต้องตั้ง ANTHROPIC_API_KEY ที่เครื่อง worker)
+          ถ้าได้ผู้สมัครน้อยกว่าจำนวนที่ต้องการ ระบบจะให้ AI จัดกลุ่มงาน (Job Family) แล้วค้นตำแหน่งใกล้เคียงในกลุ่มเดียวกันเพิ่มให้จนครบ (ใช้ AI บริษัทฟรี ไม่ต้องตั้งคีย์)
         </p>
       </div>
 
