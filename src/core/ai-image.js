@@ -14,10 +14,13 @@ import { envString } from '../config.js';
 async function openaiAdapter({ prompt, apiKey }) {
   const model = envString('CONTENT_IMAGE_MODEL', 'gpt-image-1');
   const size = envString('CONTENT_IMAGE_SIZE', '1024x1024');
+  const payload = { model, prompt, size, n: 1 };
+  // dall-e-* คืน URL เป็น default → ต้องขอ b64_json ชัด ๆ; gpt-image-1 คืน b64 เสมอ (และไม่รับ param นี้)
+  if (/^dall-e/i.test(model)) payload.response_format = 'b64_json';
   const res = await fetch('https://api.openai.com/v1/images/generations', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
-    body: JSON.stringify({ model, prompt, size, n: 1 }),
+    body: JSON.stringify(payload),
   });
   if (!res.ok) {
     const body = await res.text().catch(() => '');
