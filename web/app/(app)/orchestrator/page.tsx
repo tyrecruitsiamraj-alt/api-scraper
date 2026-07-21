@@ -178,7 +178,7 @@ export default async function OrchestratorPage() {
       <WorkCenter
         items={items}
         connectors={connectors.map((connector) => ({ id: connector.id, label: `${connector.platform} · ${connector.label}` }))}
-        facebookAccounts={fb.map((account) => ({ id: account.id, label: account.label }))}
+        facebookAccounts={fb.map((account) => ({ id: account.id, label: account.label, groupCount: account.group_count }))}
       />
     </div>
   );

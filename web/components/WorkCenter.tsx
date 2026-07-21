@@ -40,6 +40,7 @@ export type WorkCenterItem = {
 };
 
 type Option = { id: string; label: string };
+export type FbAccountOption = { id: string; label: string; groupCount: number };
 
 // เรียงตาม "ใครต้องขยับ" — งานพัง/ต้องแก้ ขึ้นบนสุดเสมอ, งานเสร็จจมล่างสุด
 const STAGE_PRIORITY: Record<WorkCenterStage, number> = {
@@ -134,7 +135,7 @@ function Stepper({ steps }: { steps: Step[] }) {
 function WorkAction({ item, connectors, facebookAccounts }: {
   item: WorkCenterItem;
   connectors: Option[];
-  facebookAccounts: Option[];
+  facebookAccounts: FbAccountOption[];
 }) {
   if (item.campaignId && item.nextAction === 'retry_draft') {
     return (
@@ -191,7 +192,10 @@ function WorkAction({ item, connectors, facebookAccounts }: {
   }
 
   if (item.stage === 'review' && item.kind === 'content' && item.content) {
+    const readyAccounts = facebookAccounts.filter((a) => a.groupCount > 0);
     const noAccount = facebookAccounts.length === 0;
+    const noReady = readyAccounts.length === 0;
+    // เลือกบัญชีที่พร้อม (มีกลุ่ม) เป็นค่าเริ่มต้น — บัญชีที่ไม่มีกลุ่มเลือกไม่ได้ (กันโพสต์ไปตายทีหลัง)
     return (
       <form action={approveContentAction} className="flex flex-wrap items-end gap-2">
         <input type="hidden" name="contentId" value={item.content.id} />
@@ -200,14 +204,20 @@ function WorkAction({ item, connectors, facebookAccounts }: {
           <label className="label" htmlFor={`facebook-${item.id}`}>บัญชีสำหรับเผยแพร่</label>
           <select id={`facebook-${item.id}`} name="fbAccountId" required defaultValue="" className="field">
             <option value="" disabled>เลือกบัญชี Facebook…</option>
-            {facebookAccounts.map((account) => <option key={account.id} value={account.id}>{account.label}</option>)}
+            {facebookAccounts.map((account) => (
+              <option key={account.id} value={account.id} disabled={account.groupCount === 0}>
+                {account.label}{account.groupCount === 0 ? ' (ยังไม่มีกลุ่ม)' : ` · ${account.groupCount} กลุ่ม`}
+              </option>
+            ))}
           </select>
         </div>
-        <button className="btn-primary" disabled={noAccount}>
-          {noAccount ? 'อนุมัติและโพสต์ — ยังไม่มีบัญชี' : 'อนุมัติและโพสต์'}
+        <button className="btn-primary" disabled={noReady}>
+          {noAccount ? 'ยังไม่มีบัญชี' : noReady ? 'ทุกบัญชียังไม่มีกลุ่ม' : 'อนุมัติและโพสต์'}
         </button>
-        {noAccount && (
-          <Link href="/settings/connectors" className="text-xs text-accent hover:underline">เพิ่มบัญชี Facebook ก่อน</Link>
+        {noReady && (
+          <Link href="/settings/posting" className="text-xs text-accent hover:underline">
+            {noAccount ? 'เพิ่มบัญชี Facebook ก่อน' : 'เลือกกลุ่มให้บัญชีก่อน'}
+          </Link>
         )}
       </form>
     );
@@ -226,10 +236,49 @@ function WorkAction({ item, connectors, facebookAccounts }: {
   return null;
 }
 
+// ---- แถบ "งานตั้งค่าที่ค้าง": สแกนสิ่งที่ถ้าไม่ทำแล้วงานเดินต่อไม่ได้ แล้วเด้งขึ้นให้ทำก่อน ----
+function Readiness({ facebookAccounts }: { facebookAccounts: FbAccountOption[] }) {
+  const problems: { text: string; href: string; btn: string }[] = [];
+  if (facebookAccounts.length === 0) {
+    problems.push({
+      text: 'ยังไม่มีบัญชี Facebook สำหรับโพสต์ — งาน Auto post จะทำไม่ได้',
+      href: '/settings/connectors',
+      btn: 'เพิ่มบัญชี',
+    });
+  } else {
+    const noGroup = facebookAccounts.filter((a) => a.groupCount === 0);
+    if (noGroup.length > 0) {
+      const names = noGroup.map((a) => a.label).join(', ');
+      problems.push({
+        text: `บัญชี ${names} ยังไม่ได้เลือกกลุ่มโพสต์ — งานที่ต้อง Auto post จะค้างที่ป้ายอนุมัติ`,
+        href: '/settings/posting',
+        btn: 'เลือกกลุ่มตอนนี้',
+      });
+    }
+  }
+  if (problems.length === 0) return null;
+  return (
+    <div className="space-y-2">
+      {problems.map((p) => (
+        <div key={p.text} className="flex flex-wrap items-center gap-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3">
+          <span className="text-lg leading-none text-amber-600">⚙</span>
+          <div className="min-w-0 flex-1">
+            <div className="text-[13px] font-medium text-amber-800">ตั้งค่าที่ต้องทำก่อนงานถึงจะเดิน</div>
+            <div className="mt-0.5 text-xs text-amber-700">{p.text}</div>
+          </div>
+          <Link href={p.href} className="shrink-0 rounded-lg bg-amber-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-amber-700">
+            {p.btn}
+          </Link>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function WorkItemCard({ item, connectors, facebookAccounts }: {
   item: WorkCenterItem;
   connectors: Option[];
-  facebookAccounts: Option[];
+  facebookAccounts: FbAccountOption[];
 }) {
   const showImage = item.stage === 'review' && item.content?.hasImage;
   return (
@@ -291,7 +340,7 @@ function WorkItemCard({ item, connectors, facebookAccounts }: {
 export function WorkCenter({ items, connectors, facebookAccounts }: {
   items: WorkCenterItem[];
   connectors: Option[];
-  facebookAccounts: Option[];
+  facebookAccounts: FbAccountOption[];
 }) {
   const [showDone, setShowDone] = useState(false);
 
@@ -321,6 +370,8 @@ export function WorkCenter({ items, connectors, facebookAccounts }: {
         <h1 className="text-2xl font-semibold tracking-tight">ศูนย์งาน</h1>
         <p className="mt-1 text-sm text-subtle">งานจาก So Recruit ทุกใบ — รับงาน ตรวจ อนุมัติ และติดตามจนเสร็จ ในหน้าเดียว</p>
       </div>
+
+      <Readiness facebookAccounts={facebookAccounts} />
 
       <div className="grid gap-3 grid-cols-2 sm:grid-cols-4">
         <div className="card p-4"><div className="text-xs text-subtle">ต้องแก้</div><div className="mt-1 text-3xl font-semibold tabular-nums text-red-600">{counts.attention}</div></div>
