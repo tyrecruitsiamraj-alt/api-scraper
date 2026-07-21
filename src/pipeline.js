@@ -1,5 +1,6 @@
 import { resolveProvider } from './connectors/registry.js';
 import { RateLimiter } from './core/anti-ban.js';
+import { matchesCriteria, splitCriteria } from './core/candidate-match.js';
 import { envInt } from './config.js';
 import {
   countScrapedToday,
@@ -48,10 +49,18 @@ export async function runConnector(connector, criteria, runtime, opts = {}) {
   let updatedCount = 0;
   let failed = 0;
   let found = 0;
+  let filteredOut = 0; // ไม่ตรงเงื่อนไข local (อายุ/วุฒิ/จังหวัด/เพศ) — ข้ามโดยไม่นับเข้า target
   let status = 'success';
   let error = null;
   let browser = null;
   let activeContext = null; // tracked so the finally can log out to free the session
+
+  // "ค้นกว้าง กรองแม่น": ส่งแค่ตำแหน่ง/คำค้นไปเว็บ (กัน AND ซ้อนแล้วเหลือ 0)
+  // แล้วกรอง อายุ/วุฒิ/จังหวัด/เพศ จากเรซูเม่ที่ parse ได้ในระบบเราแทน
+  const { siteCriteria, localFilters, active: localFilterActive } = splitCriteria(criteria);
+  if (localFilterActive) {
+    console.log(`  [${connector.label}] กรองในระบบ: ${Object.entries(localFilters).map(([k, v]) => `${k}=${v}`).join(' ')} (เว็บค้นด้วยตำแหน่ง/คำค้นอย่างเดียว)`);
+  }
 
   // per-round limit ∩ connector daily cap ∩ PROVIDER daily cap (strict)
   const today = await countScrapedToday(connector.id);
@@ -106,7 +115,9 @@ export async function runConnector(connector, criteria, runtime, opts = {}) {
     activeContext = sess.context;
     await saveConnectorSession(connector.id, await sess.dumpState());
 
-    const runSearch = () => provider.searchResumeIds(sess, { ...criteria, maxCandidates: target }, runtime);
+    // เผื่อ id ให้พอ: กรอง local จะคัดคนออกส่วนหนึ่ง เลยขอ id จากเว็บมากกว่า target
+    const idTarget = localFilterActive ? Math.min(target * 3, target + 300) : target;
+    const runSearch = () => provider.searchResumeIds(sess, { ...siteCriteria, maxCandidates: idTarget }, runtime);
     let search;
     try {
       search = await runSearch();
@@ -177,6 +188,16 @@ export async function runConnector(connector, criteria, runtime, opts = {}) {
           html = await provider.fetchResumeHtml(sess, id, runtime);
           parsed = provider.parseResumeHtml(html, { sourceUrl: url, index: saved + 1, focusPosition: criteria.position || '-' });
         }
+        // กรองเงื่อนไข local ก่อน "เปิดเผยเบอร์" (enrichContacts กิน quota บัญชี) —
+        // คนไม่ตรงเงื่อนไข = ข้ามเลย ไม่เปลือง quota ไม่นับเข้า target
+        if (localFilterActive) {
+          const verdict = matchesCriteria(parsed, localFilters);
+          if (!verdict.ok) {
+            filteredOut += 1;
+            console.log(`  ⏭ ${parsed.name || id}: ${verdict.reason}`);
+            return;
+          }
+        }
         if (provider.enrichContacts) await provider.enrichContacts(sess.request, id, parsed, runtime);
         const assets = await provider.collectAssetsForDb(sess.request, parsed);
 
@@ -229,6 +250,13 @@ export async function runConnector(connector, criteria, runtime, opts = {}) {
     }
 
     if (status === 'success' && saved < target) status = 'partial';
+    if (localFilterActive) {
+      console.log(`  [${connector.label}] สรุปกรอง: ตรงเงื่อนไข ${saved - resumeFrom} · คัดออก ${filteredOut} (จาก ${found} id ที่เว็บให้)`);
+      // บันทึกไว้ใน error field (ว่างอยู่) เมื่อได้ 0 — ให้หน้าเว็บอธิบายเหตุถูก
+      if (saved - resumeFrom === 0 && filteredOut > 0 && !error) {
+        error = `เว็บให้มา ${found} คน แต่ถูกคัดออกทั้งหมดด้วยเงื่อนไข (${Object.entries(localFilters).map(([k, v]) => `${k}=${v}`).join(', ')}) — ลองผ่อนเงื่อนไข`;
+      }
+    }
   } catch (e) {
     error = e.message;
     if (e.fatal) {
