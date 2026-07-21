@@ -5,15 +5,14 @@ import { usePathname } from 'next/navigation';
 
 const ITEMS = [
   { href: '/settings/connectors', label: 'Connector', detail: 'บัญชี Scraping และ Facebook' },
-  { href: '/settings/jobs', label: 'Job', detail: 'เนื้อหางานสำหรับโพสต์' },
-  { href: '/settings/posting', label: 'ตั้งค่าโพสต์', detail: 'กลุ่ม เทมเพลต และตารางเวลา' },
+  { href: '/settings/posting', label: 'ตั้งค่าโพสต์', detail: 'เนื้อหางาน กลุ่ม เทมเพลต ตารางเวลา' },
 ];
 
 export function SettingsNav() {
   const pathname = usePathname();
 
   return (
-    <nav className="grid gap-3 sm:grid-cols-3" aria-label="เมนูตั้งค่า">
+    <nav className="grid gap-3 sm:grid-cols-2" aria-label="เมนูตั้งค่า">
       {ITEMS.map((item) => {
         const active = pathname === item.href || pathname.startsWith(`${item.href}/`);
         return (
