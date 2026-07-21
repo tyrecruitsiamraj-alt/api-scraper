@@ -20,41 +20,51 @@ html, body {
 ::selection { background: rgba(228, 28, 36, 0.14); }
 
 @layer components {
-  /* Surfaces — Ferrari: sharp 0px corners + hairline, no shadow tiers ----- */
+  /* Surfaces — Apple-soft: โค้งนุ่ม + เงามีมิติ + ยกขึ้นตอน hover ---------- */
   .card {
-    @apply bg-white rounded-none border border-line;
+    @apply bg-white rounded-2xl border border-line/70 shadow-card
+           transition-[box-shadow,transform] duration-300 ease-out;
+  }
+  /* การ์ดที่คลิกได้ — ใส่คลาสนี้เพิ่มเพื่อให้ยกลอยตอน hover */
+  .card-hover {
+    @apply hover:-translate-y-0.5 hover:shadow-cardHover;
   }
   .glass {
     background: rgba(255, 255, 255, 0.72);
     backdrop-filter: saturate(180%) blur(20px);
     -webkit-backdrop-filter: saturate(180%) blur(20px);
   }
+  .glass-dark {
+    background: rgba(22, 22, 24, 0.72);
+    backdrop-filter: saturate(180%) blur(20px);
+    -webkit-backdrop-filter: saturate(180%) blur(20px);
+  }
 
-  /* Buttons — Ferrari: sharp 0px, uppercase + tracking (luxury precision).
-     ไทยไม่มีตัวพิมพ์ใหญ่ = uppercase ไม่กระทบ, ได้แค่ tracking บางๆ ------- */
+  /* Buttons — Apple pill: โค้งเต็ม, sentence-case, transition นุ่ม -------- */
   .btn {
-    @apply inline-flex items-center justify-center gap-2 rounded-none px-5 py-2.5
-           text-sm font-semibold uppercase tracking-[0.06em]
-           transition-all duration-150 active:scale-[0.98]
+    @apply inline-flex items-center justify-center gap-2 rounded-full px-5 py-2.5
+           text-sm font-medium tracking-[-0.01em]
+           transition-all duration-200 ease-out active:scale-[0.97]
            disabled:pointer-events-none disabled:opacity-40;
   }
   .btn-primary {
-    @apply btn bg-accent text-white hover:bg-accent-hover;
+    @apply btn bg-accent text-white shadow-sm hover:bg-accent-hover
+           hover:shadow-[0_6px_18px_rgba(228,28,36,0.28)];
   }
   .btn-secondary {
-    @apply btn border border-ink/15 bg-transparent text-ink hover:bg-black/[0.04];
+    @apply btn bg-black/[0.05] text-ink hover:bg-black/[0.08];
   }
   .btn-ghost {
     @apply btn text-ink hover:bg-black/5;
   }
   .btn-sm {
-    @apply px-3.5 py-1.5 text-[12px];
+    @apply px-3.5 py-1.5 text-[13px];
   }
   .btn-danger {
-    @apply btn border border-red-200 text-red-600 hover:bg-red-50;
+    @apply btn text-red-600 hover:bg-red-50;
   }
 
-  /* Pills + status dot — the ONE place pill geometry survives (Ferrari badge) */
+  /* Pills + status dot --------------------------------------------------- */
   .pill {
     @apply inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium;
   }
@@ -62,23 +72,23 @@ html, body {
     @apply inline-block h-2 w-2 shrink-0 rounded-full;
   }
 
-  /* Form controls — Ferrari inputs at 4px radius ------------------------- */
+  /* Form controls — โค้งนุ่ม 12px + focus ring ---------------------------- */
   .field {
-    @apply w-full rounded-[4px] border border-hairline bg-black/[0.015] px-3.5 py-2.5
-           text-sm text-ink outline-none transition
+    @apply w-full rounded-xl border border-hairline/70 bg-black/[0.015] px-3.5 py-2.5
+           text-sm text-ink outline-none transition duration-200
            placeholder:text-subtle/60
            focus:border-accent focus:bg-white focus:ring-4 focus:ring-accent/10;
   }
   .label {
-    @apply mb-1.5 block text-[11px] font-semibold uppercase tracking-[0.08em] text-ink/60;
+    @apply mb-1.5 block text-[13px] font-medium text-ink/70;
   }
 
-  /* Segmented control ---------------------------------------------------- */
+  /* Segmented control (iOS-style) --------------------------------------- */
   .seg {
-    @apply inline-flex gap-1 rounded-none bg-black/[0.05] p-1;
+    @apply inline-flex gap-1 rounded-full bg-black/[0.05] p-1;
   }
   .seg-btn {
-    @apply rounded-none px-4 py-1.5 text-[13px] font-medium text-subtle transition hover:text-ink;
+    @apply rounded-full px-4 py-1.5 text-[13px] font-medium text-subtle transition hover:text-ink;
   }
   .seg-btn-active {
     @apply bg-white text-ink shadow-sm hover:text-ink;
@@ -89,9 +99,9 @@ html, body {
     @apply flex items-center gap-4 px-5 py-4 transition-colors hover:bg-black/[0.015];
   }
 
-  /* Uppercase tracked eyebrow/nav label (Ferrari nav voice) -------------- */
+  /* Small caption/eyebrow label (subtle, sentence-case) ------------------ */
   .eyebrow {
-    @apply text-[11px] font-semibold uppercase tracking-[0.1em] text-muted;
+    @apply text-[11px] font-semibold uppercase tracking-[0.08em] text-muted;
   }
 }
 

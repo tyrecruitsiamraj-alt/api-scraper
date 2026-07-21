@@ -22,27 +22,27 @@ const config: Config = {
         bad: '#ff3b30',
       },
       borderRadius: {
-        // Ferrari: sharp 0px is the dominant radius. Flatten common inline
-        // roundings (lg/xl/2xl/3xl) app-wide; keep `full` for pills/badges only.
-        md: '0px',
-        lg: '0px',
-        xl: '0px',
-        '2xl': '0px',
-        '3xl': '0px',
+        // Apple-style soft radii — โค้งนุ่มแบบ apple.com
+        md: '10px',
+        lg: '14px',
+        xl: '18px',
+        '2xl': '22px',
+        '3xl': '28px',
       },
       boxShadow: {
-        // Ferrari uses hairlines + photographic depth — no soft shadow tiers.
-        card: 'none',
-        pop: '0 12px 40px rgba(0,0,0,0.12)',
+        // เงานุ่มมีเลเยอร์ (ambient + key) + ระดับ hover ที่ยกขึ้น
+        card: '0 1px 2px rgba(17,17,26,0.04), 0 4px 16px rgba(17,17,26,0.05)',
+        cardHover: '0 4px 12px rgba(17,17,26,0.06), 0 12px 32px rgba(17,17,26,0.10)',
+        pop: '0 12px 40px rgba(0,0,0,0.14)',
       },
       keyframes: {
         fadeUp: {
-          '0%': { opacity: '0', transform: 'translateY(8px)' },
+          '0%': { opacity: '0', transform: 'translateY(10px)' },
           '100%': { opacity: '1', transform: 'translateY(0)' },
         },
       },
       animation: {
-        fadeUp: 'fadeUp 0.4s ease-out both',
+        fadeUp: 'fadeUp 0.45s cubic-bezier(0.22,1,0.36,1) both',
       },
     },
   },

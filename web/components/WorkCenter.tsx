@@ -268,12 +268,12 @@ function Readiness({ facebookAccounts }: { facebookAccounts: FbAccountOption[] }
   return (
     <div className="space-y-2">
       {problems.map((p) => (
-        <div key={p.text} className="flex flex-wrap items-center gap-3 border-l-2 border-amber-500 bg-amber-50 px-4 py-3">
+        <div key={p.text} className="flex flex-wrap items-center gap-3 rounded-2xl border border-amber-200/70 bg-amber-50 px-4 py-3 shadow-card">
           <div className="min-w-0 flex-1">
             <div className="eyebrow text-amber-700">ตั้งค่าที่ต้องทำก่อนงานถึงจะเดิน</div>
             <div className="mt-1 text-[13px] text-amber-800">{p.text}</div>
           </div>
-          <Link href={p.href} className="shrink-0 bg-amber-600 px-3.5 py-2 text-[11px] font-semibold uppercase tracking-[0.06em] text-white hover:bg-amber-700">
+          <Link href={p.href} className="btn-primary btn-sm shrink-0 !bg-amber-600 hover:!bg-amber-700">
             {p.btn}
           </Link>
         </div>
@@ -289,7 +289,7 @@ function WorkItemCard({ item, connectors, facebookAccounts }: {
 }) {
   const showImage = item.stage === 'review' && item.content?.hasImage;
   return (
-    <div className={`card p-4 sm:p-5 ${CARD_ACCENT[item.stage]}`}>
+    <div className={`card card-hover animate-fadeUp p-4 sm:p-5 ${CARD_ACCENT[item.stage]}`}>
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div className="min-w-0">
           <div className="text-[15px] font-medium leading-tight text-ink">
@@ -315,7 +315,7 @@ function WorkItemCard({ item, connectors, facebookAccounts }: {
             />
           )}
           {item.detail && (
-            <p className={`min-w-0 flex-1 whitespace-pre-wrap text-[13px] leading-relaxed ${item.stage === 'attention' ? 'border-l-2 border-accent bg-red-50 px-3 py-2 text-red-700' : 'text-ink/70'}`}>
+            <p className={`min-w-0 flex-1 whitespace-pre-wrap text-[13px] leading-relaxed ${item.stage === 'attention' ? 'rounded-xl border-l-2 border-accent bg-red-50 px-3.5 py-2.5 text-red-700' : 'text-ink/70'}`}>
               {item.detail.length > 240 ? `${item.detail.slice(0, 240)}…` : item.detail}
             </p>
           )}
@@ -328,9 +328,9 @@ function WorkItemCard({ item, connectors, facebookAccounts }: {
             <span>ดึงผู้สมัคร</span>
             <span className="tabular-nums text-ink">{item.progress.got} / {item.progress.target}</span>
           </div>
-          <div className="h-1 overflow-hidden bg-black/[0.06]">
+          <div className="h-1.5 overflow-hidden rounded-full bg-black/[0.06]">
             <div
-              className="h-full bg-accent"
+              className="h-full rounded-full bg-accent transition-[width] duration-500 ease-out"
               style={{ width: `${Math.min(100, Math.round((item.progress.got / item.progress.target) * 100))}%` }}
             />
           </div>
@@ -388,18 +388,18 @@ export function WorkCenter({ items, connectors, facebookAccounts }: {
 
       <Readiness facebookAccounts={facebookAccounts} />
 
-      <div className="grid grid-cols-2 border border-line bg-white sm:grid-cols-4">
-        {STAT.map((s, i) => (
-          <div key={s.label} className={`relative px-5 py-4 ${i > 0 ? 'border-l border-line' : ''}`}>
-            <span className={`absolute left-0 top-0 h-full w-[3px] ${s.value > 0 ? s.bar : 'bg-transparent'}`} />
-            <div className="eyebrow">{s.label}</div>
-            <div className={`mt-1.5 text-[30px] font-medium leading-none tabular-nums ${s.value > 0 ? s.tone : 'text-subtle/40'}`}>{s.value}</div>
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+        {STAT.map((s) => (
+          <div key={s.label} className="card card-hover relative overflow-hidden px-5 py-4">
+            <span className={`absolute left-0 top-0 h-full w-1 ${s.value > 0 ? s.bar : 'bg-transparent'}`} />
+            <div className="text-xs text-subtle">{s.label}</div>
+            <div className={`mt-1.5 text-[30px] font-semibold leading-none tabular-nums ${s.value > 0 ? s.tone : 'text-subtle/40'}`}>{s.value}</div>
           </div>
         ))}
       </div>
 
       {active.length === 0 ? (
-        <div className="border border-line bg-white px-5 py-16 text-center text-sm text-subtle">ไม่มีงานค้าง — ทุกอย่างเรียบร้อย</div>
+        <div className="card px-5 py-16 text-center text-sm text-subtle">ไม่มีงานค้าง — ทุกอย่างเรียบร้อย</div>
       ) : (
         <div className="space-y-3">
           {active.map((item) => (

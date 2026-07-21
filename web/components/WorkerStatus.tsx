@@ -8,7 +8,7 @@ export async function WorkerStatus() {
   const workers = await listWorkerHeartbeats();
   if (workers.length === 0) {
     return (
-      <div className="flex items-center gap-2.5 border border-line bg-white px-4 py-2.5 text-xs text-subtle">
+      <div className="flex items-center gap-2.5 rounded-2xl border border-line/70 bg-white px-4 py-2.5 text-xs shadow-card text-subtle">
         <span className="inline-block h-1.5 w-1.5 rounded-full bg-gray-300" />
         <span className="eyebrow">เครื่องทำงาน</span>
         <span>ยังไม่มีเครื่องรายงานตัว — เปิด start-workers.bat (PC) / start-mac.command (Mac) แล้วรอ ~1 นาที</span>
@@ -17,7 +17,7 @@ export async function WorkerStatus() {
   }
   const offline = workers.filter((w) => !w.online);
   return (
-    <div className="flex flex-wrap items-center gap-x-5 gap-y-2 border border-line bg-white px-4 py-2.5 text-xs">
+    <div className="flex flex-wrap items-center gap-x-5 gap-y-2 rounded-2xl border border-line/70 bg-white px-4 py-2.5 text-xs shadow-card">
       <span className="eyebrow">เครื่องทำงาน</span>
       {workers.map((w) => (
         <span key={`${w.kind}:${w.name}`} className="inline-flex items-center gap-2">
