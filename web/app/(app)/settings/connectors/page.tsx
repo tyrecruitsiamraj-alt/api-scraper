@@ -1,7 +1,8 @@
-import { deleteConnectorAction, setAccountWorkerAction, toggleConnectorAction } from '@/lib/actions';
+import { deleteConnectorAction, deleteFacebookAccountAction, setAccountWorkerAction, toggleConnectorAction } from '@/lib/actions';
 import { facebookQuotaSummary, knownWorkerNames, listAllConnectors, listProviderLimits } from '@/lib/repo';
 import { ProviderLimitsPanel } from '@/components/ProviderLimitsPanel';
 import { FacebookQuotaPanel } from '@/components/FacebookQuotaPanel';
+import { ConnectorEditButton } from '@/components/ConnectorEditButton';
 import { NewUnifiedConnectorForm } from '../NewUnifiedConnectorForm';
 
 export const dynamic = 'force-dynamic';
@@ -96,20 +97,27 @@ export default async function SettingsConnectorsPage() {
                     )}
                   </div>
 
-                  <div className="flex shrink-0 items-center gap-1">
+                  <div className="flex shrink-0 flex-wrap items-center justify-end gap-1">
                     {c.platform === 'facebook' ? (
-                      <form action={setAccountWorkerAction} className="flex items-center gap-1">
-                        <input type="hidden" name="accountId" value={id} />
-                        <input
-                          name="worker"
-                          defaultValue={c.preferred_worker ?? ''}
-                          placeholder="ชื่อเครื่อง"
-                          list="known-facebook-workers"
-                          className="field w-32 py-1.5 font-mono text-xs"
-                          aria-label={`เครื่องสำหรับ ${c.label}`}
-                        />
-                        <button className="btn-secondary btn-sm">บันทึก Pin</button>
-                      </form>
+                      <>
+                        <form action={setAccountWorkerAction} className="flex items-center gap-1">
+                          <input type="hidden" name="accountId" value={id} />
+                          <input
+                            name="worker"
+                            defaultValue={c.preferred_worker ?? ''}
+                            placeholder="ชื่อเครื่อง"
+                            list="known-facebook-workers"
+                            className="field w-28 py-1.5 font-mono text-xs"
+                            aria-label={`เครื่องสำหรับ ${c.label}`}
+                          />
+                          <button className="btn-secondary btn-sm">Pin</button>
+                        </form>
+                        <ConnectorEditButton id={id} platform="facebook" label={c.label} username={c.username ?? ''} />
+                        <form action={deleteFacebookAccountAction}>
+                          <input type="hidden" name="id" value={id} />
+                          <button className="btn-danger btn-sm" aria-label={`ลบ ${c.label}`}>ลบ</button>
+                        </form>
+                      </>
                     ) : (
                       <>
                         <form action={toggleConnectorAction}>
@@ -117,6 +125,7 @@ export default async function SettingsConnectorsPage() {
                           <input type="hidden" name="enabled" value={(!c.enabled).toString()} />
                           <button className="btn-ghost btn-sm">{c.enabled ? 'ปิด' : 'เปิด'}</button>
                         </form>
+                        <ConnectorEditButton id={id} platform={c.platform} label={c.label} username={c.username ?? ''} />
                         <form action={deleteConnectorAction}>
                           <input type="hidden" name="id" value={id} />
                           <button className="btn-danger btn-sm" aria-label={`ลบ ${c.label}`}>ลบ</button>

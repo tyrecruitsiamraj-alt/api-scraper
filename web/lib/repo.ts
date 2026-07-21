@@ -260,6 +260,42 @@ export async function deleteConnector(id: string) {
   await q('DELETE FROM connectors WHERE id = $1', [id]);
 }
 
+/** แก้ข้อมูล Scraper connector (jobbkk/jobthai). password ว่าง = ไม่เปลี่ยนรหัสเดิม. */
+export async function updateScraperConnector(
+  id: string,
+  c: { label: string; username: string; passwordEnc: string | null },
+) {
+  if (c.passwordEnc) {
+    await q('UPDATE connectors SET label=$2, username=$3, password_enc=$4, updated_at=now() WHERE id=$1', [
+      id, c.label, c.username, c.passwordEnc,
+    ]);
+  } else {
+    await q('UPDATE connectors SET label=$2, username=$3, updated_at=now() WHERE id=$1', [id, c.label, c.username]);
+  }
+}
+
+/** แก้ข้อมูลบัญชี Facebook. password ว่าง = ไม่เปลี่ยนรหัสเดิม. */
+export async function updateFacebookAccount(
+  id: string,
+  c: { label: string; username: string; password: string | null },
+) {
+  if (c.password) {
+    await q(
+      `UPDATE ${AP}.users SET name=$2, poster_name=$2, email=$3, password=$4, updated_at=now() WHERE id=$1`,
+      [id, c.label, c.username, c.password],
+    );
+  } else {
+    await q(`UPDATE ${AP}.users SET name=$2, poster_name=$2, email=$3, updated_at=now() WHERE id=$1`, [
+      id, c.label, c.username,
+    ]);
+  }
+}
+
+/** ลบบัญชี Facebook ออกจาก schema Auto-Post ของ project นี้. */
+export async function deleteFacebookAccount(id: string) {
+  await q(`DELETE FROM ${AP}.users WHERE id = $1`, [id]);
+}
+
 // ---------------------------------------------------------------------------
 // Provider daily caps (provider_limits) — across all connectors of a platform
 // ---------------------------------------------------------------------------

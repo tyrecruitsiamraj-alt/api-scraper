@@ -18,6 +18,9 @@ import {
   setContentStatus,
   updateContentCaption,
   deleteConnector,
+  updateScraperConnector,
+  updateFacebookAccount,
+  deleteFacebookAccount,
   deleteTask,
   enqueueScrapeForTask,
   insertConnector,
@@ -366,6 +369,31 @@ export async function deleteConnectorAction(formData: FormData) {
   if (id) await deleteConnector(id);
   revalidatePath('/connectors');
   revalidatePath('/settings');
+  revalidatePath('/settings/connectors');
+}
+
+/** แก้ไข connector (Scraper หรือ Facebook) — password ว่าง = คงรหัสเดิม. */
+export async function editConnectorAction(formData: FormData) {
+  await requireSession();
+  const id = String(formData.get('id') ?? '').trim();
+  const platform = String(formData.get('platform') ?? '').trim();
+  const label = String(formData.get('label') ?? '').trim();
+  const username = String(formData.get('username') ?? '').trim();
+  const password = String(formData.get('password') ?? '').trim();
+  if (!id || !label) throw new Error('กรุณากรอกชื่อที่แสดง');
+  if (platform === 'facebook') {
+    await updateFacebookAccount(id, { label, username, password: password || null });
+  } else {
+    await updateScraperConnector(id, { label, username, passwordEnc: password ? encryptSecret(password) : null });
+  }
+  revalidatePath('/settings/connectors');
+}
+
+/** ลบบัญชี Facebook. */
+export async function deleteFacebookAccountAction(formData: FormData) {
+  await requireSession();
+  const id = String(formData.get('id') ?? '').trim();
+  if (id) await deleteFacebookAccount(id);
   revalidatePath('/settings/connectors');
 }
 
