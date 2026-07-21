@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import Link from 'next/link';
 import {
   approveContentAction,
@@ -13,6 +13,11 @@ import {
 } from '@/lib/actions';
 
 export type WorkCenterStage = 'intake' | 'working' | 'review' | 'completed' | 'attention';
+
+export type Step = {
+  label: string;
+  state: 'done' | 'active' | 'failed' | 'skip' | 'todo';
+};
 
 export type WorkCenterItem = {
   id: string;
@@ -31,24 +36,34 @@ export type WorkCenterItem = {
   taskId?: string | null;
   campaignId?: string | null;
   nextAction?: 'retry_draft' | 'retry_post' | 'measure' | null;
+  steps?: Step[];
 };
 
 type Option = { id: string; label: string };
 
-const TABS: { stage: WorkCenterStage; label: string }[] = [
-  { stage: 'intake', label: 'งานเข้าใหม่' },
-  { stage: 'attention', label: 'ต้องแก้' },
-  { stage: 'working', label: 'กำลังทำงาน' },
-  { stage: 'review', label: 'รอตรวจผล' },
-  { stage: 'completed', label: 'สำเร็จ' },
-];
+// เรียงตาม "ใครต้องขยับ" — งานพัง/ต้องแก้ ขึ้นบนสุดเสมอ, งานเสร็จจมล่างสุด
+const STAGE_PRIORITY: Record<WorkCenterStage, number> = {
+  attention: 0,
+  review: 1,
+  intake: 2,
+  working: 3,
+  completed: 4,
+};
 
-const STAGE_STYLE: Record<WorkCenterStage, string> = {
+const STAGE_PILL: Record<WorkCenterStage, string> = {
   intake: 'bg-amber-50 text-amber-700',
   working: 'bg-blue-50 text-blue-700',
   review: 'bg-orange-50 text-orange-700',
   completed: 'bg-green-50 text-green-700',
   attention: 'bg-red-50 text-red-700',
+};
+
+const CARD_ACCENT: Record<WorkCenterStage, string> = {
+  attention: 'border-red-200',
+  review: 'border-accent/60 border-2',
+  intake: 'border-amber-200',
+  working: 'border-line',
+  completed: 'border-line',
 };
 
 function fmtDate(value: string) {
@@ -59,43 +74,60 @@ function fmtDate(value: string) {
   }
 }
 
-function TypeBadge({ kind }: { kind: WorkCenterItem['kind'] }) {
-  return (
-    <span className={`pill ${kind === 'content' ? 'bg-orange-50 text-orange-700' : 'bg-emerald-50 text-emerald-700'}`}>
-      <span className={`dot ${kind === 'content' ? 'bg-orange-500' : 'bg-emerald-500'}`} />
-      {kind === 'content' ? 'Content' : 'Scraping'}
-    </span>
-  );
+function KindTag({ kind }: { kind: WorkCenterItem['kind'] }) {
+  return <span className="text-xs font-normal text-subtle">· งาน {kind === 'content' ? 'Content' : 'Scraping'}</span>;
 }
 
-function Timeline({ item }: { item: WorkCenterItem }) {
-  const order: WorkCenterStage[] = ['intake', 'working', 'review', 'completed'];
-  const current = item.stage === 'attention' ? Math.max(1, order.indexOf('working')) : order.indexOf(item.stage);
-  const steps = [
-    'รับคำขอจาก So Recruit',
-    item.kind === 'content' ? 'AI สร้าง Content' : 'Worker ทำ Scraping',
-    'ตรวจผลลัพธ์และอนุมัติ',
-    item.kind === 'content' ? 'เผยแพร่และวัดผล' : 'ตรวจรับข้อมูลเรียบร้อย',
-  ];
+// ---- Stepper 6 ป้าย แนวนอน: done=เขียว✓, active=น้ำเงินเลข, failed=แดง✕, skip=จุดประ», todo=ว่าง ----
+function StepDot({ step, index }: { step: Step; index: number }) {
+  const base = 'flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[11px] font-medium';
+  switch (step.state) {
+    case 'done':
+      return <span className={`${base} bg-green-100 text-green-700`}>✓</span>;
+    case 'active':
+      return <span className={`${base} bg-accent text-white`}>{index + 1}</span>;
+    case 'failed':
+      return <span className={`${base} bg-red-100 text-red-700`}>✕</span>;
+    case 'skip':
+      return <span className={`${base} border border-dashed border-line text-subtle`}>»</span>;
+    default:
+      return <span className={`${base} border border-line bg-white`} />;
+  }
+}
+
+function Stepper({ steps }: { steps: Step[] }) {
   return (
-    <ol className="mt-4 space-y-0">
-      {steps.map((step, index) => {
-        const done = current > index;
-        const active = current === index || (item.stage === 'attention' && index === current);
-        return (
-          <li key={step} className="relative flex gap-3 pb-4 last:pb-0">
-            {index < steps.length - 1 && <span className="absolute left-[7px] top-4 h-full w-px bg-line" />}
-            <span className={`relative z-10 mt-0.5 h-4 w-4 shrink-0 rounded-full border-2 ${
-              done ? 'border-green-500 bg-green-500' : active ? 'border-accent bg-accent' : 'border-line bg-white'
-            }`} />
-            <div>
-              <div className={`text-sm ${active ? 'font-medium text-ink' : 'text-subtle'}`}>{step}</div>
-              {active && <div className="mt-0.5 text-xs text-subtle">{item.statusLabel}</div>}
+    <div className="mt-3">
+      <div className="flex">
+        {steps.map((step, i) => {
+          const lineBefore = i > 0 && (steps[i - 1].state === 'done') ? 'bg-green-300' : 'bg-line';
+          const lineAfter = step.state === 'done' ? 'bg-green-300' : 'bg-line';
+          return (
+            <div key={step.label} className="flex flex-1 flex-col items-center">
+              <div className="flex w-full items-center">
+                <span className={`h-0.5 flex-1 ${i === 0 ? 'opacity-0' : lineBefore}`} />
+                <StepDot step={step} index={i} />
+                <span className={`h-0.5 flex-1 ${i === steps.length - 1 ? 'opacity-0' : lineAfter}`} />
+              </div>
+              <div
+                className={`mt-1 text-center text-[10px] leading-tight ${
+                  step.state === 'active'
+                    ? 'font-medium text-accent'
+                    : step.state === 'failed'
+                      ? 'font-medium text-red-600'
+                      : step.state === 'skip'
+                        ? 'text-subtle/60'
+                        : 'text-subtle'
+                }`}
+              >
+                {step.label}
+                {step.state === 'skip' && <span className="block text-[9px]">ข้าม</span>}
+              </div>
             </div>
-          </li>
-        );
-      })}
-    </ol>
+          );
+        })}
+      </div>
+    </div>
   );
 }
 
@@ -108,7 +140,7 @@ function WorkAction({ item, connectors, facebookAccounts }: {
     return (
       <form action={retryCampaignDraftAction}>
         <input type="hidden" name="campaignId" value={item.campaignId} />
-        <button className="btn-primary w-full">ลองสร้าง Content ใหม่</button>
+        <button className="btn-primary">ลองสร้าง Content ใหม่</button>
       </form>
     );
   }
@@ -117,7 +149,7 @@ function WorkAction({ item, connectors, facebookAccounts }: {
     return (
       <form action={retryCampaignPostAction}>
         <input type="hidden" name="campaignId" value={item.campaignId} />
-        <button className="btn-primary w-full">ลองโพสต์ใหม่</button>
+        <button className="btn-primary">ลองโพสต์ใหม่</button>
       </form>
     );
   }
@@ -126,7 +158,7 @@ function WorkAction({ item, connectors, facebookAccounts }: {
     return (
       <form action={measureCampaignAction}>
         <input type="hidden" name="campaignId" value={item.campaignId} />
-        <button className="btn-primary w-full">ตรวจผล Engagement</button>
+        <button className="btn-primary">ตรวจผล Engagement</button>
       </form>
     );
   }
@@ -136,37 +168,47 @@ function WorkAction({ item, connectors, facebookAccounts }: {
       return (
         <form action={startCampaignAction}>
           <input type="hidden" name="requestNo" value={item.requestNo} />
-          <button className="btn-primary w-full">อนุมัติรับงาน Content</button>
+          <button className="btn-primary">อนุมัติรับงาน Content</button>
         </form>
       );
     }
     return (
-      <form action={startSoRecruitScrapeAction} className="space-y-2">
+      <form action={startSoRecruitScrapeAction} className="flex flex-wrap items-end gap-2">
         <input type="hidden" name="requestNo" value={item.requestNo} />
-        <label className="label" htmlFor={`connector-${item.id}`}>เลือก Connector ก่อนเริ่ม</label>
-        <select id={`connector-${item.id}`} name="connectorId" required defaultValue="" className="field">
-          <option value="" disabled>เลือกบัญชี Scraping…</option>
-          {connectors.map((connector) => <option key={connector.id} value={connector.id}>{connector.label}</option>)}
-        </select>
-        <button className="btn-primary w-full" disabled={connectors.length === 0}>อนุมัติและเริ่ม Scraping</button>
+        <div>
+          <label className="label" htmlFor={`connector-${item.id}`}>เลือก Connector</label>
+          <select id={`connector-${item.id}`} name="connectorId" required defaultValue="" className="field">
+            <option value="" disabled>เลือกบัญชี Scraping…</option>
+            {connectors.map((connector) => <option key={connector.id} value={connector.id}>{connector.label}</option>)}
+          </select>
+        </div>
+        <button className="btn-primary" disabled={connectors.length === 0}>อนุมัติและเริ่ม Scraping</button>
         {connectors.length === 0 && (
-          <Link href="/settings/connectors" className="block text-center text-xs text-accent hover:underline">เพิ่ม Connector ก่อน</Link>
+          <Link href="/settings/connectors" className="text-xs text-accent hover:underline">เพิ่ม Connector ก่อน</Link>
         )}
       </form>
     );
   }
 
   if (item.stage === 'review' && item.kind === 'content' && item.content) {
+    const noAccount = facebookAccounts.length === 0;
     return (
-      <form action={approveContentAction} className="space-y-2">
+      <form action={approveContentAction} className="flex flex-wrap items-end gap-2">
         <input type="hidden" name="contentId" value={item.content.id} />
         <input type="hidden" name="campaignId" value={item.content.campaignId} />
-        <label className="label" htmlFor={`facebook-${item.id}`}>บัญชีสำหรับเผยแพร่</label>
-        <select id={`facebook-${item.id}`} name="fbAccountId" required defaultValue="" className="field">
-          <option value="" disabled>เลือกบัญชี Facebook…</option>
-          {facebookAccounts.map((account) => <option key={account.id} value={account.id}>{account.label}</option>)}
-        </select>
-        <button className="btn-primary w-full" disabled={facebookAccounts.length === 0}>อนุมัติและส่งโพสต์</button>
+        <div>
+          <label className="label" htmlFor={`facebook-${item.id}`}>บัญชีสำหรับเผยแพร่</label>
+          <select id={`facebook-${item.id}`} name="fbAccountId" required defaultValue="" className="field">
+            <option value="" disabled>เลือกบัญชี Facebook…</option>
+            {facebookAccounts.map((account) => <option key={account.id} value={account.id}>{account.label}</option>)}
+          </select>
+        </div>
+        <button className="btn-primary" disabled={noAccount}>
+          {noAccount ? 'อนุมัติและโพสต์ — ยังไม่มีบัญชี' : 'อนุมัติและโพสต์'}
+        </button>
+        {noAccount && (
+          <Link href="/settings/connectors" className="text-xs text-accent hover:underline">เพิ่มบัญชี Facebook ก่อน</Link>
+        )}
       </form>
     );
   }
@@ -175,13 +217,75 @@ function WorkAction({ item, connectors, facebookAccounts }: {
     return (
       <form action={approveScrapeResultAction}>
         <input type="hidden" name="taskId" value={item.taskId} />
-        <button className="btn-primary w-full">ตรวจรับผล Scraping</button>
+        <button className="btn-primary">ตรวจรับผล Scraping</button>
       </form>
     );
   }
 
-  if (item.href) return <Link href={item.href} className="btn-secondary w-full">เปิดรายละเอียด</Link>;
+  if (item.href) return <Link href={item.href} className="btn-secondary">เปิดรายละเอียด</Link>;
   return null;
+}
+
+function WorkItemCard({ item, connectors, facebookAccounts }: {
+  item: WorkCenterItem;
+  connectors: Option[];
+  facebookAccounts: Option[];
+}) {
+  const showImage = item.stage === 'review' && item.content?.hasImage;
+  return (
+    <div className={`card p-4 sm:p-5 ${CARD_ACCENT[item.stage]}`}>
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <div className="min-w-0">
+          <div className="text-sm font-medium text-ink">
+            {item.title} <KindTag kind={item.kind} />
+          </div>
+          <div className="mt-0.5 text-xs text-subtle">
+            {item.requestNo || item.id.split(':')[1] || item.id}
+            {item.requester ? ` · ${item.requester}` : ''} · {fmtDate(item.createdAt)}
+          </div>
+        </div>
+        <span className={`pill shrink-0 ${STAGE_PILL[item.stage]}`}>{item.statusLabel}</span>
+      </div>
+
+      {item.steps && item.steps.length > 0 && <Stepper steps={item.steps} />}
+
+      {(showImage || item.detail) && (
+        <div className="mt-3 flex gap-3">
+          {showImage && item.content && (
+            <img
+              src={`/api/campaign-content/${item.content.id}/image`}
+              alt="รูป Content"
+              className="h-16 w-16 shrink-0 rounded-lg border border-line object-cover"
+            />
+          )}
+          {item.detail && (
+            <p className={`min-w-0 flex-1 whitespace-pre-wrap text-[13px] leading-relaxed ${item.stage === 'attention' ? 'rounded-lg bg-red-50 px-3 py-2 text-red-700' : 'text-ink/75'}`}>
+              {item.stage === 'attention' && <span className="mr-1">⚠</span>}
+              {item.detail.length > 240 ? `${item.detail.slice(0, 240)}…` : item.detail}
+            </p>
+          )}
+        </div>
+      )}
+
+      {item.progress && item.progress.target > 0 && (
+        <div className="mt-3">
+          <div className="mb-1 text-xs text-subtle">
+            ดึงผู้สมัคร {item.progress.got} จาก {item.progress.target} คน
+          </div>
+          <div className="h-1.5 overflow-hidden rounded-full bg-black/[0.06]">
+            <div
+              className="h-full rounded-full bg-accent/75"
+              style={{ width: `${Math.min(100, Math.round((item.progress.got / item.progress.target) * 100))}%` }}
+            />
+          </div>
+        </div>
+      )}
+
+      <div className="mt-4 flex flex-wrap items-center gap-2">
+        <WorkAction item={item} connectors={connectors} facebookAccounts={facebookAccounts} />
+      </div>
+    </div>
+  );
 }
 
 export function WorkCenter({ items, connectors, facebookAccounts }: {
@@ -189,15 +293,7 @@ export function WorkCenter({ items, connectors, facebookAccounts }: {
   connectors: Option[];
   facebookAccounts: Option[];
 }) {
-  const firstStage = TABS.find((tab) => items.some((item) => item.stage === tab.stage))?.stage ?? 'intake';
-  const [stage, setStage] = useState<WorkCenterStage>(firstStage);
-  const visible = useMemo(() => items.filter((item) => item.stage === stage), [items, stage]);
-  const [selectedId, setSelectedId] = useState<string | null>(visible[0]?.id ?? null);
-  const selected = visible.find((item) => item.id === selectedId) ?? visible[0] ?? null;
-
-  useEffect(() => {
-    if (!visible.some((item) => item.id === selectedId)) setSelectedId(visible[0]?.id ?? null);
-  }, [visible, selectedId]);
+  const [showDone, setShowDone] = useState(false);
 
   const counts = useMemo(() => {
     const result: Record<WorkCenterStage, number> = { intake: 0, working: 0, review: 0, completed: 0, attention: 0 };
@@ -205,84 +301,62 @@ export function WorkCenter({ items, connectors, facebookAccounts }: {
     return result;
   }, [items]);
 
+  const sorted = useMemo(
+    () =>
+      [...items].sort((a, b) => {
+        const pa = STAGE_PRIORITY[a.stage];
+        const pb = STAGE_PRIORITY[b.stage];
+        if (pa !== pb) return pa - pb;
+        return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+      }),
+    [items],
+  );
+
+  const active = sorted.filter((item) => item.stage !== 'completed');
+  const done = sorted.filter((item) => item.stage === 'completed');
+
   return (
     <div className="space-y-5">
-      <div className="flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">ศูนย์งาน</h1>
-          <p className="mt-1 text-sm text-subtle">รับงาน ตรวจงาน แก้ปัญหา และติดตามผลได้จากหน้าเดียว</p>
+      <div>
+        <h1 className="text-2xl font-semibold tracking-tight">ศูนย์งาน</h1>
+        <p className="mt-1 text-sm text-subtle">งานจาก So Recruit ทุกใบ — รับงาน ตรวจ อนุมัติ และติดตามจนเสร็จ ในหน้าเดียว</p>
+      </div>
+
+      <div className="grid gap-3 grid-cols-2 sm:grid-cols-4">
+        <div className="card p-4"><div className="text-xs text-subtle">ต้องแก้</div><div className="mt-1 text-3xl font-semibold tabular-nums text-red-600">{counts.attention}</div></div>
+        <div className="card p-4"><div className="text-xs text-subtle">รอคุณ</div><div className="mt-1 text-3xl font-semibold tabular-nums text-orange-600">{counts.intake + counts.review}</div></div>
+        <div className="card p-4"><div className="text-xs text-subtle">ระบบกำลังทำ</div><div className="mt-1 text-3xl font-semibold tabular-nums text-blue-600">{counts.working}</div></div>
+        <div className="card p-4"><div className="text-xs text-subtle">เสร็จ</div><div className="mt-1 text-3xl font-semibold tabular-nums text-green-700">{counts.completed}</div></div>
+      </div>
+
+      {active.length === 0 ? (
+        <div className="card px-5 py-16 text-center text-sm text-subtle">ไม่มีงานค้าง — ทุกอย่างเรียบร้อย 🎉</div>
+      ) : (
+        <div className="space-y-3">
+          {active.map((item) => (
+            <WorkItemCard key={item.id} item={item} connectors={connectors} facebookAccounts={facebookAccounts} />
+          ))}
         </div>
-      </div>
+      )}
 
-      <div className="grid gap-3 sm:grid-cols-3">
-        <div className="card p-4"><div className="text-xs text-subtle">งานเข้าใหม่</div><div className="mt-1 text-3xl font-semibold tabular-nums">{counts.intake}</div></div>
-        <div className="card p-4"><div className="text-xs text-subtle">ต้องแก้ก่อนทำต่อ</div><div className="mt-1 text-3xl font-semibold tabular-nums text-red-600">{counts.attention}</div></div>
-        <div className="card p-4"><div className="text-xs text-subtle">สำเร็จ</div><div className="mt-1 text-3xl font-semibold tabular-nums text-green-700">{counts.completed}</div></div>
-      </div>
-
-      <div className="flex flex-wrap gap-1.5">
-        {TABS.map((tab) => (
+      {done.length > 0 && (
+        <div>
           <button
-            key={tab.stage}
             type="button"
-            onClick={() => setStage(tab.stage)}
-            className={`rounded-full px-3.5 py-2 text-[13px] font-medium transition ${
-              stage === tab.stage ? 'bg-accent text-white shadow-sm' : 'bg-black/[0.04] text-subtle hover:bg-black/[0.07] hover:text-ink'
-            }`}
+            onClick={() => setShowDone((v) => !v)}
+            className="text-sm text-subtle hover:text-ink"
           >
-            {tab.label} <span className="ml-1 tabular-nums opacity-75">{counts[tab.stage]}</span>
+            {showDone ? '▾' : '▸'} งานที่เสร็จแล้ว ({done.length})
           </button>
-        ))}
-      </div>
-
-      <div className="grid items-start gap-5 lg:grid-cols-[minmax(0,1.65fr)_minmax(280px,.75fr)]">
-        <div className="min-w-0">
-          <div className="mb-2 flex items-center justify-between">
-            <h2 className="text-[15px] font-semibold">คิวงาน</h2>
-            <span className="text-xs text-subtle">{visible.length} รายการ</span>
-          </div>
-          {visible.length === 0 ? (
-            <div className="card px-5 py-16 text-center text-sm text-subtle">ไม่มีงานในสถานะนี้</div>
-          ) : (
-            <div className="card overflow-x-auto">
-              <table className="w-full min-w-[650px] text-sm">
-                <thead><tr className="border-b border-line text-left text-xs text-subtle"><th className="px-4 py-3 font-medium">ประเภท</th><th className="px-4 py-3 font-medium">รายละเอียด</th><th className="px-4 py-3 font-medium">ผู้ขอ</th><th className="px-4 py-3 font-medium">สร้างเมื่อ</th><th className="px-4 py-3 font-medium">สถานะ</th></tr></thead>
-                <tbody>
-                  {visible.map((item) => (
-                    <tr key={item.id} onClick={() => setSelectedId(item.id)} className={`cursor-pointer border-b border-line/60 last:border-0 ${selected?.id === item.id ? 'bg-accent/[0.06]' : 'hover:bg-black/[0.015]'}`}>
-                      <td className="px-4 py-3"><TypeBadge kind={item.kind} /></td>
-                      <td className="px-4 py-3"><div className="font-medium text-ink">{item.title}</div><div className="mt-0.5 text-xs text-subtle">{item.requestNo || item.detail || '—'}</div></td>
-                      <td className="px-4 py-3 text-subtle">{item.requester || '—'}</td>
-                      <td className="whitespace-nowrap px-4 py-3 text-xs text-subtle">{fmtDate(item.createdAt)}</td>
-                      <td className="px-4 py-3"><span className={`pill ${STAGE_STYLE[item.stage]}`}>{item.statusLabel}</span></td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+          {showDone && (
+            <div className="mt-3 space-y-3">
+              {done.map((item) => (
+                <WorkItemCard key={item.id} item={item} connectors={connectors} facebookAccounts={facebookAccounts} />
+              ))}
             </div>
           )}
         </div>
-
-        <aside className="card p-5 lg:sticky lg:top-24">
-          {selected ? (
-            <div>
-              <div className="flex items-start justify-between gap-3">
-                <div className="min-w-0"><TypeBadge kind={selected.kind} /><h2 className="mt-2 text-lg font-semibold leading-snug">{selected.title}</h2><div className="mt-1 text-xs text-subtle">{selected.requestNo || selected.id}</div></div>
-                <span className={`pill shrink-0 ${STAGE_STYLE[selected.stage]}`}>{selected.statusLabel}</span>
-              </div>
-              {selected.content?.hasImage && <img src={`/api/campaign-content/${selected.content.id}/image`} alt="รูป Content" className="mt-4 h-40 w-full rounded-xl object-cover" />}
-              {selected.detail && <p className="mt-4 whitespace-pre-wrap text-sm leading-relaxed text-ink/80">{selected.detail}</p>}
-              <dl className="mt-4 grid grid-cols-[auto_1fr] gap-x-3 gap-y-2 text-sm">
-                <dt className="text-subtle">ผู้ขอ</dt><dd>{selected.requester || '—'}</dd>
-                <dt className="text-subtle">Connector</dt><dd>{selected.connector || 'ยังไม่เลือก'}</dd>
-                {selected.progress && <><dt className="text-subtle">ความคืบหน้า</dt><dd>{selected.progress.got}/{selected.progress.target || '—'}</dd></>}
-              </dl>
-              <Timeline item={selected} />
-              <div className="mt-5"><WorkAction item={selected} connectors={connectors} facebookAccounts={facebookAccounts} /></div>
-            </div>
-          ) : <div className="py-12 text-center text-sm text-subtle">เลือกรายการเพื่อดูรายละเอียด</div>}
-        </aside>
-      </div>
+      )}
     </div>
   );
 }

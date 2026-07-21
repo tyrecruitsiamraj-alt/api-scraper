@@ -9,7 +9,7 @@ import {
 } from '@/lib/repo';
 import { AutoRefresh } from '@/components/AutoRefresh';
 import { WorkerStatus } from '@/components/WorkerStatus';
-import { WorkCenter, type WorkCenterItem, type WorkCenterStage } from '@/components/WorkCenter';
+import { WorkCenter, type WorkCenterItem, type WorkCenterStage, type Step } from '@/components/WorkCenter';
 
 export const dynamic = 'force-dynamic';
 
@@ -26,12 +26,60 @@ const STATUS_TH: Record<string, string> = {
   done: 'เสร็จ',
 };
 
+// เส้นทางงาน 6 ป้ายเดียวกันทุกงาน — งานไหนไม่ใช้ขั้นไหน = 'skip' (วิ่งทะลุผ่านให้เห็น)
+const STEP_LABELS = ['รับงาน', 'เตรียมของ', 'อนุมัติ', 'Scrape', 'Auto post', 'เสร็จ'] as const;
+type S = Step['state'];
+const mkSteps = (states: [S, S, S, S, S, S]): Step[] =>
+  STEP_LABELS.map((label, i) => ({ label, state: states[i] }));
+
 function campaignStage(status: string, postStatus?: string): WorkCenterStage {
   if (postStatus === 'failed' || postStatus === 'cancelled') return 'attention';
   if (status === 'pending_approval') return 'review';
   if (status === 'done') return 'completed';
   if (status === 'low_engagement' || status === 'draft_error') return 'attention';
   return 'working';
+}
+
+/** Content: รับงาน → เตรียมของ(AI) → อนุมัติ → [Scrape ข้าม] → Auto post → เสร็จ */
+function contentSteps(status: string, postStatus?: string): Step[] {
+  let draft: S = 'done';
+  if (['new', 'researching', 'drafting'].includes(status)) draft = 'active';
+  else if (status === 'draft_error') draft = 'failed';
+
+  let approve: S = 'todo';
+  if (status === 'pending_approval') approve = 'active';
+  else if (['approved', 'posting', 'measuring', 'done'].includes(status)) approve = 'done';
+
+  let post: S = 'todo';
+  if (postStatus === 'failed' || postStatus === 'cancelled') post = 'failed';
+  else if (postStatus === 'queued' || postStatus === 'running' || status === 'posting') post = 'active';
+  else if (postStatus === 'completed' || ['measuring', 'done'].includes(status)) post = 'done';
+
+  let done: S = 'todo';
+  if (status === 'done') done = 'done';
+  else if (status === 'measuring') done = 'active';
+
+  return mkSteps(['done', draft, approve, 'skip', post, done]);
+}
+
+/** Scraping: รับงาน → เตรียมของ → อนุมัติ → Scrape → [Auto post ข้าม] → เสร็จ */
+function scrapeSteps(status: string, reviewStatus?: string): Step[] {
+  let scrape: S = 'todo';
+  if (status === 'queued' || status === 'running') scrape = 'active';
+  else if (status === 'error') scrape = 'failed';
+  else if (status === 'done') scrape = 'done';
+
+  let done: S = 'todo';
+  if (status === 'done') done = reviewStatus === 'pending' ? 'active' : 'done';
+
+  return mkSteps(['done', 'done', 'done', scrape, 'skip', done]);
+}
+
+/** คำขอที่ยังไม่รับ — ป้ายแรกกำลังรอ, ที่เหลือ todo, ข้ามตามชนิดงาน */
+function intakeSteps(kind: 'content' | 'scraping'): Step[] {
+  const scrape: S = kind === 'scraping' ? 'todo' : 'skip';
+  const post: S = kind === 'content' ? 'todo' : 'skip';
+  return mkSteps(['active', 'todo', 'todo', scrape, post, 'todo']);
 }
 
 export default async function OrchestratorPage() {
@@ -59,6 +107,7 @@ export default async function OrchestratorPage() {
       statusLabel: 'รออนุมัติรับงาน',
       createdAt: request.created_at,
       href: '/orchestrator/imports',
+      steps: intakeSteps(request.request_type),
     })),
     ...campaigns.map((campaign): WorkCenterItem => {
       const content = contentByCampaign.get(campaign.id);
@@ -95,6 +144,7 @@ export default async function OrchestratorPage() {
             : canMeasure
               ? 'measure'
               : null,
+        steps: contentSteps(campaign.status, post?.status),
       };
     }),
     ...tasks.filter((task) => task.status !== 'idle' || task.source_request_no).map((task): WorkCenterItem => {
@@ -116,6 +166,7 @@ export default async function OrchestratorPage() {
         href: '/scraping',
         progress: { got: task.progress_got, target: task.progress_target || task.target_count || 0 },
         taskId: task.id,
+        steps: scrapeSteps(task.status, task.review_status),
       };
     }),
   ].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
