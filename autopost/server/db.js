@@ -1764,6 +1764,42 @@ async function enqueueDailyPostRunJobs() {
   });
 }
 
+/**
+ * Worker heartbeat — เว็บใช้เช็คว่า "เครื่องโพสต์ยังมีชีวิต" (เคสโพสต์ fail เงียบ 2 วันไม่มีใครรู้).
+ * remote worker เรียก /api/worker/post/claim ทุก ~5 วิอยู่แล้ว → server แตะแถวให้ที่นั่น
+ * (เครื่อง Mac ไม่ต้องแก้โค้ดเอง). fail-soft: heartbeat พังห้ามทำให้ claim พัง.
+ */
+async function ensureWorkersTable() {
+  await query(`
+    CREATE TABLE IF NOT EXISTS workers (
+      name       VARCHAR(255) PRIMARY KEY,
+      kind       VARCHAR(50) NOT NULL DEFAULT 'autopost',
+      last_seen  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      meta       JSONB NOT NULL DEFAULT '{}'
+    )
+  `);
+}
+
+const heartbeatLastByName = new Map(); // throttle ในหน่วยความจำ — ลด write ตอน poll ถี่
+async function touchWorkerHeartbeat(name, meta = {}) {
+  const key = String(name || '').trim();
+  if (!key) return;
+  const last = heartbeatLastByName.get(key) || 0;
+  if (Date.now() - last < 15_000) return;
+  heartbeatLastByName.set(key, Date.now());
+  try {
+    await ensureWorkersTable();
+    await query(
+      `INSERT INTO workers (name, kind, last_seen, meta)
+       VALUES ($1, 'autopost', NOW(), $2::jsonb)
+       ON CONFLICT (name) DO UPDATE SET last_seen = NOW(), meta = EXCLUDED.meta`,
+      [key, JSON.stringify(meta)]
+    );
+  } catch (e) {
+    console.warn(`[heartbeat] เขียนไม่ได้: ${e.message}`);
+  }
+}
+
 async function claimNextPostRunJob(workerId, runId, workerName) {
   await ensurePostRunQueueUserColumn();
   await ensureUsersPostControlColumns();
@@ -2453,6 +2489,7 @@ module.exports = {
   enqueuePostRunJobsPerUser,
   enqueueDailyPostRunJobs,
   claimNextPostRunJob,
+  touchWorkerHeartbeat,
   completePostRunJob,
   pauseUser,
   resumeUser,

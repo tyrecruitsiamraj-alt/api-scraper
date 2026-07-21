@@ -10,7 +10,7 @@ export default function LoginPage() {
   const router = useRouter();
 
   useEffect(() => {
-    if (status === 'authenticated') router.replace('/candidates');
+    if (status === 'authenticated') router.replace('/orchestrator');
   }, [status, router]);
 
   return (
@@ -23,7 +23,7 @@ export default function LoginPage() {
           <h1 className="text-xl font-semibold mb-1">ยินดีต้อนรับ</h1>
           <p className="text-sm text-subtle mb-7">เข้าสู่ระบบด้วยบัญชีองค์กรของคุณ</p>
           <button
-            onClick={() => signIn('azure-ad', { callbackUrl: '/candidates' })}
+            onClick={() => signIn('azure-ad', { callbackUrl: '/orchestrator' })}
             disabled={status === 'loading'}
             className="btn-primary w-full"
           >

@@ -21,10 +21,31 @@ import { runConnector } from '../src/pipeline.js';
 import { runTask } from '../src/tasks-worker.js';
 import { generateDraftForCampaign } from '../src/core/orchestrator-draft.js';
 import { measureCampaign } from '../src/core/orchestrator-measure.js';
+import { sendAlert } from '../src/core/alert.js';
 
 const WORKER_ID = `${os.hostname()}#${process.pid}`;
 const POLL_MS = Number.parseInt(process.env.WORKER_POLL_MS ?? '3000', 10);
 const STALE_SECONDS = Number.parseInt(process.env.WORKER_STALE_SECONDS ?? '1800', 10); // 30 min
+
+// ---- heartbeat: บอกเว็บว่าเครื่องนี้ยังมีชีวิต (ตาราง workers, schema-011) ----
+// key = hostname (ไม่มี pid) — pool หลาย process บนเครื่องเดียวกันแชร์แถวเดียว
+// fail-soft: heartbeat พังห้ามทำให้ runner หยุด (แค่ log)
+const HEARTBEAT_MS = 15_000;
+let lastBeat = 0;
+async function heartbeat() {
+  if (Date.now() - lastBeat < HEARTBEAT_MS) return;
+  lastBeat = Date.now();
+  try {
+    await query(
+      `INSERT INTO workers (name, kind, last_seen, meta)
+       VALUES ($1, 'scraper', now(), $2::jsonb)
+       ON CONFLICT (name) DO UPDATE SET last_seen = now(), meta = EXCLUDED.meta`,
+      [os.hostname(), JSON.stringify({ pid: process.pid, types: SUPPORTED })],
+    );
+  } catch (e) {
+    console.warn(`  [heartbeat] เขียนไม่ได้: ${e.message}`);
+  }
+}
 
 /** connector_key = '<platform>:<id>' */
 function splitConnectorKey(key) {
@@ -124,6 +145,7 @@ async function finish(id, status, error = null) {
 }
 
 async function runOne() {
+  await heartbeat();
   await recoverStale();
   const job = await claimNext();
   if (!job) return false;
@@ -133,8 +155,11 @@ async function runOne() {
     await finish(job.id, 'done');
     console.log(`  ✓ done: ${JSON.stringify(r).slice(0, 200)}`);
   } catch (e) {
-    await finish(job.id, 'error', String(e?.message ?? e).slice(0, 500));
+    const errMsg = String(e?.message ?? e).slice(0, 500);
+    await finish(job.id, 'error', errMsg);
     console.error(`  ✗ error: ${e?.message ?? e}`);
+    // แจ้งเตือนทันทีที่งานพัง (fail-soft — ไม่มี ALERT_WEBHOOK_URL = เงียบ)
+    await sendAlert(`❌ งาน ${job.type} พังบนเครื่อง ${WORKER_ID}\nกุญแจ: ${job.connector_key}\nสาเหตุ: ${errMsg}`);
   }
   return true;
 }

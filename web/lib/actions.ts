@@ -11,6 +11,7 @@ import {
   createCampaignFromRequest,
   enqueueDraftForCampaign,
   enqueueApprovedPost,
+  retryCampaignPost,
   enqueueMeasureForCampaign,
   getCampaign,
   getContentById,
@@ -227,29 +228,47 @@ export async function approveContentAction(formData: FormData) {
   const contentId = String(formData.get('contentId') ?? '');
   const campaignId = String(formData.get('campaignId') ?? '');
   const fbAccountId = String(formData.get('fbAccountId') ?? '').trim();
-  if (contentId && campaignId) {
-    await setContentStatus(contentId, 'approved');
-    let posting = false;
-    if (fbAccountId) {
-      const [campaign, content] = await Promise.all([getCampaign(campaignId), getContentById(contentId)]);
-      if (campaign && content) {
-        await enqueueApprovedPost({
-          campaign,
-          content,
-          userId: fbAccountId,
-          requestedBy: session.user?.email ?? session.user?.name ?? null,
-        });
-        await setCampaignStatus(campaignId, 'posting');
-        await setSoRecruitRequestStatus(campaign.request_no, 'posted');
-        // autopost worker (npm run worker:post) โพล post_run_queue เองทุก ~5 วิ — ไม่ต้อง kick
-        posting = true;
-      }
-    }
-    if (!posting) await setCampaignStatus(campaignId, 'approved');
-  }
+  if (!contentId || !campaignId) throw new Error('ข้อมูล Content ไม่ครบ');
+  if (!fbAccountId) throw new Error('กรุณาเลือกบัญชี Facebook ก่อนอนุมัติ');
+  const [campaign, content] = await Promise.all([getCampaign(campaignId), getContentById(contentId)]);
+  if (!campaign || !content || content.campaign_id !== campaignId) throw new Error('ไม่พบ Content ของ campaign นี้');
+  await enqueueApprovedPost({
+    campaign,
+    content,
+    userId: fbAccountId,
+    requestedBy: session.user?.email ?? session.user?.name ?? null,
+  });
+  await setSoRecruitRequestStatus(campaign.request_no, 'posted');
+  // autopost worker (npm run worker:post) โพล post_run_queue เองทุก ~5 วิ — ไม่ต้อง kick
   revalidatePath(`/orchestrator/${campaignId}`);
   revalidatePath('/orchestrator');
   revalidatePath('/autopost'); // อนุมัติจากหน้า Auto-Post ได้ด้วย → รีเฟรช section คิว
+}
+
+/** ลองให้ AI สร้าง Content ใหม่ หลัง worker/config ผิดพลาด. */
+export async function retryCampaignDraftAction(formData: FormData) {
+  const session = await getServerSession(authOptions);
+  if (!session) throw new Error('unauthorized');
+  const campaignId = String(formData.get('campaignId') ?? '').trim();
+  if (!campaignId) throw new Error('ไม่พบ campaign');
+  await setCampaignStatus(campaignId, 'drafting');
+  await enqueueDraftForCampaign(campaignId, session.user?.email ?? session.user?.name ?? null);
+  kickWorker();
+  revalidatePath(`/orchestrator/${campaignId}`);
+  revalidatePath('/orchestrator');
+}
+
+/** ส่ง assignment เดิมกลับเข้าคิว Auto-Post โดยไม่สร้างโพสต์ซ้ำ. */
+export async function retryCampaignPostAction(formData: FormData) {
+  const session = await getServerSession(authOptions);
+  if (!session) throw new Error('unauthorized');
+  const campaignId = String(formData.get('campaignId') ?? '').trim();
+  if (!campaignId) throw new Error('ไม่พบ campaign');
+  await retryCampaignPost(campaignId, session.user?.email ?? session.user?.name ?? null);
+  await setCampaignStatus(campaignId, 'posting');
+  revalidatePath(`/orchestrator/${campaignId}`);
+  revalidatePath('/orchestrator');
+  revalidatePath('/autopost');
 }
 
 /** แก้แคปชันของร่างคอนเทนต์ (ก่อนอนุมัติ). */

@@ -53,14 +53,19 @@ const TOOL = {
  * @returns {Promise<null | { caption:string, videoBrief:string, imagePrompt:string, model:string }>}
  */
 export async function generateContent(campaign = {}) {
-  // เลือก AI ที่ใช้คิดข้อความ: 'anthropic' (Claude, ต้องมี key) หรือ 'ollama'
-  // (server บริษัท ฟรี ไม่ต้อง key). ไม่ตั้ง CONTENT_TEXT_PROVIDER = เลือกอัตโนมัติ:
-  // มี ANTHROPIC_API_KEY → anthropic, ไม่มีแต่มี OLLAMA_BASE_URL → ollama, ไม่มีทั้งคู่ → ปิด
+  // เลือก AI ที่ใช้คิดข้อความ: 'anthropic' (Claude), 'openai' (GPT — ใช้ key เดียวกับที่สร้างรูป)
+  // หรือ 'ollama' (server บริษัท ฟรี ไม่ต้อง key). ไม่ตั้ง CONTENT_TEXT_PROVIDER = เลือกอัตโนมัติ
+  // ตามลำดับ: anthropic → openai → ollama → ปิด
   const apiKey = envString('ANTHROPIC_API_KEY');
+  const openaiKey = envString('OPENAI_API_KEY');
   const ollamaBase = envString('OLLAMA_BASE_URL');
-  const provider = envString('CONTENT_TEXT_PROVIDER', apiKey ? 'anthropic' : ollamaBase ? 'ollama' : '');
+  const provider = envString(
+    'CONTENT_TEXT_PROVIDER',
+    apiKey ? 'anthropic' : openaiKey ? 'openai' : ollamaBase ? 'ollama' : ''
+  );
   if (!provider) return null; // feature off — ไม่มีทั้ง key และ ollama
   if (provider === 'anthropic' && !apiKey) return null;
+  if (provider === 'openai' && !openaiKey) return null;
   if (provider === 'ollama' && !ollamaBase) return null;
 
   const snap = campaign.snapshot ?? {};
@@ -93,6 +98,8 @@ export async function generateContent(campaign = {}) {
   try {
     if (provider === 'ollama') {
       ({ out, modelUsed } = await callOllama({ base: ollamaBase, userMsg }));
+    } else if (provider === 'openai') {
+      ({ out, modelUsed } = await callOpenAI({ apiKey: openaiKey, userMsg }));
     } else {
       ({ out, modelUsed } = await callAnthropic({ apiKey, userMsg }));
     }
@@ -129,6 +136,54 @@ async function callAnthropic({ apiKey, userMsg }) {
   });
   const block = msg.content?.find((b) => b.type === 'tool_use' && b.name === TOOL.name);
   return { out: block?.input ?? null, modelUsed: model };
+}
+
+/**
+ * OpenAI (GPT) — ใช้ OPENAI_API_KEY ตัวเดียวกับที่สร้างรูป (ai-image.js).
+ * บังคับ output เป็น JSON ตาม schema เดียวกับ tool ของ Claude ผ่าน Structured Outputs.
+ */
+async function callOpenAI({ apiKey, userMsg }) {
+  const model = envString('CONTENT_TEXT_MODEL', 'gpt-4o-mini');
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 120_000);
+  try {
+    const res = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
+      signal: controller.signal,
+      body: JSON.stringify({
+        model,
+        temperature: 0.7,
+        max_tokens: 1500,
+        response_format: {
+          type: 'json_schema',
+          json_schema: {
+            name: TOOL.name,
+            strict: true,
+            schema: { ...TOOL.input_schema, additionalProperties: false },
+          },
+        },
+        messages: [
+          { role: 'system', content: SYSTEM + '\nตอบเป็นภาษาไทย และตอบเป็น JSON ตามโครงสร้างที่กำหนดเท่านั้น' },
+          { role: 'user', content: userMsg },
+        ],
+      }),
+    });
+    if (!res.ok) {
+      const body = await res.text().catch(() => '');
+      throw new Error(`openai HTTP ${res.status}${body ? `: ${body.slice(0, 200)}` : ''}`);
+    }
+    const json = await res.json();
+    let out = null;
+    try {
+      out = JSON.parse(json?.choices?.[0]?.message?.content ?? '');
+    } catch {
+      throw new Error('openai ตอบไม่ใช่ JSON ที่ parse ได้');
+    }
+    return { out, modelUsed: `openai:${model}` };
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 /**

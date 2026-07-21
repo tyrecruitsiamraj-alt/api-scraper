@@ -93,6 +93,7 @@ app.get('/api/fb-session-health', (req, res) => {
 
 const { spawn } = require('child_process');
 const db = require('./db');
+const { sendAlert } = require('./alert');
 const logger = require('./logger');
 const leadCollectBot = require('./leadCollectBot');
 const facebookSessionCheck = require('./facebookSessionCheck');
@@ -1501,6 +1502,8 @@ app.post('/api/worker/post/claim', async (req, res) => {
     const workerId = String(req.body?.worker_id || req.get('x-worker-id') || '').trim() || 'worker';
     /** ชื่อเครื่องแบบนิ่ง (ไม่มี pid) — ใช้เทียบ users.preferred_worker (pin บัญชี→เครื่อง) */
     const workerName = String(req.body?.worker_name || req.get('x-worker-name') || '').trim() || null;
+    // heartbeat: worker โพลทุก ~5 วิ → แตะ last_seen ให้เว็บเห็นว่าเครื่องยังมีชีวิต (fail-soft ใน db)
+    await db.touchWorkerHeartbeat(workerName || workerId, { worker_id: workerId });
     const runId = db.generateRunId();
     const job = await db.claimNextPostRunJob(workerId, runId, workerName);
     if (!job) return res.json({ ok: true, job: null });
@@ -1531,6 +1534,11 @@ app.post('/api/worker/post/complete', async (req, res) => {
       message: row.status === 'completed' ? 'โพสต์งานเสร็จแล้ว (ผ่าน Worker)' : 'โพสต์งานล้มเหลว (ผ่าน Worker)',
       error: row.error || null,
     };
+    // แจ้งเตือนทันทีที่โพสต์ fail (fail-soft — ไม่มี ALERT_WEBHOOK_URL = เงียบ)
+    if (row.status === 'failed') {
+      sendAlert(`❌ โพสต์ Facebook ไม่สำเร็จ (คิว ${row.id})\nบัญชี: ${row.user_id || '-'}\nสาเหตุ: ${row.error || 'ไม่ทราบ'}`)
+        .catch(() => {});
+    }
     return res.json({ ok: true, job: row });
   } catch (e) {
     return res.status(500).json({ error: e.message || String(e) });

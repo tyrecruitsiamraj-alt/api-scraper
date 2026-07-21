@@ -10,10 +10,9 @@ const nextConfig = {
       'puppeteer-core',
       '@sparticuz/chromium-min',
     ],
-  },
-  // Keep package code (not the remote pack) inside the serverless function.
-  outputFileTracingIncludes: {
-    '/api/candidates/[id]/pdf': ['./node_modules/@sparticuz/chromium-min/**/*'],
+    outputFileTracingIncludes: {
+      '/api/candidates/[id]/pdf': ['./node_modules/@sparticuz/chromium-min/**/*'],
+    },
   },
 };
 

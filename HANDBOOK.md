@@ -356,8 +356,9 @@ ERP request
 Text provider:
 
 - `CONTENT_TEXT_PROVIDER=anthropic` ใช้ `ANTHROPIC_API_KEY`
+- `CONTENT_TEXT_PROVIDER=openai` ใช้ `OPENAI_API_KEY` (key เดียวกับที่สร้างรูป)
 - `CONTENT_TEXT_PROVIDER=ollama` ใช้ `OLLAMA_BASE_URL`
-- ถ้าเว้นว่าง ระบบเลือก Anthropic ก่อน ถ้าไม่มี key จึงเลือก Ollama
+- ถ้าเว้นว่าง ระบบเลือกอัตโนมัติตามลำดับ: Anthropic → OpenAI → Ollama
 
 Image provider ปัจจุบันรองรับ `openai` ผ่าน `OPENAI_API_KEY`; ถ้าไม่มี key draft ยังสำเร็จแต่ไม่มีรูป
 
@@ -401,6 +402,7 @@ Likes และ shares ถูกบันทึกเพื่อแสดงผ
 | `scrape_tasks` | task, schedule, phase, progress, adjacent plan, So Recruit source และสถานะตรวจรับ |
 | `work_queue` | unified queue สำหรับ scraper/orchestrator |
 | `job_family_cache` | cache adjacent-position AI |
+| `workers` | heartbeat เครื่อง worker (ทั้ง 2 schema — scraper เขียนตรง, autopost เขียนผ่าน server ตอน claim) |
 | `erp_open_requests` | staging ใบขอจาก ERP |
 | `recruit_campaigns` | campaign ต่อใบขอ |
 | `campaign_contents` | draft หลาย version |
@@ -414,7 +416,7 @@ Views:
 
 ### 9.2 Migration policy
 
-Root migration รันไฟล์ `schema.sql` และ `schema-002.sql` ถึง `schema-010.sql` ตามลำดับ ทุกไฟล์ออกแบบให้ idempotent โดย `schema-010.sql` เพิ่มการผูก Scraping task กับคำขอ So Recruit และ result review
+Root migration รันไฟล์ `schema.sql` และ `schema-002.sql` ถึง `schema-011.sql` ตามลำดับ ทุกไฟล์ออกแบบให้ idempotent โดย `schema-010.sql` เพิ่มการผูก Scraping task กับคำขอ So Recruit และ result review ส่วน `schema-011.sql` เพิ่มตาราง `workers` (heartbeat)
 
 ```powershell
 npm run migrate
@@ -495,7 +497,8 @@ Auto‑Post มี Express API จำนวนมากใน `autopost/server/i
 - runtime: `HEADLESS`, `DEBUG`, `REQUEST_DELAY_MIN_MS`, `REQUEST_DELAY_MAX_MS`
 - default criteria: `POSITION`, `KEYWORD`, `MAX_CANDIDATES`, `PROVINCE`, salary/age/gender
 - AI/OCR: `ANTHROPIC_API_KEY`, `OLLAMA_BASE_URL`, `OLLAMA_MODEL`, `OLLAMA_HOST`, `OCR_MODEL`, `OCR_MAX_PAGES`, `OPENAI_API_KEY`
-- orchestrator: `CONTENT_TEXT_PROVIDER`, `CONTENT_TEXT_MODEL`, `CONTENT_IMAGE_PROVIDER`, `CONTENT_IMAGE_MODEL`, `ENGAGE_*`
+- orchestrator: `CONTENT_TEXT_PROVIDER` (anthropic | openai | ollama; เว้นว่าง = auto ตามลำดับนั้น), `CONTENT_TEXT_MODEL`, `CONTENT_IMAGE_PROVIDER`, `CONTENT_IMAGE_MODEL`, `ENGAGE_*`
+- แจ้งเตือน: `ALERT_WEBHOOK_URL` (Teams Incoming Webhook หรือ endpoint รับ POST `{text}`; เว้นว่าง = ไม่แจ้ง) — ใช้ทั้ง root และ `autopost/`
 - ERP: `MSSQL_*`
 
 ### Web

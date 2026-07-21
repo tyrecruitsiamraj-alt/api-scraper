@@ -11,8 +11,8 @@ import { generateImage } from './ai-image.js';
  *   4. insert campaign_contents (version ถัดไป, status='draft')
  *   5. ตั้ง campaign 'pending_approval' ให้คนอนุมัติในแดชบอร์ด
  *
- * ไม่มี ANTHROPIC_API_KEY = คิด content ไม่ได้ → คืน campaign กลับ 'new' + note
- * (feature ปิดตัวเอง งานอื่นไม่พัง). โยน error เฉพาะกรณีผิดจริง (campaign ไม่พบ).
+ * ไม่มี ANTHROPIC_API_KEY/สร้างผลไม่ได้ = campaign เป็น draft_error พร้อมเหตุผล
+ * และโยน error ให้ work_queue บันทึกว่าไม่สำเร็จ (ผู้ใช้กด Retry ได้จาก Work Center).
  */
 export async function generateDraftForCampaign(campaignId) {
   if (!campaignId) throw new Error('generateDraftForCampaign: missing campaignId');
@@ -47,10 +47,10 @@ export async function generateDraftForCampaign(campaignId) {
   });
 
   if (!content) {
-    // ไม่มี ANTHROPIC_API_KEY (หรือคืนผลไม่ได้) — คืน campaign ไปสถานะ new พร้อมโน้ต
+    // อย่ารายงาน queue ว่าสำเร็จ เพราะจะทำให้ campaign ค้างแบบไม่มีทางไปต่อ
     const note = 'คิด content ไม่ได้ — ตรวจ ANTHROPIC_API_KEY บนเครื่อง worker';
-    await query(`UPDATE recruit_campaigns SET status='new', status_note=$2, updated_at=now() WHERE id=$1`, [campaignId, note]);
-    return { campaignId, skipped: true, reason: 'no content (missing ANTHROPIC_API_KEY?)' };
+    await query(`UPDATE recruit_campaigns SET status='draft_error', status_note=$2, updated_at=now() WHERE id=$1`, [campaignId, note]);
+    throw new Error(note);
   }
 
   // รูปเป็น optional — ไม่มี OPENAI_API_KEY ก็ยังบันทึก draft (caption/brief) ได้

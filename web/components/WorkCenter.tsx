@@ -5,6 +5,9 @@ import Link from 'next/link';
 import {
   approveContentAction,
   approveScrapeResultAction,
+  measureCampaignAction,
+  retryCampaignDraftAction,
+  retryCampaignPostAction,
   startCampaignAction,
   startSoRecruitScrapeAction,
 } from '@/lib/actions';
@@ -26,16 +29,18 @@ export type WorkCenterItem = {
   progress?: { got: number; target: number } | null;
   content?: { id: string; campaignId: string; caption: string | null; hasImage: boolean } | null;
   taskId?: string | null;
+  campaignId?: string | null;
+  nextAction?: 'retry_draft' | 'retry_post' | 'measure' | null;
 };
 
 type Option = { id: string; label: string };
 
 const TABS: { stage: WorkCenterStage; label: string }[] = [
-  { stage: 'intake', label: 'รอตรวจรับ' },
+  { stage: 'intake', label: 'งานเข้าใหม่' },
+  { stage: 'attention', label: 'ต้องแก้' },
   { stage: 'working', label: 'กำลังทำงาน' },
   { stage: 'review', label: 'รอตรวจผล' },
   { stage: 'completed', label: 'สำเร็จ' },
-  { stage: 'attention', label: 'ต้องดำเนินการ' },
 ];
 
 const STAGE_STYLE: Record<WorkCenterStage, string> = {
@@ -99,6 +104,33 @@ function WorkAction({ item, connectors, facebookAccounts }: {
   connectors: Option[];
   facebookAccounts: Option[];
 }) {
+  if (item.campaignId && item.nextAction === 'retry_draft') {
+    return (
+      <form action={retryCampaignDraftAction}>
+        <input type="hidden" name="campaignId" value={item.campaignId} />
+        <button className="btn-primary w-full">ลองสร้าง Content ใหม่</button>
+      </form>
+    );
+  }
+
+  if (item.campaignId && item.nextAction === 'retry_post') {
+    return (
+      <form action={retryCampaignPostAction}>
+        <input type="hidden" name="campaignId" value={item.campaignId} />
+        <button className="btn-primary w-full">ลองโพสต์ใหม่</button>
+      </form>
+    );
+  }
+
+  if (item.campaignId && item.nextAction === 'measure') {
+    return (
+      <form action={measureCampaignAction}>
+        <input type="hidden" name="campaignId" value={item.campaignId} />
+        <button className="btn-primary w-full">ตรวจผล Engagement</button>
+      </form>
+    );
+  }
+
   if (item.stage === 'intake' && item.requestNo) {
     if (item.kind === 'content') {
       return (
@@ -178,14 +210,13 @@ export function WorkCenter({ items, connectors, facebookAccounts }: {
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">ศูนย์งาน</h1>
-          <p className="mt-1 text-sm text-subtle">งานจาก So Recruit · Content และ Scraping ในคิวเดียว</p>
+          <p className="mt-1 text-sm text-subtle">รับงาน ตรวจงาน แก้ปัญหา และติดตามผลได้จากหน้าเดียว</p>
         </div>
-        <Link href="/orchestrator/imports" className="btn-secondary btn-sm">ดูคำขอทั้งหมด</Link>
       </div>
 
       <div className="grid gap-3 sm:grid-cols-3">
-        <div className="card p-4"><div className="text-xs text-subtle">รออนุมัติรับงาน</div><div className="mt-1 text-3xl font-semibold tabular-nums">{counts.intake}</div></div>
-        <div className="card p-4"><div className="text-xs text-subtle">ต้องดำเนินการ</div><div className="mt-1 text-3xl font-semibold tabular-nums text-red-600">{counts.attention}</div></div>
+        <div className="card p-4"><div className="text-xs text-subtle">งานเข้าใหม่</div><div className="mt-1 text-3xl font-semibold tabular-nums">{counts.intake}</div></div>
+        <div className="card p-4"><div className="text-xs text-subtle">ต้องแก้ก่อนทำต่อ</div><div className="mt-1 text-3xl font-semibold tabular-nums text-red-600">{counts.attention}</div></div>
         <div className="card p-4"><div className="text-xs text-subtle">สำเร็จ</div><div className="mt-1 text-3xl font-semibold tabular-nums text-green-700">{counts.completed}</div></div>
       </div>
 

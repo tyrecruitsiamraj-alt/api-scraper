@@ -4,10 +4,8 @@ import {
   autopostActivity,
   listPendingApprovalContents,
   postQueueList,
-  listFacebookAccounts,
 } from '@/lib/repo';
 import { AutopostActivity } from '@/components/AutopostActivity';
-import { approveContentAction } from '@/lib/actions';
 
 export const dynamic = 'force-dynamic';
 
@@ -28,12 +26,11 @@ const QUEUE_STATUS: Record<string, { label: string; cls: string }> = {
 };
 
 export default async function AutopostOverviewPage() {
-  const [a, activity, pending, queue, fbAccounts] = await Promise.all([
+  const [a, activity, pending, queue] = await Promise.all([
     autopostOverview(),
     autopostActivity(),
     listPendingApprovalContents(),
     postQueueList(),
-    listFacebookAccounts(),
   ]);
 
   return (
@@ -67,53 +64,13 @@ export default async function AutopostOverviewPage() {
         </>
       )}
 
-      {/* Content รออนุมัติ — ดึงร่างจาก orchestrator มาอนุมัติ→เข้าคิวโพสต์ที่นี่ได้เลย */}
+      {/* การอนุมัติรวมไว้ที่ Work Center จุดเดียว เพื่อลดเส้นทางซ้ำและลดการกดผิดหน้า. */}
       <div>
-        <h2 className="mb-3 text-base font-semibold">📝 Content รออนุมัติ ({pending.length})</h2>
-        {pending.length === 0 ? (
-          <div className="card px-5 py-10 text-center text-sm text-subtle">
-            ยังไม่มีร่างคอนเทนต์รออนุมัติ — สร้างได้จากโหมด <Link href="/orchestrator" className="text-accent hover:underline">Content</Link>
-          </div>
-        ) : (
-          <div className="grid gap-4 md:grid-cols-2">
-            {pending.map((p) => (
-              <div key={p.id} className="card p-4">
-                <div className="mb-2 flex items-center justify-between text-xs text-subtle">
-                  <Link href={`/orchestrator/${p.campaign_id}`} className="font-medium text-accent hover:underline">
-                    {p.title || p.request_no || 'campaign'} · v{p.version}
-                  </Link>
-                  {p.has_image && <span className="rounded bg-teal-50 px-1.5 py-0.5 text-teal-700">มีรูป</span>}
-                </div>
-                <div className="grid gap-3 sm:grid-cols-[120px_1fr]">
-                  {p.has_image ? (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img
-                      src={`/api/campaign-content/${p.id}/image`}
-                      alt="ตัวอย่างรูป"
-                      className="h-[120px] w-full rounded-lg object-cover"
-                    />
-                  ) : (
-                    <div className="grid h-[120px] place-items-center rounded-lg bg-black/[0.03] text-xs text-subtle">ไม่มีรูป</div>
-                  )}
-                  <div className="min-w-0">
-                    <p className="line-clamp-4 whitespace-pre-wrap text-[13px] leading-relaxed">{p.caption || '—'}</p>
-                  </div>
-                </div>
-                <form action={approveContentAction} className="mt-3 flex flex-wrap items-center gap-2">
-                  <input type="hidden" name="contentId" value={p.id} />
-                  <input type="hidden" name="campaignId" value={p.campaign_id} />
-                  <select name="fbAccountId" required className="input input-sm flex-1 min-w-[140px]" defaultValue="">
-                    <option value="" disabled>เลือกบัญชี Facebook…</option>
-                    {fbAccounts.map((f) => (
-                      <option key={f.id} value={f.id}>{f.label} ({f.group_count} กลุ่ม)</option>
-                    ))}
-                  </select>
-                  <button className="btn-primary btn-sm">✓ อนุมัติ + เข้าคิวโพสต์</button>
-                </form>
-              </div>
-            ))}
-          </div>
-        )}
+        <h2 className="mb-3 text-base font-semibold">Content รอตรวจ ({pending.length})</h2>
+        <div className="card px-5 py-8 text-center text-sm text-subtle">
+          <p>{pending.length > 0 ? `มี ${pending.length} งานรอตรวจและเลือกบัญชีโพสต์` : 'ตอนนี้ไม่มี Content รอตรวจ'}</p>
+          <Link href="/orchestrator" className="btn-primary btn-sm mt-3 inline-flex">ไปจัดการที่ศูนย์งาน</Link>
+        </div>
       </div>
 
       {/* คิวโพสต์ — worker รันตามลำดับเวลาเข้าคิว บัญชีละ 1 งานพร้อมกัน */}

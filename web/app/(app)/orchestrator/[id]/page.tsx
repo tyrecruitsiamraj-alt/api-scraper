@@ -299,10 +299,11 @@ export default async function CampaignDetail({ params }: { params: { id: string 
                               <span className="mb-1 block">โพสต์ด้วยบัญชี</span>
                               <select
                                 name="fbAccountId"
+                                required
                                 defaultValue=""
                                 className="rounded-lg border border-hairline bg-transparent px-2 py-1.5 text-sm text-ink"
                               >
-                                <option value="">— อนุมัติเฉย ๆ (ยังไม่โพสต์) —</option>
+                                <option value="" disabled>เลือกบัญชี Facebook…</option>
                                 {fbAccounts.map((a) => (
                                   <option key={a.id} value={a.id}>
                                     {a.label} ({a.group_count} กลุ่ม)
@@ -311,11 +312,11 @@ export default async function CampaignDetail({ params }: { params: { id: string 
                               </select>
                             </label>
                           ) : (
-                            <span className="text-xs text-subtle">
-                              ยังไม่มีบัญชี Facebook ในระบบ — อนุมัติได้ แต่ยังโพสต์อัตโนมัติไม่ได้
-                            </span>
+                            <Link href="/settings/connectors" className="text-xs text-accent hover:underline">
+                              เพิ่มและผูกบัญชี Facebook ก่อนอนุมัติ
+                            </Link>
                           )}
-                          <button className="btn-primary btn-sm">✓ อนุมัติและโพสต์</button>
+                          <button className="btn-primary btn-sm" disabled={fbAccounts.length === 0}>✓ อนุมัติและโพสต์</button>
                         </form>
                         <form action={rejectContentAction}>
                           <input type="hidden" name="contentId" value={ct.id} />

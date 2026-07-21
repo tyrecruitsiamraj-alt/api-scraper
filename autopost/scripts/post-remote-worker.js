@@ -31,14 +31,14 @@ const TOKEN = String(process.env.POST_WORKER_TOKEN || '').trim();
 const INTERVAL_MS = Math.max(2000, Number(process.env.WORKER_POLL_MS) || 5000);
 /**
  * งานโพสต์พร้อมกัน = จำนวน Chrome/Playwright ที่เปิดคู่กัน (บัญชีละ 1 งานโดยทั่วไป)
- * ค่าเริ่มต้น 24 / เพดาน 48 — รองรับหลาย Assignments หลายบัญชีพร้อมกัน (ปรับลดถ้า RAM ไม่พอ)
- * WORKER_CONCURRENCY_MAX จำกัดเพดานสูงสุดในโค้ดที่ 96
+ * POC เครื่องเดียวใช้ค่าเริ่มต้น 2 / เพดาน 8 เพื่อลด Chrome ชนกันและ session หลุด
+ * เพิ่มได้ด้วย WORKER_CONCURRENCY เมื่อวัด RAM/ความเสถียรแล้ว
  * บัญชีเดียวแต่เจอ session เพี้ยน: ตั้ง WORKER_CONCURRENCY=1
  */
-const CONCURRENCY_MAX = Math.min(96, Math.max(1, Number(process.env.WORKER_CONCURRENCY_MAX) || 48));
+const CONCURRENCY_MAX = Math.min(32, Math.max(1, Number(process.env.WORKER_CONCURRENCY_MAX) || 8));
 const CONCURRENCY = Math.min(
   CONCURRENCY_MAX,
-  Math.max(1, Number(process.env.WORKER_CONCURRENCY) || 24)
+  Math.max(1, Number(process.env.WORKER_CONCURRENCY) || 2)
 );
 const PROJECT_ROOT = process.cwd();
 
@@ -271,4 +271,3 @@ if (AUTO_POST_DAILY_ENABLED) {
 
 setInterval(tick, INTERVAL_MS);
 tick();
-

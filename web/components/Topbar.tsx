@@ -21,7 +21,6 @@ const NAV: Record<Mode, { href: string; label: string }[]> = {
   ],
   orchestrator: [
     { href: '/orchestrator', label: 'กระดานงาน' },
-    { href: '/orchestrator/imports', label: 'คำขอ So Recruit' },
   ],
 };
 

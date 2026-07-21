@@ -1,6 +1,6 @@
 import 'server-only';
 import { randomUUID } from 'node:crypto';
-import { q } from './db';
+import { pool, q } from './db';
 
 // schema ของ autopost — แยกต่อ project ได้ผ่าน env (ไม่ตั้ง = so_autopost_jobs เดิม)
 // ใช้กับทุก query ข้าม schema ไปฝั่ง autopost. ค่าจาก env เราคุมเอง (ไม่ใช่ input ผู้ใช้)
@@ -1246,30 +1246,102 @@ export async function enqueueApprovedPost(opts: {
   // เผื่อ schema autopost ยังไม่มีคอลัมน์ image_ref (idempotent)
   await q(`ALTER TABLE ${AP}.jobs ADD COLUMN IF NOT EXISTS image_ref TEXT`);
 
-  await q(
-    `INSERT INTO ${AP}.jobs (id, title, owner, company, caption, status, image_ref)
-     VALUES ($1, $2, 'SO Recruitment', 'SO Recruitment', $3, 'pending', $4)`,
-    [jobId, title, content.caption || '', imageRef],
+  const client = await pool().connect();
+  try {
+    await client.query('BEGIN');
+    await client.query(
+      `INSERT INTO ${AP}.jobs (id, title, owner, company, caption, status, image_ref)
+       VALUES ($1, $2, 'SO Recruitment', 'SO Recruitment', $3, 'pending', $4)`,
+      [jobId, title, content.caption || '', imageRef],
+    );
+    await client.query(
+      `INSERT INTO ${AP}.assignments (id, job_ids, group_ids, user_id)
+       VALUES ($1, $2::jsonb, '[]'::jsonb, $3)`,
+      [assignmentId, JSON.stringify([jobId]), userId],
+    );
+    // requested_by ≠ 'auto-daily' → worker ตั้ง IGNORE_DAILY_CAP=1 (โพสต์แบบสั่งเองข้าม cap ได้)
+    await client.query(
+      `INSERT INTO ${AP}.post_run_queue (id, assignment_ids, user_id, status, requested_by, message)
+       VALUES ($1, $2::jsonb, $3, 'queued', $4, $5)`,
+      [queueId, JSON.stringify([assignmentId]), userId, requestedBy || 'orchestrator', `orchestrator campaign ${campaign.id}`],
+    );
+    await client.query(
+      `INSERT INTO campaign_posts (campaign_id, content_id, platform, account_ref, job_ref)
+       VALUES ($1, $2, 'facebook', $3, $4)`,
+      [campaign.id, content.id, userId, jobId],
+    );
+    await client.query(`UPDATE campaign_contents SET status = 'approved', reject_reason = NULL WHERE id = $1`, [content.id]);
+    await client.query(
+      `UPDATE recruit_campaigns SET status = 'posting', status_note = NULL, updated_at = now() WHERE id = $1`,
+      [campaign.id],
+    );
+    await client.query('COMMIT');
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally {
+    client.release();
+  }
+
+  return { jobId, assignmentId, queueId };
+}
+
+export type CampaignPostQueueState = {
+  campaign_id: string;
+  queue_id: string;
+  assignment_id: string;
+  user_id: string;
+  status: string;
+  error: string | null;
+  created_at: string;
+  finished_at: string | null;
+};
+
+/** สถานะคิวโพสต์ล่าสุดของแต่ละ campaign เพื่อให้ Work Center แสดงผลจริงจาก Auto-Post. */
+export async function listCampaignPostQueueStates(): Promise<CampaignPostQueueState[]> {
+  try {
+    return await q<CampaignPostQueueState>(
+      `SELECT DISTINCT ON (cp.campaign_id)
+              cp.campaign_id, q.id AS queue_id, a.id AS assignment_id, q.user_id,
+              q.status, NULLIF(COALESCE(q.error, ''), '') AS error,
+              q.created_at, q.finished_at
+         FROM campaign_posts cp
+         JOIN ${AP}.assignments a ON a.job_ids ? cp.job_ref
+         JOIN ${AP}.post_run_queue q ON q.assignment_ids ? a.id
+        ORDER BY cp.campaign_id, q.created_at DESC`,
+    );
+  } catch {
+    return [];
+  }
+}
+
+/** นำ assignment เดิมที่โพสต์ไม่สำเร็จกลับเข้าคิว โดยไม่สร้าง Content/Job ซ้ำ. */
+export async function retryCampaignPost(campaignId: string, requestedBy: string | null) {
+  const rows = await q<CampaignPostQueueState>(
+    `SELECT cp.campaign_id, q.id AS queue_id, a.id AS assignment_id, q.user_id,
+            q.status, NULLIF(COALESCE(q.error, ''), '') AS error,
+            q.created_at, q.finished_at
+       FROM campaign_posts cp
+       JOIN ${AP}.assignments a ON a.job_ids ? cp.job_ref
+       JOIN ${AP}.post_run_queue q ON q.assignment_ids ? a.id
+      WHERE cp.campaign_id = $1
+      ORDER BY q.created_at DESC
+      LIMIT 1`,
+    [campaignId],
   );
-  await q(
-    `INSERT INTO ${AP}.assignments (id, job_ids, group_ids, user_id)
-     VALUES ($1, $2::jsonb, '[]'::jsonb, $3)`,
-    [assignmentId, JSON.stringify([jobId]), userId],
-  );
-  // requested_by ≠ 'auto-daily' → worker ตั้ง IGNORE_DAILY_CAP=1 (โพสต์แบบสั่งเองข้าม cap ได้)
+  const latest = rows[0];
+  if (!latest) throw new Error('ไม่พบงานโพสต์เดิมสำหรับลองใหม่');
+  if (latest.status === 'queued' || latest.status === 'running') return latest.queue_id;
+  if (latest.status !== 'failed' && latest.status !== 'cancelled') {
+    throw new Error(`งานโพสต์สถานะ ${latest.status} ไม่สามารถลองใหม่ได้`);
+  }
+  const queueId = autopostId();
   await q(
     `INSERT INTO ${AP}.post_run_queue (id, assignment_ids, user_id, status, requested_by, message)
      VALUES ($1, $2::jsonb, $3, 'queued', $4, $5)`,
-    [queueId, JSON.stringify([assignmentId]), userId, requestedBy || 'orchestrator', `orchestrator campaign ${campaign.id}`],
+    [queueId, JSON.stringify([latest.assignment_id]), latest.user_id, requestedBy || 'orchestrator', `retry orchestrator campaign ${campaignId}`],
   );
-
-  await q(
-    `INSERT INTO campaign_posts (campaign_id, content_id, platform, account_ref, job_ref)
-     VALUES ($1, $2, 'facebook', $3, $4)`,
-    [campaign.id, content.id, userId, jobId],
-  );
-
-  return { jobId, assignmentId, queueId };
+  return queueId;
 }
 
 // --- หน้า /autopost: Content รออนุมัติ + คิวโพสต์ ---
@@ -1362,4 +1434,29 @@ export async function listCampaignPosts(campaignId: string) {
        FROM campaign_posts WHERE campaign_id = $1 ORDER BY created_at DESC`,
     [campaignId],
   );
+}
+
+// --- Worker heartbeat (schema-011 + autopost.workers) — เครื่องไหนยังมีชีวิต ---
+export type WorkerHeartbeat = {
+  name: string;
+  kind: string; // scraper | autopost
+  last_seen: string;
+  online: boolean; // last_seen ใหม่กว่า 2 นาที (heartbeat เขียนทุก ~15 วิ)
+};
+
+/** รวม worker ทั้งสองฝั่ง (scraper + autopost) เพื่อโชว์บนศูนย์งาน. fail-soft: ตารางยังไม่มี = list ว่าง */
+export async function listWorkerHeartbeats(): Promise<WorkerHeartbeat[]> {
+  const out: WorkerHeartbeat[] = [];
+  for (const src of ['workers', `${AP}.workers`]) {
+    try {
+      const rows = await q<WorkerHeartbeat>(
+        `SELECT name, kind, last_seen, (last_seen > now() - interval '2 minutes') AS online
+           FROM ${src} ORDER BY name`,
+      );
+      out.push(...rows);
+    } catch {
+      /* ตารางยังไม่ถูก migrate — ข้าม */
+    }
+  }
+  return out;
 }
