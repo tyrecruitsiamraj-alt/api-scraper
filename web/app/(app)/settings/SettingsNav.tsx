@@ -4,8 +4,8 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 
 const ITEMS = [
-  { href: '/settings/connectors', label: 'Connector', detail: 'บัญชี Scraping และ Facebook' },
-  { href: '/settings/posting', label: 'ตั้งค่าโพสต์', detail: 'เนื้อหางาน กลุ่ม เทมเพลต ตารางเวลา' },
+  { href: '/settings/connectors', label: 'บัญชีเชื่อมต่อ', detail: 'บัญชี Scraping และ Facebook' },
+  { href: '/settings/posting', label: 'กลุ่มโพสต์', detail: 'เลือกกลุ่มให้บัญชี และคลังกลุ่ม' },
 ];
 
 export function SettingsNav() {

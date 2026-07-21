@@ -1224,6 +1224,102 @@ function autopostId(): string {
   return Date.now().toString(36) + Math.random().toString(36).slice(2);
 }
 
+// ---------------------------------------------------------------------------
+// จัดการกลุ่มโพสต์ + ผูกกลุ่มเข้าบัญชี (native — แทน iframe เดิม)
+// ---------------------------------------------------------------------------
+export type PostingGroup = {
+  id: string;
+  name: string;
+  fb_group_id: string;
+  province: string | null;
+  department: string | null;
+};
+
+/** กลุ่ม Facebook ทั้งหมดในระบบ. guarded — [] ถ้า schema ไม่มี. */
+export async function listPostingGroups(): Promise<PostingGroup[]> {
+  try {
+    return await q<PostingGroup>(
+      `SELECT id, COALESCE(NULLIF(TRIM(name), ''), fb_group_id) AS name,
+              fb_group_id, province, department
+         FROM ${AP}.groups
+        ORDER BY created_at DESC`,
+    );
+  } catch {
+    return [];
+  }
+}
+
+export type FbAccountGroups = { id: string; label: string; groupIds: string[] };
+
+/** บัญชี FB พร้อม id กลุ่มที่ผูกไว้ (สำหรับหน้าเลือกกลุ่ม). */
+export async function listFbAccountsWithGroups(): Promise<FbAccountGroups[]> {
+  try {
+    const rows = await q<{ id: string; label: string; group_ids: unknown }>(
+      `SELECT id, COALESCE(NULLIF(TRIM(name), ''), env_key, id) AS label,
+              CASE WHEN jsonb_typeof(group_ids::jsonb) = 'array' THEN group_ids::jsonb ELSE '[]'::jsonb END AS group_ids
+         FROM ${AP}.users
+        ORDER BY label`,
+    );
+    return rows.map((r) => ({
+      id: r.id,
+      label: r.label,
+      groupIds: Array.isArray(r.group_ids) ? r.group_ids.map(String) : [],
+    }));
+  } catch {
+    return [];
+  }
+}
+
+/** เพิ่มกลุ่มใหม่. คืน id กลุ่ม. */
+export async function createPostingGroup(input: {
+  fbGroupId: string;
+  name?: string | null;
+  province?: string | null;
+  department?: string | null;
+}): Promise<string> {
+  const id = autopostId();
+  const name = (input.name || '').trim() || `Group ${input.fbGroupId}`;
+  await q(
+    `INSERT INTO ${AP}.groups (id, name, fb_group_id, province, department)
+     VALUES ($1, $2, $3, $4, $5)`,
+    [id, name, input.fbGroupId.trim(), input.province || null, input.department || null],
+  );
+  return id;
+}
+
+/** ลบกลุ่ม + ถอดกลุ่มนั้นออกจากทุกบัญชีที่ผูกไว้ (กัน group_ids ชี้กลุ่มที่หายไป). */
+export async function deletePostingGroup(id: string): Promise<void> {
+  const client = await pool().connect();
+  try {
+    await client.query('BEGIN');
+    await client.query(`DELETE FROM ${AP}.groups WHERE id = $1`, [id]);
+    await client.query(
+      `UPDATE ${AP}.users
+          SET group_ids = COALESCE((
+                SELECT jsonb_agg(v) FROM jsonb_array_elements_text(
+                  CASE WHEN jsonb_typeof(group_ids::jsonb) = 'array' THEN group_ids::jsonb ELSE '[]'::jsonb END
+                ) AS v WHERE v <> $1
+              ), '[]'::jsonb)
+        WHERE group_ids::jsonb ? $1`,
+      [id],
+    );
+    await client.query('COMMIT');
+  } catch (e) {
+    await client.query('ROLLBACK');
+    throw e;
+  } finally {
+    client.release();
+  }
+}
+
+/** ตั้งกลุ่มของบัญชี (แทนที่ทั้งชุด). */
+export async function setAccountGroups(userId: string, groupIds: string[]): Promise<void> {
+  await q(
+    `UPDATE ${AP}.users SET group_ids = $2::jsonb, updated_at = now() WHERE id = $1`,
+    [userId, JSON.stringify(groupIds)],
+  );
+}
+
 /**
  * อนุมัติร่างคอนเทนต์ → ส่งเข้าคิวโพสต์ของ autopost: สร้าง job (+image_ref ชี้รูป AI) +
  * assignment (บัญชีที่เลือก, กลุ่มว่าง = ใช้กลุ่มที่ตั้งในบัญชี) + post_run_queue (queued).

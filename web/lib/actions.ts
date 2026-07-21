@@ -35,11 +35,50 @@ import {
   setTaskEnabled,
   approveScrapeTaskResult,
   setSoRecruitRequestStatus,
+  createPostingGroup,
+  deletePostingGroup,
+  setAccountGroups,
 } from './repo';
 
 async function requireSession() {
   const session = await getServerSession(authOptions);
   if (!session) throw new Error('unauthorized');
+}
+
+// ---- จัดการกลุ่มโพสต์ + ผูกกลุ่มเข้าบัญชี (หน้า /settings/posting native) ----
+/** เพิ่มกลุ่มใหม่จาก URL หรือ ID กลุ่ม Facebook. */
+export async function createGroupAction(formData: FormData) {
+  await requireSession();
+  const raw = String(formData.get('fbGroupId') ?? '').trim();
+  // รับได้ทั้ง ID ล้วน หรือ URL — ดึงเลขกลุ่มออกมา
+  const fbGroupId = (raw.match(/(?:groups\/)?(\d{6,})/)?.[1] ?? raw).trim();
+  if (!/^\d{6,}$/.test(fbGroupId)) throw new Error('ใส่ ID กลุ่ม (ตัวเลข) หรือลิงก์กลุ่ม Facebook ที่ถูกต้อง');
+  const name = String(formData.get('name') ?? '').trim();
+  const province = String(formData.get('province') ?? '').trim();
+  await createPostingGroup({ fbGroupId, name: name || null, province: province || null });
+  revalidatePath('/settings/posting');
+  revalidatePath('/orchestrator');
+}
+
+/** ลบกลุ่ม. */
+export async function deleteGroupAction(formData: FormData) {
+  await requireSession();
+  const id = String(formData.get('id') ?? '').trim();
+  if (!id) throw new Error('ไม่พบกลุ่ม');
+  await deletePostingGroup(id);
+  revalidatePath('/settings/posting');
+  revalidatePath('/orchestrator');
+}
+
+/** บันทึกกลุ่มที่บัญชีหนึ่งจะโพสต์ (ติ๊ก checkbox แล้วบันทึกทั้งชุด). */
+export async function setAccountGroupsAction(formData: FormData) {
+  await requireSession();
+  const userId = String(formData.get('userId') ?? '').trim();
+  if (!userId) throw new Error('ไม่พบบัญชี');
+  const groupIds = formData.getAll('groupIds').map((v) => String(v)).filter(Boolean);
+  await setAccountGroups(userId, groupIds);
+  revalidatePath('/settings/posting');
+  revalidatePath('/orchestrator');
 }
 
 /** Mirror api-scraper tasks-worker nextRunFrom() for the first scheduled fire. */

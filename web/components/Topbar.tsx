@@ -2,64 +2,27 @@
 
 import Image from 'next/image';
 import Link from 'next/link';
-import { usePathname, useRouter } from 'next/navigation';
+import { usePathname } from 'next/navigation';
 import { signOut, useSession } from 'next-auth/react';
 
-type Mode = 'scraping' | 'autopost' | 'orchestrator';
+// เมนูแบนแถวเดียว — เลิก "โหมด" ที่ทำให้กระโดดไปมา. ศูนย์งานคือศูนย์กลาง.
+const NAV: { href: string; label: string }[] = [
+  { href: '/orchestrator', label: 'ศูนย์งาน' },
+  { href: '/candidates', label: 'คลังผู้สมัคร' },
+  { href: '/scraping', label: 'งาน Scraping' },
+  { href: '/autopost', label: 'โพสต์ & ผลลัพธ์' },
+];
 
-const NAV: Record<Mode, { href: string; label: string }[]> = {
-  scraping: [
-    { href: '/dashboard', label: 'ภาพรวม' },
-    { href: '/candidates', label: 'ผู้สมัคร' },
-    { href: '/scraping', label: 'งาน Scraping' },
-  ],
-  autopost: [
-    { href: '/autopost', label: 'ภาพรวม' },
-    { href: '/autopost/runs', label: 'รอบโพสต์' },
-    { href: '/autopost/collect', label: 'เก็บคอมเมนต์' },
-    { href: '/autopost/reports', label: 'รายงาน' },
-  ],
-  orchestrator: [
-    { href: '/orchestrator', label: 'กระดานงาน' },
-  ],
-};
-
-/** ทุกหน้าแยกโหมดชัดเจน: /autopost/* = Auto-Post, /orchestrator/* = Content, ที่เหลือ = Scraping */
-function modeOf(pathname: string): Mode {
-  if (pathname.startsWith('/autopost')) return 'autopost';
-  if (pathname.startsWith('/orchestrator')) return 'orchestrator';
-  return 'scraping';
-}
-
-/** active tab: match แบบ exact กับ prefix (แต่ /autopost ต้อง exact ไม่งั้นชนทุกหน้า /autopost/*) */
+/** active tab: exact หรือ prefix (ครอบหน้าย่อย เช่น /orchestrator/[id], /autopost/runs) */
 function isActive(pathname: string, href: string): boolean {
-  if (href === '/autopost') return pathname === '/autopost';
   return pathname === href || pathname.startsWith(href + '/');
 }
 
-function ModeSwitch({ mode, onSwitch }: { mode: Mode; onSwitch: (m: Mode) => void }) {
-  return (
-    <div className="flex shrink-0 items-center rounded-full border border-line bg-white/70 p-0.5">
-      {(['scraping', 'autopost', 'orchestrator'] as Mode[]).map((m) => (
-        <button
-          key={m}
-          onClick={() => onSwitch(m)}
-          className={`whitespace-nowrap rounded-full px-3 py-1 text-[12.5px] font-medium transition ${
-            mode === m ? 'bg-accent text-white shadow-sm' : 'text-muted hover:text-ink'
-          }`}
-        >
-          {m === 'scraping' ? 'Scraping' : m === 'autopost' ? 'Auto-Post' : 'ศูนย์งาน'}
-        </button>
-      ))}
-    </div>
-  );
-}
-
-function NavTabs({ mode }: { mode: Mode }) {
+function NavTabs() {
   const pathname = usePathname();
   return (
     <nav className="-mx-1 flex items-center gap-1 overflow-x-auto">
-      {NAV[mode].map((item) => {
+      {NAV.map((item) => {
         const active = isActive(pathname, item.href);
         return (
           <Link
@@ -80,13 +43,6 @@ function NavTabs({ mode }: { mode: Mode }) {
 export function Topbar() {
   const { data: session } = useSession();
   const pathname = usePathname();
-  const router = useRouter();
-  const mode = modeOf(pathname);
-
-  const switchMode = (m: Mode) => {
-    if (m === mode) return;
-    router.push(m === 'autopost' ? '/autopost' : m === 'orchestrator' ? '/orchestrator' : '/dashboard');
-  };
 
   const user = session?.user;
   const label = user?.name || user?.email || 'ผู้ใช้';
@@ -101,16 +57,14 @@ export function Topbar() {
   return (
     <header className="glass sticky top-0 z-30 border-b border-line/70">
       <div className="mx-auto flex h-16 max-w-7xl items-center justify-between gap-3 px-4 sm:px-6 lg:px-8">
-        {/* brand + mode switch */}
+        {/* brand */}
         <div className="flex min-w-0 shrink-0 items-center gap-3">
           <Image src="/logo-SO.webp" alt="SO — SIAMRAJATHANEE" width={32} height={32} className="h-8 w-auto shrink-0" priority />
-          <div className="hidden h-7 w-px bg-line sm:block" />
-          <ModeSwitch mode={mode} onSwitch={switchMode} />
         </div>
 
         {/* nav (center) */}
         <div className="hidden flex-1 justify-center md:flex">
-          <NavTabs mode={mode} />
+          <NavTabs />
         </div>
 
         {/* right */}
@@ -150,7 +104,7 @@ export function Topbar() {
 
       {/* nav (mobile) */}
       <div className="border-t border-line/70 px-3 py-1.5 md:hidden">
-        <NavTabs mode={mode} />
+        <NavTabs />
       </div>
     </header>
   );
