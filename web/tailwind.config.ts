@@ -22,11 +22,17 @@ const config: Config = {
         bad: '#ff3b30',
       },
       borderRadius: {
-        xl: '14px',
-        '2xl': '16px',
+        // Ferrari: sharp 0px is the dominant radius. Flatten common inline
+        // roundings (lg/xl/2xl/3xl) app-wide; keep `full` for pills/badges only.
+        md: '0px',
+        lg: '0px',
+        xl: '0px',
+        '2xl': '0px',
+        '3xl': '0px',
       },
       boxShadow: {
-        card: '0 1px 2px rgba(0,0,0,0.04), 0 8px 28px rgba(0,0,0,0.06)',
+        // Ferrari uses hairlines + photographic depth — no soft shadow tiers.
+        card: 'none',
         pop: '0 12px 40px rgba(0,0,0,0.12)',
       },
       keyframes: {
