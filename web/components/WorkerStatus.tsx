@@ -8,27 +8,32 @@ export async function WorkerStatus() {
   const workers = await listWorkerHeartbeats();
   if (workers.length === 0) {
     return (
-      <div className="card flex items-center gap-2 px-4 py-2.5 text-xs text-subtle">
-        <span className="inline-block h-2 w-2 rounded-full bg-gray-300" />
-        ยังไม่เห็นเครื่อง worker รายงานตัว — เปิด start-workers.bat (PC) / start-mac.command (Mac) แล้วรอ ~1 นาที
+      <div className="flex items-center gap-2.5 border border-line bg-white px-4 py-2.5 text-xs text-subtle">
+        <span className="inline-block h-1.5 w-1.5 rounded-full bg-gray-300" />
+        <span className="eyebrow">เครื่องทำงาน</span>
+        <span>ยังไม่มีเครื่องรายงานตัว — เปิด start-workers.bat (PC) / start-mac.command (Mac) แล้วรอ ~1 นาที</span>
       </div>
     );
   }
   const offline = workers.filter((w) => !w.online);
   return (
-    <div className="card flex flex-wrap items-center gap-x-4 gap-y-1.5 px-4 py-2.5 text-xs">
-      <span className="font-medium text-subtle">เครื่องทำงาน:</span>
+    <div className="flex flex-wrap items-center gap-x-5 gap-y-2 border border-line bg-white px-4 py-2.5 text-xs">
+      <span className="eyebrow">เครื่องทำงาน</span>
       {workers.map((w) => (
-        <span key={`${w.kind}:${w.name}`} className="inline-flex items-center gap-1.5">
-          <span className={`inline-block h-2 w-2 rounded-full ${w.online ? 'bg-green-500' : 'bg-red-500'}`} />
-          <span className={w.online ? 'text-ink' : 'text-red-600 font-medium'}>
-            {w.name} ({w.kind === 'scraper' ? 'สแครป/AI' : 'โพสต์ FB'})
+        <span key={`${w.kind}:${w.name}`} className="inline-flex items-center gap-2">
+          <span className={`relative inline-flex h-2 w-2`}>
+            <span className={`inline-block h-2 w-2 rounded-full ${w.online ? 'bg-emerald-500' : 'bg-accent'}`} />
+            {w.online && <span className="absolute inset-0 animate-ping rounded-full bg-emerald-500/60" />}
+          </span>
+          <span className={w.online ? 'text-ink' : 'font-medium text-accent'}>
+            {w.name}
+            <span className="text-subtle"> · {w.kind === 'scraper' ? 'สแครป/AI' : 'โพสต์ FB'}</span>
             {!w.online && ` — ออฟไลน์ตั้งแต่ ${new Date(w.last_seen).toLocaleString('th-TH', { timeStyle: 'short', dateStyle: 'short' })}`}
           </span>
         </span>
       ))}
       {offline.length > 0 && (
-        <span className="ml-auto text-red-600">⚠ {offline.length} เครื่องหาย — งานจะค้างคิวจนกว่าจะเปิดกลับ</span>
+        <span className="ml-auto font-medium text-accent">{offline.length} เครื่องหาย — งานจะค้างคิวจนกว่าจะเปิดกลับ</span>
       )}
     </div>
   );

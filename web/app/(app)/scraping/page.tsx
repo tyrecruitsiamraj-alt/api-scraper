@@ -2,6 +2,7 @@ import Link from 'next/link';
 import { listConnectorOptions, listTasks } from '@/lib/repo';
 import { NewTaskForm } from './NewTaskForm';
 import { TaskList } from './TaskList';
+import { ScrapingNav } from '@/components/ScrapingNav';
 
 export const dynamic = 'force-dynamic';
 
@@ -10,8 +11,9 @@ export default async function ScrapingPage() {
 
   return (
     <div className="space-y-6">
+      <ScrapingNav />
       <div>
-        <h1 className="text-2xl font-semibold tracking-tight">งาน Scraping</h1>
+        <h1 className="text-[28px] font-medium tracking-tight">สร้างงาน Scraping</h1>
         <p className="mt-1 text-sm text-subtle">สร้างงานดึงข้อมูล ตั้งเวลา หรือสั่งรันทันที พร้อมดูความคืบหน้าสด</p>
       </div>
 

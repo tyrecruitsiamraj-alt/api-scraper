@@ -6,16 +6,17 @@ import { usePathname } from 'next/navigation';
 import { signOut, useSession } from 'next-auth/react';
 
 // เมนูแบนแถวเดียว — เลิก "โหมด" ที่ทำให้กระโดดไปมา. ศูนย์งานคือศูนย์กลาง.
-const NAV: { href: string; label: string }[] = [
+// คลังผู้สมัคร ย้ายไปเป็นแท็บย่อยใต้ "งาน Scraping" (ScrapingNav)
+const NAV: { href: string; label: string; also?: string[] }[] = [
   { href: '/orchestrator', label: 'ศูนย์งาน' },
-  { href: '/candidates', label: 'คลังผู้สมัคร' },
-  { href: '/scraping', label: 'งาน Scraping' },
+  { href: '/scraping', label: 'งาน Scraping', also: ['/candidates'] },
   { href: '/autopost', label: 'โพสต์ & ผลลัพธ์' },
 ];
 
-/** active tab: exact หรือ prefix (ครอบหน้าย่อย เช่น /orchestrator/[id], /autopost/runs) */
-function isActive(pathname: string, href: string): boolean {
-  return pathname === href || pathname.startsWith(href + '/');
+/** active tab: exact หรือ prefix (ครอบหน้าย่อย เช่น /orchestrator/[id], /candidates ใต้ Scraping) */
+function isActive(pathname: string, item: { href: string; also?: string[] }): boolean {
+  const hrefs = [item.href, ...(item.also ?? [])];
+  return hrefs.some((h) => pathname === h || pathname.startsWith(h + '/'));
 }
 
 function NavTabs() {
@@ -23,7 +24,7 @@ function NavTabs() {
   return (
     <nav className="-mx-1 flex items-center gap-1 overflow-x-auto">
       {NAV.map((item) => {
-        const active = isActive(pathname, item.href);
+        const active = isActive(pathname, item);
         return (
           <Link
             key={item.href}

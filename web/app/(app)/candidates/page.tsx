@@ -1,7 +1,16 @@
 import Link from 'next/link';
-import { countCandidates, listCandidates } from '@/lib/repo';
+import { countCandidates, listCandidates, listCandidateProvinces } from '@/lib/repo';
+import { ScrapingNav } from '@/components/ScrapingNav';
 
 export const dynamic = 'force-dynamic';
+
+const UPDATED_OPTS: { value: string; label: string }[] = [
+  { value: '', label: 'อัปเดตทุกช่วง' },
+  { value: '1', label: 'ใน 24 ชม.' },
+  { value: '7', label: 'ใน 7 วัน' },
+  { value: '30', label: 'ใน 30 วัน' },
+  { value: '90', label: 'ใน 90 วัน' },
+];
 
 const PLATFORM_LABEL: Record<string, string> = { jobbkk: 'JobBKK', jobthai: 'JobThai' };
 const PLATFORM_COLOR: Record<string, string> = {
@@ -33,27 +42,42 @@ function relTime(s: string | null) {
 export default async function CandidatesPage({
   searchParams,
 }: {
-  searchParams: { q?: string; platform?: string; page?: string };
+  searchParams: { q?: string; platform?: string; position?: string; province?: string; updated?: string; page?: string };
 }) {
   const search = searchParams.q?.trim() || undefined;
   const platform = searchParams.platform || undefined;
+  const position = searchParams.position?.trim() || undefined;
+  const province = searchParams.province?.trim() || undefined;
+  const updatedDays = Number.parseInt(searchParams.updated ?? '', 10) || undefined;
   const pageNo = Math.max(1, Number.parseInt(searchParams.page ?? '1', 10) || 1);
   const limit = 40;
-  const [rows, total] = await Promise.all([
-    listCandidates({ search, platform, limit, offset: (pageNo - 1) * limit }),
-    countCandidates({ search, platform }),
+  const filter = { search, platform, position, province, updatedDays };
+  const [rows, total, provinces] = await Promise.all([
+    listCandidates({ ...filter, limit, offset: (pageNo - 1) * limit }),
+    countCandidates(filter),
+    listCandidateProvinces(),
   ]);
   const pages = Math.max(1, Math.ceil(total / limit));
 
+  // เก็บ query ปัจจุบัน (ยกเว้น page) เพื่อใส่ในลิงก์แท็บ/หน้า
+  const baseParams = (extra: Record<string, string> = {}) => {
+    const p = new URLSearchParams();
+    if (search) p.set('q', search);
+    if (position) p.set('position', position);
+    if (province) p.set('province', province);
+    if (updatedDays) p.set('updated', String(updatedDays));
+    if (platform) p.set('platform', platform);
+    for (const [k, v] of Object.entries(extra)) v ? p.set(k, v) : p.delete(k);
+    return p;
+  };
+
   const tab = (key: string, label: string) => {
-    const params = new URLSearchParams();
-    if (search) params.set('q', search);
-    if (key) params.set('platform', key);
+    const p = baseParams({ platform: key });
     const active = (platform ?? '') === key;
     return (
       <Link
         key={key || 'all'}
-        href={`/candidates${params.toString() ? '?' + params.toString() : ''}`}
+        href={`/candidates${p.toString() ? '?' + p.toString() : ''}`}
         className={`pill ${active ? 'bg-ink text-white' : 'bg-black/5 text-ink hover:bg-black/10'}`}
       >
         {label}
@@ -61,19 +85,38 @@ export default async function CandidatesPage({
     );
   };
 
+  const activeFilters = [position, province, updatedDays].filter(Boolean).length;
+
   return (
     <div>
-      <div className="mb-6 flex items-end justify-between gap-4">
+      <ScrapingNav />
+
+      <div className="mb-5 flex items-end justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight">ผู้สมัคร</h1>
-          <p className="text-sm text-subtle mt-1">{total.toLocaleString()} โปรไฟล์พร้อมใช้งาน</p>
+          <h1 className="text-[28px] font-medium tracking-tight">คลังผู้สมัคร</h1>
+          <p className="text-sm text-subtle mt-1">{total.toLocaleString()} โปรไฟล์{activeFilters > 0 ? ' (กรองแล้ว)' : 'พร้อมใช้งาน'}</p>
         </div>
-        <form className="flex gap-2" action="/candidates" method="get">
-          {platform && <input type="hidden" name="platform" value={platform} />}
-          <input name="q" defaultValue={search} placeholder="ค้นหาชื่อ / เบอร์ / ตำแหน่ง" className="field w-72" />
-          <button className="btn-primary" type="submit">ค้นหา</button>
-        </form>
       </div>
+
+      {/* ฟิลเตอร์: ค้นหา · ตำแหน่ง · จังหวัด · วันที่อัปเดต */}
+      <form className="mb-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-5" action="/candidates" method="get">
+        {platform && <input type="hidden" name="platform" value={platform} />}
+        <input name="q" defaultValue={search} placeholder="ค้นหาชื่อ / เบอร์" className="field" />
+        <input name="position" defaultValue={position} placeholder="ตำแหน่งที่ต้องการ" className="field" />
+        <select name="province" defaultValue={province ?? ''} className="field">
+          <option value="">ทุกจังหวัด</option>
+          {provinces.map((pv) => <option key={pv} value={pv}>{pv}</option>)}
+        </select>
+        <select name="updated" defaultValue={searchParams.updated ?? ''} className="field">
+          {UPDATED_OPTS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+        </select>
+        <div className="flex gap-2">
+          <button className="btn-primary flex-1" type="submit">กรอง</button>
+          {(search || activeFilters > 0) && (
+            <Link href="/candidates" className="btn-secondary">ล้าง</Link>
+          )}
+        </div>
+      </form>
 
       <div className="mb-5 flex gap-2">
         {tab('', 'ทั้งหมด')}
@@ -130,11 +173,11 @@ export default async function CandidatesPage({
       {pages > 1 && (
         <div className="mt-5 flex items-center justify-center gap-3 text-sm">
           {pageNo > 1 && (
-            <Link className="btn-ghost" href={`/candidates?${new URLSearchParams({ ...(search ? { q: search } : {}), ...(platform ? { platform } : {}), page: String(pageNo - 1) })}`}>ก่อนหน้า</Link>
+            <Link className="btn-ghost" href={`/candidates?${baseParams({ page: String(pageNo - 1) })}`}>ก่อนหน้า</Link>
           )}
           <span className="text-subtle">หน้า {pageNo} / {pages}</span>
           {pageNo < pages && (
-            <Link className="btn-ghost" href={`/candidates?${new URLSearchParams({ ...(search ? { q: search } : {}), ...(platform ? { platform } : {}), page: String(pageNo + 1) })}`}>ถัดไป</Link>
+            <Link className="btn-ghost" href={`/candidates?${baseParams({ page: String(pageNo + 1) })}`}>ถัดไป</Link>
           )}
         </div>
       )}

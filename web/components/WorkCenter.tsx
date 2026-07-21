@@ -76,53 +76,61 @@ function fmtDate(value: string) {
 }
 
 function KindTag({ kind }: { kind: WorkCenterItem['kind'] }) {
-  return <span className="text-xs font-normal text-subtle">· งาน {kind === 'content' ? 'Content' : 'Scraping'}</span>;
+  return <span className="ml-1.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-subtle/70">{kind === 'content' ? 'Content' : 'Scraping'}</span>;
 }
 
-// ---- Stepper 6 ป้าย แนวนอน: done=เขียว✓, active=น้ำเงินเลข, failed=แดง✕, skip=จุดประ», todo=ว่าง ----
+// ---- Stepper 6 ป้าย: done=ดำเข้ม✓, active=แดง(voltage), failed=แดงขอบ✕, skip=จุดจาง, todo=ว่าง ----
 function StepDot({ step, index }: { step: Step; index: number }) {
-  const base = 'flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[11px] font-medium';
+  const base = 'flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[11px] font-semibold leading-none';
   switch (step.state) {
     case 'done':
-      return <span className={`${base} bg-green-100 text-green-700`}>✓</span>;
+      return (
+        <span className={`${base} bg-ink text-white`}>
+          <svg width="11" height="11" viewBox="0 0 12 12" fill="none" aria-hidden><path d="M2.5 6.2l2.3 2.3 4.7-5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" /></svg>
+        </span>
+      );
     case 'active':
-      return <span className={`${base} bg-accent text-white`}>{index + 1}</span>;
+      return (
+        <span className={`${base} bg-accent text-white ring-4 ring-accent/15`}>{index + 1}</span>
+      );
     case 'failed':
-      return <span className={`${base} bg-red-100 text-red-700`}>✕</span>;
+      return <span className={`${base} border border-accent bg-white text-accent`}>✕</span>;
     case 'skip':
-      return <span className={`${base} border border-dashed border-line text-subtle`}>»</span>;
+      return <span className="flex h-6 w-6 shrink-0 items-center justify-center"><span className="h-1.5 w-1.5 rounded-full bg-line" /></span>;
     default:
-      return <span className={`${base} border border-line bg-white`} />;
+      return <span className={`${base} border border-line bg-white text-transparent`}>{index + 1}</span>;
   }
 }
 
 function Stepper({ steps }: { steps: Step[] }) {
   return (
-    <div className="mt-3">
+    <div className="mt-4">
       <div className="flex">
         {steps.map((step, i) => {
-          const lineBefore = i > 0 && (steps[i - 1].state === 'done') ? 'bg-green-300' : 'bg-line';
-          const lineAfter = step.state === 'done' ? 'bg-green-300' : 'bg-line';
+          const lineBefore = i > 0 && steps[i - 1].state === 'done' ? 'bg-ink/25' : 'bg-line';
+          const lineAfter = step.state === 'done' ? 'bg-ink/25' : 'bg-line';
           return (
             <div key={step.label} className="flex flex-1 flex-col items-center">
               <div className="flex w-full items-center">
-                <span className={`h-0.5 flex-1 ${i === 0 ? 'opacity-0' : lineBefore}`} />
+                <span className={`h-px flex-1 ${i === 0 ? 'opacity-0' : lineBefore}`} />
                 <StepDot step={step} index={i} />
-                <span className={`h-0.5 flex-1 ${i === steps.length - 1 ? 'opacity-0' : lineAfter}`} />
+                <span className={`h-px flex-1 ${i === steps.length - 1 ? 'opacity-0' : lineAfter}`} />
               </div>
               <div
-                className={`mt-1 text-center text-[10px] leading-tight ${
+                className={`mt-1.5 text-center text-[9.5px] uppercase leading-tight tracking-[0.06em] ${
                   step.state === 'active'
-                    ? 'font-medium text-accent'
+                    ? 'font-semibold text-accent'
                     : step.state === 'failed'
-                      ? 'font-medium text-red-600'
-                      : step.state === 'skip'
-                        ? 'text-subtle/60'
-                        : 'text-subtle'
+                      ? 'font-semibold text-accent'
+                      : step.state === 'done'
+                        ? 'text-ink/70'
+                        : step.state === 'skip'
+                          ? 'text-subtle/50'
+                          : 'text-subtle'
                 }`}
               >
                 {step.label}
-                {step.state === 'skip' && <span className="block text-[9px]">ข้าม</span>}
+                {step.state === 'skip' && <span className="block text-[8.5px]">ข้าม</span>}
               </div>
             </div>
           );
@@ -260,13 +268,12 @@ function Readiness({ facebookAccounts }: { facebookAccounts: FbAccountOption[] }
   return (
     <div className="space-y-2">
       {problems.map((p) => (
-        <div key={p.text} className="flex flex-wrap items-center gap-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3">
-          <span className="text-lg leading-none text-amber-600">⚙</span>
+        <div key={p.text} className="flex flex-wrap items-center gap-3 border-l-2 border-amber-500 bg-amber-50 px-4 py-3">
           <div className="min-w-0 flex-1">
-            <div className="text-[13px] font-medium text-amber-800">ตั้งค่าที่ต้องทำก่อนงานถึงจะเดิน</div>
-            <div className="mt-0.5 text-xs text-amber-700">{p.text}</div>
+            <div className="eyebrow text-amber-700">ตั้งค่าที่ต้องทำก่อนงานถึงจะเดิน</div>
+            <div className="mt-1 text-[13px] text-amber-800">{p.text}</div>
           </div>
-          <Link href={p.href} className="shrink-0 rounded-lg bg-amber-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-amber-700">
+          <Link href={p.href} className="shrink-0 bg-amber-600 px-3.5 py-2 text-[11px] font-semibold uppercase tracking-[0.06em] text-white hover:bg-amber-700">
             {p.btn}
           </Link>
         </div>
@@ -285,10 +292,10 @@ function WorkItemCard({ item, connectors, facebookAccounts }: {
     <div className={`card p-4 sm:p-5 ${CARD_ACCENT[item.stage]}`}>
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div className="min-w-0">
-          <div className="text-sm font-medium text-ink">
-            {item.title} <KindTag kind={item.kind} />
+          <div className="text-[15px] font-medium leading-tight text-ink">
+            {item.title}<KindTag kind={item.kind} />
           </div>
-          <div className="mt-0.5 text-xs text-subtle">
+          <div className="mt-1 text-[11px] uppercase tracking-[0.04em] text-subtle/80">
             {item.requestNo || item.id.split(':')[1] || item.id}
             {item.requester ? ` · ${item.requester}` : ''} · {fmtDate(item.createdAt)}
           </div>
@@ -299,17 +306,16 @@ function WorkItemCard({ item, connectors, facebookAccounts }: {
       {item.steps && item.steps.length > 0 && <Stepper steps={item.steps} />}
 
       {(showImage || item.detail) && (
-        <div className="mt-3 flex gap-3">
+        <div className="mt-4 flex gap-3">
           {showImage && item.content && (
             <img
               src={`/api/campaign-content/${item.content.id}/image`}
               alt="รูป Content"
-              className="h-16 w-16 shrink-0 rounded-lg border border-line object-cover"
+              className="h-16 w-16 shrink-0 border border-line object-cover"
             />
           )}
           {item.detail && (
-            <p className={`min-w-0 flex-1 whitespace-pre-wrap text-[13px] leading-relaxed ${item.stage === 'attention' ? 'rounded-lg bg-red-50 px-3 py-2 text-red-700' : 'text-ink/75'}`}>
-              {item.stage === 'attention' && <span className="mr-1">⚠</span>}
+            <p className={`min-w-0 flex-1 whitespace-pre-wrap text-[13px] leading-relaxed ${item.stage === 'attention' ? 'border-l-2 border-accent bg-red-50 px-3 py-2 text-red-700' : 'text-ink/70'}`}>
               {item.detail.length > 240 ? `${item.detail.slice(0, 240)}…` : item.detail}
             </p>
           )}
@@ -317,13 +323,14 @@ function WorkItemCard({ item, connectors, facebookAccounts }: {
       )}
 
       {item.progress && item.progress.target > 0 && (
-        <div className="mt-3">
-          <div className="mb-1 text-xs text-subtle">
-            ดึงผู้สมัคร {item.progress.got} จาก {item.progress.target} คน
+        <div className="mt-4">
+          <div className="mb-1.5 flex items-baseline justify-between text-[11px] uppercase tracking-[0.06em] text-subtle">
+            <span>ดึงผู้สมัคร</span>
+            <span className="tabular-nums text-ink">{item.progress.got} / {item.progress.target}</span>
           </div>
-          <div className="h-1.5 overflow-hidden rounded-full bg-black/[0.06]">
+          <div className="h-1 overflow-hidden bg-black/[0.06]">
             <div
-              className="h-full rounded-full bg-accent/75"
+              className="h-full bg-accent"
               style={{ width: `${Math.min(100, Math.round((item.progress.got / item.progress.target) * 100))}%` }}
             />
           </div>
@@ -364,24 +371,35 @@ export function WorkCenter({ items, connectors, facebookAccounts }: {
   const active = sorted.filter((item) => item.stage !== 'completed');
   const done = sorted.filter((item) => item.stage === 'completed');
 
+  const STAT = [
+    { label: 'ต้องแก้', value: counts.attention, tone: 'text-accent', bar: 'bg-accent' },
+    { label: 'รอคุณ', value: counts.intake + counts.review, tone: 'text-amber-600', bar: 'bg-amber-500' },
+    { label: 'ระบบกำลังทำ', value: counts.working, tone: 'text-ink', bar: 'bg-ink/40' },
+    { label: 'เสร็จ', value: counts.completed, tone: 'text-emerald-700', bar: 'bg-emerald-600' },
+  ];
+
   return (
-    <div className="space-y-5">
+    <div className="space-y-6">
       <div>
-        <h1 className="text-2xl font-semibold tracking-tight">ศูนย์งาน</h1>
+        <div className="eyebrow text-accent">SO Recruitment</div>
+        <h1 className="mt-1 text-[28px] font-medium tracking-tight">ศูนย์งาน</h1>
         <p className="mt-1 text-sm text-subtle">งานจาก So Recruit ทุกใบ — รับงาน ตรวจ อนุมัติ และติดตามจนเสร็จ ในหน้าเดียว</p>
       </div>
 
       <Readiness facebookAccounts={facebookAccounts} />
 
-      <div className="grid gap-3 grid-cols-2 sm:grid-cols-4">
-        <div className="card p-4"><div className="text-xs text-subtle">ต้องแก้</div><div className="mt-1 text-3xl font-semibold tabular-nums text-red-600">{counts.attention}</div></div>
-        <div className="card p-4"><div className="text-xs text-subtle">รอคุณ</div><div className="mt-1 text-3xl font-semibold tabular-nums text-orange-600">{counts.intake + counts.review}</div></div>
-        <div className="card p-4"><div className="text-xs text-subtle">ระบบกำลังทำ</div><div className="mt-1 text-3xl font-semibold tabular-nums text-blue-600">{counts.working}</div></div>
-        <div className="card p-4"><div className="text-xs text-subtle">เสร็จ</div><div className="mt-1 text-3xl font-semibold tabular-nums text-green-700">{counts.completed}</div></div>
+      <div className="grid grid-cols-2 border border-line bg-white sm:grid-cols-4">
+        {STAT.map((s, i) => (
+          <div key={s.label} className={`relative px-5 py-4 ${i > 0 ? 'border-l border-line' : ''}`}>
+            <span className={`absolute left-0 top-0 h-full w-[3px] ${s.value > 0 ? s.bar : 'bg-transparent'}`} />
+            <div className="eyebrow">{s.label}</div>
+            <div className={`mt-1.5 text-[30px] font-medium leading-none tabular-nums ${s.value > 0 ? s.tone : 'text-subtle/40'}`}>{s.value}</div>
+          </div>
+        ))}
       </div>
 
       {active.length === 0 ? (
-        <div className="card px-5 py-16 text-center text-sm text-subtle">ไม่มีงานค้าง — ทุกอย่างเรียบร้อย 🎉</div>
+        <div className="border border-line bg-white px-5 py-16 text-center text-sm text-subtle">ไม่มีงานค้าง — ทุกอย่างเรียบร้อย</div>
       ) : (
         <div className="space-y-3">
           {active.map((item) => (
@@ -395,9 +413,9 @@ export function WorkCenter({ items, connectors, facebookAccounts }: {
           <button
             type="button"
             onClick={() => setShowDone((v) => !v)}
-            className="text-sm text-subtle hover:text-ink"
+            className="eyebrow inline-flex items-center gap-1.5 hover:text-ink"
           >
-            {showDone ? '▾' : '▸'} งานที่เสร็จแล้ว ({done.length})
+            <span className="text-[9px]">{showDone ? '▼' : '▶'}</span> งานที่เสร็จแล้ว · {done.length}
           </button>
           {showDone && (
             <div className="mt-3 space-y-3">

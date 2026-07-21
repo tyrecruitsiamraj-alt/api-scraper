@@ -24,18 +24,46 @@ export type CandidateRow = {
   asset_count: number;
 };
 
-export async function listCandidates(opts: { search?: string; platform?: string; limit?: number; offset?: number } = {}) {
-  const { search, platform, limit = 40, offset = 0 } = opts;
-  const params: unknown[] = [];
+export type CandidateFilter = {
+  search?: string;
+  platform?: string;
+  position?: string;
+  province?: string;
+  updatedDays?: number; // อัปเดตภายใน N วันล่าสุด
+  limit?: number;
+  offset?: number;
+};
+
+/** สร้าง WHERE ร่วมกันระหว่าง list กับ count (params ต่อเนื่องกัน) */
+function buildCandidateWhere(opts: CandidateFilter, params: unknown[]): string {
   const where: string[] = [];
-  if (search) {
-    params.push(`%${search}%`);
+  if (opts.search) {
+    params.push(`%${opts.search}%`);
     where.push(`(c.full_name ILIKE $${params.length} OR c.phone ILIKE $${params.length} OR c.desired_positions ILIKE $${params.length})`);
   }
-  if (platform) {
-    params.push(platform);
+  if (opts.platform) {
+    params.push(opts.platform);
     where.push(`EXISTS (SELECT 1 FROM candidate_sources s WHERE s.candidate_id = c.id AND s.platform = $${params.length})`);
   }
+  if (opts.position) {
+    params.push(`%${opts.position}%`);
+    where.push(`c.desired_positions ILIKE $${params.length}`);
+  }
+  if (opts.province) {
+    params.push(opts.province);
+    where.push(`c.province = $${params.length}`);
+  }
+  if (opts.updatedDays && opts.updatedDays > 0) {
+    params.push(opts.updatedDays);
+    where.push(`c.last_updated_at >= now() - ($${params.length} || ' days')::interval`);
+  }
+  return where.length ? 'WHERE ' + where.join(' AND ') : '';
+}
+
+export async function listCandidates(opts: CandidateFilter = {}) {
+  const { limit = 40, offset = 0 } = opts;
+  const params: unknown[] = [];
+  const whereSql = buildCandidateWhere(opts, params);
   params.push(limit);
   params.push(offset);
   const rows = await q<CandidateRow>(
@@ -44,7 +72,7 @@ export async function listCandidates(opts: { search?: string; platform?: string;
             ARRAY(SELECT DISTINCT s.platform FROM candidate_sources s WHERE s.candidate_id = c.id) AS platforms,
             (SELECT count(*)::int FROM candidate_assets a WHERE a.candidate_id = c.id) AS asset_count
        FROM candidates c
-      ${where.length ? 'WHERE ' + where.join(' AND ') : ''}
+      ${whereSql}
       ORDER BY c.last_updated_at DESC
       LIMIT $${params.length - 1} OFFSET $${params.length}`,
     params,
@@ -52,23 +80,24 @@ export async function listCandidates(opts: { search?: string; platform?: string;
   return rows;
 }
 
-export async function countCandidates(opts: { search?: string; platform?: string } = {}) {
-  const { search, platform } = opts;
+export async function countCandidates(opts: CandidateFilter = {}) {
   const params: unknown[] = [];
-  const where: string[] = [];
-  if (search) {
-    params.push(`%${search}%`);
-    where.push(`(c.full_name ILIKE $${params.length} OR c.phone ILIKE $${params.length} OR c.desired_positions ILIKE $${params.length})`);
-  }
-  if (platform) {
-    params.push(platform);
-    where.push(`EXISTS (SELECT 1 FROM candidate_sources s WHERE s.candidate_id = c.id AND s.platform = $${params.length})`);
-  }
+  const whereSql = buildCandidateWhere(opts, params);
   const rows = await q<{ n: number }>(
-    `SELECT count(*)::int n FROM candidates c ${where.length ? 'WHERE ' + where.join(' AND ') : ''}`,
+    `SELECT count(*)::int n FROM candidates c ${whereSql}`,
     params,
   );
   return rows[0]?.n ?? 0;
+}
+
+/** รายชื่อจังหวัดที่มีในฐานผู้สมัคร (สำหรับ dropdown ฟิลเตอร์) */
+export async function listCandidateProvinces(): Promise<string[]> {
+  const rows = await q<{ province: string }>(
+    `SELECT DISTINCT province FROM candidates
+      WHERE province IS NOT NULL AND TRIM(province) <> ''
+      ORDER BY province`,
+  );
+  return rows.map((r) => r.province);
 }
 
 export async function getCandidate(id: string) {
