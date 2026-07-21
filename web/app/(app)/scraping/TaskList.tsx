@@ -301,7 +301,7 @@ export function TaskList({ initialTasks }: { initialTasks: TaskRow[] }) {
             {/* finished-but-incomplete / no-result hints */}
             {status === 'done' && got === 0 && (
               <p className="mt-2 text-xs text-amber-700">
-                ไม่พบผลลัพธ์ในรอบนี้ — มักเกิดจาก session ของ connector หมดอายุหรือ criteria แคบเกินไป ลองกด “รันตอนนี้” อีกครั้ง
+                ไม่พบผลลัพธ์ในรอบนี้ — มักเกิดจากใส่ฟิลเตอร์ซ้อนกันแน่นเกิน (ตำแหน่ง + จังหวัด + วุฒิ + อายุ พร้อมกัน) หรือคำค้นตำแหน่งไม่ตรงกับที่คนไทยเขียนในเรซูเม่ ลองลดฟิลเตอร์ (เอาอายุ/วุฒิออก) แล้วกด “รันตอนนี้” อีกครั้ง
               </p>
             )}
             {status === 'done' && got > 0 && target > 0 && got < target && (
