@@ -5,3 +5,6 @@ output/
 
 # Skill (IP ลับขององค์กร) — เก็บ local ใช้งานได้ แต่ห้าม push ขึ้น repo public
 .claude/skills/
+
+# ผลลัพธ์งานเฉพาะกิจ (เช่น lead TikTok) — เก็บ local ไม่ขึ้น repo
+outputs/
