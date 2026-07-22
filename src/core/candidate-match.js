@@ -54,19 +54,16 @@ function candidateAge(parsed) {
  * @returns {{ siteCriteria: object, localFilters: object, active: boolean }}
  */
 export function splitCriteria(criteria = {}) {
+  // ทุกฟิลเตอร์ไปเว็บหมด (แม่นสุด แต่ AND ซ้อนอาจได้น้อย)
   if (process.env.STRICT_SITE_FILTERS === '1') {
     return { siteCriteria: { ...criteria }, localFilters: {}, active: false };
   }
-  const {
-    ageMin, ageMax, education, gender, province,
-    ...siteCriteria
-  } = criteria;
+  // ค่าเริ่มต้น: จังหวัด + อายุ ส่งไปกรองที่เว็บ (เป๊ะ — เลือกกรุงเทพได้กรุงเทพ, อายุ 25-35 ได้ในช่วง)
+  // เหลือแค่ วุฒิ + เพศ กรองในระบบ (เว็บ map วุฒิหยาบ/เพศบางเรซูเม่ไม่ระบุ — กรองเองแม่นกว่า)
+  const { education, gender, ...siteCriteria } = criteria;
   const localFilters = {};
-  if (num(ageMin)) localFilters.ageMin = num(ageMin);
-  if (num(ageMax)) localFilters.ageMax = num(ageMax);
   if (String(education ?? '').trim()) localFilters.education = String(education).trim();
   if (String(gender ?? '').trim()) localFilters.gender = String(gender).trim();
-  if (String(province ?? '').trim()) localFilters.province = String(province).trim();
   return { siteCriteria, localFilters, active: Object.keys(localFilters).length > 0 };
 }
 
