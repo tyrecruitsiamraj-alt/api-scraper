@@ -1008,6 +1008,20 @@ export async function setSoRecruitRequestStatus(requestNo: string | null, status
   }
 }
 
+/** ตีกลับใบขอไป So Recruit พร้อมเหตุผล (เขียนลง notes ให้ผู้ขอเห็นว่าขาดอะไร). */
+export async function rejectSoRecruitRequest(requestNo: string | null, reason: string | null) {
+  if (!requestNo) return;
+  const note = reason ? `ตีกลับ: ${reason}` : 'ตีกลับ — ข้อมูลไม่พอ/ไม่รับงาน';
+  try {
+    await q(
+      `UPDATE "jarvis_rm".job_posting_requests SET status = 'rejected', notes = $2, updated_at = now() WHERE request_no = $1`,
+      [requestNo, note],
+    );
+  } catch (e) {
+    console.warn(`[orchestrator] ตีกลับใบขอ So Recruit ไม่สำเร็จ (${requestNo}): ${(e as Error).message}`);
+  }
+}
+
 export type CampaignRow = {
   id: string;
   request_no: string | null;

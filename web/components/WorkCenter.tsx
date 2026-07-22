@@ -6,6 +6,8 @@ import {
   approveContentAction,
   approveScrapeResultAction,
   measureCampaignAction,
+  rejectContentAction,
+  rejectRequestAction,
   retryCampaignDraftAction,
   retryCampaignPostAction,
   startCampaignAction,
@@ -173,29 +175,50 @@ function WorkAction({ item, connectors, facebookAccounts }: {
   }
 
   if (item.stage === 'intake' && item.requestNo) {
+    const rejectForm = (
+      <form action={rejectRequestAction} className="flex flex-wrap items-end gap-2 border-t border-line/60 pt-3">
+        <input type="hidden" name="requestNo" value={item.requestNo} />
+        <div className="min-w-[220px] flex-1">
+          <label className="label" htmlFor={`rej-req-${item.id}`}>ตีกลับใบขอ — บอกว่าขาดข้อมูลอะไร</label>
+          <input
+            id={`rej-req-${item.id}`}
+            name="reason"
+            placeholder="เช่น ไม่ระบุตำแหน่ง, ไม่บอกจังหวัด, จำนวนที่รับไม่ชัด"
+            className="field"
+          />
+        </div>
+        <button className="btn-secondary">ตีกลับใบขอ</button>
+      </form>
+    );
     if (item.kind === 'content') {
       return (
-        <form action={startCampaignAction}>
-          <input type="hidden" name="requestNo" value={item.requestNo} />
-          <button className="btn-primary">อนุมัติรับงาน Content</button>
-        </form>
+        <div className="w-full space-y-3">
+          <form action={startCampaignAction}>
+            <input type="hidden" name="requestNo" value={item.requestNo} />
+            <button className="btn-primary">อนุมัติรับงาน Content</button>
+          </form>
+          {rejectForm}
+        </div>
       );
     }
     return (
-      <form action={startSoRecruitScrapeAction} className="flex flex-wrap items-end gap-2">
-        <input type="hidden" name="requestNo" value={item.requestNo} />
-        <div>
-          <label className="label" htmlFor={`connector-${item.id}`}>เลือก Connector</label>
-          <select id={`connector-${item.id}`} name="connectorId" required defaultValue="" className="field">
-            <option value="" disabled>เลือกบัญชี Scraping…</option>
-            {connectors.map((connector) => <option key={connector.id} value={connector.id}>{connector.label}</option>)}
-          </select>
-        </div>
-        <button className="btn-primary" disabled={connectors.length === 0}>อนุมัติและเริ่ม Scraping</button>
-        {connectors.length === 0 && (
-          <Link href="/settings/connectors" className="text-xs text-accent hover:underline">เพิ่ม Connector ก่อน</Link>
-        )}
-      </form>
+      <div className="w-full space-y-3">
+        <form action={startSoRecruitScrapeAction} className="flex flex-wrap items-end gap-2">
+          <input type="hidden" name="requestNo" value={item.requestNo} />
+          <div>
+            <label className="label" htmlFor={`connector-${item.id}`}>เลือก Connector</label>
+            <select id={`connector-${item.id}`} name="connectorId" required defaultValue="" className="field">
+              <option value="" disabled>เลือกบัญชี Scraping…</option>
+              {connectors.map((connector) => <option key={connector.id} value={connector.id}>{connector.label}</option>)}
+            </select>
+          </div>
+          <button className="btn-primary" disabled={connectors.length === 0}>อนุมัติและเริ่ม Scraping</button>
+          {connectors.length === 0 && (
+            <Link href="/settings/connectors" className="text-xs text-accent hover:underline">เพิ่ม Connector ก่อน</Link>
+          )}
+        </form>
+        {rejectForm}
+      </div>
     );
   }
 
@@ -205,29 +228,47 @@ function WorkAction({ item, connectors, facebookAccounts }: {
     const noReady = readyAccounts.length === 0;
     // เลือกบัญชีที่พร้อม (มีกลุ่ม) เป็นค่าเริ่มต้น — บัญชีที่ไม่มีกลุ่มเลือกไม่ได้ (กันโพสต์ไปตายทีหลัง)
     return (
-      <form action={approveContentAction} className="flex flex-wrap items-end gap-2">
-        <input type="hidden" name="contentId" value={item.content.id} />
-        <input type="hidden" name="campaignId" value={item.content.campaignId} />
-        <div>
-          <label className="label" htmlFor={`facebook-${item.id}`}>บัญชีสำหรับเผยแพร่</label>
-          <select id={`facebook-${item.id}`} name="fbAccountId" required defaultValue="" className="field">
-            <option value="" disabled>เลือกบัญชี Facebook…</option>
-            {facebookAccounts.map((account) => (
-              <option key={account.id} value={account.id} disabled={account.groupCount === 0}>
-                {account.label}{account.groupCount === 0 ? ' (ยังไม่มีกลุ่ม)' : ` · ${account.groupCount} กลุ่ม`}
-              </option>
-            ))}
-          </select>
-        </div>
-        <button className="btn-primary" disabled={noReady}>
-          {noAccount ? 'ยังไม่มีบัญชี' : noReady ? 'ทุกบัญชียังไม่มีกลุ่ม' : 'อนุมัติและโพสต์'}
-        </button>
-        {noReady && (
-          <Link href="/settings/posting" className="text-xs text-accent hover:underline">
-            {noAccount ? 'เพิ่มบัญชี Facebook ก่อน' : 'เลือกกลุ่มให้บัญชีก่อน'}
-          </Link>
-        )}
-      </form>
+      <div className="w-full space-y-3">
+        <form action={approveContentAction} className="flex flex-wrap items-end gap-2">
+          <input type="hidden" name="contentId" value={item.content.id} />
+          <input type="hidden" name="campaignId" value={item.content.campaignId} />
+          <div>
+            <label className="label" htmlFor={`facebook-${item.id}`}>บัญชีสำหรับเผยแพร่</label>
+            <select id={`facebook-${item.id}`} name="fbAccountId" required defaultValue="" className="field">
+              <option value="" disabled>เลือกบัญชี Facebook…</option>
+              {facebookAccounts.map((account) => (
+                <option key={account.id} value={account.id} disabled={account.groupCount === 0}>
+                  {account.label}{account.groupCount === 0 ? ' (ยังไม่มีกลุ่ม)' : ` · ${account.groupCount} กลุ่ม`}
+                </option>
+              ))}
+            </select>
+          </div>
+          <button className="btn-primary" disabled={noReady}>
+            {noAccount ? 'ยังไม่มีบัญชี' : noReady ? 'ทุกบัญชียังไม่มีกลุ่ม' : 'อนุมัติและโพสต์'}
+          </button>
+          {noReady && (
+            <Link href="/settings/posting" className="text-xs text-accent hover:underline">
+              {noAccount ? 'เพิ่มบัญชี Facebook ก่อน' : 'เลือกกลุ่มให้บัญชีก่อน'}
+            </Link>
+          )}
+        </form>
+
+        {/* ตีกลับให้ AI แก้ใหม่ พร้อมบอกว่าขาด/ผิดอะไร */}
+        <form action={rejectContentAction} className="flex flex-wrap items-end gap-2 border-t border-line/60 pt-3">
+          <input type="hidden" name="contentId" value={item.content.id} />
+          <input type="hidden" name="campaignId" value={item.content.campaignId} />
+          <div className="min-w-[220px] flex-1">
+            <label className="label" htmlFor={`reject-${item.id}`}>ตีกลับ — บอกว่าต้องแก้อะไร</label>
+            <input
+              id={`reject-${item.id}`}
+              name="reason"
+              placeholder="เช่น เพิ่มเงินเดือน, เน้นสวัสดิการ, เปลี่ยนรูป, แคปชั่นยาวไป"
+              className="field"
+            />
+          </div>
+          <button className="btn-secondary">ตีกลับให้แก้ใหม่</button>
+        </form>
+      </div>
     );
   }
 
@@ -349,7 +390,8 @@ export function WorkCenter({ items, connectors, facebookAccounts }: {
   connectors: Option[];
   facebookAccounts: FbAccountOption[];
 }) {
-  const [showDone, setShowDone] = useState(false);
+  // กล่องตัวเลขกดกรองได้: null = ค่าเริ่มต้น (โชว์งานค้าง + งานเสร็จยุบไว้)
+  const [filter, setFilter] = useState<'attention' | 'waiting' | 'working' | 'completed' | null>(null);
 
   const counts = useMemo(() => {
     const result: Record<WorkCenterStage, number> = { intake: 0, working: 0, review: 0, completed: 0, attention: 0 };
@@ -371,12 +413,16 @@ export function WorkCenter({ items, connectors, facebookAccounts }: {
   const active = sorted.filter((item) => item.stage !== 'completed');
   const done = sorted.filter((item) => item.stage === 'completed');
 
+  // แต่ละกล่อง = ชุด stage ที่กรอง
   const STAT = [
-    { label: 'ต้องแก้', value: counts.attention, tone: 'text-accent', bar: 'bg-accent' },
-    { label: 'รอคุณ', value: counts.intake + counts.review, tone: 'text-amber-600', bar: 'bg-amber-500' },
-    { label: 'ระบบกำลังทำ', value: counts.working, tone: 'text-ink', bar: 'bg-ink/40' },
-    { label: 'เสร็จ', value: counts.completed, tone: 'text-emerald-700', bar: 'bg-emerald-600' },
+    { key: 'attention' as const, label: 'ต้องแก้', value: counts.attention, tone: 'text-accent', bar: 'bg-accent', ring: 'ring-accent', stages: ['attention'] as WorkCenterStage[] },
+    { key: 'waiting' as const, label: 'รอคุณ', value: counts.intake + counts.review, tone: 'text-amber-600', bar: 'bg-amber-500', ring: 'ring-amber-400', stages: ['intake', 'review'] as WorkCenterStage[] },
+    { key: 'working' as const, label: 'ระบบกำลังทำ', value: counts.working, tone: 'text-ink', bar: 'bg-ink/40', ring: 'ring-ink/30', stages: ['working'] as WorkCenterStage[] },
+    { key: 'completed' as const, label: 'เสร็จ', value: counts.completed, tone: 'text-emerald-700', bar: 'bg-emerald-600', ring: 'ring-emerald-400', stages: ['completed'] as WorkCenterStage[] },
   ];
+
+  const activeStat = STAT.find((s) => s.key === filter);
+  const filtered = activeStat ? sorted.filter((item) => activeStat.stages.includes(item.stage)) : [];
 
   return (
     <div className="space-y-6">
@@ -390,41 +436,60 @@ export function WorkCenter({ items, connectors, facebookAccounts }: {
 
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
         {STAT.map((s) => (
-          <div key={s.label} className="card card-hover relative overflow-hidden px-5 py-4">
+          <button
+            key={s.key}
+            type="button"
+            onClick={() => setFilter((cur) => (cur === s.key ? null : s.key))}
+            className={`card card-hover relative overflow-hidden px-5 py-4 text-left ${filter === s.key ? `ring-2 ${s.ring}` : ''}`}
+            aria-pressed={filter === s.key}
+          >
             <span className={`absolute left-0 top-0 h-full w-1 ${s.value > 0 ? s.bar : 'bg-transparent'}`} />
-            <div className="text-xs text-subtle">{s.label}</div>
+            <div className="flex items-center justify-between text-xs text-subtle">
+              <span>{s.label}</span>
+              <span className="opacity-50">{filter === s.key ? 'กำลังดู' : 'กดดู'}</span>
+            </div>
             <div className={`mt-1.5 text-[30px] font-semibold leading-none tabular-nums ${s.value > 0 ? s.tone : 'text-subtle/40'}`}>{s.value}</div>
-          </div>
+          </button>
         ))}
       </div>
 
-      {active.length === 0 ? (
-        <div className="card px-5 py-16 text-center text-sm text-subtle">ไม่มีงานค้าง — ทุกอย่างเรียบร้อย</div>
-      ) : (
+      {filter ? (
+        /* โหมดกรอง: โชว์เฉพาะกลุ่มที่กด */
         <div className="space-y-3">
-          {active.map((item) => (
-            <WorkItemCard key={item.id} item={item} connectors={connectors} facebookAccounts={facebookAccounts} />
-          ))}
+          <div className="flex items-center justify-between">
+            <div className="text-sm font-medium">{activeStat?.label} · {filtered.length} งาน</div>
+            <button type="button" onClick={() => setFilter(null)} className="text-xs text-accent hover:underline">← กลับหน้ารวม</button>
+          </div>
+          {filtered.length === 0 ? (
+            <div className="card px-5 py-12 text-center text-sm text-subtle">ไม่มีงานในกลุ่มนี้</div>
+          ) : (
+            filtered.map((item) => (
+              <WorkItemCard key={item.id} item={item} connectors={connectors} facebookAccounts={facebookAccounts} />
+            ))
+          )}
         </div>
-      )}
-
-      {done.length > 0 && (
-        <div>
-          <button
-            type="button"
-            onClick={() => setShowDone((v) => !v)}
-            className="eyebrow inline-flex items-center gap-1.5 hover:text-ink"
-          >
-            <span className="text-[9px]">{showDone ? '▼' : '▶'}</span> งานที่เสร็จแล้ว · {done.length}
-          </button>
-          {showDone && (
-            <div className="mt-3 space-y-3">
-              {done.map((item) => (
+      ) : (
+        /* โหมดปกติ: งานค้างเรียงตามด่วน + งานเสร็จยุบไว้ */
+        <>
+          {active.length === 0 ? (
+            <div className="card px-5 py-16 text-center text-sm text-subtle">ไม่มีงานค้าง — ทุกอย่างเรียบร้อย</div>
+          ) : (
+            <div className="space-y-3">
+              {active.map((item) => (
                 <WorkItemCard key={item.id} item={item} connectors={connectors} facebookAccounts={facebookAccounts} />
               ))}
             </div>
           )}
-        </div>
+          {done.length > 0 && (
+            <button
+              type="button"
+              onClick={() => setFilter('completed')}
+              className="eyebrow inline-flex items-center gap-1.5 hover:text-ink"
+            >
+              <span className="text-[9px]">▶</span> ดูงานที่เสร็จแล้ว · {done.length}
+            </button>
+          )}
+        </>
       )}
     </div>
   );

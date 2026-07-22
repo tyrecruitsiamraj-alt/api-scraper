@@ -35,6 +35,7 @@ import {
   setTaskEnabled,
   approveScrapeTaskResult,
   setSoRecruitRequestStatus,
+  rejectSoRecruitRequest,
   createPostingGroup,
   deletePostingGroup,
   setAccountGroups,
@@ -225,6 +226,16 @@ export async function startCampaignAction(formData: FormData) {
       kickWorker(); // drain คิวทันที (บนเครื่องที่รัน worker)
     }
   }
+  revalidatePath('/orchestrator/imports');
+  revalidatePath('/orchestrator');
+}
+
+/** ตีกลับใบขอจาก So Recruit (ยังไม่รับงาน) พร้อมเหตุผล — เขียนกลับให้ผู้ขอเห็นว่าขาดอะไร. */
+export async function rejectRequestAction(formData: FormData) {
+  await requireSession();
+  const requestNo = String(formData.get('requestNo') ?? '').trim();
+  const reason = String(formData.get('reason') ?? '').trim() || null;
+  if (requestNo) await rejectSoRecruitRequest(requestNo, reason);
   revalidatePath('/orchestrator/imports');
   revalidatePath('/orchestrator');
 }
