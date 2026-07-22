@@ -1,6 +1,7 @@
 import { query } from '../db/pool.js';
-import { generateContent } from './content-gen.js';
+import { generateContent, generatePosterFields } from './content-gen.js';
 import { generateImage } from './ai-image.js';
+import { renderPoster } from './poster.js';
 
 /**
  * สร้างร่างคอนเทนต์ 1 version ให้ campaign หนึ่ง (งานเบื้องหลังของ work_queue
@@ -54,7 +55,23 @@ export async function generateDraftForCampaign(campaignId) {
   }
 
   // รูปเป็น optional — ไม่มี OPENAI_API_KEY ก็ยังบันทึก draft (caption/brief) ได้
-  const image = await generateImage({ prompt: content.imagePrompt }).catch(() => null);
+  // ลำดับ: (1) รูปคนพื้นหลังใส → (2) ประกอบโปสเตอร์ SO WORK! (ตัวหนังสือไทยคมชัด) →
+  // ถ้าโปสเตอร์ทำไม่ได้ ใช้รูปคน/รูปเดิมแทน — คนอนุมัติเห็นรูปจริงบนศูนย์งานก่อนกดเสมอ
+  let image = null;
+  const [person, posterFields] = await Promise.all([
+    generateImage({ prompt: content.imagePrompt, transparent: true }).catch(() => null),
+    generatePosterFields({
+      title: c.title, positions: c.positions, province: c.province,
+      qty: c.qty, remaining_qty: c.remaining_qty, snapshot: c.request_snapshot ?? {},
+    }).catch(() => null),
+  ]);
+  if (posterFields) {
+    const contactLine = process.env.CONTENT_CONTACT_LINE || '';
+    const personUri = person ? `data:${person.mime};base64,${person.bytes.toString('base64')}` : null;
+    image = await renderPoster({ ...posterFields, contactLine }, personUri).catch(() => null);
+    if (image) console.log(`  [draft] โปสเตอร์ SO WORK! สำเร็จ (${Math.round(image.bytes.length / 1024)} KB${person ? ' + รูปคน AI' : ''})`);
+  }
+  if (!image) image = person; // fallback: อย่างน้อยได้รูปคน (หรือ null = ไม่มีรูป)
 
   const [{ v: version }] = (
     await query(`SELECT COALESCE(MAX(version), 0) + 1 AS v FROM campaign_contents WHERE campaign_id = $1`, [campaignId])

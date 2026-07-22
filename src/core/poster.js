@@ -69,10 +69,10 @@ function buildHtml(f = {}, personDataUri = null) {
       <div style="margin-top:22px;display:flex;gap:12px;flex-wrap:wrap;">${benefitHtml}</div>
     </div>
 
-    <div style="position:absolute;left:56px;right:56px;bottom:40px;background:#f7f7f8;border:1px solid #e6e6eb;border-radius:22px;padding:22px 38px;display:flex;align-items:center;justify-content:space-between;">
+    ${contactLine ? `<div style="position:absolute;left:56px;right:56px;bottom:40px;background:#f7f7f8;border:1px solid #e6e6eb;border-radius:22px;padding:22px 38px;display:flex;align-items:center;justify-content:space-between;">
       <div style="font-size:25px;color:#6e6e73;">สนใจสมัคร ทักเลย</div>
       <div style="display:flex;align-items:center;gap:14px;font-weight:600;font-size:32px;color:#1d1d1f;"><span style="background:#06c755;color:#fff;font-size:21px;padding:6px 15px;border-radius:10px;">LINE</span> ${contactLine}</div>
-    </div>
+    </div>` : ''}
   </div>
   </body></html>`;
 }

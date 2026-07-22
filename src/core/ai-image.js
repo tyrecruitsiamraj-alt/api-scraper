@@ -11,10 +11,12 @@ import { envString } from '../config.js';
  */
 
 /** OpenAI Images API (gpt-image-1) — คืน { bytes, mime } หรือ null. */
-async function openaiAdapter({ prompt, apiKey }) {
+async function openaiAdapter({ prompt, apiKey, transparent }) {
   const model = envString('CONTENT_IMAGE_MODEL', 'gpt-image-1');
   const size = envString('CONTENT_IMAGE_SIZE', '1024x1024');
   const payload = { model, prompt, size, n: 1 };
+  // โหมดรูปคน diecut สำหรับวางบนโปสเตอร์ (gpt-image-1 เท่านั้น; dall-e ไม่รองรับ)
+  if (transparent && /^gpt-image/i.test(model)) payload.background = 'transparent';
   // dall-e-* คืน URL เป็น default → ต้องขอ b64_json ชัด ๆ; gpt-image-1 คืน b64 เสมอ (และไม่รับ param นี้)
   if (/^dall-e/i.test(model)) payload.response_format = 'b64_json';
   const res = await fetch('https://api.openai.com/v1/images/generations', {
@@ -37,10 +39,11 @@ const ADAPTERS = {
 };
 
 /**
- * @param {{ prompt: string }} args
+ * @param {{ prompt: string, transparent?: boolean }} args
+ *   transparent = รูปคนพื้นหลังใส (diecut) สำหรับประกอบโปสเตอร์
  * @returns {Promise<null | { bytes: Buffer, mime: string, provider: string, model: string }>}
  */
-export async function generateImage({ prompt } = {}) {
+export async function generateImage({ prompt, transparent = false } = {}) {
   const p = String(prompt ?? '').trim();
   if (!p) return null;
 
@@ -54,7 +57,7 @@ export async function generateImage({ prompt } = {}) {
   if (!apiKey) return null; // feature off — ไม่มี key
 
   try {
-    const r = await adapter.run({ prompt: p, apiKey });
+    const r = await adapter.run({ prompt: p, apiKey, transparent });
     if (!r?.bytes?.length) return null;
     return { ...r, provider: providerName, model: envString('CONTENT_IMAGE_MODEL', 'gpt-image-1') };
   } catch (e) {
