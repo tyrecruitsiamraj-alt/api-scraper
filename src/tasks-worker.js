@@ -21,6 +21,7 @@ import {
   setTaskAdjacentPlan,
   setTaskPhase,
   setTaskProgressTarget,
+  topTrendKeywords,
   touchTask,
 } from './db/repositories.js';
 import { envInt, loadRuntime } from './config.js';
@@ -77,6 +78,16 @@ export async function runTask(t, runtime) {
     }
     if (dp?.positions?.length) {
       descPositions = dp.positions;
+      // การันตี volume: เติม "คำมาแรง" ของ Family นี้จาก job_trends (seo-update รายสัปดาห์)
+      // ต่อท้ายเสมอ — ต่อให้ AI ออกคำเฉพาะเกินไป ก็ยังมีคำสามัญที่พิสูจน์แล้วว่าค้นเจอ
+      try {
+        const trends = await topTrendKeywords(dp.family, 4);
+        const merged = [...descPositions, ...trends.filter((k) => !descPositions.includes(k))];
+        if (merged.length > descPositions.length) {
+          console.log(`  📈 เติมคำมาแรงจาก job_trends (${dp.family}): ${merged.slice(descPositions.length).join(', ')}`);
+          descPositions = merged;
+        }
+      } catch { /* fail-soft */ }
       criteria.position = descPositions[0]; // ตำแหน่งแรก (ตรงสุด) = base scrape
       console.log(`  🧭 ${dp.familyLabel || ''} → [${descPositions.join(', ')}]`);
       try {

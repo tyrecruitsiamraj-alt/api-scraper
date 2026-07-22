@@ -310,6 +310,24 @@ export async function fillCandidateContacts(id, { email, phone, line_id }) {
 // ---------------------------------------------------------------------------
 // Scrape runs
 // ---------------------------------------------------------------------------
+/**
+ * คำค้นมาแรงของ Job Family จากตาราง job_trends (schema-012, อัปเดตโดย seo-update)
+ * ใช้เติมท้ายชุดคำค้นโหมดเนื้องาน — การันตีว่ามีคำสามัญ volume สูงเสมอ ไม่พึ่งดวงโมเดล.
+ * fail-soft: ตารางไม่มี/ว่าง = [] (งานหลักเดินต่อ)
+ */
+export async function topTrendKeywords(family, limit = 4) {
+  if (!family) return [];
+  try {
+    const { rows } = await query(
+      `SELECT keyword FROM job_trends WHERE family = $1 ORDER BY volume DESC, captured_at DESC LIMIT $2`,
+      [family, limit],
+    );
+    return rows.map((r) => r.keyword);
+  } catch {
+    return [];
+  }
+}
+
 export async function startRun(connectorId, platform, criteria, taskId = null) {
   const { rows } = await query(
     `INSERT INTO scrape_runs (connector_id, platform, criteria, task_id) VALUES ($1,$2,$3,$4) RETURNING id`,
