@@ -73,10 +73,15 @@ async function callApi(pathname, body) {
   return data;
 }
 
-/** งานโพสต์หนึ่งงานนานได้ — default 8 ชม. (ต้อง ≥ Playwright timeout; ดู PLAYWRIGHT_GLOBAL_TIMEOUT_MS) */
+/**
+ * งานโพสต์หนึ่งงานนานได้ — default 25 นาที.
+ * ลดจาก 8 ชม. เพราะงานที่ค้าง (login checkpoint/session เพี้ยน) จะจับ lock บัญชีไว้นานเกิน
+ * บล็อกงานอื่นของบัญชีเดียวกันทั้งคิว. โพสต์จริง (login+human delay+หลายกลุ่ม) ปกติ <15 นาที
+ * ต่อบัญชี; เผื่อไว้ 25. งานหลายกลุ่ม/บัญชีช้าเป็นพิเศษ ปรับขึ้นด้วย WORKER_POST_JOB_MAX_MS (ms)
+ */
 const JOB_MAX_MS = Math.min(
   12 * 60 * 60 * 1000,
-  Math.max(10 * 60 * 1000, Number(process.env.WORKER_POST_JOB_MAX_MS) || 8 * 60 * 60 * 1000)
+  Math.max(5 * 60 * 1000, Number(process.env.WORKER_POST_JOB_MAX_MS) || 25 * 60 * 1000)
 );
 
 function runPlaywrightForJob(job) {

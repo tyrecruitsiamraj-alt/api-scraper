@@ -106,6 +106,24 @@ test('Dynamic Post: รันโพสต์ตาม Assignments', async ({ pag
     groupMap.set(g.id, { fb_group_id: g.fb_group_id, sheet_url: g.sheet_url });
   }
 
+  /**
+   * เช็คเร็วก่อน login: assignment ที่จะโพสต์ resolve "กลุ่มปลายทาง" ได้อย่างน้อย 1 ไหม
+   * (กลุ่มจาก assignment เอง ถ้าว่างใช้กลุ่มของ user). ถ้าไม่มีเลย = หยุดทันที
+   * ไม่ต้องเปิด Chrome/login ค้างรอ + ให้ข้อความบอกวิธีแก้ชัด (แทนที่จะไปตายท้ายลูปด้วย error ยาว ๆ)
+   */
+  const resolveGroupIds = (a: { user_id?: string; group_ids?: unknown }): string[] => {
+    const owner = config.users.find((u) => u.id === String(a.user_id || ''));
+    const raw = (Array.isArray(a.group_ids) && a.group_ids.length > 0
+      ? a.group_ids
+      : ((owner as { group_ids?: unknown })?.group_ids ?? [])) as unknown[];
+    return (Array.isArray(raw) ? raw : []).map(String).filter((gid) => groupMap.has(gid));
+  };
+  if (!assignments.some((a) => resolveGroupIds(a).length > 0)) {
+    throw new Error(
+      'ยังไม่ได้เลือกกลุ่มโพสต์ให้บัญชีนี้ — ไปที่ ตั้งค่า › กลุ่มโพสต์ แล้วติ๊กกลุ่มให้บัญชี จากนั้นลองโพสต์ใหม่'
+    );
+  }
+
   /** จัดกลุ่ม assignment ตามบัญชี (คงลำดับสร้าง) — คิวจาก server เป็น 1 งาน/บัญชีอยู่แล้ว แต่รองรับหลายบัญชีใน run เดียวด้วย */
   const assignmentsByUser = new Map<string, typeof assignments>();
   for (const a of assignments) {
