@@ -875,6 +875,8 @@ export type PostingRequest = {
   erp_province: string | null;
   erp_qty: number | null;
   erp_remaining: number | null;
+  /** ข้อมูลใบขอที่ So Recruit แนบมา (migration 055 ฝั่ง jarvis) — ใช้ทำ checklist + โปสเตอร์ */
+  job_snapshot: Record<string, unknown> | null;
 };
 
 export async function listSoRecruitPostingRequests(): Promise<PostingRequest[]> {
@@ -882,10 +884,14 @@ export async function listSoRecruitPostingRequests(): Promise<PostingRequest[]> 
     return await q<PostingRequest>(
       `SELECT r.id, r.request_no, r.job_id, r.reason, r.notes, r.requested_by_name, r.created_at,
               COALESCE(NULLIF(to_jsonb(r)->>'request_type', ''), 'content') AS request_type,
-              COALESCE(e.title, NULLIF(to_jsonb(j)->>'job_description_code_1', ''),
+              (to_jsonb(r)->'job_snapshot') AS job_snapshot,
+              COALESCE(NULLIF(to_jsonb(r)->'job_snapshot'->>'position', ''),
+                       e.title, NULLIF(to_jsonb(j)->>'job_description_code_1', ''),
                        NULLIF(to_jsonb(j)->>'staff_title_name', ''), j.job_type, j.unit_name) AS erp_title,
-              COALESCE(e.province, j.location_address) AS erp_province,
-              e.qty AS erp_qty, e.remaining_qty AS erp_remaining
+              COALESCE(NULLIF(to_jsonb(r)->'job_snapshot'->>'location', ''),
+                       e.province, j.location_address) AS erp_province,
+              COALESCE((to_jsonb(r)->'job_snapshot'->>'qty')::int, e.qty) AS erp_qty,
+              e.remaining_qty AS erp_remaining
          FROM "jarvis_rm".job_posting_requests r
          LEFT JOIN "jarvis_rm".jobs j ON j.id::text = r.job_id
          LEFT JOIN recruit_campaigns c ON c.request_no = r.request_no
@@ -1124,6 +1130,7 @@ export async function createCampaignFromRequest(requestNo: string, createdBy: st
       pr = await q<PostingRequest>(
         `SELECT id, request_no, job_id, reason, notes, requested_by_name, created_at,
                 COALESCE(NULLIF(to_jsonb(job_posting_requests)->>'request_type', ''), 'content') AS request_type,
+                (to_jsonb(job_posting_requests)->'job_snapshot') AS job_snapshot,
                 NULL::text AS erp_title, NULL::text AS erp_province, NULL::int AS erp_qty, NULL::int AS erp_remaining
            FROM "jarvis_rm".job_posting_requests WHERE request_no = $1`,
         [requestNo],
@@ -1135,8 +1142,26 @@ export async function createCampaignFromRequest(requestNo: string, createdBy: st
     const p = pr[0];
     if (p.request_type !== 'content') throw new Error(`คำขอ ${requestNo} ไม่ใช่ประเภท Content`);
     fromSoRecruit = true;
-    snapshot = { source: 'so_recruit', job_id: p.job_id, reason: p.reason, requested_by_name: p.requested_by_name };
-    title = p.request_no; // ยังไม่มีชื่อตำแหน่ง (อยู่ MSSQL) — ใช้เลขใบขอไปก่อน
+    // ข้อมูลที่ So Recruit แนบมากับคำขอ (job_snapshot) — ตำแหน่ง/พื้นที่/รายได้ ฯลฯ
+    const js = (p.job_snapshot ?? {}) as Record<string, unknown>;
+    const s = (k: string) => String(js[k] ?? '').trim();
+    const position = s('position');
+    title = position || p.request_no; // มีชื่อตำแหน่งจริง = ใช้เลย, ไม่มี = เลขใบขอ
+    province = s('location') || null;
+    qty = Number(js.qty) || null;
+    // แปลงเป็นรูปที่ poster/caption ใช้ (campaignContext อ่าน request_name/work_addr/detail)
+    const detail = [
+      s('income') ? `รายได้รวม ${s('income')}` : '',
+      s('work_schedule') ? `เวลางาน ${s('work_schedule')}` : '',
+      s('gender') ? `เพศ ${s('gender')}` : '',
+      js.age_min || js.age_max ? `อายุ ${js.age_min ?? ''}-${js.age_max ?? ''} ปี` : '',
+      s('unit_name') ? `หน่วยงาน ${s('unit_name')}` : '',
+      s('note'),
+    ].filter(Boolean).join(' · ');
+    snapshot = {
+      source: 'so_recruit', job_id: p.job_id, reason: p.reason, requested_by_name: p.requested_by_name,
+      ...js, request_name: position || undefined, work_addr: s('location') || undefined, detail: detail || undefined,
+    };
   }
 
   const ins = await q<{ id: string }>(

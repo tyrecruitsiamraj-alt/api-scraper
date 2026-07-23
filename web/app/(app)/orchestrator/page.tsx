@@ -95,20 +95,33 @@ export default async function OrchestratorPage() {
   const contentByCampaign = new Map(pending.map((content) => [content.campaign_id, content]));
   const postByCampaign = new Map(postStates.map((state) => [state.campaign_id, state]));
   const items: WorkCenterItem[] = [
-    ...reqs.map((request): WorkCenterItem => ({
-      id: `request:${request.id}`,
-      kind: request.request_type,
-      stage: 'intake',
-      title: request.erp_title || request.request_no,
-      requestNo: request.request_no,
-      detail: request.reason || request.notes,
-      requester: request.requested_by_name,
-      connector: null,
-      statusLabel: 'รออนุมัติรับงาน',
-      createdAt: request.created_at,
-      href: '/orchestrator/imports',
-      steps: intakeSteps(request.request_type),
-    })),
+    ...reqs.map((request): WorkCenterItem => {
+      // ใบตรวจข้อมูล: ช่องไหนมี/ขาด — คนตรวจเห็นก่อนกดรับ/ตีกลับ (ขาดเยอะ = ตีกลับพร้อมบอกได้เลย)
+      const js = (request.job_snapshot ?? {}) as Record<string, unknown>;
+      const has = (v: unknown) => String(v ?? '').trim() !== '' && v !== null;
+      const checklist = [
+        { label: 'ตำแหน่ง', ok: has(js.position) || has(request.erp_title && request.erp_title !== request.request_no ? request.erp_title : '') },
+        { label: 'พื้นที่', ok: has(js.location) || has(request.erp_province) },
+        { label: 'รายได้', ok: has(js.income) },
+        { label: 'จำนวน', ok: has(js.qty) || has(request.erp_qty) },
+        { label: 'เวลางาน', ok: has(js.work_schedule) },
+      ];
+      return {
+        id: `request:${request.id}`,
+        kind: request.request_type,
+        stage: 'intake',
+        title: request.erp_title || request.request_no,
+        requestNo: request.request_no,
+        detail: request.reason || request.notes,
+        requester: request.requested_by_name,
+        connector: null,
+        statusLabel: 'รออนุมัติรับงาน',
+        createdAt: request.created_at,
+        href: '/orchestrator/imports',
+        steps: intakeSteps(request.request_type),
+        checklist,
+      };
+    }),
     ...campaigns.map((campaign): WorkCenterItem => {
       const content = contentByCampaign.get(campaign.id);
       const post = postByCampaign.get(campaign.id);

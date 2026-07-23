@@ -39,6 +39,8 @@ export type WorkCenterItem = {
   campaignId?: string | null;
   nextAction?: 'retry_draft' | 'retry_post' | 'measure' | null;
   steps?: Step[];
+  /** ใบตรวจข้อมูลใบขอ (เฉพาะ intake) — ช่องไหนมี ✓ / ขาด ✗ ให้ตัดสินใจรับ/ตีกลับ */
+  checklist?: { label: string; ok: boolean }[];
 };
 
 type Option = { id: string; label: string };
@@ -345,6 +347,25 @@ function WorkItemCard({ item, connectors, facebookAccounts }: {
       </div>
 
       {item.steps && item.steps.length > 0 && <Stepper steps={item.steps} />}
+
+      {item.checklist && item.checklist.length > 0 && (
+        <div className="mt-4 flex flex-wrap items-center gap-1.5">
+          <span className="mr-1 text-[11px] font-medium text-subtle">ข้อมูลใบขอ:</span>
+          {item.checklist.map((c) => (
+            <span
+              key={c.label}
+              className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-medium ${
+                c.ok ? 'bg-emerald-50 text-emerald-700' : 'bg-red-50 text-red-600'
+              }`}
+            >
+              {c.ok ? '✓' : '✗'} {c.label}
+            </span>
+          ))}
+          {item.checklist.some((c) => !c.ok) && (
+            <span className="text-[11px] text-subtle">— ขาดเยอะ ตีกลับพร้อมบอกได้เลย</span>
+          )}
+        </div>
+      )}
 
       {(showImage || item.detail) && (
         <div className="mt-4 flex gap-3">
