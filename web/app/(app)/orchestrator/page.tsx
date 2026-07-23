@@ -6,6 +6,7 @@ import {
   listConnectorOptions,
   listTasks,
   listCampaignPostQueueStates,
+  listCampaignPendingAdminCounts,
 } from '@/lib/repo';
 import { AutoRefresh } from '@/components/AutoRefresh';
 import { WorkerStatus } from '@/components/WorkerStatus';
@@ -83,7 +84,7 @@ function intakeSteps(kind: 'content' | 'scraping'): Step[] {
 }
 
 export default async function OrchestratorPage() {
-  const [reqs, campaigns, pending, fb, connectors, tasks, postStates] = await Promise.all([
+  const [reqs, campaigns, pending, fb, connectors, tasks, postStates, pendingAdmin] = await Promise.all([
     listSoRecruitPostingRequests(),
     listCampaigns(),
     listPendingApprovalContents(),
@@ -91,9 +92,11 @@ export default async function OrchestratorPage() {
     listConnectorOptions(),
     listTasks(),
     listCampaignPostQueueStates(),
+    listCampaignPendingAdminCounts(),
   ]);
   const contentByCampaign = new Map(pending.map((content) => [content.campaign_id, content]));
   const postByCampaign = new Map(postStates.map((state) => [state.campaign_id, state]));
+  const pendingAdminByCampaign = new Map(pendingAdmin.map((x) => [x.campaign_id, x.pending]));
   const items: WorkCenterItem[] = [
     ...reqs.map((request): WorkCenterItem => {
       // ใบตรวจข้อมูล: ช่องไหนมี/ขาด — คนตรวจเห็นก่อนกดรับ/ตีกลับ (ขาดเยอะ = ตีกลับพร้อมบอกได้เลย)
@@ -127,7 +130,10 @@ export default async function OrchestratorPage() {
       const post = postByCampaign.get(campaign.id);
       const postFailed = post?.status === 'failed' || post?.status === 'cancelled';
       const canMeasure = post?.status === 'completed' && ['posting', 'measuring'].includes(campaign.status);
-      const statusLabel = postFailed
+      // โพสต์ลงกลุ่มแล้วแต่แอดมินกลุ่มยังไม่ปล่อย — บอกตรง ๆ จะได้ไม่รอเก้อ
+      const adminPending = pendingAdminByCampaign.get(campaign.id) ?? 0;
+      const adminSuffix = adminPending > 0 ? ` · รอแอดมินกลุ่มอนุมัติ ${adminPending} โพสต์` : '';
+      const statusLabel = (postFailed
         ? (post.status === 'cancelled' ? 'คิวโพสต์ถูกยกเลิก' : 'โพสต์ไม่สำเร็จ')
         : post?.status === 'queued'
           ? 'รอคิวโพสต์'
@@ -135,7 +141,7 @@ export default async function OrchestratorPage() {
             ? 'กำลังโพสต์'
             : canMeasure
               ? (campaign.status === 'measuring' ? 'รอข้อมูล Engagement' : 'โพสต์แล้ว · รอตรวจผล')
-              : STATUS_TH[campaign.status] || campaign.status;
+              : STATUS_TH[campaign.status] || campaign.status) + adminSuffix;
       return {
         id: `content:${campaign.id}`,
         kind: 'content',

@@ -1641,3 +1641,18 @@ export async function listBestPostTimes(limit = 3): Promise<BestPostTime[]> {
     return [];
   }
 }
+
+/** จำนวนโพสต์ที่ค้าง "รอแอดมินกลุ่มอนุมัติ" ต่อ campaign (จาก post_logs.post_status ของ autopost) */
+export async function listCampaignPendingAdminCounts(): Promise<{ campaign_id: string; pending: number }[]> {
+  try {
+    return await q<{ campaign_id: string; pending: number }>(
+      `SELECT cp.campaign_id, count(*)::int AS pending
+         FROM campaign_posts cp
+         JOIN ${AP}.post_logs pl ON pl.job_id = cp.job_ref
+        WHERE pl.post_status = 'รออนุมัติ'
+        GROUP BY cp.campaign_id`,
+    );
+  } catch {
+    return [];
+  }
+}

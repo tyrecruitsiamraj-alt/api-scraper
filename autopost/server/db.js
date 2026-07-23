@@ -2053,6 +2053,7 @@ async function buildDailyPostPlan(userId, opts = {}) {
             COUNT(*)::int AS posts,
             COUNT(*) FILTER (WHERE customer_phone IS NOT NULL AND customer_phone <> '')::int AS phones,
             COALESCE(SUM(comment_count), 0)::int AS comments,
+            COUNT(*) FILTER (WHERE post_status = 'รออนุมัติ')::int AS pendings,
             MAX(created_at) AS last_posted
      FROM post_logs
      WHERE job_id = ANY($1)
@@ -2080,21 +2081,31 @@ async function buildDailyPostPlan(userId, opts = {}) {
       continue;
     }
     const score = Number(s.phones) * 3 + Number(s.comments);
+    // กลุ่มดองโพสต์: โพสต์ ≥2 ครั้งแล้วค้าง "รออนุมัติ" เกิน 70% = แอดมินกลุ่มไม่ค่อยปล่อย
+    // → ดันไปท้ายคิว (ไม่ตัดทิ้ง เผื่อแอดมินกลับมาปล่อย) ไม่ให้เปลืองโควต้าวันนี้
+    const pendings = Number(s.pendings || 0);
+    const pendingProne = Number(s.posts) >= 2 && pendings / Number(s.posts) >= 0.7;
     const item = {
       ...c,
-      tier: score > 0 ? 'proven' : 'quiet',
+      tier: pendingProne ? 'quiet' : score > 0 ? 'proven' : 'quiet',
       score,
       posts: Number(s.posts),
       phones: Number(s.phones),
       comments: Number(s.comments),
+      pendings,
+      pending_prone: pendingProne,
       last_posted: s.last_posted,
     };
-    (score > 0 ? tierProven : tierQuiet).push(item);
+    (item.tier === 'proven' ? tierProven : tierQuiet).push(item);
   }
   tierProven.sort(
     (a, b) => b.score - a.score || new Date(a.last_posted) - new Date(b.last_posted)
   );
-  tierQuiet.sort((a, b) => new Date(a.last_posted) - new Date(b.last_posted));
+  // quiet: คู่ที่ "ดองโพสต์" ไปท้ายสุดเสมอ แล้วค่อยเรียงตามที่ห่างการโพสต์ล่าสุด
+  tierQuiet.sort(
+    (a, b) => Number(a.pending_prone || false) - Number(b.pending_prone || false)
+      || new Date(a.last_posted) - new Date(b.last_posted)
+  );
 
   const exploreShare = Math.min(1, Math.max(0, Number(process.env.POST_EXPLORE_SHARE) || 0.2));
   const exploreSlots = Math.min(tierExplore.length, Math.ceil(budget * exploreShare));
