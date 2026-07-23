@@ -129,7 +129,28 @@ export async function measureCampaign(campaignId) {
   }
 
   if (measured > 0 && !anyPending) {
-    // วัดครบแล้วแต่ต่ำทั้งหมด → คิดใหม่ (regen version ใหม่)
+    // วัดครบแล้วแต่ต่ำทั้งหมด → บันทึก "แนวที่ไม่เวิร์ค" ก่อน แล้วคิดใหม่ (regen version ใหม่)
+    if (bestContentId) {
+      // bestContentId = เวอร์ชันที่คะแนนดีที่สุดในบรรดาที่ต่ำ = ตัวแทนแนวที่โพสต์แล้วคนไม่สนใจ
+      // fail-soft: ตาราง content_losing_patterns เพิ่งมาใน schema-014 — ถ้ายังไม่ migrate ก็ข้าม
+      await query(
+        `INSERT INTO content_losing_patterns
+           (position_family, platform, sample_content_id, avg_engagement, engagement_score, campaign_id, reason)
+         VALUES ($1, 'facebook', $2, $3, $3, $4, $5)
+         ON CONFLICT (sample_content_id) WHERE sample_content_id IS NOT NULL DO UPDATE SET
+           avg_engagement = EXCLUDED.avg_engagement, engagement_score = EXCLUDED.engagement_score,
+           reason = EXCLUDED.reason`,
+        [
+          campaign.title || campaign.request_no || null,
+          bestContentId,
+          bestScore,
+          campaignId,
+          `คะแนน ${bestScore} ต่ำกว่าเกณฑ์ ${highScore}`,
+        ],
+      ).catch((e) => {
+        console.warn(`[measure] บันทึก losing pattern ไม่สำเร็จ (${campaignId}): ${e.message}`);
+      });
+    }
     await query(
       `UPDATE recruit_campaigns SET status='low_engagement', status_note=$2, updated_at=now() WHERE id=$1`,
       [campaignId, `คนสนใจน้อย (คะแนนสูงสุด ${bestScore}) — ให้ AI คิดใหม่`],

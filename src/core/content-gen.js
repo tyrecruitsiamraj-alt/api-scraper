@@ -83,9 +83,11 @@ const POSTER_SYSTEM = `คุณคือคนสรุปใบขอกำล
 /**
  * @param {{ title?:string, positions?:string, province?:string, qty?:number,
  *   remaining_qty?:number, snapshot?:Record<string,any>,
- *   winningExamples?: string[] }} campaign
+ *   winningExamples?: string[], losingExamples?: string[] }} campaign
  *   winningExamples = แคปชันที่เคยได้ engagement สูง (จาก content_winning_patterns)
  *   ใส่เป็นแรงบันดาลใจให้ AI คิดตามแนวที่เคยเวิร์ค — ไม่มีก็ gen ได้ปกติ
+ *   losingExamples = แคปชันที่เคยได้ engagement ต่ำ (จาก content_losing_patterns)
+ *   ใส่เป็นตัวอย่าง "แนวที่คนไม่สนใจ — ห้ามทำซ้ำ" — ไม่มีก็ gen ได้ปกติ
  * @returns {Promise<null | { caption:string, videoBrief:string, imagePrompt:string, model:string }>}
  */
 export async function generateContent(campaign = {}) {
@@ -117,11 +119,21 @@ export async function generateContent(campaign = {}) {
       wins.map((w, i) => `ตัวอย่าง ${i + 1}:\n${w}`).join('\n---\n')
     : '';
 
+  // แนวที่ "ไม่เวิร์ค" (คนสนใจน้อย) — เตือน AI ให้เลี่ยงโทน/โครงสร้างแบบนี้
+  const loses = (campaign.losingExamples ?? [])
+    .map((s) => String(s ?? '').trim())
+    .filter(Boolean)
+    .slice(0, 2);
+  const losesBlock = loses.length
+    ? `\n\n⚠️ แคปชันที่เคยได้ผลไม่ดี (คนไม่สนใจ) — ห้ามเขียนแนวนี้ซ้ำ ให้เปลี่ยนมุม/พาดหัว/จุดขายให้ต่างออกไป:\n` +
+      loses.map((w, i) => `ตัวอย่างที่ไม่ควรทำ ${i + 1}:\n${w}`).join('\n---\n')
+    : '';
+
   // A/B: บอกแนวการเขียนของเวอร์ชันนี้ (เช่น "ตรงไปตรงมา" vs "เน้นสวัสดิการ")
   const styleBlock = String(campaign.styleHint ?? '').trim()
     ? `\n\nแนวการเขียนของเวอร์ชันนี้ (บังคับ): ${String(campaign.styleHint).trim()}`
     : '';
-  const userMsg = `เขียนคอนเทนต์สรรหาสำหรับใบขอนี้:\n${ctx}${winsBlock}${styleBlock}`;
+  const userMsg = `เขียนคอนเทนต์สรรหาสำหรับใบขอนี้:\n${ctx}${winsBlock}${losesBlock}${styleBlock}`;
 
   // qwen/Ollama ตอบไม่นิ่งเป็นรอบ ๆ — ว่าง/พังให้ลองซ้ำสูงสุด 3 รอบ
   let out = null;

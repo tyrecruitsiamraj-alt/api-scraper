@@ -37,6 +37,19 @@ export async function generateDraftForCampaign(campaignId) {
     [String(c.title ?? '').trim()],
   ).then((r) => r.rows.map((x) => x.caption)).catch(() => []);
 
+  // แนวที่ "ไม่เวิร์ค" (คนสนใจน้อย): เอาแคปชันที่คะแนนต่ำสุดมาเตือน AI ให้เลี่ยง
+  // (ตำแหน่งใกล้เคียงก่อน แล้วคะแนนต่ำก่อน; ตาราง schema-014 ยังไม่ migrate = [] ไม่กระทบ gen)
+  const losingExamples = await query(
+    `SELECT cc.caption
+       FROM content_losing_patterns lp
+       JOIN campaign_contents cc ON cc.id = lp.sample_content_id
+      WHERE cc.caption IS NOT NULL AND TRIM(cc.caption) <> ''
+      ORDER BY (lp.position_family IS NOT NULL AND $1 <> '' AND lp.position_family ILIKE '%' || $1 || '%') DESC,
+               lp.engagement_score ASC NULLS LAST
+      LIMIT 2`,
+    [String(c.title ?? '').trim()],
+  ).then((r) => r.rows.map((x) => x.caption)).catch(() => []);
+
   const base = {
     title: c.title,
     positions: c.positions,
@@ -45,6 +58,7 @@ export async function generateDraftForCampaign(campaignId) {
     remaining_qty: c.remaining_qty,
     snapshot: c.request_snapshot ?? {},
     winningExamples,
+    losingExamples,
   };
 
   // A/B: 2 เวอร์ชันคนละแนว — คนอนุมัติเลือกอันที่ชอบ (ผลชนะถูกเก็บเข้า winning patterns ต่อ)
