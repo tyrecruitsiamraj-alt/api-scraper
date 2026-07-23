@@ -648,6 +648,132 @@ export async function autopostOverview(): Promise<AutopostOverview | null> {
   }
 }
 
+// ---------------------------------------------------------------------------
+// ผลลัพธ์ & Leads — เก็บเกี่ยวเบอร์จากคอมเมนต์ (อ่านจาก post_logs ฝั่ง autopost)
+// lead = เบอร์ใน customer_phone (ตัวเก็บคอมเมนต์ join ด้วย ', '); 1 โพสต์ได้หลายเบอร์
+// ตัวเก็บ dedupe เบอร์ข้ามโพสต์แล้ว (เก็บโพสต์ล่าสุดของเบอร์นั้น) → นับตรง ๆ ได้
+// ---------------------------------------------------------------------------
+// จำนวนเบอร์ใน 1 แถว post_logs — split ด้วย ',' (ครอบทั้ง ', ' ใหม่และ ',' เก่า)
+const LEAD_COUNT_SQL = `CASE WHEN NULLIF(TRIM(pl.customer_phone), '') IS NULL THEN 0
+  ELSE COALESCE(array_length(string_to_array(TRIM(pl.customer_phone), ','), 1), 0) END`;
+
+export type LeadResultsSummary = {
+  leads_total: number;
+  leads_today: number;
+  leads_7d: number;
+  posts_with_leads: number;
+  posts_total: number;
+  top_position: string | null;
+  top_position_leads: number;
+};
+
+/** สรุปภาพรวมผลลัพธ์ leads (การ์ดบนสุดของหน้าผลลัพธ์). guarded — null ถ้า schema ไม่พร้อม. */
+export async function leadResultsSummary(): Promise<LeadResultsSummary | null> {
+  try {
+    const [s] = await q<Omit<LeadResultsSummary, 'top_position' | 'top_position_leads'>>(
+      `SELECT
+         COALESCE(sum(${LEAD_COUNT_SQL}), 0)::int AS leads_total,
+         COALESCE(sum(${LEAD_COUNT_SQL}) FILTER (
+           WHERE (pl.created_at AT TIME ZONE 'Asia/Bangkok')::date = (now() AT TIME ZONE 'Asia/Bangkok')::date
+         ), 0)::int AS leads_today,
+         COALESCE(sum(${LEAD_COUNT_SQL}) FILTER (WHERE pl.created_at >= now() - interval '7 days'), 0)::int AS leads_7d,
+         count(*) FILTER (WHERE ${LEAD_COUNT_SQL} > 0)::int AS posts_with_leads,
+         count(*)::int AS posts_total
+       FROM ${AP}.post_logs pl`,
+    );
+    if (!s) return null;
+    const [tp] = await q<{ position: string; leads: number }>(
+      `SELECT COALESCE(NULLIF(TRIM(pl.job_title), ''), 'ไม่ระบุตำแหน่ง') AS position,
+              COALESCE(sum(${LEAD_COUNT_SQL}), 0)::int AS leads
+         FROM ${AP}.post_logs pl
+        GROUP BY 1 ORDER BY leads DESC NULLS LAST LIMIT 1`,
+    );
+    return {
+      ...s,
+      top_position: tp && tp.leads > 0 ? tp.position : null,
+      top_position_leads: tp?.leads ?? 0,
+    };
+  } catch {
+    return null;
+  }
+}
+
+export type LeadByPosition = { position: string; leads: number; posts: number; comments: number };
+
+/** leads แยกตามตำแหน่งงาน — บอกว่าประกาศตำแหน่งไหนดึงคนได้จริง. */
+export async function leadsByPosition(limit = 12): Promise<LeadByPosition[]> {
+  try {
+    return await q<LeadByPosition>(
+      `SELECT COALESCE(NULLIF(TRIM(pl.job_title), ''), 'ไม่ระบุตำแหน่ง') AS position,
+              COALESCE(sum(${LEAD_COUNT_SQL}), 0)::int AS leads,
+              count(*)::int AS posts,
+              COALESCE(sum(COALESCE(pl.comment_count, 0)), 0)::int AS comments
+         FROM ${AP}.post_logs pl
+        GROUP BY 1
+       HAVING COALESCE(sum(${LEAD_COUNT_SQL}), 0) > 0
+        ORDER BY leads DESC, posts DESC
+        LIMIT $1`,
+      [limit],
+    );
+  } catch {
+    return [];
+  }
+}
+
+export type LeadPostRow = {
+  id: string;
+  job_title: string | null;
+  group_name: string | null;
+  account: string | null;
+  post_link: string | null;
+  post_status: string | null;
+  comment_count: number;
+  reactions: number;
+  shares: number;
+  lead_count: number;
+  phones: string | null; // customer_phone ดิบ (คั่น ', ') — แยกเป็นชิปในหน้าจอ
+  created_at: string;
+};
+
+/** โพสต์ที่เก็บ lead ได้ เรียงเบอร์มากสุดก่อน — เบอร์พร้อมทักกลับ (ฐานของ Lead Responder). guarded. */
+export async function topLeadPosts(opts: { limit?: number; days?: number } = {}): Promise<LeadPostRow[]> {
+  const { limit = 60, days } = opts;
+  try {
+    // reactions/shares เป็น runtime migration ของ autopost — ensure ก่อนกัน query ล้มทั้งก้อน
+    await q(`ALTER TABLE ${AP}.post_logs ADD COLUMN IF NOT EXISTS reactions INT DEFAULT 0`);
+    await q(`ALTER TABLE ${AP}.post_logs ADD COLUMN IF NOT EXISTS shares INT DEFAULT 0`);
+    const params: unknown[] = [];
+    let filter = `WHERE ${LEAD_COUNT_SQL} > 0`;
+    if (days && days > 0) {
+      params.push(days);
+      filter += ` AND pl.created_at >= now() - ($${params.length}::text || ' days')::interval`;
+    }
+    params.push(limit);
+    return await q<LeadPostRow>(
+      `SELECT pl.id,
+              NULLIF(TRIM(pl.job_title), '') AS job_title,
+              NULLIF(TRIM(pl.group_name), '') AS group_name,
+              COALESCE(NULLIF(TRIM(u.name), ''), NULLIF(TRIM(pl.poster_name), '')) AS account,
+              pl.post_link,
+              pl.post_status,
+              COALESCE(pl.comment_count, 0) AS comment_count,
+              COALESCE(pl.reactions, 0) AS reactions,
+              COALESCE(pl.shares, 0) AS shares,
+              ${LEAD_COUNT_SQL} AS lead_count,
+              pl.customer_phone AS phones,
+              pl.created_at
+         FROM ${AP}.post_logs pl
+         LEFT JOIN ${AP}.users u ON u.id = pl.user_id
+        ${filter}
+        ORDER BY lead_count DESC, pl.created_at DESC
+        LIMIT $${params.length}`,
+      params,
+    );
+  } catch {
+    return [];
+  }
+}
+
 /** True when tasks are queued but no worker seems to be picking them up. */
 export async function hasStaleQueuedTasks(sec = 90) {
   const rows = await q<{ n: number }>(

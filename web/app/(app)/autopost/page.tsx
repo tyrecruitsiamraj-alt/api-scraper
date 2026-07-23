@@ -9,6 +9,7 @@ import {
 
 const DOW_TH = ['อาทิตย์', 'จันทร์', 'อังคาร', 'พุธ', 'พฤหัส', 'ศุกร์', 'เสาร์'];
 import { AutopostActivity } from '@/components/AutopostActivity';
+import { AutopostNav } from '@/components/AutopostNav';
 
 export const dynamic = 'force-dynamic';
 
@@ -40,9 +41,11 @@ export default async function AutopostOverviewPage() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-2xl font-semibold tracking-tight">ภาพรวม Auto-Post</h1>
-        <p className="mt-1 text-sm text-subtle">สถานะการโพสต์ Facebook และ lead ที่เก็บได้</p>
+        <h1 className="text-2xl font-semibold tracking-tight">ภาพรวมการโพสต์</h1>
+        <p className="mt-1 text-sm text-subtle">คิวโพสต์ Facebook · สถานะ worker · โควต้า (ดูเบอร์ผู้สนใจได้ที่แท็บผลลัพธ์)</p>
       </div>
+
+      <AutopostNav />
 
       {!a ? (
         <p className="text-sm text-subtle">ยังไม่มีข้อมูล Auto-Post (ตรวจสอบการเชื่อมต่อฐานข้อมูล)</p>
