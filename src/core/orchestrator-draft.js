@@ -37,7 +37,7 @@ export async function generateDraftForCampaign(campaignId) {
     [String(c.title ?? '').trim()],
   ).then((r) => r.rows.map((x) => x.caption)).catch(() => []);
 
-  const content = await generateContent({
+  const base = {
     title: c.title,
     positions: c.positions,
     province: c.province,
@@ -45,7 +45,17 @@ export async function generateDraftForCampaign(campaignId) {
     remaining_qty: c.remaining_qty,
     snapshot: c.request_snapshot ?? {},
     winningExamples,
-  });
+  };
+
+  // A/B: 2 เวอร์ชันคนละแนว — คนอนุมัติเลือกอันที่ชอบ (ผลชนะถูกเก็บเข้า winning patterns ต่อ)
+  const AB_STYLES = [
+    'A — ตรงไปตรงมา: พาดหัวเปิดรับสมัครชัด ๆ ข้อมูลครบ กระชับ',
+    'B — เน้นจุดขาย: นำด้วยรายได้/สวัสดิการ/ความมั่นคง โทนชวนคุย',
+  ];
+  const content = await generateContent({ ...base, styleHint: AB_STYLES[0] });
+  const contentB = content
+    ? await generateContent({ ...base, styleHint: AB_STYLES[1] }).catch(() => null)
+    : null;
 
   if (!content) {
     // อย่ารายงาน queue ว่าสำเร็จ เพราะจะทำให้ campaign ค้างแบบไม่มีทางไปต่อ
@@ -77,14 +87,19 @@ export async function generateDraftForCampaign(campaignId) {
     await query(`SELECT COALESCE(MAX(version), 0) + 1 AS v FROM campaign_contents WHERE campaign_id = $1`, [campaignId])
   ).rows;
 
-  await query(
-    `INSERT INTO campaign_contents
-       (campaign_id, version, platform, caption, image_bytes, image_mime, video_brief, gen_model, status)
-     VALUES ($1, $2, 'facebook', $3, $4, $5, $6, $7, 'draft')`,
-    [campaignId, version, content.caption, image?.bytes ?? null, image?.mime ?? null, content.videoBrief, content.model],
-  );
+  // บันทึกทั้ง 2 เวอร์ชัน (โปสเตอร์ใบเดียวกัน — ต่างกันที่แคปชัน) ให้คนเลือกตอนอนุมัติ
+  const versions = [content, contentB].filter(Boolean);
+  for (let i = 0; i < versions.length; i += 1) {
+    const v = versions[i];
+    await query(
+      `INSERT INTO campaign_contents
+         (campaign_id, version, platform, caption, image_bytes, image_mime, video_brief, gen_model, status)
+       VALUES ($1, $2, 'facebook', $3, $4, $5, $6, $7, 'draft')`,
+      [campaignId, version + i, v.caption, image?.bytes ?? null, image?.mime ?? null, v.videoBrief, v.model],
+    );
+  }
 
   await query(`UPDATE recruit_campaigns SET status='pending_approval', status_note=NULL, updated_at=now() WHERE id=$1`, [campaignId]);
 
-  return { campaignId, version, hasImage: !!image, model: content.model };
+  return { campaignId, version, versions: versions.length, hasImage: !!image, model: content.model };
 }

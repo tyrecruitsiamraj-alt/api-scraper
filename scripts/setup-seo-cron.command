@@ -10,12 +10,14 @@ fi
 mkdir -p "$ROOT/output"
 
 LINE="30 8 * * 1 cd $ROOT && $NODE scripts/seo-update.mjs >> $ROOT/output/seo-update.log 2>&1"
+LINE2="45 8 * * 1 cd $ROOT && $NODE scripts/best-time-update.mjs >> $ROOT/output/best-time.log 2>&1"
 
-# เอาบรรทัดเก่าของ seo-update ออกก่อน (กันซ้ำ/path เปลี่ยน) แล้วใส่ใหม่
-( crontab -l 2>/dev/null | grep -v 'seo-update.mjs' ; echo "$LINE" ) | crontab -
+# เอาบรรทัดเก่าออกก่อน (กันซ้ำ/path เปลี่ยน) แล้วใส่ใหม่ทั้งคู่
+( crontab -l 2>/dev/null | grep -v 'seo-update.mjs' | grep -v 'best-time-update.mjs' ; echo "$LINE" ; echo "$LINE2" ) | crontab -
 
-echo "✓ ติดตั้งแล้ว: รันทุกวันจันทร์ 08:30"
+echo "✓ ติดตั้งแล้ว: SEO จันทร์ 08:30 + Best-time จันทร์ 08:45"
 echo "  $LINE"
+echo "  $LINE2"
 echo
 echo "ทดสอบรันทันที 1 ครั้ง? (ใช้ Ollama ~2-3 นาที)"
 read -r -p "พิมพ์ y แล้ว Enter เพื่อรันเลย / Enter เฉย ๆ เพื่อข้าม: " RUN_NOW

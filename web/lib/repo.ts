@@ -1624,3 +1624,20 @@ export async function listWorkerHeartbeats(): Promise<WorkerHeartbeat[]> {
   }
   return out;
 }
+
+// --- ช่วงเวลาโพสต์ที่ได้ผล (post_time_insights — best-time-update.mjs อัปเดตรายสัปดาห์) ---
+export type BestPostTime = { dow: number; hour: number; posts: number; score: number };
+
+/** ช่วงเวลาที่ engagement/lead ต่อโพสต์สูงสุด (ต้องมี ≥2 โพสต์ในช่วงนั้นถึงนับ) */
+export async function listBestPostTimes(limit = 3): Promise<BestPostTime[]> {
+  try {
+    return await q<BestPostTime>(
+      `SELECT dow, hour, posts, score::float AS score
+         FROM post_time_insights WHERE posts >= 2 AND score > 0
+        ORDER BY score DESC LIMIT $1`,
+      [limit],
+    );
+  } catch {
+    return [];
+  }
+}

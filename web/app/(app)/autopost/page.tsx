@@ -2,9 +2,12 @@ import Link from 'next/link';
 import {
   autopostOverview,
   autopostActivity,
+  listBestPostTimes,
   listPendingApprovalContents,
   postQueueList,
 } from '@/lib/repo';
+
+const DOW_TH = ['อาทิตย์', 'จันทร์', 'อังคาร', 'พุธ', 'พฤหัส', 'ศุกร์', 'เสาร์'];
 import { AutopostActivity } from '@/components/AutopostActivity';
 
 export const dynamic = 'force-dynamic';
@@ -26,11 +29,12 @@ const QUEUE_STATUS: Record<string, { label: string; cls: string }> = {
 };
 
 export default async function AutopostOverviewPage() {
-  const [a, activity, pending, queue] = await Promise.all([
+  const [a, activity, pending, queue, bestTimes] = await Promise.all([
     autopostOverview(),
     autopostActivity(),
     listPendingApprovalContents(),
     postQueueList(),
+    listBestPostTimes(3),
   ]);
 
   return (
@@ -57,6 +61,18 @@ export default async function AutopostOverviewPage() {
             />
             <Stat label="Lead วันนี้" value={a.leads_today.toLocaleString()} sub="เบอร์จากคอมเมนต์" />
             <Stat label="Lead 14 วัน" value={a.leads_14d.toLocaleString()} />
+          </div>
+          <div className="card flex flex-wrap items-center gap-x-4 gap-y-1.5 px-4 py-2.5 text-xs">
+            <span className="eyebrow">ช่วงเวลาโพสต์แนะนำ</span>
+            {bestTimes.length > 0 ? (
+              bestTimes.map((t) => (
+                <span key={`${t.dow}-${t.hour}`} className="pill bg-emerald-50 text-emerald-700">
+                  {DOW_TH[t.dow]} {String(t.hour).padStart(2, '0')}:00 · score {t.score.toFixed(1)}
+                </span>
+              ))
+            ) : (
+              <span className="text-subtle">ยังไม่มีข้อมูลพอ — แนวทั่วไป: เช้า 07-09 · เที่ยง 12-13 · เย็น 18-20 (ระบบจะเรียนรู้เองเมื่อโพสต์สะสมมากขึ้น)</span>
+            )}
           </div>
           <p className="text-xs text-subtle">
             จัดการ Connector, Job และการตั้งค่าโพสต์ได้จากเมนู “ตั้งค่า” ด้านบน
