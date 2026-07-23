@@ -774,6 +774,135 @@ export async function topLeadPosts(opts: { limit?: number; days?: number } = {})
   }
 }
 
+// ---------------------------------------------------------------------------
+// Weekly Report — สรุปผลรายสัปดาห์ส่งหัวหน้า (โพสต์ · lead · ผู้สมัคร · แคมเปญ)
+// หน้าต่าง = 7 วันย้อนหลัง (เลื่อน offset สัปดาห์ได้) เทียบกับ 7 วันก่อนหน้า (WoW)
+// crosses schemas: post_logs (AP) + candidate_sources/campaign_posts (candidate schema)
+// ---------------------------------------------------------------------------
+export type ReportMetric = { value: number; prev: number };
+export type WeeklyReport = {
+  from: string;
+  to: string;
+  offset: number;
+  posts: ReportMetric;
+  leads: ReportMetric;
+  candidates: ReportMetric;
+  campaigns: ReportMetric;
+  byPosition: { position: string; leads: number; posts: number }[];
+  byDay: { day: string; posts: number; leads: number }[];
+  topPosts: LeadPostRow[];
+};
+
+export async function weeklyReport(offset = 0): Promise<WeeklyReport | null> {
+  const off = Math.max(0, Math.min(52, Math.floor(offset || 0)));
+  const DAY = 86_400_000;
+  const wEnd = new Date(Date.now() - off * 7 * DAY);
+  const wStart = new Date(wEnd.getTime() - 7 * DAY);
+  const pStart = new Date(wStart.getTime() - 7 * DAY);
+  const [P, W, E] = [pStart.toISOString(), wStart.toISOString(), wEnd.toISOString()];
+
+  // โพสต์ + lead (cur/prev) — ตัวหลัก; ถ้าอ่านไม่ได้ถือว่าไม่มีข้อมูลรายงาน
+  let posts: ReportMetric;
+  let leads: ReportMetric;
+  try {
+    await q(`ALTER TABLE ${AP}.post_logs ADD COLUMN IF NOT EXISTS reactions INT DEFAULT 0`);
+    await q(`ALTER TABLE ${AP}.post_logs ADD COLUMN IF NOT EXISTS shares INT DEFAULT 0`);
+    const [row] = await q<{ posts: number; posts_prev: number; leads: number; leads_prev: number }>(
+      `SELECT
+         count(*) FILTER (WHERE pl.created_at >= $2 AND pl.created_at < $3)::int AS posts,
+         count(*) FILTER (WHERE pl.created_at >= $1 AND pl.created_at < $2)::int AS posts_prev,
+         COALESCE(sum(${LEAD_COUNT_SQL}) FILTER (WHERE pl.created_at >= $2 AND pl.created_at < $3), 0)::int AS leads,
+         COALESCE(sum(${LEAD_COUNT_SQL}) FILTER (WHERE pl.created_at >= $1 AND pl.created_at < $2), 0)::int AS leads_prev
+       FROM ${AP}.post_logs pl
+      WHERE pl.created_at >= $1 AND pl.created_at < $3`,
+      [P, W, E],
+    );
+    if (!row) return null;
+    posts = { value: row.posts, prev: row.posts_prev };
+    leads = { value: row.leads, prev: row.leads_prev };
+  } catch {
+    return null;
+  }
+
+  // ผู้สมัครที่ดึงได้ใหม่ (candidate_sources.first_seen_at) — guarded
+  let candidates: ReportMetric = { value: 0, prev: 0 };
+  try {
+    const [c] = await q<{ cur: number; prev: number }>(
+      `SELECT count(*) FILTER (WHERE first_seen_at >= $2 AND first_seen_at < $3)::int AS cur,
+              count(*) FILTER (WHERE first_seen_at >= $1 AND first_seen_at < $2)::int AS prev
+         FROM candidate_sources
+        WHERE first_seen_at >= $1 AND first_seen_at < $3`,
+      [P, W, E],
+    );
+    if (c) candidates = { value: c.cur, prev: c.prev };
+  } catch {
+    /* schema/สิทธิ์ไม่พร้อม — คง 0 */
+  }
+
+  // แคมเปญคอนเทนต์ที่ส่งโพสต์ (distinct campaign จาก campaign_posts) — guarded
+  let campaigns: ReportMetric = { value: 0, prev: 0 };
+  try {
+    const [c] = await q<{ cur: number; prev: number }>(
+      `SELECT count(DISTINCT campaign_id) FILTER (WHERE created_at >= $2 AND created_at < $3)::int AS cur,
+              count(DISTINCT campaign_id) FILTER (WHERE created_at >= $1 AND created_at < $2)::int AS prev
+         FROM campaign_posts
+        WHERE created_at >= $1 AND created_at < $3`,
+      [P, W, E],
+    );
+    if (c) campaigns = { value: c.cur, prev: c.prev };
+  } catch {
+    /* คง 0 */
+  }
+
+  // lead ตามตำแหน่ง + รายวัน + โพสต์เด่น (เฉพาะหน้าต่างสัปดาห์นี้)
+  let byPosition: WeeklyReport['byPosition'] = [];
+  let byDay: WeeklyReport['byDay'] = [];
+  let topPosts: LeadPostRow[] = [];
+  try {
+    byPosition = await q<{ position: string; leads: number; posts: number }>(
+      `SELECT COALESCE(NULLIF(TRIM(pl.job_title), ''), 'ไม่ระบุตำแหน่ง') AS position,
+              COALESCE(sum(${LEAD_COUNT_SQL}), 0)::int AS leads,
+              count(*)::int AS posts
+         FROM ${AP}.post_logs pl
+        WHERE pl.created_at >= $1 AND pl.created_at < $2
+        GROUP BY 1 HAVING count(*) > 0
+        ORDER BY leads DESC, posts DESC LIMIT 10`,
+      [W, E],
+    );
+    byDay = await q<{ day: string; posts: number; leads: number }>(
+      `SELECT to_char((pl.created_at AT TIME ZONE 'Asia/Bangkok')::date, 'YYYY-MM-DD') AS day,
+              count(*)::int AS posts,
+              COALESCE(sum(${LEAD_COUNT_SQL}), 0)::int AS leads
+         FROM ${AP}.post_logs pl
+        WHERE pl.created_at >= $1 AND pl.created_at < $2
+        GROUP BY 1 ORDER BY 1`,
+      [W, E],
+    );
+    topPosts = await q<LeadPostRow>(
+      `SELECT pl.id,
+              NULLIF(TRIM(pl.job_title), '') AS job_title,
+              NULLIF(TRIM(pl.group_name), '') AS group_name,
+              COALESCE(NULLIF(TRIM(u.name), ''), NULLIF(TRIM(pl.poster_name), '')) AS account,
+              pl.post_link, pl.post_status,
+              COALESCE(pl.comment_count, 0) AS comment_count,
+              COALESCE(pl.reactions, 0) AS reactions,
+              COALESCE(pl.shares, 0) AS shares,
+              ${LEAD_COUNT_SQL} AS lead_count,
+              pl.customer_phone AS phones,
+              pl.created_at
+         FROM ${AP}.post_logs pl
+         LEFT JOIN ${AP}.users u ON u.id = pl.user_id
+        WHERE ${LEAD_COUNT_SQL} > 0 AND pl.created_at >= $1 AND pl.created_at < $2
+        ORDER BY lead_count DESC, pl.created_at DESC LIMIT 8`,
+      [W, E],
+    );
+  } catch {
+    /* คง [] */
+  }
+
+  return { from: W, to: E, offset: off, posts, leads, candidates, campaigns, byPosition, byDay, topPosts };
+}
+
 /** True when tasks are queued but no worker seems to be picking them up. */
 export async function hasStaleQueuedTasks(sec = 90) {
   const rows = await q<{ n: number }>(

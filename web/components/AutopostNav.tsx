@@ -7,12 +7,13 @@ import { usePathname } from 'next/navigation';
 const ITEMS = [
   { href: '/autopost', label: 'ภาพรวมการโพสต์', detail: 'คิวโพสต์ · สถานะ worker · โควต้า' },
   { href: '/autopost/results', label: 'ผลลัพธ์ & Leads', detail: 'เบอร์ผู้สนใจที่เก็บได้ · โพสต์ที่ได้ผล' },
+  { href: '/autopost/report', label: 'รายงานสัปดาห์', detail: 'สรุปผลรายสัปดาห์ · ส่งหัวหน้า' },
 ];
 
 export function AutopostNav() {
   const pathname = usePathname();
   return (
-    <nav className="mb-6 grid gap-3 sm:grid-cols-2" aria-label="เมนูโพสต์ & ผลลัพธ์">
+    <nav className="mb-6 grid gap-3 sm:grid-cols-3" aria-label="เมนูโพสต์ & ผลลัพธ์">
       {ITEMS.map((item) => {
         // exact match — /autopost ไม่ควร active เมื่ออยู่ /autopost/results
         const active =
