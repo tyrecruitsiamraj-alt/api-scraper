@@ -137,13 +137,18 @@ async function summarizeTrends(base, model, snippets) {
     const json = await res.json();
     const content = String(json?.message?.content ?? '');
     const list = pickTrendList(parseLoose(content));
-    if (list.length === 0) {
-      // โชว์คำตอบดิบเมื่อสรุปว่าง — จะได้รู้ว่า qwen ตอบอะไร (think ค้าง/JSON เพี้ยน/ว่าง)
-      console.warn(`  [trend] สรุปว่าง — done=${json?.done_reason ?? '?'} len=${content.length} head=${content.slice(0, 220).replace(/\s+/g, ' ')}`);
+    const result = list
+      .map((t) => ({
+        label: String(t.label ?? t.name ?? t.title ?? t.trend ?? t.topic ?? '').trim(),
+        note: String(t.note ?? t.detail ?? t.description ?? t.how ?? '').trim().slice(0, 300),
+        forImage: t.for_image !== false,
+      }))
+      .filter((t) => t.label && t.label.length <= 100);
+    // ผลสุดท้ายว่าง (list ว่าง หรือ list มีแต่ filter ทิ้งหมด) → โชว์คำตอบดิบให้เห็นว่า qwen ตอบอะไร
+    if (result.length === 0) {
+      console.warn(`  [trend] สรุปว่าง — done=${json?.done_reason ?? '?'} contentLen=${content.length} listLen=${list.length} head=${content.slice(0, 400).replace(/\s+/g, ' ')}`);
     }
-    return list
-      .map((t) => ({ label: String(t.label ?? t.name ?? '').trim(), note: String(t.note ?? t.detail ?? '').trim().slice(0, 300), forImage: t.for_image !== false }))
-      .filter((t) => t.label && t.label.length <= 60);
+    return result;
   } finally {
     clearTimeout(timer);
   }
