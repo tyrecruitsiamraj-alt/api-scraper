@@ -292,7 +292,13 @@ export async function startCampaignAction(formData: FormData) {
 export async function rejectRequestAction(formData: FormData) {
   await requireSession();
   const requestNo = String(formData.get('requestNo') ?? '').trim();
-  const reason = String(formData.get('reason') ?? '').trim() || null;
+  // ข้อที่คนติกว่าขาด/ให้แก้ + เหตุผลเพิ่มเติม → ประกอบเป็นข้อความตีกลับให้ผู้ขอเห็นชัด
+  const missing = formData.getAll('missing').map((v) => String(v).trim()).filter(Boolean);
+  const extra = String(formData.get('reason') ?? '').trim();
+  const reason = [
+    missing.length ? `ข้อมูลที่ต้องแก้/ขาด: ${missing.join(', ')}` : '',
+    extra,
+  ].filter(Boolean).join(' · ') || null;
   if (requestNo) await rejectSoRecruitRequest(requestNo, reason);
   revalidatePath('/orchestrator/imports');
   revalidatePath('/orchestrator');

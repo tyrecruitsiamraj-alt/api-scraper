@@ -146,45 +146,52 @@ function Stepper({ steps }: { steps: Step[] }) {
   );
 }
 
-// ลำดับ+ป้ายช่องข้อมูลใบขอ (ดู/แก้บนการ์ด intake)
-const REQUEST_FIELD_DEFS: { key: string; label: string }[] = [
+// ช่องข้อมูลใบขอที่ "ดูอย่างเดียว" (ตรวจว่าดึงครบไหม — ไม่ให้แก้ตรงนี้ ผิดให้ตีกลับ)
+const REQUEST_VIEW_DEFS: { key: string; label: string }[] = [
   { key: 'position', label: 'ตำแหน่ง' },
   { key: 'location', label: 'พื้นที่/จังหวัด' },
-  { key: 'income', label: 'รายได้' },
   { key: 'qty', label: 'จำนวน (คน)' },
   { key: 'work_schedule', label: 'เวลางาน' },
   { key: 'gender', label: 'เพศ' },
-  { key: 'age_min', label: 'อายุต่ำสุด' },
-  { key: 'age_max', label: 'อายุสูงสุด' },
-  { key: 'unit_name', label: 'หน่วยงาน' },
-  { key: 'note', label: 'หมายเหตุ' },
 ];
 
 /**
- * กล่อง "ดู/แก้รายละเอียดใบขอ" — กางแล้วเห็นทุกช่อง (ว่าง = ใบขอไม่ได้ให้มา)
- * แก้ตรงช่องได้เลย ค่าจะถูกส่งไปกับปุ่มอนุมัติของ form นั้น (ผ่าน form= attribute)
+ * กล่อง "ดูรายละเอียดใบขอ" — ตรวจว่าดึงข้อมูลมาครบไหม (ช่องส่วนใหญ่ดูอย่างเดียว)
+ * แก้ได้เฉพาะ "รายได้" + "เพิ่มเติม/สวัสดิการ" (บางทีใบขอไม่ครบ เติมได้ก่อนกดอนุมัติ)
+ * ค่าที่แก้ส่งไปกับปุ่มอนุมัติของ form นั้น (ผ่าน form= attribute) — ช่องอื่นผิด ให้ตีกลับ
  */
 function RequestFieldsEditor({ fields, formId }: { fields: Record<string, string>; formId: string }) {
+  const age = [fields.age_min, fields.age_max].filter(Boolean).join('–');
+  const view: { label: string; value: string }[] = [
+    ...REQUEST_VIEW_DEFS.map((d) => ({ label: d.label, value: fields[d.key] ?? '' })),
+    { label: 'อายุ', value: age },
+    { label: 'หน่วยงาน', value: fields.unit_name ?? '' },
+  ];
   return (
     <details className="rounded-2xl border border-line bg-black/[0.015] px-4 py-3">
       <summary className="cursor-pointer select-none text-[13px] font-medium text-ink">
-        📋 ดู/แก้รายละเอียดใบขอ
-        <span className="ml-1 font-normal text-subtle">— แก้ก่อนกดอนุมัติได้ ช่องว่าง = ใช้ตามใบขอเดิม</span>
+        📋 ดูรายละเอียดใบขอ
+        <span className="ml-1 font-normal text-subtle">— ตรวจว่าดึงครบไหม · แก้ได้เฉพาะรายได้/สวัสดิการ</span>
       </summary>
-      <div className="mt-3 grid gap-x-3 gap-y-2 sm:grid-cols-2">
-        {REQUEST_FIELD_DEFS.map((fd) => (
-          <div key={fd.key}>
-            <label className="label" htmlFor={`${formId}-${fd.key}`}>{fd.label}</label>
-            <input
-              id={`${formId}-${fd.key}`}
-              name={`ov_${fd.key}`}
-              form={formId}
-              defaultValue={fields[fd.key] ?? ''}
-              placeholder="— ไม่มีในใบขอ —"
-              className="field w-full"
-            />
+      {/* ดูอย่างเดียว */}
+      <div className="mt-3 grid gap-x-4 gap-y-2 sm:grid-cols-2">
+        {view.map((v) => (
+          <div key={v.label} className="flex items-baseline justify-between gap-2 border-b border-hairline/50 pb-1.5">
+            <span className="text-xs text-subtle">{v.label}</span>
+            <span className={`text-right text-[13px] ${v.value ? 'text-ink' : 'text-red-500/80'}`}>{v.value || '— ไม่มีในใบขอ —'}</span>
           </div>
         ))}
+      </div>
+      {/* แก้ได้เฉพาะ 2 ช่องนี้ */}
+      <div className="mt-3 grid gap-x-3 gap-y-2 border-t border-line/60 pt-3 sm:grid-cols-2">
+        <div>
+          <label className="label" htmlFor={`${formId}-income`}>รายได้ <span className="text-subtle">(แก้ได้)</span></label>
+          <input id={`${formId}-income`} name="ov_income" form={formId} defaultValue={fields.income ?? ''} placeholder="เช่น 25,000+ /เดือน" className="field w-full" />
+        </div>
+        <div>
+          <label className="label" htmlFor={`${formId}-note`}>เพิ่มเติม / สวัสดิการ <span className="text-subtle">(เติมได้)</span></label>
+          <input id={`${formId}-note`} name="ov_note" form={formId} defaultValue={fields.note ?? ''} placeholder="เช่น มี OT, ประกันสังคม, ที่พัก, เบี้ยขยัน" className="field w-full" />
+        </div>
       </div>
     </details>
   );
@@ -224,18 +231,29 @@ function WorkAction({ item, connectors, facebookAccounts }: {
 
   if (item.stage === 'intake' && item.requestNo) {
     const rejectForm = (
-      <form action={rejectRequestAction} className="flex flex-wrap items-end gap-2 border-t border-line/60 pt-3">
+      <form action={rejectRequestAction} className="space-y-2 border-t border-line/60 pt-3">
         <input type="hidden" name="requestNo" value={item.requestNo} />
-        <div className="min-w-[220px] flex-1">
-          <label className="label" htmlFor={`rej-req-${item.id}`}>ตีกลับใบขอ — บอกว่าขาดข้อมูลอะไร</label>
+        {item.checklist && item.checklist.length > 0 && (
+          <div>
+            <div className="label">ติกข้อที่ขาด/ให้แก้ แล้วตีกลับ</div>
+            <div className="mt-1 flex flex-wrap gap-x-4 gap-y-1.5">
+              {item.checklist.map((c) => (
+                <label key={c.label} className="inline-flex items-center gap-1.5 text-[13px] text-ink">
+                  <input type="checkbox" name="missing" value={c.label} defaultChecked={!c.ok} className="h-4 w-4 accent-[var(--accent,#e41c24)]" />
+                  {c.label}{c.ok ? '' : ' (ขาด)'}
+                </label>
+              ))}
+            </div>
+          </div>
+        )}
+        <div className="flex flex-wrap items-end gap-2">
           <input
-            id={`rej-req-${item.id}`}
             name="reason"
-            placeholder="เช่น ไม่ระบุตำแหน่ง, ไม่บอกจังหวัด, จำนวนที่รับไม่ชัด"
-            className="field"
+            placeholder="เหตุผลเพิ่มเติม (ไม่บังคับ)"
+            className="field min-w-[220px] flex-1"
           />
+          <button className="btn-secondary">ตีกลับใบขอ</button>
         </div>
-        <button className="btn-secondary">ตีกลับใบขอ</button>
       </form>
     );
     if (item.kind === 'content') {
