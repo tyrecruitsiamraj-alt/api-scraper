@@ -38,6 +38,8 @@ start_workers() {
     echo $! > "$RUN/caffeinate.pid"
   fi
   printf "  ${D}(กันเครื่องหลับให้แล้ว · ปิดหน้าต่างนี้ได้ worker ยังวิ่งต่อ)${N}\n"
+  # งานประจำสัปดาห์ (เทรนด์/SEO/เวลาโพสต์) ตั้ง cron ให้อัตโนมัติ — ไม่ต้องกดตั้งเอง
+  install_cron quiet || true
 }
 
 stop_workers() {
@@ -67,21 +69,25 @@ refresh_workers() {
 
 # ---------- ตั้งเวลารันอัตโนมัติ (cron จันทร์) — แทน setup-seo-cron.command ----------
 install_cron() {
-  printf "\n${B}▶ ตั้งเวลารันอัตโนมัติ (ทุกวันจันทร์)...${N}\n"
+  local quiet="${1:-}"
+  [ -z "$quiet" ] && printf "\n${B}▶ ตั้งเวลารันอัตโนมัติ (ทุกวันจันทร์)...${N}\n"
   local NODE; NODE="$(command -v node || true)"
-  if [ -z "$NODE" ]; then printf "  ${R}✗ ไม่พบ node ใน PATH${N}\n"; return 1; fi
+  if [ -z "$NODE" ]; then [ -z "$quiet" ] && printf "  ${R}✗ ไม่พบ node ใน PATH${N}\n"; return 1; fi
   mkdir -p output
   local ROOT; ROOT="$(pwd)"
   local L1="30 8 * * 1 cd $ROOT && $NODE scripts/seo-update.mjs >> $ROOT/output/seo-update.log 2>&1"
   local L2="45 8 * * 1 cd $ROOT && $NODE scripts/best-time-update.mjs >> $ROOT/output/best-time.log 2>&1"
-  # cron ไม่มีจอ → trend-discover บังคับ headless; ถ้า FB บล็อกค่อยรันมือ T→1 (headful)
+  # cron ไม่มีจอ → trend-discover บังคับ headless; ถ้า FB บล็อกค่อยรันมือ (ปุ่ม ⚡ = headful)
   local L3="0 9 * * 1 cd $ROOT && TREND_HEADLESS=1 $NODE scripts/trend-discover.mjs >> $ROOT/output/trend-discover.log 2>&1"
-  ( crontab -l 2>/dev/null | grep -v 'seo-update.mjs' | grep -v 'best-time-update.mjs' | grep -v 'trend-discover.mjs' ; echo "$L1"; echo "$L2"; echo "$L3" ) | crontab -
-  printf "  ${G}✓ ตั้งแล้ว (จันทร์): SEO 08:30 · ช่วงเวลาโพสต์ 08:45 · สำรวจเทรนด์ 09:00${N}\n"
-  printf "  ${D}log อยู่ที่ output/*.log · ตั้งซ้ำได้ ไม่ซ้ำซ้อน${N}\n"
+  ( crontab -l 2>/dev/null | grep -v 'seo-update.mjs' | grep -v 'best-time-update.mjs' | grep -v 'trend-discover.mjs' ; echo "$L1"; echo "$L2"; echo "$L3" ) | crontab - 2>/dev/null
+  if [ -z "$quiet" ]; then
+    printf "  ${G}✓ ตั้งแล้ว (จันทร์): SEO 08:30 · ช่วงเวลาโพสต์ 08:45 · สำรวจเทรนด์ 09:00${N}\n"
+    printf "  ${D}log อยู่ที่ output/*.log · ตั้งซ้ำได้ ไม่ซ้ำซ้อน${N}\n"
+  fi
 }
 
 # ---------- งานประจำ (เงียบ + สรุป) ----------
+TASK_OK=0; TASK_FAIL=0
 run_quiet() {
   local title="$1"; shift
   local log="$LOGT/$(date +%Y%m%d-%H%M%S)-$(printf '%s' "$title" | tr ' /' '__').log"
@@ -90,9 +96,11 @@ run_quiet() {
   "$@" > "$log" 2>&1
   local code=$?; local dur=$(( $(date +%s) - s ))
   if [ $code -eq 0 ]; then
+    TASK_OK=$((TASK_OK+1))
     printf "  ${G}✓ สำเร็จ${N} ${D}(%ss)${N}\n" "$dur"
     tail -n 3 "$log" | sed "s/^/    ${D}/;s/\$/${N}/"
   else
+    TASK_FAIL=$((TASK_FAIL+1))
     printf "  ${R}✗ ล้มเหลว (exit %s, %ss)${N}\n" "$code" "$dur"
     grep -iE 'error|fail|ล้ม|ไม่สำเร็จ|exception|ECONN|ENOTFOUND|EHOSTUNREACH|throw|checkpoint|login' "$log" | tail -n 10 | sed "s/^/    /"
   fi
@@ -145,7 +153,90 @@ dashboard() {
   printf "เลือก: "
 }
 
-# ---------- loop ----------
+# ---------- โหมดปุ่มคลิก (macOS dialog — คลิกแล้วทำงาน ไม่ต้องพิมพ์) ----------
+BTN_START="▶ เริ่มทำงาน"
+BTN_REFRESH="↻ รีเฟรช (รับโค้ดใหม่)"
+BTN_STOP="■ หยุด worker"
+BTN_RUNNOW="⚡ สำรวจเทรนด์ + SEO ตอนนี้"
+BTN_CLOSE="✕ ปิดแผง (worker วิ่งต่อ)"
+
+have_gui() { command -v osascript >/dev/null 2>&1 && [ -z "$SO_CONTROL_TUI" ]; }
+
+gui_msg() {
+  osascript -e 'on run argv' \
+    -e 'display dialog (item 1 of argv) with title "SO Recruitment" buttons {"ตกลง"} default button 1 with icon note' \
+    -e 'end run' "$1" >/dev/null 2>&1
+}
+
+gui_note() { osascript -e "display notification \"$1\" with title \"SO Recruitment\"" >/dev/null 2>&1; }
+
+gui_pick() {
+  osascript -e 'on run argv' \
+    -e "set c to choose from list {\"$BTN_START\", \"$BTN_REFRESH\", \"$BTN_STOP\", \"$BTN_RUNNOW\"} with title \"SO Recruitment · แผงควบคุม\" with prompt (item 1 of argv) default items {\"$BTN_START\"} OK button name \"ทำเลย\" cancel button name \"ปิดแผง\"" \
+    -e 'if c is false then return "ปิด"' \
+    -e 'return item 1 of c' \
+    -e 'end run' "$1" 2>/dev/null
+}
+
+gui_status_text() {
+  local s1 s2
+  if running scraper; then s1="🟢 ดึงข้อมูล + คิดคอนเทนต์ — ทำงานอยู่"; else s1="🔴 ดึงข้อมูล + คิดคอนเทนต์ — หยุด"; fi
+  if running autopost; then s2="🟢 โพสต์ Facebook — ทำงานอยู่"; else s2="🔴 โพสต์ Facebook — หยุด"; fi
+  printf '%s\n%s\n\nงานประจำ (เทรนด์/SEO/เวลาโพสต์) ทำเองทุกจันทร์เช้า — ไม่ต้องกด\n\nเลือกแล้วกด "ทำเลย":' "$s1" "$s2"
+}
+
+gui_loop() {
+  # เปิดแผง = ตั้งงานประจำอัตโนมัติให้เลย (เงียบ ๆ)
+  install_cron quiet || true
+  while true; do
+    local choice; choice="$(gui_pick "$(gui_status_text)")"
+    case "$choice" in
+      "$BTN_START")
+        start_workers
+        gui_msg "เริ่มทำงานแล้ว ✓
+
+• ดึงข้อมูล + คิดคอนเทนต์
+• โพสต์ Facebook
+• งานประจำสัปดาห์ ตั้งเวลาอัตโนมัติแล้ว
+
+ปิดหน้าต่างได้เลย — worker วิ่งต่อเอง" ;;
+      "$BTN_REFRESH")
+        refresh_workers
+        gui_msg "รีเฟรชเสร็จ ✓ ใช้โค้ดล่าสุด:
+$(git log -1 --format='%h %s' 2>/dev/null | cut -c1-70)" ;;
+      "$BTN_STOP")
+        stop_workers
+        gui_msg "หยุด worker แล้ว — กดเริ่มทำงานเมื่อพร้อม" ;;
+      "$BTN_RUNNOW")
+        gui_note "กำลังรัน 3 งาน (~5-10 นาที) — ดูความคืบหน้าใน Terminal"
+        TASK_OK=0; TASK_FAIL=0
+        run_quiet "สำรวจเทรนด์" node scripts/trend-discover.mjs
+        run_quiet "SEO คำค้น" node scripts/seo-update.mjs
+        run_quiet "ช่วงเวลาโพสต์" node scripts/best-time-update.mjs
+        if [ "$TASK_FAIL" -eq 0 ]; then
+          gui_msg "งานประจำเสร็จ ✓ สำเร็จ $TASK_OK/3
+
+เทรนด์ใหม่ (ถ้ามี) รออนุมัติที่เว็บ → ตั้งค่า → เทรนด์คอนเทนต์"
+        else
+          gui_msg "งานประจำเสร็จ: สำเร็จ $TASK_OK · ล้มเหลว $TASK_FAIL
+
+ดูรายละเอียดในหน้าต่าง Terminal (log: logs/tasks/)"
+        fi ;;
+      *) # ปิดแผง / กด cancel — worker วิ่งต่อ
+        printf "\n${D}ปิดแผงแล้ว — worker ยังทำงานเบื้องหลัง (เปิดใหม่เมื่อไรก็ได้)${N}\n"
+        exit 0 ;;
+    esac
+  done
+}
+
+# ---------- entry: มี GUI = โหมดปุ่มคลิก / ไม่มีหรือ SO_CONTROL_TUI=1 = โหมดพิมพ์ ----------
+if have_gui; then
+  printf "${B}SO Recruitment · แผงควบคุม${N}\n${D}โหมดปุ่มคลิก — หน้าต่างเลือกคำสั่งจะเด้งขึ้นมา (log งานโชว์ที่นี่)${N}\n"
+  gui_loop
+fi
+
+# ---------- loop (โหมดพิมพ์ fallback) ----------
+install_cron quiet || true
 while true; do
   dashboard
   read -r cmd
