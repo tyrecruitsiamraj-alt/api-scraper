@@ -1,27 +1,29 @@
 // Trend Discovery — ระบบ "ไปสำรวจกลุ่ม FB เอง" แล้วเสนอเทรนด์ที่กำลังมา (ไม่ต้องให้คนพิมพ์)
 //
-// ทำงาน: อ่านโพสต์ล่าสุดในกลุ่ม (content_group_sources) ผ่าน mbasic + cookie session เดิมของ
-// autopost (เบา ไม่เปิด browser เต็ม) → ให้ Ollama สรุปเป็น "เทรนด์/มุม/สไตล์รูป" ที่กำลังมา →
+// ทำงาน: เปิดกลุ่ม (content_group_sources) ด้วย Playwright + session เดิมของ autopost (headful)
+// อ่านโพสต์รับสมัครล่าสุด → ให้ Ollama สรุปเป็น "เทรนด์/มุม/สไตล์รูป" ที่กำลังมา →
 // upsert content_trends เป็น source='discovered' active=false (รอคนกดอนุมัติที่ /settings/trends)
 //
 // รันเอง:      node scripts/trend-discover.mjs
-// รันอัตโนมัติ: cron รายสัปดาห์ (ดู setup-seo-cron.command) — หมุนทีละไม่กี่กลุ่มต่อรอบ (footprint ต่ำ)
+// รันอัตโนมัติ: cron รายสัปดาห์ — หมุนทีละไม่กี่กลุ่มต่อรอบ (footprint ต่ำ)
 //
-// ⚠️ ต้องรันบน Mac ที่มี session FB (autopost/.auth) + headful เคยล็อกอินแล้ว
-//    ToS: อ่านอย่างเดียว, สัปดาห์ละครั้ง, ไม่กี่กลุ่ม/รอบ, หน่วงเวลาแบบคน — เสี่ยงต่ำ
-//    mbasic อาจเปลี่ยน/เด้ง checkpoint → ต่อกลุ่มไหนอ่านไม่ได้ก็ข้าม (fail-soft)
+// ⚠️ ต้องรันบน Mac ที่มี session FB (autopost/.auth) ล็อกอินแล้ว + มีจอ (headful กัน bot-detect)
+//    ToS: อ่านอย่างเดียว, สัปดาห์ละครั้ง, ไม่กี่กลุ่ม/รอบ, หน่วงแบบคน — เสี่ยงต่ำ
+//    ต่อกลุ่มไหนเปิด/อ่านไม่ได้ก็ข้าม (fail-soft)
 //
 // ต้องมีใน .env: OLLAMA_BASE_URL + DB (DATABASE_URL/PG*) + DB_SCHEMA
-//   optional: FB_SESSION_PATH (ไฟล์ storageState), TREND_MAX_GROUPS (default 6)
+//   optional: FB_SESSION_PATH (storageState), TREND_MAX_GROUPS (default 6), TREND_HEADLESS=1 (บังคับ headless)
 import 'dotenv/config';
 import fs from 'node:fs';
 import path from 'node:path';
 import pg from 'pg';
-import * as cheerio from 'cheerio';
+import { chromium } from 'playwright';
 
 const MAX_GROUPS = Math.max(1, Math.min(20, Number(process.env.TREND_MAX_GROUPS) || 6));
-const UA = 'Mozilla/5.0 (Linux; Android 12) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Mobile Safari/537.36';
+const HEADLESS = process.env.TREND_HEADLESS === '1'; // default headful (FB จับ headless ง่าย)
+const DESKTOP_UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36';
 const RECRUIT_HINT = /(รับสมัคร|หางาน|สมัครงาน|เงินเดือน|รายได้|ด่วน|พนักงาน|ตำแหน่ง|จ้าง|part.?time|full.?time)/i;
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 /** หา storageState ของ FB จาก autopost/.auth (ไฟล์ล่าสุด) หรือ FB_SESSION_PATH */
 function findSessionFile() {
@@ -33,44 +35,39 @@ function findSessionFile() {
   return files[0] ? path.join(dir, files[0].f) : null;
 }
 
-/** สร้าง Cookie header สำหรับ facebook.com จาก storageState */
-function cookieHeader(sessionFile) {
-  const state = JSON.parse(fs.readFileSync(sessionFile, 'utf8'));
-  const cookies = (state.cookies || []).filter((c) => /facebook\.com$/.test((c.domain || '').replace(/^\./, '')));
-  if (!cookies.some((c) => c.name === 'c_user')) return null; // ไม่มี login cookie = ใช้ไม่ได้
-  return cookies.map((c) => `${c.name}=${c.value}`).join('; ');
-}
-
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-
-/** อ่าน snippet โพสต์รับสมัครในกลุ่มผ่าน mbasic (fail-soft: [] ถ้าอ่านไม่ได้) */
-async function readGroupSnippets(groupId, cookie) {
+/** อ่าน snippet โพสต์รับสมัครในกลุ่มด้วยหน้าที่เปิดอยู่ (fail-soft) */
+async function readGroupSnippets(page, groupId) {
   try {
-    const res = await fetch(`https://mbasic.facebook.com/groups/${groupId}`, {
-      headers: { 'User-Agent': UA, Cookie: cookie, 'Accept-Language': 'th-TH,th;q=0.9' },
-      redirect: 'follow',
-    });
-    if (!res.ok) return { ok: false, snippets: [], reason: `HTTP ${res.status}` };
-    const html = await res.text();
-    if (/checkpoint|login\.php|เข้าสู่ระบบ/i.test(html) && !/groups/i.test(html.slice(0, 500))) {
-      return { ok: false, snippets: [], reason: 'session เด้ง login/checkpoint' };
+    await page.goto(`https://www.facebook.com/groups/${groupId}`, { waitUntil: 'domcontentloaded', timeout: 45_000 });
+    await sleep(4000);
+    const url = page.url();
+    if (/login|checkpoint|\/login\.php/i.test(url)) return { ok: false, snippets: [], reason: 'session เด้ง login/checkpoint' };
+    // เลื่อนฟีดโหลดโพสต์เพิ่ม (แบบคน)
+    for (let i = 0; i < 3; i += 1) {
+      await page.evaluate(() => window.scrollBy(0, window.innerHeight * 1.5));
+      await sleep(2500 + Math.floor(Math.random() * 1500));
     }
-    const $ = cheerio.load(html);
+    const texts = await page.evaluate(() => {
+      const out = [];
+      document.querySelectorAll('div[role="article"]').forEach((el) => {
+        const t = (el.innerText || '').replace(/\s+/g, ' ').trim();
+        if (t) out.push(t);
+      });
+      return out;
+    });
     const seen = new Set();
     const snippets = [];
-    // mbasic วางเนื้อโพสต์ในหลาย container — กวาดข้อความยาว ๆ ที่มีสัญญาณรับสมัคร
-    $('div,p,span').each((_, el) => {
-      const t = $(el).text().replace(/\s+/g, ' ').trim();
-      if (t.length < 25 || t.length > 600) return;
-      if (!RECRUIT_HINT.test(t)) return;
+    for (const raw of texts) {
+      const t = String(raw).slice(0, 800).trim();
+      if (t.length < 20 || !RECRUIT_HINT.test(t)) continue;
       const key = t.slice(0, 60);
-      if (seen.has(key)) return;
+      if (seen.has(key)) continue;
       seen.add(key);
       snippets.push(t);
-    });
+    }
     return { ok: true, snippets: snippets.slice(0, 15), reason: '' };
   } catch (e) {
-    return { ok: false, snippets: [], reason: e.message };
+    return { ok: false, snippets: [], reason: e.message.split('\n')[0].slice(0, 80) };
   }
 }
 
@@ -141,8 +138,6 @@ const model = process.env.OLLAMA_MODEL || 'qwen3.5:9b';
 
 const sessionFile = findSessionFile();
 if (!sessionFile) { console.error('ไม่พบ session FB (autopost/.auth/facebook-*.json หรือ FB_SESSION_PATH) — ต้องล็อกอิน autopost ก่อน'); process.exit(1); }
-const cookie = cookieHeader(sessionFile);
-if (!cookie) { console.error(`session ${path.basename(sessionFile)} ไม่มี cookie login (c_user) — ล็อกอินใหม่`); process.exit(1); }
 
 const c = new pg.Client(process.env.DATABASE_URL
   ? { connectionString: process.env.DATABASE_URL }
@@ -151,23 +146,30 @@ await c.connect();
 const sc = process.env.DB_SCHEMA || 'public';
 await c.query(`SET search_path TO "${sc}"`);
 
-// หมุนทีละไม่กี่กลุ่ม (เก่าสุดก่อน) — วนครบทุกกลุ่มข้ามสัปดาห์ footprint ต่ำ
 const { rows: groups } = await c.query(
   `SELECT id, fb_group_id FROM content_group_sources WHERE active = true
     ORDER BY last_scanned_at NULLS FIRST, created_at LIMIT $1`, [MAX_GROUPS]);
 if (groups.length === 0) { console.log('ไม่มีกลุ่มให้สำรวจ (รัน seed-research-groups.mjs ก่อน)'); await c.end(); process.exit(0); }
 
-console.log(`Trend Discovery — ${new Date().toLocaleString('th-TH')} · สำรวจ ${groups.length} กลุ่ม (session ${path.basename(sessionFile)})`);
+console.log(`Trend Discovery — ${new Date().toLocaleString('th-TH')} · สำรวจ ${groups.length} กลุ่ม (session ${path.basename(sessionFile)}, headful=${!HEADLESS})`);
+
+const browser = await chromium.launch({ headless: HEADLESS });
+const context = await browser.newContext({ storageState: sessionFile, userAgent: DESKTOP_UA, viewport: { width: 1280, height: 900 }, locale: 'th-TH' });
+const page = await context.newPage();
+
 const allSnippets = [];
-for (const g of groups) {
-  const { ok, snippets, reason } = await readGroupSnippets(g.fb_group_id, cookie);
-  console.log(`  [${g.fb_group_id}] ${ok ? `${snippets.length} snippet` : `ข้าม (${reason})`}`);
-  allSnippets.push(...snippets);
-  await c.query(`UPDATE content_group_sources SET last_scanned_at = now() WHERE id = $1`, [g.id]);
-  await sleep(3000 + Math.floor(Math.random() * 3000)); // หน่วงแบบคน
+try {
+  for (const g of groups) {
+    const { ok, snippets, reason } = await readGroupSnippets(page, g.fb_group_id);
+    console.log(`  [${g.fb_group_id}] ${ok ? `${snippets.length} snippet` : `ข้าม (${reason})`}`);
+    allSnippets.push(...snippets);
+    await c.query(`UPDATE content_group_sources SET last_scanned_at = now() WHERE id = $1`, [g.id]);
+    await sleep(3000 + Math.floor(Math.random() * 3000));
+  }
+} finally {
+  await browser.close();
 }
 
-// dedupe snippet ข้ามกลุ่ม แล้วให้ Ollama สรุป
 const uniq = [...new Map(allSnippets.map((s) => [s.slice(0, 60), s])).values()].slice(0, 60);
 console.log(`\nรวม ${uniq.length} snippet (ไม่ซ้ำ) → ให้ Ollama สรุปเทรนด์...`);
 let trends = [];
@@ -180,7 +182,6 @@ if (uniq.length > 0) {
 
 let added = 0;
 for (const t of trends) {
-  // เสนอเป็น discovered + active=false (รอคนอนุมัติ); label ซ้ำ (manual/discovered เดิม) = ข้าม
   const r = await c.query(
     `INSERT INTO content_trends (label, note, for_caption, for_image, active, source, discovered_at)
      VALUES ($1, $2, true, $3, false, 'discovered', now())
