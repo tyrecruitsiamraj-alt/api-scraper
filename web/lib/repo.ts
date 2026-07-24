@@ -1562,16 +1562,37 @@ export type ContentRow = {
   reject_reason: string | null;
   created_at: string;
   has_image: boolean;
+  /** provenance ว่าร่างนี้ AI คิดจากอะไร (schema-015) — {angles,hooks,imageStyle,style,used_winning,used_losing} */
+  gen_notes: {
+    angles?: string[];
+    hooks?: string[];
+    imageStyle?: string;
+    style?: string | null;
+    used_winning?: number;
+    used_losing?: number;
+    research_model?: string;
+  } | null;
 };
 
 /** ร่างคอนเทนต์ทุก version ของ campaign (ใหม่สุดก่อน). image bytes ไม่ดึงมา (สตรีมแยก). */
 export async function listCampaignContents(campaignId: string) {
-  return q<ContentRow>(
-    `SELECT id, campaign_id, version, platform, caption, video_brief, gen_model, status,
-            engagement_score, reject_reason, created_at, (image_bytes IS NOT NULL) AS has_image
-       FROM campaign_contents WHERE campaign_id = $1 ORDER BY version DESC`,
-    [campaignId],
-  );
+  try {
+    return await q<ContentRow>(
+      `SELECT id, campaign_id, version, platform, caption, video_brief, gen_model, status,
+              engagement_score, reject_reason, created_at, (image_bytes IS NOT NULL) AS has_image, gen_notes
+         FROM campaign_contents WHERE campaign_id = $1 ORDER BY version DESC`,
+      [campaignId],
+    );
+  } catch {
+    // schema-015 (gen_notes) ยังไม่ migrate — query แบบไม่มีคอลัมน์นั้น
+    const rows = await q<Omit<ContentRow, 'gen_notes'>>(
+      `SELECT id, campaign_id, version, platform, caption, video_brief, gen_model, status,
+              engagement_score, reject_reason, created_at, (image_bytes IS NOT NULL) AS has_image
+         FROM campaign_contents WHERE campaign_id = $1 ORDER BY version DESC`,
+      [campaignId],
+    );
+    return rows.map((r) => ({ ...r, gen_notes: null }));
+  }
 }
 
 export async function setContentStatus(id: string, status: string, reason: string | null = null) {

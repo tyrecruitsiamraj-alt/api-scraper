@@ -1,5 +1,6 @@
 import { query } from '../db/pool.js';
 import { generateContent, generatePosterFields } from './content-gen.js';
+import { researchContentAngles } from './content-research.js';
 import { generateImage } from './ai-image.js';
 import { renderPoster } from './poster.js';
 
@@ -50,6 +51,13 @@ export async function generateDraftForCampaign(campaignId) {
     [String(c.title ?? '').trim()],
   ).then((r) => r.rows.map((x) => x.caption)).catch(() => []);
 
+  // Research ก่อนคิด: แนว/ฮุก/สไตล์รูปที่ดึงคนตำแหน่งนี้ได้ (cold-start — ใช้ก่อนมีสถิติของเราเอง)
+  // ground ด้วยแคปชันที่เคยเวิร์คของเรา; fail-soft = null (draft เดินต่อได้)
+  const research = await researchContentAngles({
+    title: c.title, province: c.province, snapshot: c.request_snapshot ?? {}, winningExamples,
+  }).catch(() => null);
+  if (research) console.log(`  [draft] research: ${research.angles.length} มุม · ${research.hooks.length} ฮุก · imageStyle=${research.imageStyle ? 'มี' : '-'}`);
+
   const base = {
     title: c.title,
     positions: c.positions,
@@ -59,6 +67,7 @@ export async function generateDraftForCampaign(campaignId) {
     snapshot: c.request_snapshot ?? {},
     winningExamples,
     losingExamples,
+    research,
   };
 
   // A/B: 2 เวอร์ชันคนละแนว — คนอนุมัติเลือกอันที่ชอบ (ผลชนะถูกเก็บเข้า winning patterns ต่อ)
@@ -102,15 +111,35 @@ export async function generateDraftForCampaign(campaignId) {
   ).rows;
 
   // บันทึกทั้ง 2 เวอร์ชัน (โปสเตอร์ใบเดียวกัน — ต่างกันที่แคปชัน) ให้คนเลือกตอนอนุมัติ
+  // gen_notes = provenance ว่าแต่ละร่างคิดจากอะไร (โชว์บนหน้า campaign; schema-015 ยังไม่มี = ข้าม)
   const versions = [content, contentB].filter(Boolean);
+  const genNotesBase = research
+    ? { angles: research.angles, hooks: research.hooks, imageStyle: research.imageStyle, research_model: research.model }
+    : {};
   for (let i = 0; i < versions.length; i += 1) {
     const v = versions[i];
-    await query(
-      `INSERT INTO campaign_contents
-         (campaign_id, version, platform, caption, image_bytes, image_mime, video_brief, gen_model, status)
-       VALUES ($1, $2, 'facebook', $3, $4, $5, $6, $7, 'draft')`,
-      [campaignId, version + i, v.caption, image?.bytes ?? null, image?.mime ?? null, v.videoBrief, v.model],
-    );
+    const genNotes = JSON.stringify({
+      ...genNotesBase,
+      style: AB_STYLES[i] ?? null,
+      used_winning: winningExamples.length,
+      used_losing: losingExamples.length,
+    });
+    try {
+      await query(
+        `INSERT INTO campaign_contents
+           (campaign_id, version, platform, caption, image_bytes, image_mime, video_brief, gen_model, status, gen_notes)
+         VALUES ($1, $2, 'facebook', $3, $4, $5, $6, $7, 'draft', $8::jsonb)`,
+        [campaignId, version + i, v.caption, image?.bytes ?? null, image?.mime ?? null, v.videoBrief, v.model, genNotes],
+      );
+    } catch {
+      // schema-015 (gen_notes) ยังไม่ migrate — บันทึกแบบไม่มีคอลัมน์นั้น
+      await query(
+        `INSERT INTO campaign_contents
+           (campaign_id, version, platform, caption, image_bytes, image_mime, video_brief, gen_model, status)
+         VALUES ($1, $2, 'facebook', $3, $4, $5, $6, $7, 'draft')`,
+        [campaignId, version + i, v.caption, image?.bytes ?? null, image?.mime ?? null, v.videoBrief, v.model],
+      );
+    }
   }
 
   await query(`UPDATE recruit_campaigns SET status='pending_approval', status_note=NULL, updated_at=now() WHERE id=$1`, [campaignId]);

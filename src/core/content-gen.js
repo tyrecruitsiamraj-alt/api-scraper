@@ -90,10 +90,12 @@ const POSTER_SYSTEM = `คุณคือคนสรุปใบขอกำล
  *   ใส่เป็นตัวอย่าง "แนวที่คนไม่สนใจ — ห้ามทำซ้ำ" — ไม่มีก็ gen ได้ปกติ
  * @returns {Promise<null | { caption:string, videoBrief:string, imagePrompt:string, model:string }>}
  */
-export async function generateContent(campaign = {}) {
-  // เลือก AI ที่ใช้คิดข้อความ: 'anthropic' (Claude), 'openai' (GPT — ใช้ key เดียวกับที่สร้างรูป)
-  // หรือ 'ollama' (server บริษัท ฟรี ไม่ต้อง key). ไม่ตั้ง CONTENT_TEXT_PROVIDER = เลือกอัตโนมัติ
-  // ตามลำดับ: anthropic → openai → ollama → ปิด
+/**
+ * เลือก provider ข้อความที่พร้อมใช้ (แชร์กับ content-research.js) —
+ * anthropic → openai → ollama ตาม key/ollama ที่มี. คืน null = ไม่มี provider เลย.
+ * @returns {null | { provider:'anthropic'|'openai'|'ollama', apiKey:string, openaiKey:string, ollamaBase:string }}
+ */
+export function resolveTextProvider() {
   const apiKey = envString('ANTHROPIC_API_KEY');
   const openaiKey = envString('OPENAI_API_KEY');
   const ollamaBase = envString('OLLAMA_BASE_URL');
@@ -101,10 +103,19 @@ export async function generateContent(campaign = {}) {
     'CONTENT_TEXT_PROVIDER',
     apiKey ? 'anthropic' : openaiKey ? 'openai' : ollamaBase ? 'ollama' : ''
   );
-  if (!provider) return null; // feature off — ไม่มีทั้ง key และ ollama
+  if (!provider) return null;
   if (provider === 'anthropic' && !apiKey) return null;
   if (provider === 'openai' && !openaiKey) return null;
   if (provider === 'ollama' && !ollamaBase) return null;
+  return { provider, apiKey, openaiKey, ollamaBase };
+}
+
+export async function generateContent(campaign = {}) {
+  // เลือก AI ที่ใช้คิดข้อความ: 'anthropic' (Claude), 'openai' (GPT — ใช้ key เดียวกับที่สร้างรูป)
+  // หรือ 'ollama' (server บริษัท ฟรี ไม่ต้อง key). ไม่ตั้ง CONTENT_TEXT_PROVIDER = เลือกอัตโนมัติ
+  const prov = resolveTextProvider();
+  if (!prov) return null; // feature off — ไม่มีทั้ง key และ ollama
+  const { provider, apiKey, openaiKey, ollamaBase } = prov;
 
   const ctx = campaignContext(campaign);
   if (!ctx) return null; // ไม่มีตำแหน่งให้คิด
@@ -129,11 +140,22 @@ export async function generateContent(campaign = {}) {
       loses.map((w, i) => `ตัวอย่างที่ไม่ควรทำ ${i + 1}:\n${w}`).join('\n---\n')
     : '';
 
+  // ผลวิจัยตลาด (จาก content-research.js) — มุม/ฮุกที่ดึงคนตำแหน่งนี้บนกลุ่มหางาน FB ไทย
+  // ให้ AI ใช้เป็นแนวคิด (ไม่ใช่ก๊อป) — ตอบโจทย์ "รู้ได้ไงว่าดี" ตั้งแต่ยังไม่มีสถิติของเราเอง
+  const research = campaign.research ?? null;
+  const angles = (research?.angles ?? []).map((s) => String(s ?? '').trim()).filter(Boolean).slice(0, 4);
+  const hooks = (research?.hooks ?? []).map((s) => String(s ?? '').trim()).filter(Boolean).slice(0, 4);
+  const researchBlock = angles.length || hooks.length
+    ? `\n\n🔍 ผลวิเคราะห์ตลาด (แนวที่ดึงคนตำแหน่งนี้ได้บนกลุ่มหางาน FB) — ใช้เป็นแนวคิด:` +
+      (angles.length ? `\nมุมที่ควรเล่น: ${angles.join(' · ')}` : '') +
+      (hooks.length ? `\nประโยคฮุกเปิด (ดัดแปลงได้ ห้ามลอกตรง): ${hooks.join(' | ')}` : '')
+    : '';
+
   // A/B: บอกแนวการเขียนของเวอร์ชันนี้ (เช่น "ตรงไปตรงมา" vs "เน้นสวัสดิการ")
   const styleBlock = String(campaign.styleHint ?? '').trim()
     ? `\n\nแนวการเขียนของเวอร์ชันนี้ (บังคับ): ${String(campaign.styleHint).trim()}`
     : '';
-  const userMsg = `เขียนคอนเทนต์สรรหาสำหรับใบขอนี้:\n${ctx}${winsBlock}${losesBlock}${styleBlock}`;
+  const userMsg = `เขียนคอนเทนต์สรรหาสำหรับใบขอนี้:\n${ctx}${winsBlock}${losesBlock}${researchBlock}${styleBlock}`;
 
   // qwen/Ollama ตอบไม่นิ่งเป็นรอบ ๆ — ว่าง/พังให้ลองซ้ำสูงสุด 3 รอบ
   let out = null;
@@ -160,10 +182,16 @@ export async function generateContent(campaign = {}) {
     return null;
   }
 
+  // สไตล์รูปจากผลวิจัย — ต่อท้าย image_prompt ให้รูปคุมโทน/องค์ประกอบตามที่สำรวจว่าเวิร์ค
+  // (ตอบโจทย์ "รูปไม่สำรวจจะรู้ไงต้องสร้างแบบไหน" — style มาจาก research ไม่ใช่สุ่ม)
+  const imageStyle = String(research?.imageStyle ?? '').trim();
+  const basePrompt = String(out.image_prompt ?? '').trim();
+  const imagePrompt = imageStyle && basePrompt ? `${basePrompt}. Style: ${imageStyle}` : basePrompt;
+
   return {
     caption,
     videoBrief: String(out.video_brief ?? '').trim(),
-    imagePrompt: String(out.image_prompt ?? '').trim(),
+    imagePrompt,
     model: modelUsed,
   };
 }
@@ -299,7 +327,7 @@ function harvestPosterFields(out) {
 }
 
 /** Claude — structured tool output (พฤติกรรมเดิมเป๊ะ) */
-async function callAnthropic({ apiKey, userMsg, system = SYSTEM, tool = TOOL }) {
+export async function callAnthropic({ apiKey, userMsg, system = SYSTEM, tool = TOOL }) {
   const model = envString('CONTENT_TEXT_MODEL', 'claude-sonnet-5');
   const client = new Anthropic({ apiKey });
   const msg = await client.messages.create({
@@ -318,7 +346,7 @@ async function callAnthropic({ apiKey, userMsg, system = SYSTEM, tool = TOOL }) 
  * OpenAI (GPT) — ใช้ OPENAI_API_KEY ตัวเดียวกับที่สร้างรูป (ai-image.js).
  * บังคับ output เป็น JSON ตาม schema เดียวกับ tool ของ Claude ผ่าน Structured Outputs.
  */
-async function callOpenAI({ apiKey, userMsg, system = SYSTEM, tool = TOOL }) {
+export async function callOpenAI({ apiKey, userMsg, system = SYSTEM, tool = TOOL }) {
   const model = envString('CONTENT_TEXT_MODEL', 'gpt-4o-mini');
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 120_000);
@@ -366,7 +394,7 @@ async function callOpenAI({ apiKey, userMsg, system = SYSTEM, tool = TOOL }) {
  * Ollama (server บริษัท, ฟรี ไม่ต้อง key) — บังคับ JSON ตาม schema ผ่าน `format`.
  * โมเดล default = qwen3.5:9b (ตัวที่ jarvis ใช้อยู่ อุ่นเครื่องแล้วบน server).
  */
-async function callOllama({ base, userMsg, system = SYSTEM, tool = TOOL }) {
+export async function callOllama({ base, userMsg, system = SYSTEM, tool = TOOL }) {
   const model = envString('OLLAMA_MODEL', 'qwen3.5:9b');
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 180_000); // โมเดลใหญ่/โหลดครั้งแรกช้าได้

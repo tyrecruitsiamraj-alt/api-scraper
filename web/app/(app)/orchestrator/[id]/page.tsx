@@ -340,6 +340,27 @@ export default async function CampaignDetail({ params }: { params: { id: string 
                         </>
                       )}
                       {ct.reject_reason && <div className="mt-2 text-xs text-red-600">เหตุผลตีกลับ: {ct.reject_reason}</div>}
+
+                      {/* provenance จริงของร่างนี้ — AI คิดจากอะไร (research + A/B + ตัวอย่างที่ใช้) */}
+                      {ct.gen_notes && (ct.gen_notes.angles?.length || ct.gen_notes.hooks?.length || ct.gen_notes.imageStyle || ct.gen_notes.style) && (
+                        <details className="mt-3 rounded-lg border border-hairline bg-black/[0.015] px-3 py-2">
+                          <summary className="cursor-pointer select-none text-xs font-medium text-subtle">🧠 ร่างนี้ AI คิดจากอะไร</summary>
+                          <div className="mt-2 space-y-1.5 text-xs text-ink/75">
+                            {ct.gen_notes.style && <div><span className="text-subtle">แนวเขียน:</span> {ct.gen_notes.style}</div>}
+                            {ct.gen_notes.angles && ct.gen_notes.angles.length > 0 && (
+                              <div><span className="text-subtle">มุมที่เล่น (research):</span> {ct.gen_notes.angles.join(' · ')}</div>
+                            )}
+                            {ct.gen_notes.hooks && ct.gen_notes.hooks.length > 0 && (
+                              <div><span className="text-subtle">ฮุกที่แนะ:</span> {ct.gen_notes.hooks.join(' | ')}</div>
+                            )}
+                            {ct.gen_notes.imageStyle && <div><span className="text-subtle">สไตล์รูป:</span> {ct.gen_notes.imageStyle}</div>}
+                            <div className="text-subtle/70">
+                              อ้างอิงแนวที่เวิร์ค {ct.gen_notes.used_winning ?? 0} · เลี่ยงแนวที่ไม่เวิร์ค {ct.gen_notes.used_losing ?? 0}
+                              {ct.gen_notes.research_model ? ` · research: ${ct.gen_notes.research_model}` : ''}
+                            </div>
+                          </div>
+                        </details>
+                      )}
                     </div>
                   </div>
 
