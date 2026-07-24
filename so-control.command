@@ -26,8 +26,10 @@ start_workers() {
   if running autopost; then
     printf "  ${D}autopost ทำงานอยู่แล้ว (pid %s)${N}\n" "$(cat "$RUN/autopost.pid")"
   else
-    ( cd autopost && nohup npm run worker:post > "../$RUN/autopost.log" 2>&1 & echo $! > "../$RUN/autopost.pid" )
-    printf "  ${G}✓ เปิด autopost (โพสต์ FB) pid %s${N}\n" "$(cat "$RUN/autopost.pid")"
+    # cwd ต้องเป็น autopost (มันอ่าน .env/.auth ที่นั่น) — ใช้ nohup bash -c + exec ให้ pid ตรงตัว npm
+    nohup bash -c 'cd autopost && exec npm run worker:post' > "$RUN/autopost.log" 2>&1 &
+    echo $! > "$RUN/autopost.pid"
+    printf "  ${G}✓ เปิด autopost (โพสต์ FB) pid %s${N}\n" "$(cat "$RUN/autopost.pid" 2>/dev/null)"
   fi
 
   # กันเครื่องหลับตราบใดที่ scraper ยังวิ่ง
@@ -50,6 +52,10 @@ stop_workers() {
       printf "  ${Y}หยุด %s${N}\n" "$name"
     fi
   done
+  # เก็บกวาด worker ที่หลุด track (เช่นจากรอบที่ pid ไม่ถูกบันทึก)
+  pkill -f "scraper-pool.mjs" 2>/dev/null && printf "  ${D}เก็บกวาด scraper ที่ค้าง${N}\n"
+  pkill -f "worker:post" 2>/dev/null && printf "  ${D}เก็บกวาด autopost ที่ค้าง${N}\n"
+  return 0
 }
 
 refresh_workers() {
