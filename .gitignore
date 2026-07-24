@@ -11,3 +11,6 @@ outputs/
 
 # แผงงาน so-tasks.command เก็บ log ที่นี่ — ไม่ต้อง commit
 logs/
+
+# แผงควบคุม so-control.command เก็บ pid/log ของ worker ที่นี่
+.run/
