@@ -903,6 +903,53 @@ export async function weeklyReport(offset = 0): Promise<WeeklyReport | null> {
   return { from: W, to: E, offset: off, posts, leads, candidates, campaigns, byPosition, byDay, topPosts };
 }
 
+// ---------------------------------------------------------------------------
+// เทรนด์ที่กำลังมา (content_trends, schema-016) — คนกรอกเทรนด์/มีมให้คอนเทนต์เกาะกระแส
+// worker (orchestrator-draft) ดึงตัว active ไปใส่ตอนคิดแคปชัน/รูป
+// ---------------------------------------------------------------------------
+export type ContentTrend = {
+  id: string;
+  label: string;
+  note: string | null;
+  for_caption: boolean;
+  for_image: boolean;
+  active: boolean;
+  created_at: string;
+};
+
+/** เทรนด์ทั้งหมด (จัดการบนหน้า Settings). guarded — [] ถ้ายังไม่ migrate. */
+export async function listContentTrends(): Promise<ContentTrend[]> {
+  try {
+    return await q<ContentTrend>(
+      `SELECT id, label, note, for_caption, for_image, active, created_at
+         FROM content_trends ORDER BY active DESC, updated_at DESC`,
+    );
+  } catch {
+    return [];
+  }
+}
+
+export async function createContentTrend(input: {
+  label: string;
+  note?: string | null;
+  forCaption?: boolean;
+  forImage?: boolean;
+}): Promise<void> {
+  await q(
+    `INSERT INTO content_trends (label, note, for_caption, for_image)
+     VALUES ($1, $2, $3, $4)`,
+    [input.label.trim(), input.note?.trim() || null, input.forCaption ?? true, input.forImage ?? true],
+  );
+}
+
+export async function setContentTrendActive(id: string, active: boolean): Promise<void> {
+  await q(`UPDATE content_trends SET active = $2, updated_at = now() WHERE id = $1`, [id, active]);
+}
+
+export async function deleteContentTrend(id: string): Promise<void> {
+  await q(`DELETE FROM content_trends WHERE id = $1`, [id]);
+}
+
 /** True when tasks are queued but no worker seems to be picking them up. */
 export async function hasStaleQueuedTasks(sec = 90) {
   const rows = await q<{ n: number }>(

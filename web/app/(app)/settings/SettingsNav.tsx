@@ -6,13 +6,14 @@ import { usePathname } from 'next/navigation';
 const ITEMS = [
   { href: '/settings/connectors', label: 'บัญชีเชื่อมต่อ', detail: 'บัญชี Scraping และ Facebook' },
   { href: '/settings/posting', label: 'กลุ่มโพสต์', detail: 'เลือกกลุ่มให้บัญชี และคลังกลุ่ม' },
+  { href: '/settings/trends', label: 'เทรนด์คอนเทนต์', detail: 'เทรนด์/มีมที่อยากให้คอนเทนต์เกาะ' },
 ];
 
 export function SettingsNav() {
   const pathname = usePathname();
 
   return (
-    <nav className="grid gap-3 sm:grid-cols-2" aria-label="เมนูตั้งค่า">
+    <nav className="grid gap-3 sm:grid-cols-3" aria-label="เมนูตั้งค่า">
       {ITEMS.map((item) => {
         const active = pathname === item.href || pathname.startsWith(`${item.href}/`);
         return (

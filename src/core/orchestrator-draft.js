@@ -1,4 +1,5 @@
 import { query } from '../db/pool.js';
+import { activeContentTrends } from '../db/repositories.js';
 import { generateContent, generatePosterFields } from './content-gen.js';
 import { researchContentAngles } from './content-research.js';
 import { generateImage } from './ai-image.js';
@@ -51,10 +52,14 @@ export async function generateDraftForCampaign(campaignId) {
     [String(c.title ?? '').trim()],
   ).then((r) => r.rows.map((x) => x.caption)).catch(() => []);
 
+  // เทรนด์ที่กำลังมา (คนเปิดไว้บนเว็บ) — เกาะเทรนด์/มีมให้ทัน (ไอติมอัลตร้าสมูท ฯลฯ)
+  const trends = await activeContentTrends().catch(() => []);
+  if (trends.length) console.log(`  [draft] เกาะเทรนด์: ${trends.map((t) => t.label).join(', ')}`);
+
   // Research ก่อนคิด: แนว/ฮุก/สไตล์รูปที่ดึงคนตำแหน่งนี้ได้ (cold-start — ใช้ก่อนมีสถิติของเราเอง)
-  // ground ด้วยแคปชันที่เคยเวิร์คของเรา; fail-soft = null (draft เดินต่อได้)
+  // ground ด้วยแคปชันที่เคยเวิร์คของเรา + เทรนด์ที่กำลังมา; fail-soft = null (draft เดินต่อได้)
   const research = await researchContentAngles({
-    title: c.title, province: c.province, snapshot: c.request_snapshot ?? {}, winningExamples,
+    title: c.title, province: c.province, snapshot: c.request_snapshot ?? {}, winningExamples, trends,
   }).catch(() => null);
   if (research) console.log(`  [draft] research: ${research.angles.length} มุม · ${research.hooks.length} ฮุก · imageStyle=${research.imageStyle ? 'มี' : '-'}`);
 
@@ -68,6 +73,7 @@ export async function generateDraftForCampaign(campaignId) {
     winningExamples,
     losingExamples,
     research,
+    trends,
   };
 
   // A/B: 2 เวอร์ชันคนละแนว — คนอนุมัติเลือกอันที่ชอบ (ผลชนะถูกเก็บเข้า winning patterns ต่อ)
@@ -113,9 +119,12 @@ export async function generateDraftForCampaign(campaignId) {
   // บันทึกทั้ง 2 เวอร์ชัน (โปสเตอร์ใบเดียวกัน — ต่างกันที่แคปชัน) ให้คนเลือกตอนอนุมัติ
   // gen_notes = provenance ว่าแต่ละร่างคิดจากอะไร (โชว์บนหน้า campaign; schema-015 ยังไม่มี = ข้าม)
   const versions = [content, contentB].filter(Boolean);
-  const genNotesBase = research
-    ? { angles: research.angles, hooks: research.hooks, imageStyle: research.imageStyle, research_model: research.model }
-    : {};
+  const genNotesBase = {
+    ...(research
+      ? { angles: research.angles, hooks: research.hooks, imageStyle: research.imageStyle, research_model: research.model }
+      : {}),
+    ...(trends.length ? { trends: trends.map((t) => t.label) } : {}),
+  };
   for (let i = 0; i < versions.length; i += 1) {
     const v = versions[i];
     const genNotes = JSON.stringify({

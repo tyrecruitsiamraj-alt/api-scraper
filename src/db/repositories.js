@@ -315,6 +315,25 @@ export async function fillCandidateContacts(id, { email, phone, line_id }) {
  * ใช้เติมท้ายชุดคำค้นโหมดเนื้องาน — การันตีว่ามีคำสามัญ volume สูงเสมอ ไม่พึ่งดวงโมเดล.
  * fail-soft: ตารางไม่มี/ว่าง = [] (งานหลักเดินต่อ)
  */
+/**
+ * เทรนด์ที่กำลังมา (content_trends, schema-016) ที่คนเปิด active ไว้ —
+ * worker เอาไปใส่ตอนคิดแคปชัน/รูป เพื่อเกาะเทรนด์ (ไอติมอัลตร้าสมูท ฯลฯ)
+ * fail-soft: ตารางยังไม่ migrate/ว่าง = [] (draft เดินต่อได้)
+ */
+export async function activeContentTrends(limit = 8) {
+  try {
+    const { rows } = await query(
+      `SELECT label, note, for_caption, for_image
+         FROM content_trends WHERE active = true
+        ORDER BY updated_at DESC LIMIT $1`,
+      [limit],
+    );
+    return rows;
+  } catch {
+    return [];
+  }
+}
+
 export async function topTrendKeywords(family, limit = 4) {
   if (!family) return [];
   try {

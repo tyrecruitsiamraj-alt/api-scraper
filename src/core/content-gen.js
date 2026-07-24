@@ -151,11 +151,18 @@ export async function generateContent(campaign = {}) {
       (hooks.length ? `\nประโยคฮุกเปิด (ดัดแปลงได้ ห้ามลอกตรง): ${hooks.join(' | ')}` : '')
     : '';
 
+  // เทรนด์/มีมที่กำลังมา (คนเปิดไว้บนเว็บ) — เกาะกระแสในแคปชันแบบเนียน (เฉพาะ for_caption)
+  const trends = (campaign.trends ?? []).filter((t) => t && (t.for_caption ?? true) && String(t.label ?? '').trim());
+  const trendsBlock = trends.length
+    ? `\n\n🔥 เทรนด์ที่กำลังมาตอนนี้ — เกาะกระแสให้เนียน ถ้าเข้ากับงานได้ (อย่าฝืน/อย่าหยาบ):\n` +
+      trends.map((t) => `- ${String(t.label).trim()}${t.note ? ` (${String(t.note).trim()})` : ''}`).join('\n')
+    : '';
+
   // A/B: บอกแนวการเขียนของเวอร์ชันนี้ (เช่น "ตรงไปตรงมา" vs "เน้นสวัสดิการ")
   const styleBlock = String(campaign.styleHint ?? '').trim()
     ? `\n\nแนวการเขียนของเวอร์ชันนี้ (บังคับ): ${String(campaign.styleHint).trim()}`
     : '';
-  const userMsg = `เขียนคอนเทนต์สรรหาสำหรับใบขอนี้:\n${ctx}${winsBlock}${losesBlock}${researchBlock}${styleBlock}`;
+  const userMsg = `เขียนคอนเทนต์สรรหาสำหรับใบขอนี้:\n${ctx}${winsBlock}${losesBlock}${researchBlock}${trendsBlock}${styleBlock}`;
 
   // qwen/Ollama ตอบไม่นิ่งเป็นรอบ ๆ — ว่าง/พังให้ลองซ้ำสูงสุด 3 รอบ
   let out = null;
@@ -185,8 +192,14 @@ export async function generateContent(campaign = {}) {
   // สไตล์รูปจากผลวิจัย — ต่อท้าย image_prompt ให้รูปคุมโทน/องค์ประกอบตามที่สำรวจว่าเวิร์ค
   // (ตอบโจทย์ "รูปไม่สำรวจจะรู้ไงต้องสร้างแบบไหน" — style มาจาก research ไม่ใช่สุ่ม)
   const imageStyle = String(research?.imageStyle ?? '').trim();
+  // เทรนด์ที่ติดธง for_image — เกาะกระแสในรูปด้วย (label ใช้เป็น hint สั้น ๆ)
+  const imageTrends = (campaign.trends ?? [])
+    .filter((t) => t && (t.for_image ?? true) && String(t.label ?? '').trim())
+    .map((t) => String(t.label).trim());
   const basePrompt = String(out.image_prompt ?? '').trim();
-  const imagePrompt = imageStyle && basePrompt ? `${basePrompt}. Style: ${imageStyle}` : basePrompt;
+  let imagePrompt = basePrompt;
+  if (basePrompt && imageStyle) imagePrompt += `. Style: ${imageStyle}`;
+  if (basePrompt && imageTrends.length) imagePrompt += `. เกาะเทรนด์: ${imageTrends.join(', ')}`;
 
   return {
     caption,

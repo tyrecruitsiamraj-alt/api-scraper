@@ -53,16 +53,24 @@ export async function researchContentAngles(input = {}) {
   const position = String(input.title ?? input.snapshot?.request_name ?? '').trim();
   if (!position) return null;
 
-  const trends = (input.trendKeywords ?? []).map((s) => String(s ?? '').trim()).filter(Boolean).slice(0, 6);
+  const kw = (input.trendKeywords ?? []).map((s) => String(s ?? '').trim()).filter(Boolean).slice(0, 6);
   const wins = (input.winningExamples ?? []).map((s) => String(s ?? '').trim()).filter(Boolean).slice(0, 2);
+  // เทรนด์/มีมที่กำลังมา (คนกรอกไว้บนเว็บ) — ให้เกาะกระแสตอนคิดมุม/ฮุก/สไตล์รูป
+  const trends = (input.trends ?? [])
+    .map((t) => (t && typeof t === 'object' ? { label: String(t.label ?? '').trim(), note: String(t.note ?? '').trim() } : { label: String(t ?? '').trim(), note: '' }))
+    .filter((t) => t.label)
+    .slice(0, 8);
 
   const userMsg = [
     `ตำแหน่งที่รับสมัคร: ${position}`,
     input.province ? `พื้นที่ทำงาน: ${input.province}` : '',
-    trends.length ? `คำค้นที่คนไทยใช้หางานนี้ (มาแรง): ${trends.join(', ')}` : '',
-    wins.length ? `แคปชันของเราที่เคยได้ผลดี (อ้างอิงโทน):\n${wins.map((w, i) => `- ${w.slice(0, 200)}`).join('\n')}` : '',
+    kw.length ? `คำค้นที่คนไทยใช้หางานนี้ (มาแรง): ${kw.join(', ')}` : '',
+    trends.length ? `เทรนด์/มีมที่กำลังมาตอนนี้ (อยากให้คอนเทนต์เกาะกระแสอย่างเนียน ไม่ฝืน):\n${trends.map((t) => `- ${t.label}${t.note ? ` (${t.note})` : ''}`).join('\n')}` : '',
+    wins.length ? `แคปชันของเราที่เคยได้ผลดี (อ้างอิงโทน):\n${wins.map((w) => `- ${w.slice(0, 200)}`).join('\n')}` : '',
     '',
-    'วิเคราะห์ว่าจะโพสต์ตำแหน่งนี้ให้คนบนกลุ่มหางาน FB ไทยหยุดดูและทักเข้ามาได้อย่างไร — ตอบเป็น angles/hooks/image_style',
+    'วิเคราะห์ว่าจะโพสต์ตำแหน่งนี้ให้คนบนกลุ่มหางาน FB ไทยหยุดดูและทักเข้ามาได้อย่างไร' +
+      (trends.length ? ' โดยเกาะเทรนด์ข้างต้นถ้าเข้ากับงานได้' : '') +
+      ' — ตอบเป็น angles/hooks/image_style',
   ].filter(Boolean).join('\n');
 
   const args = { userMsg, system: RESEARCH_SYSTEM, tool: RESEARCH_TOOL };

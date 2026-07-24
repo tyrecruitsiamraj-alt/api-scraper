@@ -40,11 +40,43 @@ import {
   deletePostingGroup,
   setAccountGroups,
   updateScrapeTaskCriteria,
+  createContentTrend,
+  setContentTrendActive,
+  deleteContentTrend,
 } from './repo';
 
 async function requireSession() {
   const session = await getServerSession(authOptions);
   if (!session) throw new Error('unauthorized');
+}
+
+// ---- เทรนด์คอนเทนต์ (schema-016) — คนกรอกเทรนด์ที่อยากให้คอนเทนต์เกาะ ----
+export async function createTrendAction(formData: FormData) {
+  await requireSession();
+  const label = String(formData.get('label') ?? '').trim();
+  if (!label) throw new Error('ใส่ชื่อเทรนด์ก่อน');
+  await createContentTrend({
+    label,
+    note: String(formData.get('note') ?? '').trim() || null,
+    forCaption: formData.get('forCaption') !== null,
+    forImage: formData.get('forImage') !== null,
+  });
+  revalidatePath('/settings/trends');
+}
+
+export async function toggleTrendAction(formData: FormData) {
+  await requireSession();
+  const id = String(formData.get('id') ?? '').trim();
+  const active = String(formData.get('active') ?? '') === 'true';
+  if (id) await setContentTrendActive(id, active);
+  revalidatePath('/settings/trends');
+}
+
+export async function deleteTrendAction(formData: FormData) {
+  await requireSession();
+  const id = String(formData.get('id') ?? '').trim();
+  if (id) await deleteContentTrend(id);
+  revalidatePath('/settings/trends');
 }
 
 // ---- จัดการกลุ่มโพสต์ + ผูกกลุ่มเข้าบัญชี (หน้า /settings/posting native) ----
