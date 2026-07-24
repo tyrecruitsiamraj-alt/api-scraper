@@ -65,6 +65,22 @@ refresh_workers() {
   start_workers
 }
 
+# ---------- ตั้งเวลารันอัตโนมัติ (cron จันทร์) — แทน setup-seo-cron.command ----------
+install_cron() {
+  printf "\n${B}▶ ตั้งเวลารันอัตโนมัติ (ทุกวันจันทร์)...${N}\n"
+  local NODE; NODE="$(command -v node || true)"
+  if [ -z "$NODE" ]; then printf "  ${R}✗ ไม่พบ node ใน PATH${N}\n"; return 1; fi
+  mkdir -p output
+  local ROOT; ROOT="$(pwd)"
+  local L1="30 8 * * 1 cd $ROOT && $NODE scripts/seo-update.mjs >> $ROOT/output/seo-update.log 2>&1"
+  local L2="45 8 * * 1 cd $ROOT && $NODE scripts/best-time-update.mjs >> $ROOT/output/best-time.log 2>&1"
+  # cron ไม่มีจอ → trend-discover บังคับ headless; ถ้า FB บล็อกค่อยรันมือ T→1 (headful)
+  local L3="0 9 * * 1 cd $ROOT && TREND_HEADLESS=1 $NODE scripts/trend-discover.mjs >> $ROOT/output/trend-discover.log 2>&1"
+  ( crontab -l 2>/dev/null | grep -v 'seo-update.mjs' | grep -v 'best-time-update.mjs' | grep -v 'trend-discover.mjs' ; echo "$L1"; echo "$L2"; echo "$L3" ) | crontab -
+  printf "  ${G}✓ ตั้งแล้ว (จันทร์): SEO 08:30 · ช่วงเวลาโพสต์ 08:45 · สำรวจเทรนด์ 09:00${N}\n"
+  printf "  ${D}log อยู่ที่ output/*.log · ตั้งซ้ำได้ ไม่ซ้ำซ้อน${N}\n"
+}
+
 # ---------- งานประจำ (เงียบ + สรุป) ----------
 run_quiet() {
   local title="$1"; shift
@@ -86,7 +102,8 @@ run_quiet() {
 tasks_menu() {
   printf "\n${B}งานประจำ (เป็นครั้งคราว)${N}\n"
   echo "  1) สำรวจเทรนด์จากกลุ่ม   2) SEO คำค้น   3) ช่วงเวลาโพสต์"
-  echo "  4) อัปเดตฐานข้อมูล        5) บันทึกกลุ่มสำรวจ   A) รันทั้งหมด(1-3)   ว่าง=กลับ"
+  echo "  4) อัปเดตฐานข้อมูล        5) บันทึกกลุ่มสำรวจ   A) รันทั้งหมด(1-3)"
+  echo "  6) ตั้งเวลารันอัตโนมัติ (cron ทุกจันทร์: 1+2+3)   ว่าง=กลับ"
   printf "เลือก: "; read -r t
   case "$t" in
     1) run_quiet "สำรวจเทรนด์" node scripts/trend-discover.mjs ;;
@@ -94,6 +111,7 @@ tasks_menu() {
     3) run_quiet "ช่วงเวลาโพสต์" node scripts/best-time-update.mjs ;;
     4) run_quiet "อัปเดตฐานข้อมูล" npm run migrate ;;
     5) run_quiet "บันทึกกลุ่ม" node scripts/seed-research-groups.mjs ;;
+    6) install_cron ;;
     A|a) run_quiet "สำรวจเทรนด์" node scripts/trend-discover.mjs
          run_quiet "SEO คำค้น" node scripts/seo-update.mjs
          run_quiet "ช่วงเวลาโพสต์" node scripts/best-time-update.mjs ;;
