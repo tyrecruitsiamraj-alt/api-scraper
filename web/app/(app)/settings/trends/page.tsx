@@ -6,6 +6,7 @@ export const dynamic = 'force-dynamic';
 export default async function TrendsSettingsPage() {
   const trends = await listContentTrends();
   const activeCount = trends.filter((t) => t.active).length;
+  const pendingCount = trends.filter((t) => t.source === 'discovered' && !t.active).length;
 
   return (
     <div className="space-y-5">
@@ -16,6 +17,15 @@ export default async function TrendsSettingsPage() {
           {activeCount > 0 ? ` · เปิดอยู่ ${activeCount} รายการ` : ''}
         </p>
       </div>
+
+      {pendingCount > 0 && (
+        <div className="rounded-2xl border border-amber-200/70 bg-amber-50 px-4 py-3">
+          <div className="eyebrow text-amber-700">ระบบสำรวจกลุ่มแล้วเสนอเทรนด์ใหม่</div>
+          <div className="mt-1 text-[13px] text-amber-800">
+            มี {pendingCount} เทรนด์ที่ระบบค้นเจอจากกลุ่ม FB รอคุณกด “เปิด” เพื่ออนุมัติให้เอาไปใช้ (ตรวจก่อนว่าเข้ากับแบรนด์)
+          </div>
+        </div>
+      )}
 
       {/* เพิ่มเทรนด์ */}
       <form action={createTrendAction} className="card space-y-3 p-4">
@@ -59,6 +69,11 @@ export default async function TrendsSettingsPage() {
                   ) : (
                     <span className="pill bg-black/5 text-subtle">ปิด</span>
                   )}
+                  {t.source === 'discovered' && (
+                    <span className={`pill text-[11px] ${t.active ? 'bg-blue-50 text-blue-700' : 'bg-amber-50 text-amber-700'}`}>
+                      {t.active ? 'ระบบเสนอ' : 'ระบบเสนอ · รออนุมัติ'}
+                    </span>
+                  )}
                   {t.for_caption && <span className="pill bg-black/[0.04] text-[11px] text-subtle">แคปชัน</span>}
                   {t.for_image && <span className="pill bg-black/[0.04] text-[11px] text-subtle">รูป</span>}
                 </div>
@@ -67,7 +82,7 @@ export default async function TrendsSettingsPage() {
               <form action={toggleTrendAction}>
                 <input type="hidden" name="id" value={t.id} />
                 <input type="hidden" name="active" value={(!t.active).toString()} />
-                <button className="btn-ghost btn-sm">{t.active ? 'ปิด' : 'เปิด'}</button>
+                <button className="btn-ghost btn-sm">{t.active ? 'ปิด' : t.source === 'discovered' ? 'อนุมัติ' : 'เปิด'}</button>
               </form>
               <form action={deleteTrendAction}>
                 <input type="hidden" name="id" value={t.id} />

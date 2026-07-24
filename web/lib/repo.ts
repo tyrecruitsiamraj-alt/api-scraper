@@ -914,18 +914,30 @@ export type ContentTrend = {
   for_caption: boolean;
   for_image: boolean;
   active: boolean;
+  source: 'manual' | 'discovered';
   created_at: string;
 };
 
-/** เทรนด์ทั้งหมด (จัดการบนหน้า Settings). guarded — [] ถ้ายังไม่ migrate. */
+/** เทรนด์ทั้งหมด (จัดการบนหน้า Settings) — ระบบเสนอ (discovered) ที่ยังไม่อนุมัติขึ้นก่อน. guarded. */
 export async function listContentTrends(): Promise<ContentTrend[]> {
   try {
     return await q<ContentTrend>(
-      `SELECT id, label, note, for_caption, for_image, active, created_at
-         FROM content_trends ORDER BY active DESC, updated_at DESC`,
+      `SELECT id, label, note, for_caption, for_image, active,
+              COALESCE(source, 'manual') AS source, created_at
+         FROM content_trends
+        ORDER BY (source = 'discovered' AND active = false) DESC, active DESC, updated_at DESC`,
     );
   } catch {
-    return [];
+    // schema-016 ยังไม่ migrate (ไม่มีตาราง) หรือ schema-017 ยังไม่มา (ไม่มี source)
+    try {
+      const rows = await q<Omit<ContentTrend, 'source'>>(
+        `SELECT id, label, note, for_caption, for_image, active, created_at
+           FROM content_trends ORDER BY active DESC, updated_at DESC`,
+      );
+      return rows.map((r) => ({ ...r, source: 'manual' as const }));
+    } catch {
+      return [];
+    }
   }
 }
 
