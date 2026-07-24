@@ -318,6 +318,14 @@ function WorkAction({ item, connectors, facebookAccounts }: {
               ))}
             </select>
           </div>
+          <div>
+            <label className="label" htmlFor={`postmode-${item.id}`}>โพสต์อะไร</label>
+            <select id={`postmode-${item.id}`} name="postMode" defaultValue="both" className="field">
+              <option value="both">รูป + แคปชัน</option>
+              <option value="image" disabled={!item.content.hasImage}>เฉพาะรูป{item.content.hasImage ? '' : ' (ไม่มีรูป)'}</option>
+              <option value="caption">เฉพาะแคปชัน</option>
+            </select>
+          </div>
           <button className="btn-primary" disabled={noReady}>
             {noAccount ? 'ยังไม่มีบัญชี' : noReady ? 'ทุกบัญชียังไม่มีกลุ่ม' : 'อนุมัติและโพสต์'}
           </button>

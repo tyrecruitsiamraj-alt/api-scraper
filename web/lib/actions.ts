@@ -345,11 +345,16 @@ export async function approveContentAction(formData: FormData) {
   if (!fbAccountId) throw new Error('กรุณาเลือกบัญชี Facebook ก่อนอนุมัติ');
   const [campaign, content] = await Promise.all([getCampaign(campaignId), getContentById(contentId)]);
   if (!campaign || !content || content.campaign_id !== campaignId) throw new Error('ไม่พบ Content ของ campaign นี้');
+  // โพสต์อะไร: both/image/caption (default both) — เฉพาะรูปต้องมีรูปจริง
+  const pm = String(formData.get('postMode') ?? 'both').trim();
+  const postMode = pm === 'image' || pm === 'caption' ? pm : 'both';
+  if (postMode === 'image' && !content.has_image) throw new Error('ร่างนี้ไม่มีรูป — เลือก “เฉพาะรูป” ไม่ได้');
   await enqueueApprovedPost({
     campaign,
     content,
     userId: fbAccountId,
     requestedBy: session.user?.email ?? session.user?.name ?? null,
+    postMode,
   });
   await setSoRecruitRequestStatus(campaign.request_no, 'posted');
   // autopost worker (npm run worker:post) โพล post_run_queue เองทุก ~5 วิ — ไม่ต้อง kick

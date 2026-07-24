@@ -1826,18 +1826,27 @@ export async function setAccountGroups(userId: string, groupIds: string[]): Prom
  * ทั้งหมดอยู่ schema `so_autopost_jobs` (DB เดียวกัน). แล้วบันทึก campaign_posts ฝั่ง orchestrator
  * (เตรียมวัดผลเฟส 4). worker บนเครื่อง PC จะหยิบคิวไปโพสต์ FB พร้อมรูป.
  */
+export type PostMode = 'both' | 'image' | 'caption';
+
 export async function enqueueApprovedPost(opts: {
   campaign: CampaignRow;
   content: { id: string; caption: string | null; has_image: boolean };
   userId: string;
   requestedBy: string | null;
+  /** โพสต์อะไร: ทั้งคู่ / เฉพาะรูป / เฉพาะแคปชัน (default both) */
+  postMode?: PostMode;
 }) {
   const { campaign, content, userId, requestedBy } = opts;
+  const mode: PostMode = opts.postMode ?? 'both';
   const jobId = autopostId();
   const assignmentId = autopostId();
   const queueId = autopostId();
   const title = (campaign.title || campaign.request_no || 'ประกาศรับสมัครงาน').slice(0, 500);
-  const imageRef = content.has_image ? `campaign-content:${content.id}` : null;
+  // เลือกโพสต์: เฉพาะแคปชัน = ไม่แนบรูป · เฉพาะรูป = แคปชันว่าง (ต้องมีรูปจริง)
+  const useImage = mode !== 'caption' && content.has_image;
+  const useCaption = mode !== 'image';
+  const imageRef = useImage ? `campaign-content:${content.id}` : null;
+  const captionText = useCaption ? (content.caption || '') : '';
 
   // เผื่อ schema autopost ยังไม่มีคอลัมน์ image_ref (idempotent)
   await q(`ALTER TABLE ${AP}.jobs ADD COLUMN IF NOT EXISTS image_ref TEXT`);
@@ -1848,7 +1857,7 @@ export async function enqueueApprovedPost(opts: {
     await client.query(
       `INSERT INTO ${AP}.jobs (id, title, owner, company, caption, status, image_ref)
        VALUES ($1, $2, 'SO Recruitment', 'SO Recruitment', $3, 'pending', $4)`,
-      [jobId, title, content.caption || '', imageRef],
+      [jobId, title, captionText, imageRef],
     );
     await client.query(
       `INSERT INTO ${AP}.assignments (id, job_ids, group_ids, user_id)

@@ -410,6 +410,14 @@ export default async function CampaignDetail({ params }: { params: { id: string 
                               เพิ่มและผูกบัญชี Facebook ก่อนอนุมัติ
                             </Link>
                           )}
+                          <label className="text-xs text-subtle">
+                            <span className="mb-1 block">โพสต์อะไร</span>
+                            <select name="postMode" defaultValue="both" className="rounded-lg border border-hairline bg-transparent px-2 py-1.5 text-sm text-ink">
+                              <option value="both">รูป + แคปชัน</option>
+                              <option value="image" disabled={!ct.has_image}>เฉพาะรูป{ct.has_image ? '' : ' (ไม่มีรูป)'}</option>
+                              <option value="caption">เฉพาะแคปชัน</option>
+                            </select>
+                          </label>
                           <button className="btn-primary btn-sm" disabled={fbAccounts.length === 0}>✓ อนุมัติและโพสต์</button>
                         </form>
                         <form action={rejectContentAction}>
