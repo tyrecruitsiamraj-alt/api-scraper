@@ -100,8 +100,22 @@ function parseLoose(raw) {
 }
 
 /** ให้ Ollama สรุป snippet ทั้งหมด → เทรนด์ที่กำลังมา */
+/** หา array ของ object เทรนด์ในทุก key (qwen ห่อ key มั่ว/ตอบ array ตรง ๆ) */
+function pickTrendList(o) {
+  if (Array.isArray(o)) return o;
+  if (o && typeof o === 'object') {
+    if (Array.isArray(o.trends)) return o.trends;
+    for (const v of Object.values(o)) {
+      if (Array.isArray(v) && v.some((x) => x && typeof x === 'object' && ('label' in x || 'name' in x))) return v;
+    }
+  }
+  return [];
+}
+
 async function summarizeTrends(base, model, snippets) {
   if (snippets.length === 0) return [];
+  // ลด input: qwen thinking model + input ยาว = สรุปพัง → เอา 30 โพสต์ ตัดสั้น 300 ตัว
+  const sample = snippets.slice(0, 30).map((s) => s.slice(0, 300));
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 180_000);
   try {
@@ -111,20 +125,24 @@ async function summarizeTrends(base, model, snippets) {
       signal: controller.signal,
       body: JSON.stringify({
         model, stream: false, think: false,
-        options: { temperature: 0.4, num_predict: 2048 },
+        options: { temperature: 0.4, num_predict: 3500 }, // เผื่อ thinking กิน budget
         format: TREND_SCHEMA,
         messages: [
-          { role: 'system', content: 'คุณคือนักวิเคราะห์คอนเทนต์สรรหาบน Facebook ไทย ดูโพสต์รับสมัครจริงในกลุ่มแล้วสรุป "เทรนด์/มุม/คำพูด/มีมที่กำลังมา" ที่คนใช้แล้วได้ผล ตอบ JSON ตามโครงสร้างเท่านั้น ภาษาไทย สั้น' },
-          { role: 'user', content: `นี่คือข้อความโพสต์รับสมัครล่าสุดจากหลายกลุ่ม:\n\n${snippets.map((s, i) => `${i + 1}. ${s}`).join('\n')}\n\nสรุป 4-8 เทรนด์/มุม/คำพูดที่เห็นบ่อยและน่าเอามาใช้กับโพสต์รับสมัครของเราตอนนี้` },
+          { role: 'system', content: 'คุณคือนักวิเคราะห์คอนเทนต์สรรหาบน Facebook ไทย ดูโพสต์รับสมัครจริงแล้วสรุป "เทรนด์/มุม/คำพูด/มีมที่กำลังมา" ที่คนใช้แล้วได้ผล ตอบ JSON ตามโครงสร้างเท่านั้น ห้ามอธิบายนำ ภาษาไทย สั้น' },
+          { role: 'user', content: `โพสต์รับสมัครล่าสุดจากหลายกลุ่ม:\n\n${sample.map((s, i) => `${i + 1}. ${s}`).join('\n')}\n\nสรุป 4-8 เทรนด์/มุม/คำพูดที่เห็นบ่อยและน่าเอามาใช้กับโพสต์รับสมัครของเรา` },
         ],
       }),
     });
     if (!res.ok) throw new Error(`ollama HTTP ${res.status}`);
     const json = await res.json();
-    const out = parseLoose(json?.message?.content);
-    const list = Array.isArray(out?.trends) ? out.trends : [];
+    const content = String(json?.message?.content ?? '');
+    const list = pickTrendList(parseLoose(content));
+    if (list.length === 0) {
+      // โชว์คำตอบดิบเมื่อสรุปว่าง — จะได้รู้ว่า qwen ตอบอะไร (think ค้าง/JSON เพี้ยน/ว่าง)
+      console.warn(`  [trend] สรุปว่าง — done=${json?.done_reason ?? '?'} len=${content.length} head=${content.slice(0, 220).replace(/\s+/g, ' ')}`);
+    }
     return list
-      .map((t) => ({ label: String(t.label ?? '').trim(), note: String(t.note ?? '').trim().slice(0, 300), forImage: t.for_image !== false }))
+      .map((t) => ({ label: String(t.label ?? t.name ?? '').trim(), note: String(t.note ?? t.detail ?? '').trim().slice(0, 300), forImage: t.for_image !== false }))
       .filter((t) => t.label && t.label.length <= 60);
   } finally {
     clearTimeout(timer);
