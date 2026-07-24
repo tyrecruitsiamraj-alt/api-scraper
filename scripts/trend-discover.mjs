@@ -137,18 +137,34 @@ async function summarizeTrends(base, model, snippets) {
     const json = await res.json();
     const content = String(json?.message?.content ?? '');
     const list = pickTrendList(parseLoose(content));
-    const result = list
-      .map((t) => ({
-        label: String(t.label ?? t.name ?? t.title ?? t.trend ?? t.topic ?? '').trim(),
-        note: String(t.note ?? t.detail ?? t.description ?? t.how ?? '').trim().slice(0, 300),
-        forImage: t.for_image !== false,
-      }))
-      .filter((t) => t.label && t.label.length <= 100);
-    // ผลสุดท้ายว่าง (list ว่าง หรือ list มีแต่ filter ทิ้งหมด) → โชว์คำตอบดิบให้เห็นว่า qwen ตอบอะไร
-    if (result.length === 0) {
+
+    // qwen ไม่ทำตาม schema เป๊ะ — บางทีให้ {category, keyword_thai:[...]} แทน {label,note}
+    // แตกทน: label = คำ/วลีไทย (จาก keyword arrays) โดยตรง, note = หมวด/คำอธิบาย
+    const trends = [];
+    const seen = new Set();
+    const push = (label, note) => {
+      const l = String(label ?? '').trim().slice(0, 100);
+      const key = l.toLowerCase();
+      if (!l || seen.has(key)) return;
+      seen.add(key);
+      // discovered = caption ก่อน (for_image=false) กันเทรนด์ text ไปเพี้ยนรูป — user ติ๊กรูปเองได้
+      trends.push({ label: l, note: String(note ?? '').trim().slice(0, 300), forImage: false });
+    };
+    for (const t of list) {
+      if (!t || typeof t !== 'object') { if (t) push(t, ''); continue; }
+      const cat = String(t.category ?? t.label ?? t.name ?? t.title ?? t.topic ?? t.theme ?? '').trim();
+      const note = String(t.note ?? t.detail ?? t.description ?? '').trim() || cat;
+      const kwRaw = t.keyword_thai ?? t.keywords ?? t.examples ?? t.phrases ?? t.keyword ?? null;
+      const kws = Array.isArray(kwRaw)
+        ? kwRaw.map((x) => String(x).trim()).filter(Boolean)
+        : (typeof kwRaw === 'string' && kwRaw.trim() ? [kwRaw.trim()] : []);
+      if (kws.length) kws.forEach((kw) => push(kw, cat));       // แต่ละคำ = 1 เทรนด์ (ไทย ใช้ได้เลย)
+      else if (cat) push(cat, note);                             // ไม่มีคำ ใช้หมวดเป็นเทรนด์
+    }
+    if (trends.length === 0) {
       console.warn(`  [trend] สรุปว่าง — done=${json?.done_reason ?? '?'} contentLen=${content.length} listLen=${list.length} head=${content.slice(0, 400).replace(/\s+/g, ' ')}`);
     }
-    return result;
+    return trends.slice(0, 12); // กันเยอะเกินตอนรีวิว
   } finally {
     clearTimeout(timer);
   }
