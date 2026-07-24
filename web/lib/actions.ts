@@ -39,6 +39,7 @@ import {
   createPostingGroup,
   deletePostingGroup,
   setAccountGroups,
+  updateScrapeTaskCriteria,
 } from './repo';
 
 async function requireSession() {
@@ -181,6 +182,21 @@ export async function queueTaskAction(formData: FormData) {
   revalidatePath('/scraping');
 }
 
+/** แก้เกณฑ์การค้นของ task หลังสร้าง (ตำแหน่ง/คำค้น/จังหวัด/เป้า) — ห้ามแก้ตอนกำลังวิ่ง. */
+export async function updateTaskCriteriaAction(formData: FormData) {
+  await requireSession();
+  const id = String(formData.get('id') ?? '').trim();
+  if (!id) return;
+  await updateScrapeTaskCriteria(id, {
+    position: String(formData.get('position') ?? ''),
+    keyword: String(formData.get('keyword') ?? ''),
+    province: String(formData.get('province') ?? ''),
+    targetCount: Number(formData.get('targetCount')) || null,
+  });
+  revalidatePath('/scraping');
+  revalidatePath('/orchestrator');
+}
+
 /** Fire a one-shot scrape for an AI-suggested adjacent position (🟡/🔴) the user picked. */
 export async function expandAdjacentTaskAction(formData: FormData) {
   await requireSession();
@@ -213,13 +229,23 @@ export async function deleteTaskAction(formData: FormData) {
 // Content Orchestrator
 // ---------------------------------------------------------------------------
 /** คนกดสั่งต่อใบ: สร้าง campaign จากใบขอใน staging เพื่อเข้าโหมดคิด content. */
+/** อ่านช่องแก้ไขใบขอ (ov_*) จากฟอร์มการ์ด intake — ช่องว่าง = ไม่ทับข้อมูลเดิม */
+function readIntakeOverrides(formData: FormData) {
+  const g = (k: string) => String(formData.get(`ov_${k}`) ?? '').trim();
+  return {
+    position: g('position'), location: g('location'), income: g('income'),
+    qty: g('qty'), work_schedule: g('work_schedule'), gender: g('gender'),
+    age_min: g('age_min'), age_max: g('age_max'), unit_name: g('unit_name'), note: g('note'),
+  };
+}
+
 export async function startCampaignAction(formData: FormData) {
   const session = await getServerSession(authOptions);
   if (!session) throw new Error('unauthorized');
   const requestNo = String(formData.get('requestNo') ?? '').trim();
   if (requestNo) {
     const owner = session.user?.email ?? session.user?.name ?? null;
-    const campaignId = await createCampaignFromRequest(requestNo, owner);
+    const campaignId = await createCampaignFromRequest(requestNo, owner, readIntakeOverrides(formData));
     if (campaignId) {
       await setCampaignStatus(campaignId, 'drafting');
       await enqueueDraftForCampaign(campaignId, owner); // AI คิด content เบื้องหลัง
@@ -248,7 +274,12 @@ export async function startSoRecruitScrapeAction(formData: FormData) {
   const connectorId = String(formData.get('connectorId') ?? '').trim();
   if (!requestNo || !connectorId) throw new Error('กรุณาเลือก Connector ก่อนอนุมัติ');
   const owner = session.user?.email ?? session.user?.name ?? null;
-  const taskId = await createScrapeTaskFromSoRecruit(requestNo, connectorId);
+  // แผน scrape ที่คนเห็น/แก้บนการ์ดก่อนกด (ว่าง = ตามใบขอ)
+  const taskId = await createScrapeTaskFromSoRecruit(requestNo, connectorId, {
+    position: String(formData.get('scrapePosition') ?? '').trim() || undefined,
+    province: String(formData.get('scrapeProvince') ?? '').trim() || undefined,
+    target: Number(formData.get('scrapeTarget')) || undefined,
+  });
   await enqueueScrapeForTask(taskId, owner);
   kickWorker();
   revalidatePath('/orchestrator');

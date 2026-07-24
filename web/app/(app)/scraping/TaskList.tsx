@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import type { TaskRow } from '@/lib/repo';
 import { ScrapingStatusBar } from '@/components/ScrapingStatusBar';
-import { deleteTaskAction, expandAdjacentTaskAction, queueTaskAction, toggleTaskAction } from '@/lib/actions';
+import { deleteTaskAction, expandAdjacentTaskAction, queueTaskAction, toggleTaskAction, updateTaskCriteriaAction } from '@/lib/actions';
 
 type LiveStatus = {
   id: string;
@@ -309,6 +309,36 @@ export function TaskList({ initialTasks }: { initialTasks: TaskRow[] }) {
             )}
 
             {status === 'error' && error && <p className="mt-2 text-xs text-red-600">⚠ {error}</p>}
+
+            {/* แก้เกณฑ์การค้นหลังสร้าง — ปิดตอนกำลังวิ่ง (จะมีผลรอบถัดไปที่กดรัน) */}
+            {!busy && (
+              <details className="mt-3">
+                <summary className="inline-flex cursor-pointer select-none items-center gap-1 text-xs text-subtle hover:text-accent">
+                  ✎ แก้เกณฑ์การค้น
+                </summary>
+                <form action={updateTaskCriteriaAction} className="mt-2 grid items-end gap-2 rounded-lg border border-line/60 bg-black/[0.015] p-3 sm:grid-cols-5">
+                  <input type="hidden" name="id" value={t.id} />
+                  <div>
+                    <label className="mb-1 block text-[11px] text-subtle" htmlFor={`ed-pos-${t.id}`}>ตำแหน่ง</label>
+                    <input id={`ed-pos-${t.id}`} name="position" defaultValue={String(t.criteria?.position ?? '')} className="field w-full" />
+                  </div>
+                  <div>
+                    <label className="mb-1 block text-[11px] text-subtle" htmlFor={`ed-kw-${t.id}`}>คำค้น</label>
+                    <input id={`ed-kw-${t.id}`} name="keyword" defaultValue={String(t.criteria?.keyword ?? '')} className="field w-full" />
+                  </div>
+                  <div>
+                    <label className="mb-1 block text-[11px] text-subtle" htmlFor={`ed-prov-${t.id}`}>จังหวัด</label>
+                    <input id={`ed-prov-${t.id}`} name="province" defaultValue={String(t.criteria?.province ?? '')} className="field w-full" />
+                  </div>
+                  <div>
+                    <label className="mb-1 block text-[11px] text-subtle" htmlFor={`ed-target-${t.id}`}>เป้า (คน)</label>
+                    <input id={`ed-target-${t.id}`} name="targetCount" type="number" min={1} defaultValue={t.target_count ?? ''} className="field w-full" />
+                  </div>
+                  <button className="btn-secondary btn-sm">บันทึกเกณฑ์</button>
+                  <p className="text-[11px] text-subtle sm:col-span-5">ลบช่องว่าง = เอาเกณฑ์นั้นออก · มีผลตอนกด “รันตอนนี้” รอบถัดไป</p>
+                </form>
+              </details>
+            )}
 
             <AdjacentPlanPanel task={t} />
           </div>

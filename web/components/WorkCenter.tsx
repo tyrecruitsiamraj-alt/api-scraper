@@ -41,6 +41,8 @@ export type WorkCenterItem = {
   steps?: Step[];
   /** ใบตรวจข้อมูลใบขอ (เฉพาะ intake) — ช่องไหนมี ✓ / ขาด ✗ ให้ตัดสินใจรับ/ตีกลับ */
   checklist?: { label: string; ok: boolean }[];
+  /** ข้อมูลใบขอเต็ม (เฉพาะ intake) — กดกางดู + แก้ไขได้ก่อนรับงาน */
+  requestFields?: Record<string, string> | null;
 };
 
 type Option = { id: string; label: string };
@@ -144,6 +146,50 @@ function Stepper({ steps }: { steps: Step[] }) {
   );
 }
 
+// ลำดับ+ป้ายช่องข้อมูลใบขอ (ดู/แก้บนการ์ด intake)
+const REQUEST_FIELD_DEFS: { key: string; label: string }[] = [
+  { key: 'position', label: 'ตำแหน่ง' },
+  { key: 'location', label: 'พื้นที่/จังหวัด' },
+  { key: 'income', label: 'รายได้' },
+  { key: 'qty', label: 'จำนวน (คน)' },
+  { key: 'work_schedule', label: 'เวลางาน' },
+  { key: 'gender', label: 'เพศ' },
+  { key: 'age_min', label: 'อายุต่ำสุด' },
+  { key: 'age_max', label: 'อายุสูงสุด' },
+  { key: 'unit_name', label: 'หน่วยงาน' },
+  { key: 'note', label: 'หมายเหตุ' },
+];
+
+/**
+ * กล่อง "ดู/แก้รายละเอียดใบขอ" — กางแล้วเห็นทุกช่อง (ว่าง = ใบขอไม่ได้ให้มา)
+ * แก้ตรงช่องได้เลย ค่าจะถูกส่งไปกับปุ่มอนุมัติของ form นั้น (ผ่าน form= attribute)
+ */
+function RequestFieldsEditor({ fields, formId }: { fields: Record<string, string>; formId: string }) {
+  return (
+    <details className="rounded-2xl border border-line bg-black/[0.015] px-4 py-3">
+      <summary className="cursor-pointer select-none text-[13px] font-medium text-ink">
+        📋 ดู/แก้รายละเอียดใบขอ
+        <span className="ml-1 font-normal text-subtle">— แก้ก่อนกดอนุมัติได้ ช่องว่าง = ใช้ตามใบขอเดิม</span>
+      </summary>
+      <div className="mt-3 grid gap-x-3 gap-y-2 sm:grid-cols-2">
+        {REQUEST_FIELD_DEFS.map((fd) => (
+          <div key={fd.key}>
+            <label className="label" htmlFor={`${formId}-${fd.key}`}>{fd.label}</label>
+            <input
+              id={`${formId}-${fd.key}`}
+              name={`ov_${fd.key}`}
+              form={formId}
+              defaultValue={fields[fd.key] ?? ''}
+              placeholder="— ไม่มีในใบขอ —"
+              className="field w-full"
+            />
+          </div>
+        ))}
+      </div>
+    </details>
+  );
+}
+
 function WorkAction({ item, connectors, facebookAccounts }: {
   item: WorkCenterItem;
   connectors: Option[];
@@ -193,9 +239,12 @@ function WorkAction({ item, connectors, facebookAccounts }: {
       </form>
     );
     if (item.kind === 'content') {
+      // ช่องแก้ไขใน RequestFieldsEditor ผูกกับ form นี้ผ่าน form= attribute
+      const formId = `approve-req-${item.id}`;
       return (
         <div className="w-full space-y-3">
-          <form action={startCampaignAction}>
+          {item.requestFields && <RequestFieldsEditor fields={item.requestFields} formId={formId} />}
+          <form id={formId} action={startCampaignAction}>
             <input type="hidden" name="requestNo" value={item.requestNo} />
             <button className="btn-primary">อนุมัติรับงาน Content</button>
           </form>
@@ -203,21 +252,45 @@ function WorkAction({ item, connectors, facebookAccounts }: {
         </div>
       );
     }
+    // scraping: โชว์แผนการค้นก่อนกดเสมอ — คนเห็นว่าจะ scrape อะไร + แก้ได้ตรงนี้
+    const f = item.requestFields ?? {};
     return (
       <div className="w-full space-y-3">
-        <form action={startSoRecruitScrapeAction} className="flex flex-wrap items-end gap-2">
+        <form action={startSoRecruitScrapeAction} className="space-y-3">
           <input type="hidden" name="requestNo" value={item.requestNo} />
-          <div>
-            <label className="label" htmlFor={`connector-${item.id}`}>เลือก Connector</label>
-            <select id={`connector-${item.id}`} name="connectorId" required defaultValue="" className="field">
-              <option value="" disabled>เลือกบัญชี Scraping…</option>
-              {connectors.map((connector) => <option key={connector.id} value={connector.id}>{connector.label}</option>)}
-            </select>
+          <div className="rounded-2xl border border-line bg-black/[0.015] px-4 py-3">
+            <div className="text-[13px] font-medium text-ink">
+              🔎 แผนการค้น
+              <span className="ml-1 font-normal text-subtle">— ระบบจะ scrape ตามนี้ แก้ได้ก่อนกด</span>
+            </div>
+            <div className="mt-2 grid gap-x-3 gap-y-2 sm:grid-cols-3">
+              <div>
+                <label className="label" htmlFor={`sp-pos-${item.id}`}>ตำแหน่งที่ค้น</label>
+                <input id={`sp-pos-${item.id}`} name="scrapePosition" defaultValue={f.position ?? ''} placeholder="เช่น พนักงานขับรถ" className="field w-full" />
+              </div>
+              <div>
+                <label className="label" htmlFor={`sp-prov-${item.id}`}>จังหวัด</label>
+                <input id={`sp-prov-${item.id}`} name="scrapeProvince" defaultValue={f.location ?? ''} placeholder="ว่าง = ทุกจังหวัด" className="field w-full" />
+              </div>
+              <div>
+                <label className="label" htmlFor={`sp-target-${item.id}`}>เป้า (คน)</label>
+                <input id={`sp-target-${item.id}`} name="scrapeTarget" type="number" min={1} defaultValue={f.qty || ''} placeholder="20" className="field w-full" />
+              </div>
+            </div>
           </div>
-          <button className="btn-primary" disabled={connectors.length === 0}>อนุมัติและเริ่ม Scraping</button>
-          {connectors.length === 0 && (
-            <Link href="/settings/connectors" className="text-xs text-accent hover:underline">เพิ่ม Connector ก่อน</Link>
-          )}
+          <div className="flex flex-wrap items-end gap-2">
+            <div>
+              <label className="label" htmlFor={`connector-${item.id}`}>เลือก Connector</label>
+              <select id={`connector-${item.id}`} name="connectorId" required defaultValue="" className="field">
+                <option value="" disabled>เลือกบัญชี Scraping…</option>
+                {connectors.map((connector) => <option key={connector.id} value={connector.id}>{connector.label}</option>)}
+              </select>
+            </div>
+            <button className="btn-primary" disabled={connectors.length === 0}>อนุมัติและเริ่ม Scraping</button>
+            {connectors.length === 0 && (
+              <Link href="/settings/connectors" className="text-xs text-accent hover:underline">เพิ่ม Connector ก่อน</Link>
+            )}
+          </div>
         </form>
         {rejectForm}
       </div>

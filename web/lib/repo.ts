@@ -1034,6 +1034,37 @@ export async function enqueueScrapeForTask(taskId: string, ownerUser: string | n
   );
 }
 
+/**
+ * แก้เกณฑ์การค้นของ task หลังสร้าง (ก่อนรัน/หลังจบ — ห้ามแก้ตอนกำลังวิ่ง)
+ * ฟอร์ม prefill ค่าเดิม: ช่องที่ลบว่าง = เอาเกณฑ์นั้นออก
+ */
+export async function updateScrapeTaskCriteria(
+  id: string,
+  patch: { position?: string; keyword?: string; province?: string; targetCount?: number | null },
+) {
+  const rows = await q<{ criteria: Record<string, unknown>; status: string }>(
+    `SELECT criteria, status FROM scrape_tasks WHERE id = $1`,
+    [id],
+  );
+  if (!rows[0]) throw new Error(`task not found: ${id}`);
+  if (rows[0].status === 'running') throw new Error('งานกำลังวิ่งอยู่ — รอจบก่อนแล้วค่อยแก้');
+  const criteria = { ...(rows[0].criteria ?? {}) };
+  const setOrDelete = (k: string, v?: string) => {
+    const s = String(v ?? '').trim();
+    if (s) criteria[k] = s;
+    else delete criteria[k];
+  };
+  setOrDelete('position', patch.position);
+  setOrDelete('keyword', patch.keyword);
+  setOrDelete('province', patch.province);
+  await q(
+    `UPDATE scrape_tasks
+        SET criteria = $2::jsonb, target_count = COALESCE($3, target_count), updated_at = now()
+      WHERE id = $1 AND status <> 'running'`,
+    [id, JSON.stringify(criteria), patch.targetCount ?? null],
+  );
+}
+
 export async function setTaskEnabled(id: string, enabled: boolean) {
   await q('UPDATE scrape_tasks SET enabled=$2, updated_at=now() WHERE id=$1', [id, enabled]);
 }
@@ -1160,8 +1191,28 @@ export async function listSoRecruitPostingRequests(): Promise<PostingRequest[]> 
   }
 }
 
+/** ค่าที่คนแก้ก่อนรับงาน (จากฟอร์มบนการ์ด intake) — ทับข้อมูลใบขอเฉพาะช่องที่กรอก */
+export type IntakeOverrides = Partial<Record<
+  'position' | 'location' | 'income' | 'qty' | 'work_schedule' | 'gender' | 'age_min' | 'age_max' | 'unit_name' | 'note',
+  string
+>>;
+
+/** ตัดช่องว่างออกจาก overrides — เหลือเฉพาะช่องที่คนกรอกจริง */
+function cleanOverrides(ov?: IntakeOverrides): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [k, v] of Object.entries(ov ?? {})) {
+    const s = String(v ?? '').trim();
+    if (s) out[k] = s;
+  }
+  return out;
+}
+
 /** สร้าง Scraping task จากคำขอ So Recruit แบบ idempotent แล้วส่ง id กลับให้ action enqueue. */
-export async function createScrapeTaskFromSoRecruit(requestNo: string, connectorId: string): Promise<string> {
+export async function createScrapeTaskFromSoRecruit(
+  requestNo: string,
+  connectorId: string,
+  overrides?: { position?: string; province?: string; target?: number },
+): Promise<string> {
   const existing = await q<{ id: string }>(
     `SELECT id FROM scrape_tasks WHERE source_request_no = $1 LIMIT 1`,
     [requestNo],
@@ -1198,10 +1249,13 @@ export async function createScrapeTaskFromSoRecruit(requestNo: string, connector
   );
   if (!connector[0]) throw new Error('Connector ไม่พร้อมใช้งาน');
 
+  // คนแก้บนการ์ดก่อนกด = ใช้ค่าที่แก้; ไม่แก้ = ใช้ตามใบขอ
+  const position = (overrides?.position ?? '').trim() || req[0].erp_title || '';
+  const province = (overrides?.province ?? '').trim() || req[0].erp_province || '';
   const criteria: Record<string, string> = {};
-  if (req[0].erp_title) criteria.position = req[0].erp_title;
-  if (req[0].erp_province) criteria.province = req[0].erp_province;
-  const target = Math.max(1, req[0].erp_remaining || req[0].erp_qty || 20);
+  if (position) criteria.position = position;
+  if (province) criteria.province = province;
+  const target = Math.max(1, overrides?.target || req[0].erp_remaining || req[0].erp_qty || 20);
 
   const inserted = await q<{ id: string }>(
     `INSERT INTO scrape_tasks
@@ -1210,7 +1264,7 @@ export async function createScrapeTaskFromSoRecruit(requestNo: string, connector
      VALUES ($1,$2,'count',$3,$4::jsonb,'queued',true,true,$5,'pending')
      ON CONFLICT DO NOTHING
      RETURNING id`,
-    [`${requestNo} · ${req[0].erp_title || 'Scraping งาน'}`, connectorId, target, JSON.stringify(criteria), requestNo],
+    [`${requestNo} · ${position || 'Scraping งาน'}`, connectorId, target, JSON.stringify(criteria), requestNo],
   );
   let taskId = inserted[0]?.id;
   if (!taskId) {
@@ -1359,7 +1413,12 @@ export async function campaignStats() {
  *      สร้าง campaign snapshot={source:'so_recruit',...} title=request_no แล้ว **เขียนสถานะกลับ**
  *      เป็น in_progress ให้ทีม matching เห็นว่ารับเรื่องแล้ว (guarded — พังไม่ block campaign)
  */
-export async function createCampaignFromRequest(requestNo: string, createdBy: string | null) {
+export async function createCampaignFromRequest(
+  requestNo: string,
+  createdBy: string | null,
+  overrides?: IntakeOverrides,
+) {
+  const ov = cleanOverrides(overrides);
   const st = await q<StagedRequest>(`SELECT * FROM erp_open_requests WHERE request_no = $1`, [requestNo]);
 
   let snapshot: unknown;
@@ -1373,10 +1432,11 @@ export async function createCampaignFromRequest(requestNo: string, createdBy: st
   if (st[0]) {
     const s = st[0];
     fromErp = true;
-    snapshot = s.snapshot ?? {};
-    title = s.title;
-    province = s.province;
-    qty = s.qty;
+    // คนแก้บนการ์ด = ทับข้อมูล staging เฉพาะช่องที่กรอก (ไม่แก้ = ตามใบขอเป๊ะ)
+    snapshot = Object.keys(ov).length ? { ...(s.snapshot ?? {}), ...ov, user_edited: true } : (s.snapshot ?? {});
+    title = ov.position || s.title;
+    province = ov.location || s.province;
+    qty = (ov.qty ? Number(ov.qty) : null) || s.qty;
     remaining = s.remaining_qty;
   } else {
     // ไม่มีใน ERP staging → ลองหยิบจากคำขอ So Recruit
@@ -1398,7 +1458,8 @@ export async function createCampaignFromRequest(requestNo: string, createdBy: st
     if (p.request_type !== 'content') throw new Error(`คำขอ ${requestNo} ไม่ใช่ประเภท Content`);
     fromSoRecruit = true;
     // ข้อมูลที่ So Recruit แนบมากับคำขอ (job_snapshot) — ตำแหน่ง/พื้นที่/รายได้ ฯลฯ
-    const js = (p.job_snapshot ?? {}) as Record<string, unknown>;
+    // merge ค่าที่คนแก้บนการ์ดทับก่อน — title/detail/poster ทั้งสายใช้ค่าที่แก้แล้วอัตโนมัติ
+    const js = { ...((p.job_snapshot ?? {}) as Record<string, unknown>), ...ov };
     const s = (k: string) => String(js[k] ?? '').trim();
     const position = s('position');
     title = position || p.request_no; // มีชื่อตำแหน่งจริง = ใช้เลย, ไม่มี = เลขใบขอ
@@ -1416,6 +1477,7 @@ export async function createCampaignFromRequest(requestNo: string, createdBy: st
     snapshot = {
       source: 'so_recruit', job_id: p.job_id, reason: p.reason, requested_by_name: p.requested_by_name,
       ...js, request_name: position || undefined, work_addr: s('location') || undefined, detail: detail || undefined,
+      ...(Object.keys(ov).length ? { user_edited: true } : {}),
     };
   }
 
@@ -1450,6 +1512,41 @@ export async function createCampaignFromRequest(requestNo: string, createdBy: st
 
 export async function setCampaignStatus(id: string, status: string, note: string | null = null) {
   await q(`UPDATE recruit_campaigns SET status = $2, status_note = $3, updated_at = now() WHERE id = $1`, [id, status, note]);
+}
+
+// ส่วนผสมที่ AI ใช้คิด content (โชว์บนหน้า campaign ให้คนเห็นว่าร่างมาจากอะไร)
+// query เดียวกับ orchestrator-draft ฝั่ง worker — winning 2 + losing 2 ตามตำแหน่งใกล้เคียง
+export type GenIngredients = { winning: string[]; losing: string[] };
+
+export async function contentGenIngredients(title: string | null): Promise<GenIngredients> {
+  const t = String(title ?? '').trim();
+  let winning: string[] = [];
+  let losing: string[] = [];
+  try {
+    winning = (await q<{ caption: string }>(
+      `SELECT cc.caption
+         FROM content_winning_patterns wp
+         JOIN campaign_contents cc ON cc.id = wp.sample_content_id
+        WHERE cc.caption IS NOT NULL AND TRIM(cc.caption) <> ''
+        ORDER BY (wp.position_family IS NOT NULL AND $1 <> '' AND wp.position_family ILIKE '%' || $1 || '%') DESC,
+                 wp.engagement_score DESC NULLS LAST
+        LIMIT 2`,
+      [t],
+    )).map((r) => r.caption);
+  } catch { /* ตารางยังไม่พร้อม */ }
+  try {
+    losing = (await q<{ caption: string }>(
+      `SELECT cc.caption
+         FROM content_losing_patterns lp
+         JOIN campaign_contents cc ON cc.id = lp.sample_content_id
+        WHERE cc.caption IS NOT NULL AND TRIM(cc.caption) <> ''
+        ORDER BY (lp.position_family IS NOT NULL AND $1 <> '' AND lp.position_family ILIKE '%' || $1 || '%') DESC,
+                 lp.engagement_score ASC NULLS LAST
+        LIMIT 2`,
+      [t],
+    )).map((r) => r.caption);
+  } catch { /* schema-014 ยังไม่ migrate — ไม่มี losing */ }
+  return { winning, losing };
 }
 
 export type ContentRow = {

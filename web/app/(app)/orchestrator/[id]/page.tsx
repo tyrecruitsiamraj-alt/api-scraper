@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
-import { getCampaign, listCampaignContents, listCampaignPosts, listFacebookAccounts, soRecruitCheck } from '@/lib/repo';
+import { contentGenIngredients, getCampaign, listCampaignContents, listCampaignPosts, listFacebookAccounts, soRecruitCheck } from '@/lib/repo';
 import type { CampaignPostRow } from '@/lib/repo';
 import { approveContentAction, rejectContentAction, editCaptionAction, measureCampaignAction } from '@/lib/actions';
 
@@ -132,6 +132,19 @@ export default async function CampaignDetail({ params }: { params: { id: string 
   const engByContent = aggregateByContent(posts);
   const canMeasure = ['posting', 'measuring', 'low_engagement'].includes(c.status);
   const pool = await soRecruitCheck(c.request_no);
+  const ingredients = await contentGenIngredients(c.title);
+
+  // ป้ายบอกว่า "ต้องทำอะไรต่อ" — คนเปิดหน้ามาแล้วรู้ทันทีว่างานค้างที่ใคร
+  const NEXT_ACTION: Record<string, { text: string; cls: string }> = {
+    drafting: { text: '🤖 AI กำลังคิดร่าง — รอสักครู่ ร่างใหม่จะโผล่ด้านล่างเอง', cls: 'border-blue-200 bg-blue-50 text-blue-800' },
+    pending_approval: { text: '👉 รอคุณ: ตรวจร่างด้านล่าง เลือกเวอร์ชันที่ชอบแล้วกดอนุมัติ (หรือตีกลับให้ AI แก้)', cls: 'border-amber-200 bg-amber-50 text-amber-800' },
+    posting: { text: '📤 กำลังโพสต์/รอคิวโพสต์ — เสร็จแล้วระบบจะเก็บคอมเมนต์และวัดผลเอง', cls: 'border-blue-200 bg-blue-50 text-blue-800' },
+    measuring: { text: '⏳ รอเก็บ engagement — ระบบวัดผลอัตโนมัติ หรือกด "วัดผลตอนนี้" มุมขวาบน', cls: 'border-amber-200 bg-amber-50 text-amber-800' },
+    low_engagement: { text: '📉 คนสนใจน้อย — ระบบบันทึกแนวนี้เป็น "ห้ามทำซ้ำ" และสั่ง AI คิดเวอร์ชันใหม่แล้ว', cls: 'border-red-200 bg-red-50 text-red-700' },
+    done: { text: '✅ เสร็จสิ้น — แนวที่ได้ผลถูกเก็บเป็นต้นแบบ ระบบจะใช้เป็นแนวทางในงานถัดไป', cls: 'border-emerald-200 bg-emerald-50 text-emerald-800' },
+    draft_error: { text: '⚠️ สร้างร่างไม่สำเร็จ — กลับไปหน้าศูนย์งานแล้วกด "ลองสร้าง Content ใหม่"', cls: 'border-red-200 bg-red-50 text-red-700' },
+  };
+  const nextAction = NEXT_ACTION[c.status];
 
   return (
     <div className="space-y-6">
@@ -160,6 +173,11 @@ export default async function CampaignDetail({ params }: { params: { id: string 
         <div className="mt-4">
           <StageStrip status={c.status} />
         </div>
+        {nextAction && (
+          <div className={`mt-4 rounded-xl border px-4 py-2.5 text-[13px] font-medium ${nextAction.cls}`}>
+            {nextAction.text}
+          </div>
+        )}
       </div>
 
       {/* Pool pre-check: มีคนใน So Recruit สำหรับใบขอนี้หรือยัง (อ่านอย่างเดียว คนตัดสินใจเอง) */}
@@ -195,17 +213,29 @@ export default async function CampaignDetail({ params }: { params: { id: string 
 
       {snap.source === 'so_recruit' ? (
         <div className="card p-6">
-          <h2 className="mb-4 text-sm font-semibold uppercase tracking-wide text-subtle">ข้อมูลคำขอ (จาก So Recruit)</h2>
+          <h2 className="mb-4 text-sm font-semibold uppercase tracking-wide text-subtle">
+            ข้อมูลคำขอ (จาก So Recruit)
+            {snap.user_edited && <span className="ml-2 rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-medium normal-case text-amber-700">✎ มีการแก้ไขตอนรับงาน</span>}
+          </h2>
           <dl className="grid grid-cols-2 gap-4 sm:grid-cols-3">
+            <Field label="ตำแหน่ง" value={snap.position || snap.request_name} />
+            <Field label="พื้นที่/สถานที่" value={snap.location || snap.work_addr} />
+            <Field label="รายได้" value={snap.income} />
+            <Field label="จำนวนที่รับ" value={snap.qty} />
+            <Field label="เวลางาน" value={snap.work_schedule} />
+            <Field label="เพศ" value={snap.gender} />
+            <Field label="อายุ" value={snap.age_min || snap.age_max ? `${snap.age_min ?? ''}-${snap.age_max ?? ''} ปี` : ''} />
+            <Field label="หน่วยงาน" value={snap.unit_name} />
             <Field label="ผู้ขอ" value={snap.requested_by_name} />
-            <Field label="อ้างอิงงาน" value={snap.job_id} />
             <div className="col-span-2 sm:col-span-3">
               <Field label="เหตุผลที่ขอโพส" value={snap.reason} />
             </div>
+            {snap.note && (
+              <div className="col-span-2 sm:col-span-3">
+                <Field label="หมายเหตุ" value={snap.note} />
+              </div>
+            )}
           </dl>
-          <p className="mt-4 text-xs text-subtle">
-            รายละเอียดตำแหน่ง/จังหวัด/จำนวน อยู่ในระบบ ERP — จะเติมให้อัตโนมัติเมื่อเชื่อม ERP (MSSQL) แล้ว
-          </p>
         </div>
       ) : (
         <div className="card p-6">
@@ -220,6 +250,49 @@ export default async function CampaignDetail({ params }: { params: { id: string 
           </dl>
         </div>
       )}
+
+      {/* โปร่งใส: บอกคนตรวจว่า AI เอาอะไรมาประกอบตอนคิดร่าง — จะได้รู้ว่าต้องเช็คอะไร */}
+      <details className="card px-6 py-4">
+        <summary className="cursor-pointer select-none text-sm font-semibold">
+          🧠 AI ใช้อะไรคิดร่างนี้
+          <span className="ml-2 text-xs font-normal text-subtle">กดดูส่วนผสมที่ระบบส่งให้ AI</span>
+        </summary>
+        <div className="mt-4 space-y-3 text-sm">
+          <div>
+            <div className="text-xs font-medium text-subtle">1 · ข้อมูลใบขอ (ด้านบน)</div>
+            <p className="mt-0.5 text-ink/80">ตำแหน่ง พื้นที่ รายได้ จำนวน เวลางาน — กติกาเหล็ก: <b>ไม่มีในใบขอ = ห้าม AI แต่งเอง</b> (เงินเดือน/สวัสดิการใช้คำกลางแทน)</p>
+          </div>
+          <div>
+            <div className="text-xs font-medium text-subtle">2 · สองเวอร์ชันคนละแนว (A/B)</div>
+            <p className="mt-0.5 text-ink/80">A — ตรงไปตรงมา: พาดหัวชัด ข้อมูลครบ กระชับ · B — เน้นจุดขาย: นำด้วยรายได้/สวัสดิการ โทนชวนคุย</p>
+          </div>
+          <div>
+            <div className="text-xs font-medium text-subtle">3 · แนวที่เคยได้ผลดี ({ingredients.winning.length} ตัวอย่าง)</div>
+            {ingredients.winning.length === 0 ? (
+              <p className="mt-0.5 text-subtle">ยังไม่มี — จะสะสมเองเมื่อโพสต์ไหนวัดผลแล้ว "คนสนใจเยอะ"</p>
+            ) : (
+              ingredients.winning.map((w, i) => (
+                <p key={i} className="mt-1 rounded-lg border border-hairline bg-emerald-50/40 px-3 py-1.5 text-xs text-ink/70">
+                  {w.length > 160 ? `${w.slice(0, 160)}…` : w}
+                </p>
+              ))
+            )}
+          </div>
+          <div>
+            <div className="text-xs font-medium text-subtle">4 · แนวที่ห้ามทำซ้ำ ({ingredients.losing.length} ตัวอย่าง)</div>
+            {ingredients.losing.length === 0 ? (
+              <p className="mt-0.5 text-subtle">ยังไม่มี — จะสะสมเองเมื่อโพสต์ไหนวัดผลแล้ว "คนสนใจน้อย"</p>
+            ) : (
+              ingredients.losing.map((w, i) => (
+                <p key={i} className="mt-1 rounded-lg border border-hairline bg-red-50/40 px-3 py-1.5 text-xs text-ink/70">
+                  {w.length > 160 ? `${w.slice(0, 160)}…` : w}
+                </p>
+              ))
+            )}
+          </div>
+          <p className="text-xs text-subtle">ตัวอย่างข้อ 3-4 เลือกจากตำแหน่งใกล้เคียงก่อน แล้วเรียงตามคะแนน engagement — อัปเดตทุกครั้งที่มีการวัดผลใหม่</p>
+        </div>
+      </details>
 
       <div>
         <h2 className="mb-3 text-base font-semibold">ร่างคอนเทนต์</h2>

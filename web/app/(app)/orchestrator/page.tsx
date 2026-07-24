@@ -109,6 +109,20 @@ export default async function OrchestratorPage() {
         { label: 'จำนวน', ok: has(js.qty) || has(request.erp_qty) },
         { label: 'เวลางาน', ok: has(js.work_schedule) },
       ];
+      // ข้อมูลใบขอเต็ม (snapshot + ERP fallback) — โชว์บนการ์ด + prefill ช่องแก้ไขก่อนรับงาน
+      const sv = (v: unknown) => String(v ?? '').trim();
+      const requestFields = {
+        position: sv(js.position) || (request.erp_title && request.erp_title !== request.request_no ? request.erp_title : ''),
+        location: sv(js.location) || request.erp_province || '',
+        income: sv(js.income),
+        qty: sv(js.qty) || (request.erp_qty ? String(request.erp_qty) : ''),
+        work_schedule: sv(js.work_schedule),
+        gender: sv(js.gender),
+        age_min: sv(js.age_min),
+        age_max: sv(js.age_max),
+        unit_name: sv(js.unit_name),
+        note: sv(js.note),
+      };
       return {
         id: `request:${request.id}`,
         kind: request.request_type,
@@ -123,6 +137,7 @@ export default async function OrchestratorPage() {
         href: '/orchestrator/imports',
         steps: intakeSteps(request.request_type),
         checklist,
+        requestFields,
       };
     }),
     ...campaigns.map((campaign): WorkCenterItem => {
