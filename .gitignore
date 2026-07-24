@@ -8,3 +8,6 @@ output/
 
 # ผลลัพธ์งานเฉพาะกิจ (เช่น lead TikTok) — เก็บ local ไม่ขึ้น repo
 outputs/
+
+# แผงงาน so-tasks.command เก็บ log ที่นี่ — ไม่ต้อง commit
+logs/
