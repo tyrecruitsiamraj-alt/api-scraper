@@ -81,9 +81,11 @@ export async function generateDraftForCampaign(campaignId) {
     'A — ตรงไปตรงมา: พาดหัวเปิดรับสมัครชัด ๆ ข้อมูลครบ กระชับ',
     'B — เน้นจุดขาย: นำด้วยรายได้/สวัสดิการ/ความมั่นคง โทนชวนคุย',
   ];
-  const content = await generateContent({ ...base, styleHint: AB_STYLES[0] });
+  // A/B รูป: 2 สไตล์รูปคนละแบบ (จาก research — เปลี่ยนตามเทรนด์ ไม่ล็อกตายตัว) เวอร์ชัน A ใช้สไตล์ 1, B ใช้สไตล์ 2
+  const styles = research?.imageStyles?.length ? research.imageStyles : (research?.imageStyle ? [research.imageStyle] : []);
+  const content = await generateContent({ ...base, styleHint: AB_STYLES[0], imageStyle: styles[0] });
   const contentB = content
-    ? await generateContent({ ...base, styleHint: AB_STYLES[1] }).catch(() => null)
+    ? await generateContent({ ...base, styleHint: AB_STYLES[1], imageStyle: styles[1] ?? styles[0] }).catch(() => null)
     : null;
 
   if (!content) {
@@ -93,43 +95,45 @@ export async function generateDraftForCampaign(campaignId) {
     throw new Error(note);
   }
 
+  const versions = [content, contentB].filter(Boolean);
+
+  // รูป+โปสเตอร์ต่อเวอร์ชัน (A/B คนละสไตล์รูป) — โปสเตอร์ text-layout ใบเดียวกัน แต่รูปคน/โทนต่างกัน
   // รูปเป็น optional — ไม่มี OPENAI_API_KEY ก็ยังบันทึก draft (caption/brief) ได้
-  // ลำดับ: (1) รูปคนพื้นหลังใส → (2) ประกอบโปสเตอร์ SO WORK! (ตัวหนังสือไทยคมชัด) →
-  // ถ้าโปสเตอร์ทำไม่ได้ ใช้รูปคน/รูปเดิมแทน — คนอนุมัติเห็นรูปจริงบนศูนย์งานก่อนกดเสมอ
-  let image = null;
-  const [person, posterFields] = await Promise.all([
-    generateImage({ prompt: content.imagePrompt, transparent: true }).catch(() => null),
-    generatePosterFields({
-      title: c.title, positions: c.positions, province: c.province,
-      qty: c.qty, remaining_qty: c.remaining_qty, snapshot: c.request_snapshot ?? {},
-    }).catch(() => null),
-  ]);
-  if (posterFields) {
-    const contactLine = process.env.CONTENT_CONTACT_LINE || '';
-    const personUri = person ? `data:${person.mime};base64,${person.bytes.toString('base64')}` : null;
-    image = await renderPoster({ ...posterFields, contactLine }, personUri).catch(() => null);
-    if (image) console.log(`  [draft] โปสเตอร์ SO WORK! สำเร็จ (${Math.round(image.bytes.length / 1024)} KB${person ? ' + รูปคน AI' : ''})`);
+  const posterFields = await generatePosterFields({
+    title: c.title, positions: c.positions, province: c.province,
+    qty: c.qty, remaining_qty: c.remaining_qty, snapshot: c.request_snapshot ?? {},
+  }).catch(() => null);
+  const contactLine = process.env.CONTENT_CONTACT_LINE || '';
+  const images = [];
+  for (const v of versions) {
+    const person = await generateImage({ prompt: v.imagePrompt, transparent: true }).catch(() => null);
+    let img = null;
+    if (posterFields) {
+      const personUri = person ? `data:${person.mime};base64,${person.bytes.toString('base64')}` : null;
+      img = await renderPoster({ ...posterFields, contactLine }, personUri).catch(() => null);
+    }
+    if (!img) img = person; // fallback: อย่างน้อยได้รูปคน (หรือ null = ไม่มีรูป)
+    images.push(img);
   }
-  if (!image) image = person; // fallback: อย่างน้อยได้รูปคน (หรือ null = ไม่มีรูป)
+  const madeImages = images.filter(Boolean).length;
+  if (madeImages) console.log(`  [draft] A/B รูป: ${madeImages}/${versions.length} ใบ (สไตล์ต่างกันตาม research/เทรนด์)`);
 
   const [{ v: version }] = (
     await query(`SELECT COALESCE(MAX(version), 0) + 1 AS v FROM campaign_contents WHERE campaign_id = $1`, [campaignId])
   ).rows;
 
-  // บันทึกทั้ง 2 เวอร์ชัน (โปสเตอร์ใบเดียวกัน — ต่างกันที่แคปชัน) ให้คนเลือกตอนอนุมัติ
   // gen_notes = provenance ว่าแต่ละร่างคิดจากอะไร (โชว์บนหน้า campaign; schema-015 ยังไม่มี = ข้าม)
-  const versions = [content, contentB].filter(Boolean);
   const genNotesBase = {
-    ...(research
-      ? { angles: research.angles, hooks: research.hooks, imageStyle: research.imageStyle, research_model: research.model }
-      : {}),
+    ...(research ? { angles: research.angles, hooks: research.hooks, research_model: research.model } : {}),
     ...(trends.length ? { trends: trends.map((t) => t.label) } : {}),
   };
   for (let i = 0; i < versions.length; i += 1) {
     const v = versions[i];
+    const image = images[i];
     const genNotes = JSON.stringify({
       ...genNotesBase,
       style: AB_STYLES[i] ?? null,
+      imageStyle: styles[i] ?? styles[0] ?? research?.imageStyle ?? null, // สไตล์รูปของเวอร์ชันนี้ (ไว้เรียนรู้ว่าอันไหนชนะ)
       used_winning: winningExamples.length,
       used_losing: losingExamples.length,
     });
@@ -153,5 +157,5 @@ export async function generateDraftForCampaign(campaignId) {
 
   await query(`UPDATE recruit_campaigns SET status='pending_approval', status_note=NULL, updated_at=now() WHERE id=$1`, [campaignId]);
 
-  return { campaignId, version, versions: versions.length, hasImage: !!image, model: content.model };
+  return { campaignId, version, versions: versions.length, hasImage: madeImages > 0, model: content.model };
 }

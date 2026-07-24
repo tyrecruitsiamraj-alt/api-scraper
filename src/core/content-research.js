@@ -29,10 +29,14 @@ const RESEARCH_TOOL = {
       },
       image_style: {
         type: 'string',
-        description: 'สไตล์รูปที่ควรใช้ให้คนหยุดดู อธิบายสั้น ๆ (โทนสี/องค์ประกอบ/อารมณ์ เช่น "คนใส่ยูนิฟอร์มยิ้ม พื้นหลังที่ทำงานจริง สีสด อารมณ์อบอุ่นน่าเชื่อถือ")',
+        description: 'สไตล์รูปแบบ A ที่ควรใช้ให้คนหยุดดู (โทนสี/องค์ประกอบ/อารมณ์ เช่น "คนใส่ยูนิฟอร์มยิ้ม พื้นหลังที่ทำงานจริง สีสด อารมณ์อบอุ่นน่าเชื่อถือ")',
+      },
+      image_style_b: {
+        type: 'string',
+        description: 'สไตล์รูปแบบ B ที่ต่างจาก A ชัดเจน (คนละมุมกล้อง/องค์ประกอบ/อารมณ์) ไว้ทำ A/B เทสต์',
       },
     },
-    required: ['angles', 'hooks', 'image_style'],
+    required: ['angles', 'hooks', 'image_style', 'image_style_b'],
   },
 };
 
@@ -96,6 +100,8 @@ export async function researchContentAngles(input = {}) {
   const angles = arr(out.angles).slice(0, 4);
   const hooks = arr(out.hooks).slice(0, 4);
   const imageStyle = String(out.image_style ?? '').trim();
+  const imageStyleB = String(out.image_style_b ?? '').trim();
+  const imageStyles = [imageStyle, imageStyleB].filter(Boolean); // สำหรับ A/B รูป
   if (!angles.length && !hooks.length && !imageStyle) return null;
-  return { angles, hooks, imageStyle, model };
+  return { angles, hooks, imageStyle, imageStyleB, imageStyles, model };
 }

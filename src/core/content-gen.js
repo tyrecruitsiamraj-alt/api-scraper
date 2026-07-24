@@ -191,7 +191,8 @@ export async function generateContent(campaign = {}) {
 
   // สไตล์รูปจากผลวิจัย — ต่อท้าย image_prompt ให้รูปคุมโทน/องค์ประกอบตามที่สำรวจว่าเวิร์ค
   // (ตอบโจทย์ "รูปไม่สำรวจจะรู้ไงต้องสร้างแบบไหน" — style มาจาก research ไม่ใช่สุ่ม)
-  const imageStyle = String(research?.imageStyle ?? '').trim();
+  // สไตล์รูป: ระบุตรง (campaign.imageStyle) ชนะ — ใช้ทำ A/B รูป (A ใช้สไตล์ 1, B ใช้สไตล์ 2)
+  const imageStyle = String(campaign.imageStyle ?? research?.imageStyle ?? '').trim();
   // เทรนด์ที่ติดธง for_image — เกาะกระแสในรูปด้วย (label ใช้เป็น hint สั้น ๆ)
   const imageTrends = (campaign.trends ?? [])
     .filter((t) => t && (t.for_image ?? true) && String(t.label ?? '').trim())
