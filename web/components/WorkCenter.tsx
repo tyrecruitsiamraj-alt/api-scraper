@@ -469,11 +469,20 @@ function WorkItemCard({ item, connectors, facebookAccounts }: {
       {(showImage || item.detail) && (
         <div className="mt-4 flex gap-3">
           {showImage && item.content && (
-            <img
-              src={`/api/campaign-content/${item.content.id}/image`}
-              alt="รูป Content"
-              className="h-16 w-16 shrink-0 border border-line object-cover"
-            />
+            // คลิกเปิดรูปเต็มในแท็บใหม่ (ดูก่อนอนุมัติ)
+            <a
+              href={`/api/campaign-content/${item.content.id}/image`}
+              target="_blank"
+              rel="noreferrer"
+              title="คลิกดูรูปเต็ม"
+              className="shrink-0 transition hover:opacity-85"
+            >
+              <img
+                src={`/api/campaign-content/${item.content.id}/image`}
+                alt="รูป Content"
+                className="h-16 w-16 border border-line object-cover"
+              />
+            </a>
           )}
           {item.detail && (
             <p className={`min-w-0 flex-1 whitespace-pre-wrap text-[13px] leading-relaxed ${item.stage === 'attention' ? 'rounded-xl border-l-2 border-accent bg-red-50 px-3.5 py-2.5 text-red-700' : 'text-ink/70'}`}>

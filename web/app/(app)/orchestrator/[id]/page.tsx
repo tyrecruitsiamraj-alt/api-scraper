@@ -324,12 +324,24 @@ export default async function CampaignDetail({ params }: { params: { id: string 
                   </div>
                   <div className="grid gap-4 sm:grid-cols-[180px_1fr]">
                     {ct.has_image ? (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img
-                        src={`/api/campaign-content/${ct.id}/image`}
-                        alt="รูปคอนเทนต์ที่ AI สร้าง"
-                        className="aspect-square w-full rounded-lg border border-hairline object-cover"
-                      />
+                      // คลิกเปิดรูปเต็ม (แท็บใหม่ — ซูม/เซฟได้)
+                      <a
+                        href={`/api/campaign-content/${ct.id}/image`}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="group relative block"
+                        title="คลิกดูรูปเต็ม"
+                      >
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img
+                          src={`/api/campaign-content/${ct.id}/image`}
+                          alt="รูปคอนเทนต์ที่ AI สร้าง"
+                          className="aspect-square w-full rounded-lg border border-hairline object-cover transition group-hover:opacity-90"
+                        />
+                        <span className="absolute bottom-1.5 right-1.5 rounded-full bg-black/55 px-2 py-0.5 text-[10px] text-white opacity-0 transition group-hover:opacity-100">
+                          🔍 ดูเต็ม
+                        </span>
+                      </a>
                     ) : (
                       <div className="grid aspect-square place-items-center rounded-lg bg-accent/10 text-center text-xs text-accent">
                         ยังไม่มีรูป
