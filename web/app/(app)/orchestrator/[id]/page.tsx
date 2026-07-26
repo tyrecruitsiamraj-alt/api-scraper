@@ -2,7 +2,7 @@ import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { contentGenIngredients, getCampaign, listCampaignContents, listCampaignPosts, listFacebookAccounts, soRecruitCheck } from '@/lib/repo';
 import type { CampaignPostRow } from '@/lib/repo';
-import { approveContentAction, rejectContentAction, editCaptionAction, measureCampaignAction } from '@/lib/actions';
+import { approveContentAction, rejectContentAction, editCaptionAction, measureCampaignAction, retryCampaignDraftAction } from '@/lib/actions';
 
 export const dynamic = 'force-dynamic';
 
@@ -166,6 +166,13 @@ export default async function CampaignDetail({ params }: { params: { id: string 
               <form action={measureCampaignAction}>
                 <input type="hidden" name="campaignId" value={c.id} />
                 <button className="btn-ghost btn-sm">📊 วัดผลตอนนี้</button>
+              </form>
+            )}
+            {/* ให้ AI ทำร่างใหม่ได้จากทุกสถานะ (ยกเว้นกำลังคิดอยู่) — เช่น รูป/แคปชันออกมาไม่ดี */}
+            {c.status !== 'drafting' && (
+              <form action={retryCampaignDraftAction}>
+                <input type="hidden" name="campaignId" value={c.id} />
+                <button className="btn-ghost btn-sm" title="สร้างเวอร์ชันใหม่ — ของเดิมยังอยู่ให้เทียบ">↻ ให้ AI คิดใหม่</button>
               </form>
             )}
           </div>
