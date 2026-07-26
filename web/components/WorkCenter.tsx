@@ -73,6 +73,23 @@ const CARD_ACCENT: Record<WorkCenterStage, string> = {
   completed: 'border-line',
 };
 
+// กล่องสถานะบนหัว = เส้นทางงาน 6 ป้ายเดียวกับ stepper บนการ์ด (นับว่างานค้างป้ายไหนกี่งาน)
+const STEP_BOXES: { label: string; hint: string }[] = [
+  { label: 'รับงาน', hint: 'รอกดรับ' },
+  { label: 'เตรียมของ', hint: 'ระบบกำลังทำ' },
+  { label: 'อนุมัติ', hint: 'รอคุณตรวจ' },
+  { label: 'Scrape', hint: 'กำลังดึงข้อมูล' },
+  { label: 'Auto post', hint: 'กำลังโพสต์' },
+  { label: 'เสร็จ', hint: 'จบงาน' },
+];
+
+/** งานอยู่ป้ายไหนของเส้นทาง — ป้ายแรกที่ active/failed; ไม่มีเลย = เสร็จ (ป้ายสุดท้าย) */
+function stepIndexOf(item: WorkCenterItem): number {
+  const idx = item.steps?.findIndex((s) => s.state === 'active' || s.state === 'failed') ?? -1;
+  if (idx >= 0) return idx;
+  return item.stage === 'completed' ? STEP_BOXES.length - 1 : 0;
+}
+
 function fmtDate(value: string) {
   try {
     return new Date(value).toLocaleString('th-TH', { dateStyle: 'short', timeStyle: 'short' });
@@ -519,13 +536,18 @@ export function WorkCenter({ items, connectors, facebookAccounts }: {
   connectors: Option[];
   facebookAccounts: FbAccountOption[];
 }) {
-  // กล่องตัวเลขกดกรองได้: null = ค่าเริ่มต้น (โชว์งานค้าง + งานเสร็จยุบไว้)
-  const [filter, setFilter] = useState<'attention' | 'waiting' | 'working' | 'completed' | null>(null);
+  // กล่องตัวเลขตามเส้นทางงาน 6 ป้าย (รับงาน→เสร็จ) — กดกรองดูงานที่ค้างป้ายนั้น
+  const [filter, setFilter] = useState<number | null>(null);
 
-  const counts = useMemo(() => {
-    const result: Record<WorkCenterStage, number> = { intake: 0, working: 0, review: 0, completed: 0, attention: 0 };
-    items.forEach((item) => { result[item.stage] += 1; });
-    return result;
+  const stepStats = useMemo(() => {
+    const counts = Array<number>(STEP_BOXES.length).fill(0);
+    const attention = Array<boolean>(STEP_BOXES.length).fill(false);
+    items.forEach((item) => {
+      const i = stepIndexOf(item);
+      counts[i] += 1;
+      if (item.stage === 'attention') attention[i] = true;
+    });
+    return { counts, attention };
   }, [items]);
 
   const sorted = useMemo(
@@ -542,16 +564,7 @@ export function WorkCenter({ items, connectors, facebookAccounts }: {
   const active = sorted.filter((item) => item.stage !== 'completed');
   const done = sorted.filter((item) => item.stage === 'completed');
 
-  // แต่ละกล่อง = ชุด stage ที่กรอง
-  const STAT = [
-    { key: 'attention' as const, label: 'ต้องแก้', value: counts.attention, tone: 'text-accent', bar: 'bg-accent', ring: 'ring-accent', stages: ['attention'] as WorkCenterStage[] },
-    { key: 'waiting' as const, label: 'รอคุณ', value: counts.intake + counts.review, tone: 'text-amber-600', bar: 'bg-amber-500', ring: 'ring-amber-400', stages: ['intake', 'review'] as WorkCenterStage[] },
-    { key: 'working' as const, label: 'ระบบกำลังทำ', value: counts.working, tone: 'text-ink', bar: 'bg-ink/40', ring: 'ring-ink/30', stages: ['working'] as WorkCenterStage[] },
-    { key: 'completed' as const, label: 'เสร็จ', value: counts.completed, tone: 'text-emerald-700', bar: 'bg-emerald-600', ring: 'ring-emerald-400', stages: ['completed'] as WorkCenterStage[] },
-  ];
-
-  const activeStat = STAT.find((s) => s.key === filter);
-  const filtered = activeStat ? sorted.filter((item) => activeStat.stages.includes(item.stage)) : [];
+  const filtered = filter != null ? sorted.filter((item) => stepIndexOf(item) === filter) : [];
 
   return (
     <div className="space-y-6">
@@ -563,30 +576,37 @@ export function WorkCenter({ items, connectors, facebookAccounts }: {
 
       <Readiness facebookAccounts={facebookAccounts} />
 
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-        {STAT.map((s) => (
-          <button
-            key={s.key}
-            type="button"
-            onClick={() => setFilter((cur) => (cur === s.key ? null : s.key))}
-            className={`card card-hover relative overflow-hidden px-5 py-4 text-left ${filter === s.key ? `ring-2 ${s.ring}` : ''}`}
-            aria-pressed={filter === s.key}
-          >
-            <span className={`absolute left-0 top-0 h-full w-1 ${s.value > 0 ? s.bar : 'bg-transparent'}`} />
-            <div className="flex items-center justify-between text-xs text-subtle">
-              <span>{s.label}</span>
-              <span className="opacity-50">{filter === s.key ? 'กำลังดู' : 'กดดู'}</span>
-            </div>
-            <div className={`mt-1.5 text-[30px] font-semibold leading-none tabular-nums ${s.value > 0 ? s.tone : 'text-subtle/40'}`}>{s.value}</div>
-          </button>
-        ))}
+      <div className="grid grid-cols-3 gap-2.5 sm:grid-cols-6">
+        {STEP_BOXES.map((s, i) => {
+          const n = stepStats.counts[i];
+          const warn = stepStats.attention[i];
+          const isLast = i === STEP_BOXES.length - 1;
+          const tone = warn ? 'text-accent' : isLast ? 'text-emerald-700' : n > 0 ? 'text-ink' : 'text-subtle/40';
+          const bar = warn ? 'bg-accent' : isLast ? 'bg-emerald-600' : 'bg-ink/30';
+          return (
+            <button
+              key={s.label}
+              type="button"
+              onClick={() => setFilter((cur) => (cur === i ? null : i))}
+              className={`card card-hover relative overflow-hidden px-3.5 py-3 text-left ${filter === i ? 'ring-2 ring-accent' : ''}`}
+              aria-pressed={filter === i}
+            >
+              <span className={`absolute left-0 top-0 h-full w-1 ${n > 0 ? bar : 'bg-transparent'}`} />
+              <div className="text-[11px] font-medium text-subtle">{s.label}</div>
+              <div className={`mt-1 text-[26px] font-semibold leading-none tabular-nums ${tone}`}>{n}</div>
+              <div className={`mt-0.5 truncate text-[10px] ${warn ? 'font-medium text-accent' : 'text-subtle/60'}`}>
+                {warn ? 'มีงานพัง — กดดู' : n > 0 ? s.hint : '—'}
+              </div>
+            </button>
+          );
+        })}
       </div>
 
       {filter ? (
         /* โหมดกรอง: โชว์เฉพาะกลุ่มที่กด */
         <div className="space-y-3">
           <div className="flex items-center justify-between">
-            <div className="text-sm font-medium">{activeStat?.label} · {filtered.length} งาน</div>
+            <div className="text-sm font-medium">{filter != null ? STEP_BOXES[filter].label : ''} · {filtered.length} งาน</div>
             <button type="button" onClick={() => setFilter(null)} className="text-xs text-accent hover:underline">← กลับหน้ารวม</button>
           </div>
           {filtered.length === 0 ? (
@@ -612,7 +632,7 @@ export function WorkCenter({ items, connectors, facebookAccounts }: {
           {done.length > 0 && (
             <button
               type="button"
-              onClick={() => setFilter('completed')}
+              onClick={() => setFilter(STEP_BOXES.length - 1)}
               className="eyebrow inline-flex items-center gap-1.5 hover:text-ink"
             >
               <span className="text-[9px]">▶</span> ดูงานที่เสร็จแล้ว · {done.length}

@@ -292,9 +292,14 @@ export async function generatePosterFields(campaign = {}) {
  */
 function harvestPosterFields(out) {
   if (!out || typeof out !== 'object') return null;
+  // qwen ชอบห่อ object ซ้อนอีกชั้น ({poster:{...}}, {data:{...}}) — flatten ชั้นแรกมารวมก่อนค้น key
+  const flat = { ...out };
+  for (const v of Object.values(out)) {
+    if (v && typeof v === 'object' && !Array.isArray(v)) Object.assign(flat, v);
+  }
   const get = (...keys) => {
     for (const k of keys) {
-      for (const [ok, ov] of Object.entries(out)) {
+      for (const [ok, ov] of Object.entries(flat)) {
         if (ok.toLowerCase() === k.toLowerCase() && ov != null && String(ov).trim()) return ov;
       }
     }

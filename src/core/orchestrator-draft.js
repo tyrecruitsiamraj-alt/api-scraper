@@ -99,14 +99,19 @@ export async function generateDraftForCampaign(campaignId) {
 
   // รูป+โปสเตอร์ต่อเวอร์ชัน (A/B คนละสไตล์รูป) — โปสเตอร์ text-layout ใบเดียวกัน แต่รูปคน/โทนต่างกัน
   // รูปเป็น optional — ไม่มี OPENAI_API_KEY ก็ยังบันทึก draft (caption/brief) ได้
-  const posterFields = await generatePosterFields({
+  let posterFields = await generatePosterFields({
     title: c.title, positions: c.positions, province: c.province,
     qty: c.qty, remaining_qty: c.remaining_qty, snapshot: c.request_snapshot ?? {},
   }).catch((e) => {
     console.warn(`  [draft] poster fields โยน error: ${e.message}`);
     return null;
   });
-  if (!posterFields) console.warn('  [draft] ⚠️ ไม่ได้ข้อมูลลงโปสเตอร์ — ร่างนี้จะได้ "รูปคนเดี่ยว" แทนโปสเตอร์ SO WORK!');
+  if (!posterFields) {
+    // การันตีโปสเตอร์: AI สรุปไม่ได้ → ใช้ข้อมูลใบขอตรง ๆ (deterministic, ไม่แต่งเอง)
+    posterFields = fallbackPosterFields(c);
+    if (posterFields) console.warn('  [draft] ⚠️ AI สรุปข้อมูลโปสเตอร์ไม่ได้ — ใช้ข้อมูลใบขอตรง ๆ ทำโปสเตอร์แทน');
+    else console.warn('  [draft] ⚠️ ไม่มีข้อมูลพอทำโปสเตอร์ (ไม่มีชื่อตำแหน่ง) — ร่างนี้จะได้รูปคนเดี่ยว');
+  }
   const contactLine = process.env.CONTENT_CONTACT_LINE || '';
   const images = [];
   for (const v of versions) {
@@ -162,4 +167,32 @@ export async function generateDraftForCampaign(campaignId) {
   await query(`UPDATE recruit_campaigns SET status='pending_approval', status_note=NULL, updated_at=now() WHERE id=$1`, [campaignId]);
 
   return { campaignId, version, versions: versions.length, hasImage: madeImages > 0, model: content.model };
+}
+
+/**
+ * โปสเตอร์ fallback จากใบขอตรง ๆ (deterministic) — AI สรุปไม่ได้ก็ยังได้โปสเตอร์ SO WORK!
+ * ใช้เฉพาะข้อมูลที่มีจริงในใบขอ ไม่แต่งเอง (ช่องไหนไม่มี = เว้นว่าง)
+ */
+function fallbackPosterFields(c) {
+  const snap = c.request_snapshot ?? {};
+  const s = (k) => String(snap[k] ?? '').trim();
+  const title = String(c.title || s('request_name') || '').trim();
+  if (!title) return null;
+  const quals = [];
+  if (s('gender')) quals.push(`เพศ${s('gender')}`);
+  if (snap.age_min || snap.age_max) quals.push(`อายุ ${snap.age_min ?? ''}–${snap.age_max ?? ''} ปี`);
+  if (s('education')) quals.push(s('education').slice(0, 40));
+  if (s('note')) quals.push(s('note').slice(0, 40));
+  if (quals.length === 0) quals.push('สอบถามรายละเอียดทางแชทได้เลย');
+  const income = s('income');
+  return {
+    title,
+    badge: 'เปิดรับสมัครด่วน',
+    location: String(c.province || s('location') || '').trim(),
+    worktime: s('work_schedule'),
+    salaryTotal: (income.match(/[\d]{1,3}(?:,\d{3})*\s*\+{0,2}/)?.[0] ?? '').trim(),
+    salaryBreakdown: income,
+    qualifications: quals.slice(0, 6),
+    benefits: [],
+  };
 }
