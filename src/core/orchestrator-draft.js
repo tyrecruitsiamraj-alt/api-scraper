@@ -102,7 +102,11 @@ export async function generateDraftForCampaign(campaignId) {
   const posterFields = await generatePosterFields({
     title: c.title, positions: c.positions, province: c.province,
     qty: c.qty, remaining_qty: c.remaining_qty, snapshot: c.request_snapshot ?? {},
-  }).catch(() => null);
+  }).catch((e) => {
+    console.warn(`  [draft] poster fields โยน error: ${e.message}`);
+    return null;
+  });
+  if (!posterFields) console.warn('  [draft] ⚠️ ไม่ได้ข้อมูลลงโปสเตอร์ — ร่างนี้จะได้ "รูปคนเดี่ยว" แทนโปสเตอร์ SO WORK!');
   const contactLine = process.env.CONTENT_CONTACT_LINE || '';
   const images = [];
   for (const v of versions) {
