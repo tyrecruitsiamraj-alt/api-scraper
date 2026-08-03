@@ -20,7 +20,9 @@ function replaceFirst(text: string, pattern: RegExp, variants: string[], seed: n
 }
 
 export function isCaptionVariationEnabled(): boolean {
-  const v = String(process.env.CAPTION_VARIATION_ENABLED ?? '1').trim().toLowerCase();
+  // Default off: keep approved brand copy exact. Enable only for an explicitly
+  // reviewed variation experiment, not as a way to disguise duplicate posting.
+  const v = String(process.env.CAPTION_VARIATION_ENABLED ?? '0').trim().toLowerCase();
   return v !== '0' && v !== 'false' && v !== 'off';
 }
 
@@ -62,12 +64,6 @@ export function varyCaptionForGroup(caption: string, groupId: string, _groupName
     const gaps = ['\n\n', '\n\n\n', '\n\n', '\n\n\n'];
     const gap = pick(gaps, seed, salt++);
     text = paras.join(gap);
-  }
-
-  const closers = ['', '', 'ขอบคุณครับ 🙏', 'ยินดีตอบคำถามครับ', ''];
-  const closer = pick(closers, seed, salt++);
-  if (closer && !text.includes(closer)) {
-    text += `\n\n${closer}`;
   }
 
   return text;

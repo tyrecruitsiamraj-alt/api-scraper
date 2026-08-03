@@ -53,7 +53,7 @@ function loadUserFileContent(userId: number): { path: string; data: unknown } | 
  */
 async function loadMasterConfigFromDb(userId: number): Promise<MasterConfig> {
   const db = require('../../server/db');
-  const users = await db.getUsers();
+  const users = await db.getUsersWithSecrets();
   const user = users.find((u: { env_key: string }) => String(u.env_key) === String(userId));
   if (!user) {
     throw new Error(`❌ ไม่พบ User ${userId} ในฐานข้อมูล (env_key=${userId})`);
@@ -163,7 +163,7 @@ function workerToMaster(worker: WorkerConfig): MasterConfig {
  */
 async function loadWorkerConfigFromDb(): Promise<WorkerConfig> {
   const db = require('../../server/db');
-  const users = await db.getUsers();
+  const users = await db.getUsersWithSecrets();
   const user = users.find((u: { env_key: string }) => String(u.env_key) === '4');
   if (!user) {
     throw new Error('❌ ไม่พบ User 4 ในฐานข้อมูล (env_key=4)');

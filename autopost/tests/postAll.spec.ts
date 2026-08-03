@@ -142,6 +142,10 @@ test('Dynamic Post: รันโพสต์ตาม Assignments', async ({ pag
   /** มีอย่างน้อย 1 บัญชีที่ได้แผนโพสต์วันนี้ (ไม่ติดโควต้า/พัก) */
   let anyUserPlanned = false;
   let totalPosted = 0;
+  let totalAttempted = 0;
+  let totalFailed = 0;
+  let totalDuplicates = 0;
+  let totalNeedsVerification = 0;
 
   for (const [userId, userAssignments] of assignmentsByUser.entries()) {
     const user = config.users.find((u) => u.id === userId);
@@ -271,7 +275,7 @@ test('Dynamic Post: รันโพสต์ตาม Assignments', async ({ pag
       };
       const gID = item.fb_group_id;
 
-      let posted = false;
+      let posted: 'posted' | 'duplicate' | 'needs_verification' | false = false;
       const maxAttempts = 2;
       for (let attempt = 1; attempt <= maxAttempts; attempt++) {
         const pageReady = await ensureActivePageForUser(user);
@@ -279,6 +283,7 @@ test('Dynamic Post: รันโพสต์ตาม Assignments', async ({ pag
         console.log(
           `🚀 [${userLabel}] โพสต์งาน "${job.title}" ไปกลุ่ม ${gID} (ครั้งที่ ${attempt}/${maxAttempts})`
         );
+        if (attempt === 1) totalAttempted += 1;
         posted = await postToGroup(activePage, request, postItem, gID, {
           userLabel,
           posterName: user.poster_name || user.name || 'Poster',
@@ -295,7 +300,7 @@ test('Dynamic Post: รันโพสต์ตาม Assignments', async ({ pag
           console.log(`⚠️ [${userLabel}] browser ปิดระหว่างโพสต์กลุ่ม ${gID} — เตรียม retry อัตโนมัติ`);
         }
       }
-      if (posted) {
+      if (posted === 'posted') {
         totalPosted += 1;
         failStreak = 0;
         await runLog({
@@ -306,7 +311,30 @@ test('Dynamic Post: รันโพสต์ตาม Assignments', async ({ pag
           job_id: item.job_id,
           group_id: gID,
         });
+      } else if (posted === 'duplicate') {
+        totalDuplicates += 1;
+        failStreak = 0;
+        await runLog({
+          level: 'info',
+          message: `ข้ามโพสต์ซ้ำที่มีหลักฐานแล้ว: ${job.title} → กลุ่ม ${gID}`,
+          assignment_id: item.assignment_id,
+          user_id: user.id,
+          job_id: item.job_id,
+          group_id: gID,
+        });
+      } else if (posted === 'needs_verification') {
+        totalNeedsVerification += 1;
+        failStreak = 0;
+        await runLog({
+          level: 'warn',
+          message: `กดโพสต์แล้วแต่ยังยืนยัน permalink ไม่ได้: ${job.title} → กลุ่ม ${gID}`,
+          assignment_id: item.assignment_id,
+          user_id: user.id,
+          job_id: item.job_id,
+          group_id: gID,
+        });
       } else {
+        totalFailed += 1;
         failStreak += 1;
         await runLog({
           level: 'warn',
@@ -356,5 +384,13 @@ test('Dynamic Post: รันโพสต์ตาม Assignments', async ({ pag
     return;
   }
 
-  console.log(`✅ โพสต์ครบตามแผนแล้ว (${totalPosted} โพสต์)`);
+  if (totalNeedsVerification > 0) {
+    throw new Error(`มี ${totalNeedsVerification} โพสต์ที่กดแล้วแต่ยังไม่มี permalink ต้องตรวจสอบก่อน retry`);
+  }
+  if (totalAttempted > 0 && totalPosted === 0 && totalDuplicates === 0) {
+    throw new Error(`โพสต์ไม่สำเร็จทั้งหมด ${totalFailed}/${totalAttempted} รายการ`);
+  }
+  console.log(
+    `✅ จบรอบโพสต์: สำเร็จ ${totalPosted} · ข้ามซ้ำ ${totalDuplicates} · ไม่สำเร็จ ${totalFailed}`
+  );
 });

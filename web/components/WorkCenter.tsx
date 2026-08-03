@@ -163,9 +163,8 @@ function Stepper({ steps }: { steps: Step[] }) {
   );
 }
 
-// ช่องข้อมูลใบขอที่ "ดูอย่างเดียว" (ตรวจว่าดึงครบไหม — ไม่ให้แก้ตรงนี้ ผิดให้ตีกลับ)
+// ช่องข้อมูลใบขอที่ดูอย่างเดียว (ตำแหน่งแยกเป็นช่องบังคับแก้ได้ด้านล่าง)
 const REQUEST_VIEW_DEFS: { key: string; label: string }[] = [
-  { key: 'position', label: 'ตำแหน่ง' },
   { key: 'location', label: 'พื้นที่/จังหวัด' },
   { key: 'qty', label: 'จำนวน (คน)' },
   { key: 'work_schedule', label: 'เวลางาน' },
@@ -173,8 +172,8 @@ const REQUEST_VIEW_DEFS: { key: string; label: string }[] = [
 ];
 
 /**
- * กล่อง "ดูรายละเอียดใบขอ" — ตรวจว่าดึงข้อมูลมาครบไหม (ช่องส่วนใหญ่ดูอย่างเดียว)
- * แก้ได้เฉพาะ "รายได้" + "เพิ่มเติม/สวัสดิการ" (บางทีใบขอไม่ครบ เติมได้ก่อนกดอนุมัติ)
+ * กล่อง "ดูรายละเอียดใบขอ" — ตำแหน่งแก้ได้และบังคับยืนยันก่อนรับงาน
+ * รวมช่องโจทย์ Content เพื่อบอกสิ่งที่ต้องเน้น/ห้ามเขียนได้ตั้งแต่ต้น
  * ค่าที่แก้ส่งไปกับปุ่มอนุมัติของ form นั้น (ผ่าน form= attribute) — ช่องอื่นผิด ให้ตีกลับ
  */
 function RequestFieldsEditor({ fields, formId }: { fields: Record<string, string>; formId: string }) {
@@ -183,12 +182,13 @@ function RequestFieldsEditor({ fields, formId }: { fields: Record<string, string
     ...REQUEST_VIEW_DEFS.map((d) => ({ label: d.label, value: fields[d.key] ?? '' })),
     { label: 'อายุ', value: age },
     { label: 'หน่วยงาน', value: fields.unit_name ?? '' },
+    { label: 'แผนก/สายงานต้นทาง', value: fields.department ?? '' },
   ];
   return (
     <details className="rounded-2xl border border-line bg-black/[0.015] px-4 py-3">
       <summary className="cursor-pointer select-none text-[13px] font-medium text-ink">
         📋 ดูรายละเอียดใบขอ
-        <span className="ml-1 font-normal text-subtle">— ตรวจว่าดึงครบไหม · แก้ได้เฉพาะรายได้/สวัสดิการ</span>
+        <span className="ml-1 font-normal text-subtle">— ยืนยันตำแหน่งจริงก่อนให้ AI คิด</span>
       </summary>
       {/* ดูอย่างเดียว */}
       <div className="mt-3 grid gap-x-4 gap-y-2 sm:grid-cols-2">
@@ -199,8 +199,20 @@ function RequestFieldsEditor({ fields, formId }: { fields: Record<string, string
           </div>
         ))}
       </div>
-      {/* แก้ได้เฉพาะ 2 ช่องนี้ */}
+      {/* ช่องที่ผู้ตรวจยืนยัน/เติมได้ก่อนเริ่มงาน */}
       <div className="mt-3 grid gap-x-3 gap-y-2 border-t border-line/60 pt-3 sm:grid-cols-2">
+        <div>
+          <label className="label" htmlFor={`${formId}-position`}>ตำแหน่งงานจริง <span className="text-accent">(ต้องยืนยัน)</span></label>
+          <input
+            id={`${formId}-position`}
+            name="ov_position"
+            form={formId}
+            required
+            defaultValue={fields.position ?? ''}
+            placeholder="เช่น พนักงานขับรถ / พนักงานประชาสัมพันธ์"
+            className="field w-full"
+          />
+        </div>
         <div>
           <label className="label" htmlFor={`${formId}-income`}>รายได้ <span className="text-subtle">(แก้ได้)</span></label>
           <input id={`${formId}-income`} name="ov_income" form={formId} defaultValue={fields.income ?? ''} placeholder="เช่น 25,000+ /เดือน" className="field w-full" />
@@ -208,6 +220,18 @@ function RequestFieldsEditor({ fields, formId }: { fields: Record<string, string
         <div>
           <label className="label" htmlFor={`${formId}-note`}>เพิ่มเติม / สวัสดิการ <span className="text-subtle">(เติมได้)</span></label>
           <input id={`${formId}-note`} name="ov_note" form={formId} defaultValue={fields.note ?? ''} placeholder="เช่น มี OT, ประกันสังคม, ที่พัก, เบี้ยขยัน" className="field w-full" />
+        </div>
+        <div className="sm:col-span-2">
+          <label className="label" htmlFor={`${formId}-content-brief`}>โจทย์ Content <span className="text-subtle">(สิ่งที่ต้องเน้นหรือห้ามเขียน)</span></label>
+          <textarea
+            id={`${formId}-content-brief`}
+            name="ov_content_brief"
+            form={formId}
+            defaultValue={fields.content_brief ?? ''}
+            placeholder="เช่น เน้นประสบการณ์ขับรถผู้บริหาร และห้ามสื่อว่าเป็นบุคลากรโรงพยาบาล"
+            rows={2}
+            className="field w-full"
+          />
         </div>
       </div>
     </details>
@@ -380,7 +404,8 @@ function WorkAction({ item, connectors, facebookAccounts }: {
             <input
               id={`reject-${item.id}`}
               name="reason"
-              placeholder="เช่น เพิ่มเงินเดือน, เน้นสวัสดิการ, เปลี่ยนรูป, แคปชั่นยาวไป"
+              required
+              placeholder="เช่น ตำแหน่งต้องเป็นพนักงานขับรถ ไม่ใช่พนักงานโรงพยาบาล"
               className="field"
             />
           </div>

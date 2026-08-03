@@ -96,6 +96,8 @@ export interface SaveToSheetOptions {
   jobId?: string;
   groupId?: string;
   customerPhone?: string;
+  idempotencyKey?: string;
+  contentFingerprint?: string;
 }
 
 async function pushPostRecord(
@@ -143,6 +145,10 @@ async function pushPostRecord(
       user_id: postLogOpts.userId,
       job_id: postLogOpts.jobId,
       group_id: postLogOpts.groupId,
+      idempotency_key: postLogOpts.idempotencyKey,
+      content_fingerprint: postLogOpts.contentFingerprint,
+      lifecycle_state: finalLink ? 'verified' : 'needs_verification',
+      verification_error: finalLink ? undefined : 'permalink_missing',
     });
   }
 }
@@ -302,7 +308,7 @@ export async function saveToSheet(
   memberCount: string,
   sheetUrl: string,
   postLogOpts?: SaveToSheetOptions
-): Promise<void> {
+): Promise<'verified' | 'needs_verification'> {
   try {
     await ensureNoDialogBlockingNavigation(page);
     console.log(`[saveToSheet] เก็บลิงก์กลุ่ม ${gID} — ลำดับ: my_posted_content → my_pending_content → ฟีดกลุ่ม (สำรอง)`);
@@ -332,7 +338,7 @@ export async function saveToSheet(
       );
       if (ok) {
         console.log(`[saveToSheet] บันทึกลิงก์แล้ว (${item.status})`);
-        return;
+        return 'verified';
       }
     }
 
@@ -354,7 +360,7 @@ export async function saveToSheet(
         postLogOpts
       );
       console.log('[saveToSheet] บันทึกลิงก์จากฟีดกลุ่มแล้ว');
-      return;
+      return 'verified';
     }
 
     console.warn('[saveToSheet] ไม่พบลิงก์โพสต์ล่าสุด — ข้ามบันทึก Sheet (โพสต์อาจสำเร็จแล้ว)');
@@ -375,9 +381,15 @@ export async function saveToSheet(
         user_id: postLogOpts.userId,
         job_id: postLogOpts.jobId,
         group_id: postLogOpts.groupId || gID,
+        idempotency_key: postLogOpts.idempotencyKey,
+        content_fingerprint: postLogOpts.contentFingerprint,
+        lifecycle_state: 'needs_verification',
+        verification_error: 'permalink_missing_after_post',
       });
     }
+    return 'needs_verification';
   } catch (err) {
     console.error('[saveToSheet] บันทึก Sheet ไม่สำเร็จ:', (err as Error).message);
+    return 'needs_verification';
   }
 }

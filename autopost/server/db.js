@@ -3,9 +3,17 @@
  */
 require('dotenv').config();
 const { Pool } = require('pg');
+const {
+  decryptCredential,
+  encryptCredential,
+} = require('./credentialCrypto');
 
 const DATABASE_URL = process.env.DATABASE_URL;
 const SCHEMA = process.env.DB_SCHEMA || 'so_autopost_apiscraper';
+const CANDIDATE_SCHEMA = process.env.CANDIDATE_DB_SCHEMA || 'so-candidate-data';
+if (!/^[A-Za-z_][A-Za-z0-9_-]*$/.test(CANDIDATE_SCHEMA)) {
+  throw new Error(`CANDIDATE_DB_SCHEMA ไม่ถูกต้อง: ${CANDIDATE_SCHEMA}`);
+}
 const ASSIGNMENTS_TABLE = SCHEMA.includes('-') ? `"${SCHEMA}".assignments` : `${SCHEMA}.assignments`;
 
 let pool = null;
@@ -200,35 +208,65 @@ async function deleteAllGroups() {
 }
 
 // --- Users ---
+function publicUser(row) {
+  const { fb_access_token, password, ...rest } = row;
+  return {
+    ...rest,
+    has_password: !!password,
+    has_fb_token: !!fb_access_token,
+    group_ids: row.group_ids || [],
+    blacklist_groups: row.blacklist_groups || [],
+    post_settings: row.post_settings || {},
+  };
+}
+
+function secretUser(row) {
+  const { fb_access_token, ...rest } = row;
+  return {
+    ...rest,
+    password: decryptCredential(row.password),
+    has_fb_token: !!fb_access_token,
+    group_ids: row.group_ids || [],
+    blacklist_groups: row.blacklist_groups || [],
+    post_settings: row.post_settings || {},
+  };
+}
+
 async function getUsers() {
   const { rows } = await query('SELECT * FROM users ORDER BY COALESCE(NULLIF(trim(name), \'\'), env_key), env_key');
   return rows.map((r) => {
-    const { fb_access_token, ...rest } = r;
     const base = `USER_${String(r.env_key || r.id).toUpperCase().replace(/[^A-Z0-9_]/g, '_')}`;
     return {
-      ...rest,
-      has_fb_token: !!(fb_access_token || process.env[`${base}_FB_ACCESS_TOKEN`]),
-      group_ids: r.group_ids || [],
-      blacklist_groups: r.blacklist_groups || [],
-      post_settings: r.post_settings || {},
+      ...publicUser(r),
+      has_fb_token: !!(r.fb_access_token || process.env[`${base}_FB_ACCESS_TOKEN`]),
     };
   });
+}
+
+async function getUsersWithSecrets() {
+  const { rows } = await query('SELECT * FROM users ORDER BY COALESCE(NULLIF(trim(name), \'\'), env_key), env_key');
+  return rows.map(secretUser);
 }
 
 async function getUserFbToken(userId) {
   const { rows } = await query('SELECT env_key, fb_access_token FROM users WHERE id = $1', [userId]);
   if (rows.length === 0) return null;
   const r = rows[0];
-  const token = r.fb_access_token || process.env[`USER_${String(r.env_key || userId).toUpperCase().replace(/[^A-Z0-9_]/g, '_')}_FB_ACCESS_TOKEN`];
+  const storedToken = decryptCredential(r.fb_access_token);
+  const token = storedToken || process.env[`USER_${String(r.env_key || userId).toUpperCase().replace(/[^A-Z0-9_]/g, '_')}_FB_ACCESS_TOKEN`];
   return token || null;
 }
 
 async function getUserById(id) {
   const { rows } = await query('SELECT * FROM users WHERE id = $1', [id]);
   if (rows.length === 0) return null;
-  const r = rows[0];
-  const { fb_access_token, ...rest } = r;
-  return { ...rest, group_ids: r.group_ids || [], blacklist_groups: r.blacklist_groups || [], post_settings: r.post_settings || {} };
+  return publicUser(rows[0]);
+}
+
+async function getUserByIdWithSecrets(id) {
+  const { rows } = await query('SELECT * FROM users WHERE id = $1', [id]);
+  if (rows.length === 0) return null;
+  return secretUser(rows[0]);
 }
 
 async function createUser(data) {
@@ -248,11 +286,11 @@ async function createUser(data) {
       data.poster_name || null,
       data.sheet_url || null,
       data.email || null,
-      data.password || null,
+      encryptCredential(data.password) || null,
       JSON.stringify(data.group_ids || []),
       JSON.stringify(data.blacklist_groups || []),
       JSON.stringify(data.post_settings || {}),
-      data.fb_access_token || null,
+      encryptCredential(data.fb_access_token) || null,
       contactPhone,
     ]
   );
@@ -288,11 +326,17 @@ async function updateUser(id, data) {
       data.poster_name,
       data.sheet_url,
       data.email,
-      data.password !== undefined ? data.password : null,
+      data.password !== undefined && data.password !== ''
+        ? encryptCredential(data.password)
+        : null,
       data.group_ids ? JSON.stringify(data.group_ids) : null,
       data.blacklist_groups ? JSON.stringify(data.blacklist_groups) : null,
       data.post_settings ? JSON.stringify(data.post_settings) : null,
-      data.fb_access_token !== undefined ? data.fb_access_token : null,
+      data.fb_access_token !== undefined && data.fb_access_token !== ''
+        ? encryptCredential(data.fb_access_token)
+        : data.fb_access_token === ''
+          ? ''
+          : null,
       data.contact_phone !== undefined ? contactPhoneParam ?? '' : null,
     ]
   );
@@ -1120,10 +1164,76 @@ async function getRunLogs(opts = {}) {
 
 // --- Post Logs (รูปแบบ Log File) ---
 async function createPostLog(data) {
+  await ensurePostLogIntegrityColumns();
   const id = generateId();
-  await query(
-    `INSERT INTO post_logs (id, run_id, assignment_id, user_id, job_id, group_id, poster_name, owner, job_title, company, group_name, member_count, post_link, post_status, comment_count, customer_phone)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)`,
+  const params = [
+    id,
+    data.run_id || null,
+    data.assignment_id || null,
+    data.user_id || null,
+    data.job_id || null,
+    data.group_id || null,
+    data.poster_name || null,
+    data.owner || null,
+    data.job_title || null,
+    data.company || null,
+    data.group_name || null,
+    data.member_count || '0',
+    data.post_link || null,
+    data.post_status || null,
+    data.comment_count ?? 0,
+    data.customer_phone || null,
+    data.idempotency_key || null,
+    data.content_fingerprint || null,
+    data.lifecycle_state || (data.post_link ? 'verified' : 'needs_verification'),
+    data.verification_error || null,
+  ];
+  const { rows } = await query(
+    `INSERT INTO post_logs
+       (id, run_id, assignment_id, user_id, job_id, group_id, poster_name, owner,
+        job_title, company, group_name, member_count, post_link, post_status,
+        comment_count, customer_phone, idempotency_key, content_fingerprint,
+        lifecycle_state, verification_error)
+     VALUES (${params.map((_, i) => `$${i + 1}`).join(', ')})
+     ON CONFLICT (idempotency_key) WHERE idempotency_key IS NOT NULL
+     DO UPDATE SET
+       run_id = COALESCE(EXCLUDED.run_id, post_logs.run_id),
+       assignment_id = COALESCE(EXCLUDED.assignment_id, post_logs.assignment_id),
+       user_id = COALESCE(EXCLUDED.user_id, post_logs.user_id),
+       job_id = COALESCE(EXCLUDED.job_id, post_logs.job_id),
+       group_id = COALESCE(EXCLUDED.group_id, post_logs.group_id),
+       poster_name = COALESCE(EXCLUDED.poster_name, post_logs.poster_name),
+       owner = COALESCE(EXCLUDED.owner, post_logs.owner),
+       job_title = COALESCE(EXCLUDED.job_title, post_logs.job_title),
+       company = COALESCE(EXCLUDED.company, post_logs.company),
+       group_name = COALESCE(EXCLUDED.group_name, post_logs.group_name),
+       member_count = COALESCE(EXCLUDED.member_count, post_logs.member_count),
+       post_link = COALESCE(NULLIF(EXCLUDED.post_link, ''), post_logs.post_link),
+       post_status = COALESCE(EXCLUDED.post_status, post_logs.post_status),
+       lifecycle_state = COALESCE(EXCLUDED.lifecycle_state, post_logs.lifecycle_state),
+       verification_error = EXCLUDED.verification_error,
+       content_fingerprint = COALESCE(EXCLUDED.content_fingerprint, post_logs.content_fingerprint),
+       updated_at = NOW()
+     RETURNING id`,
+    params
+  );
+  return rows[0]?.id || id;
+}
+
+async function reservePostAttempt(data) {
+  await ensurePostLogIntegrityColumns();
+  const key = String(data.idempotency_key || '').trim();
+  if (!key) throw new Error('idempotency_key required');
+  const id = generateId();
+  const { rows } = await query(
+    `INSERT INTO post_logs
+       (id, run_id, assignment_id, user_id, job_id, group_id, poster_name, owner,
+        job_title, company, group_name, member_count, post_status, idempotency_key,
+        content_fingerprint, lifecycle_state)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,'เตรียมโพสต์',$13,$14,'planned')
+     ON CONFLICT (idempotency_key) WHERE idempotency_key IS NOT NULL
+     DO NOTHING
+     RETURNING *`,
     [
       id,
       data.run_id || null,
@@ -1137,13 +1247,62 @@ async function createPostLog(data) {
       data.company || null,
       data.group_name || null,
       data.member_count || '0',
-      data.post_link || null,
-      data.post_status || null,
-      data.comment_count ?? 0,
-      data.customer_phone || null,
+      key,
+      data.content_fingerprint || null,
     ]
   );
-  return id;
+  if (rows[0]) return { row: rows[0], should_post: true, created: true };
+  const existing = (await query(`SELECT * FROM post_logs WHERE idempotency_key=$1`, [key])).rows[0];
+  if (existing?.lifecycle_state === 'failed') {
+    const retry = (
+      await query(
+        `UPDATE post_logs SET
+           run_id=$2, lifecycle_state='planned', post_status='เตรียมโพสต์',
+           verification_error=NULL, updated_at=NOW()
+         WHERE idempotency_key=$1
+         RETURNING *`,
+        [key, data.run_id || existing.run_id || null]
+      )
+    ).rows[0];
+    return { row: retry, should_post: true, created: false };
+  }
+  const sameRunPlanned =
+    existing &&
+    existing.lifecycle_state === 'planned' &&
+    String(existing.run_id || '') === String(data.run_id || '');
+  return { row: existing || null, should_post: !!sameRunPlanned, created: false };
+}
+
+async function updatePostAttemptState(idempotencyKey, data = {}) {
+  await ensurePostLogIntegrityColumns();
+  const allowed = new Set([
+    'planned',
+    'posting',
+    'clicked_unverified',
+    'verified',
+    'needs_verification',
+    'failed',
+  ]);
+  const state = String(data.lifecycle_state || '').trim();
+  if (!allowed.has(state)) throw new Error(`invalid lifecycle_state: ${state}`);
+  const { rows } = await query(
+    `UPDATE post_logs SET
+       lifecycle_state=$2,
+       post_status=COALESCE($3, post_status),
+       post_link=COALESCE(NULLIF($4, ''), post_link),
+       verification_error=$5,
+       updated_at=NOW()
+     WHERE idempotency_key=$1
+     RETURNING *`,
+    [
+      String(idempotencyKey || ''),
+      state,
+      data.post_status || null,
+      data.post_link || null,
+      data.verification_error || null,
+    ]
+  );
+  return rows[0] || null;
 }
 
 async function getPostLogs(opts = {}) {
@@ -1268,6 +1427,8 @@ async function ensurePostLogsEngagementColumns() {
   try {
     await query(`ALTER TABLE post_logs ADD COLUMN IF NOT EXISTS reactions INT DEFAULT 0`);
     await query(`ALTER TABLE post_logs ADD COLUMN IF NOT EXISTS shares INT DEFAULT 0`);
+    await query(`ALTER TABLE post_logs ADD COLUMN IF NOT EXISTS collect_count INT NOT NULL DEFAULT 0`);
+    await query(`ALTER TABLE post_logs ADD COLUMN IF NOT EXISTS last_collected_at TIMESTAMPTZ`);
   } catch (_) {
     // ignore if no permission / table variation
   }
@@ -1284,7 +1445,10 @@ async function updatePostLogCollectResult(id, commentCount, customerPhone, react
   await ensurePostLogsEngagementColumns();
   await query(
     `UPDATE post_logs SET comment_count = $2, customer_phone = $3,
-            reactions = COALESCE($4, reactions), shares = COALESCE($5, shares)
+            reactions = COALESCE($4, reactions), shares = COALESCE($5, shares),
+            collect_count = COALESCE(collect_count, 0) + 1,
+            last_collected_at = NOW(),
+            updated_at = NOW()
       WHERE id = $1`,
     [
       String(id),
@@ -2154,7 +2318,33 @@ async function buildDailyPostPlan(userId, opts = {}) {
 
 async function completePostRunJob(id, data = {}) {
   await ensurePostRunQueueTable();
-  const ok = !!data.ok;
+  await ensurePostLogIntegrityColumns();
+  let ok = !!data.ok;
+  let evidenceError = null;
+  const evidenceRunId = data.run_id || null;
+  if (ok && evidenceRunId) {
+    const { rows: evidenceRows } = await query(
+      `SELECT
+         (SELECT COUNT(*)::int FROM run_logs WHERE run_id=$1 AND level='success') AS success_logs,
+         (SELECT COUNT(*)::int FROM post_logs WHERE run_id=$1) AS post_logs,
+         (SELECT COUNT(*)::int FROM post_logs
+           WHERE run_id=$1 AND lifecycle_state IN ('planned','posting','clicked_unverified','needs_verification')) AS ambiguous,
+         (SELECT COUNT(*)::int FROM post_logs
+           WHERE run_id=$1 AND lifecycle_state='failed') AS failed`,
+      [evidenceRunId]
+    );
+    const evidence = evidenceRows[0] || {};
+    if (Number(evidence.success_logs) > 0 && Number(evidence.post_logs) === 0) {
+      ok = false;
+      evidenceError = 'post_evidence_missing: run reported success but post_logs is empty';
+    } else if (Number(evidence.ambiguous) > 0) {
+      ok = false;
+      evidenceError = `post_requires_verification:${Number(evidence.ambiguous)}`;
+    } else if (Number(evidence.failed) > 0) {
+      ok = false;
+      evidenceError = `post_partial_failure:${Number(evidence.failed)}`;
+    }
+  }
   const status = ok ? 'completed' : 'failed';
   const { rows } = await query(
     `UPDATE post_run_queue
@@ -2166,9 +2356,56 @@ async function completePostRunJob(id, data = {}) {
          updated_at = NOW()
      WHERE id = $1
      RETURNING *`,
-    [String(id || ''), status, data.run_id || null, data.message || null, data.error || null]
+    [
+      String(id || ''),
+      status,
+      data.run_id || null,
+      evidenceError ? 'Worker finished but post evidence is incomplete' : data.message || null,
+      evidenceError || data.error || null,
+    ]
   );
+  if (ok && evidenceRunId) {
+    await markVerifiedCampaignsPosted(evidenceRunId).catch((error) => {
+      console.warn('[db] sync verified campaign status failed:', error.message || String(error));
+    });
+  }
   return rows[0] || null;
+}
+
+/** เปลี่ยนเป็น posted หลัง ledger มี permalink ที่ยืนยันแล้วเท่านั้น. */
+async function markVerifiedCampaignsPosted(runId) {
+  const candidateSchema = CANDIDATE_SCHEMA.includes('-')
+    ? `"${CANDIDATE_SCHEMA}"`
+    : CANDIDATE_SCHEMA;
+  const { rows } = await query(
+    `WITH verified_campaigns AS (
+       SELECT DISTINCT cp.campaign_id
+         FROM ${candidateSchema}.campaign_posts cp
+         JOIN post_logs pl ON pl.job_id=cp.job_ref
+        WHERE pl.run_id=$1
+          AND pl.lifecycle_state='verified'
+          AND pl.post_link IS NOT NULL
+          AND trim(pl.post_link)<>''
+     )
+     UPDATE ${candidateSchema}.recruit_campaigns c
+        SET status='posted',
+            status_note='ยืนยันโพสต์แล้วจาก permalink',
+            updated_at=now()
+       FROM verified_campaigns v
+      WHERE c.id=v.campaign_id
+     RETURNING c.request_no`,
+    [String(runId)],
+  );
+  const requestNos = rows.map((row) => row.request_no).filter(Boolean);
+  if (requestNos.length > 0) {
+    await query(
+      `UPDATE "jarvis_rm".job_posting_requests
+          SET status='posted', updated_at=now()
+        WHERE request_no=ANY($1::text[])`,
+      [requestNos],
+    ).catch(() => {});
+  }
+  return rows.length;
 }
 
 async function getPostRunQueueSummary() {
@@ -2261,6 +2498,53 @@ async function enqueueCollectRunJob(data = {}) {
   );
   const { rows } = await query(`SELECT * FROM collect_run_queue WHERE id = $1`, [id]);
   return rows[0] || null;
+}
+
+/** Enqueue verified posts at ~2h, 24h and 72h without duplicate active jobs. */
+async function enqueueDueCollectJobs(limit = 300) {
+  await ensureCollectRunQueueTable();
+  await ensurePostLogIntegrityColumns();
+  await ensurePostLogsEngagementColumns();
+  const { rows } = await query(
+    `SELECT p.id, p.user_id
+       FROM post_logs p
+      WHERE p.user_id IS NOT NULL
+        AND p.post_link IS NOT NULL AND TRIM(p.post_link) <> ''
+        AND p.lifecycle_state IN ('verified','logged')
+        AND COALESCE(p.collect_count, 0) < 3
+        AND (
+          (COALESCE(p.collect_count, 0)=0 AND p.created_at <= NOW() - INTERVAL '2 hours') OR
+          (COALESCE(p.collect_count, 0)=1 AND p.created_at <= NOW() - INTERVAL '24 hours') OR
+          (COALESCE(p.collect_count, 0)=2 AND p.created_at <= NOW() - INTERVAL '72 hours')
+        )
+        AND NOT EXISTS (
+          SELECT 1
+            FROM collect_run_queue q,
+                 LATERAL jsonb_array_elements_text(q.post_log_ids) item
+           WHERE q.status IN ('queued','running') AND item.value=p.id
+        )
+      ORDER BY p.created_at
+      LIMIT $1`,
+    [Math.max(1, Math.min(2000, Number(limit) || 300))]
+  );
+  const byUser = new Map();
+  for (const row of rows) {
+    const uid = String(row.user_id);
+    if (!byUser.has(uid)) byUser.set(uid, []);
+    byUser.get(uid).push(String(row.id));
+  }
+  const created = [];
+  for (const [userId, postLogIds] of byUser.entries()) {
+    created.push(
+      await enqueueCollectRunJob({
+        user_id: userId,
+        post_log_ids: postLogIds,
+        requested_by: 'auto-due',
+        message: 'scheduled engagement collect (2h/24h/72h)',
+      })
+    );
+  }
+  return { created, posts: rows.length };
 }
 
 async function claimNextCollectRunJob(workerId, runId) {
@@ -2367,7 +2651,7 @@ async function failStaleRunningCollectJobs(maxAgeMinutes) {
 // --- Config for Bot ---
 async function getDynamicConfig() {
   const [users, groups, jobs, assignments] = await Promise.all([
-    getUsers(),
+    getUsersWithSecrets(),
     getGroups(),
     getJobs(),
     getAssignments(),
@@ -2396,6 +2680,26 @@ async function ensurePostLogsCustomerPhoneWide() {
   await query(`ALTER TABLE ${schemaName}.post_logs ALTER COLUMN customer_phone TYPE VARCHAR(2000)`).catch(() => {});
 }
 
+/** Exactly-once post ledger: reserve before clicking and verify afterwards. */
+async function ensurePostLogIntegrityColumns() {
+  const schemaName = SCHEMA.includes('-') ? `"${SCHEMA}"` : SCHEMA;
+  await query(`ALTER TABLE ${schemaName}.post_logs ADD COLUMN IF NOT EXISTS idempotency_key TEXT`);
+  await query(`ALTER TABLE ${schemaName}.post_logs ADD COLUMN IF NOT EXISTS content_fingerprint TEXT`);
+  await query(
+    `ALTER TABLE ${schemaName}.post_logs ADD COLUMN IF NOT EXISTS lifecycle_state VARCHAR(40) NOT NULL DEFAULT 'logged'`
+  );
+  await query(`ALTER TABLE ${schemaName}.post_logs ADD COLUMN IF NOT EXISTS verification_error TEXT`);
+  await query(
+    `ALTER TABLE ${schemaName}.post_logs ADD COLUMN IF NOT EXISTS collect_count INT NOT NULL DEFAULT 0`
+  );
+  await query(`ALTER TABLE ${schemaName}.post_logs ADD COLUMN IF NOT EXISTS last_collected_at TIMESTAMPTZ`);
+  await query(`ALTER TABLE ${schemaName}.post_logs ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW()`);
+  await query(
+    `CREATE UNIQUE INDEX IF NOT EXISTS uq_post_logs_idempotency
+       ON ${schemaName}.post_logs(idempotency_key) WHERE idempotency_key IS NOT NULL`
+  );
+}
+
 async function initSchema() {
   const fs = require('fs');
   const path = require('path');
@@ -2414,6 +2718,7 @@ async function initSchema() {
   await ensurePostLogsGroupNameText();
   await ensureUsersContactPhoneColumn();
   await ensurePostLogsCustomerPhoneWide().catch(() => {});
+  await ensurePostLogIntegrityColumns().catch(() => {});
   await ensureAssignmentsJobIdsColumn().catch(() => {});
   await ensurePostRunQueueTable().catch(() => {});
   await ensureCollectRunQueueTable().catch(() => {});
@@ -2441,7 +2746,9 @@ module.exports = {
   addJobPosition,
   deleteJobPosition,
   getUsers,
+  getUsersWithSecrets,
   getUserById,
+  getUserByIdWithSecrets,
   getUserFbToken,
   createUser,
   updateUser,
@@ -2481,6 +2788,8 @@ module.exports = {
   createRunLog,
   getRunLogs,
   createPostLog,
+  reservePostAttempt,
+  updatePostAttemptState,
   getPostLogs,
   getPostLogsForCommentCollect,
   getPostLogsByIdsForUser,
@@ -2517,6 +2826,7 @@ module.exports = {
   failStaleRunningPostJobs,
   ensureCollectRunQueueTable,
   enqueueCollectRunJob,
+  enqueueDueCollectJobs,
   claimNextCollectRunJob,
   completeCollectRunJob,
   getCollectRunQueueSummary,
@@ -2527,5 +2837,6 @@ module.exports = {
   initSchema,
   ensurePostLogsGroupNameText,
   ensureUsersContactPhoneColumn,
+  ensurePostLogIntegrityColumns,
   ensureAssignmentsJobIdsColumn,
 };

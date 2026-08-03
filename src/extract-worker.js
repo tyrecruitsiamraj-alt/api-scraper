@@ -1,7 +1,8 @@
 import { closePool } from './db/pool.js';
-import { getAssetContent, listPendingExtractions, saveExtraction } from './db/repositories.js';
+import { getAssetContent, listPendingExtractions, requeueRetryableExtractions, saveExtraction } from './db/repositories.js';
 import { extractAttachment } from './core/ollama.js';
 import { envInt, sleep } from './config.js';
+import { fileURLToPath } from 'node:url';
 
 /**
  * Decoupled OCR/extraction worker. Processes attachment assets with
@@ -11,8 +12,9 @@ import { envInt, sleep } from './config.js';
  *
  *   node src/extract-worker.js          # one batch
  */
-async function main() {
-  const batch = await listPendingExtractions(envInt('EXTRACT_BATCH', 20));
+export async function processExtractionBatch(limit = envInt('EXTRACT_BATCH', 20)) {
+  await requeueRetryableExtractions(Math.max(limit * 5, 100));
+  const batch = await listPendingExtractions(limit);
   console.log(`\n=== extraction worker: ${batch.length} pending attachment(s) ===`);
   let ok = 0;
   let fail = 0;
@@ -31,11 +33,19 @@ async function main() {
     await sleep(300);
   }
   console.log(`done. extracted ${ok}, failed/skipped ${fail}`);
+  return { total: batch.length, ok, fail };
+}
+
+async function main() {
+  await processExtractionBatch();
   await closePool();
 }
 
-main().catch(async (e) => {
-  console.error('extract-worker failed:', e.message);
-  await closePool();
-  process.exit(1);
-});
+const isMain = process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1];
+if (isMain) {
+  main().catch(async (e) => {
+    console.error('extract-worker failed:', e.message);
+    await closePool();
+    process.exit(1);
+  });
+}

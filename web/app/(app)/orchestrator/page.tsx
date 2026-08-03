@@ -121,7 +121,9 @@ export default async function OrchestratorPage() {
         age_min: sv(js.age_min),
         age_max: sv(js.age_max),
         unit_name: sv(js.unit_name),
+        department: sv(js.department) || sv(js.department_code),
         note: sv(js.note),
+        content_brief: sv(js.content_brief),
       };
       return {
         id: `request:${request.id}`,

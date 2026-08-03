@@ -1,8 +1,8 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
-import { contentGenIngredients, getCampaign, listCampaignContents, listCampaignPosts, listFacebookAccounts, soRecruitCheck } from '@/lib/repo';
-import type { CampaignPostRow } from '@/lib/repo';
-import { approveContentAction, rejectContentAction, editCaptionAction, measureCampaignAction, retryCampaignDraftAction } from '@/lib/actions';
+import { contentGenIngredients, getCampaign, getCampaignOpsTrace, listCampaignContents, listCampaignPosts, listFacebookAccounts, soRecruitCheck } from '@/lib/repo';
+import type { CampaignHandoff, CampaignPostRow, CampaignStageRun, ContentAgentContract, ContentQualityScore } from '@/lib/repo';
+import { approveContentAction, approveExperimentAction, rejectContentAction, editCaptionAction, measureCampaignAction, retryCampaignDraftAction } from '@/lib/actions';
 
 export const dynamic = 'force-dynamic';
 
@@ -85,6 +85,98 @@ function StageStrip({ status }: { status: string }) {
   );
 }
 
+const AI_FLOW = [
+  ['spec', 'spec_agent', 'ยืนยันตำแหน่ง'],
+  ['research', 'trend_agent', 'หาแนวและหลักฐาน'],
+  ['copy', 'copy_agent', 'เขียน A/B'],
+  ['visual', 'visual_agent', 'ออกแบบภาพ'],
+  ['quality', 'quality_agent', 'ตรวจคุณภาพ'],
+] as const;
+
+function AiTeamFlow({ runs, contracts, handoffs }: { runs: CampaignStageRun[]; contracts: ContentAgentContract[]; handoffs: CampaignHandoff[] }) {
+  const latest = new Map<string, CampaignStageRun>();
+  for (const run of runs) latest.set(run.stage_key, run);
+  const contractByKey = new Map(contracts.map((contract) => [contract.agent_key, contract]));
+  return (
+    <div className="card p-5">
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <div>
+          <h2 className="text-sm font-semibold">ทีม AI ทำงานถึงไหนแล้ว</h2>
+          <p className="mt-0.5 text-xs text-subtle">แต่ละคนมีหน้าที่และ output ชัดเจน งานจะหยุดทันทีเมื่อด่านบังคับไม่ผ่าน</p>
+        </div>
+        <span className="text-[11px] text-subtle">Supervisor → คนตรวจ → Auto-post</span>
+      </div>
+      <div className="mt-4 grid gap-2 sm:grid-cols-5">
+        {AI_FLOW.map(([key, agentKey, label], index) => {
+          const run = latest.get(key);
+          const contract = contractByKey.get(run?.agent_key ?? agentKey);
+          const state = run?.status ?? 'waiting';
+          const cls = state === 'completed'
+            ? 'border-emerald-200 bg-emerald-50/60'
+            : state === 'failed'
+              ? 'border-red-200 bg-red-50/60'
+              : state === 'running'
+                ? 'border-blue-200 bg-blue-50/60'
+                : 'border-hairline bg-black/[0.015]';
+          return (
+            <div key={key} className={`rounded-xl border p-3 ${cls}`}>
+              <div className="text-[10px] font-medium uppercase tracking-wide text-subtle">{index + 1} · {state}</div>
+              <div className="mt-1 text-xs font-semibold">{label}</div>
+              <div className="mt-1 text-[11px] text-ink/70">{run?.agent_name ?? contract?.display_name ?? 'รอรับงาน'}</div>
+              {run?.quality_score != null && <div className="mt-1 text-[11px] font-medium text-emerald-700">Quality {run.quality_score}/100</div>}
+              {run?.error && <div className="mt-1 line-clamp-2 text-[10px] text-red-700">{run.error}</div>}
+            </div>
+          );
+        })}
+      </div>
+      {handoffs.length > 0 && (
+        <div className="mt-3 flex flex-wrap gap-2 text-[11px]">
+          {handoffs.slice(-8).map((handoff) => (
+            <span key={handoff.id} className={`rounded-full px-2.5 py-1 ${handoff.status === 'rejected' ? 'bg-red-50 text-red-700' : handoff.status === 'pending' ? 'bg-amber-50 text-amber-800' : 'bg-emerald-50 text-emerald-700'}`}>
+              {handoff.from_stage ?? 'intake'} → {handoff.to_stage} · {handoff.status}
+            </span>
+          ))}
+        </div>
+      )}
+      <details className="mt-3 text-xs text-subtle">
+        <summary className="cursor-pointer select-none">ดูขอบเขตหน้าที่และกฎของทีม</summary>
+        <div className="mt-2 grid gap-2 sm:grid-cols-2">
+          {contracts.map((contract) => (
+            <div key={contract.agent_key} className="rounded-lg border border-hairline px-3 py-2">
+              <div className="font-medium text-ink">{contract.display_name}</div>
+              <div className="mt-0.5">{contract.responsibility}</div>
+              {contract.playbook_path && <div className="mt-1 break-all text-[10px] text-blue-700">Playbook: {contract.playbook_path}</div>}
+              <div className="mt-1 text-[10px] text-red-700">ห้าม: {contract.hard_rules.join(' · ')}</div>
+            </div>
+          ))}
+        </div>
+      </details>
+    </div>
+  );
+}
+
+function QualityCard({ score }: { score?: ContentQualityScore }) {
+  if (!score) return <div className="mt-3 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800">ยังไม่มี Quality Score — ร่างเก่าต้องสร้างใหม่ก่อนโพสต์</div>;
+  return (
+    <details className={`mt-3 rounded-lg border px-3 py-2 ${score.hard_gate_passed ? 'border-emerald-200 bg-emerald-50/40' : 'border-red-200 bg-red-50/40'}`}>
+      <summary className="cursor-pointer select-none text-xs font-semibold">
+        {score.hard_gate_passed ? '✓' : '✕'} Quality Score {score.overall_score}/100
+        <span className="ml-2 font-normal text-subtle">กดดูคะแนนรายด้าน</span>
+      </summary>
+      <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-3">
+        {Object.entries(score.dimensions).map(([key, value]) => (
+          <div key={key} className="rounded-md bg-white/70 px-2 py-1.5 text-[11px]">
+            <div className="text-subtle">{key.replaceAll('_', ' ')}</div>
+            <div className="font-semibold">{value.score}/{value.max}</div>
+          </div>
+        ))}
+      </div>
+      {score.blockers.length > 0 && <div className="mt-2 text-[11px] text-red-700">ต้องแก้: {score.blockers.join(' · ')}</div>}
+      {score.warnings.length > 0 && <div className="mt-1 text-[11px] text-amber-700">ควรปรับ: {score.warnings.join(' · ')}</div>}
+    </details>
+  );
+}
+
 function Field({ label, value }: { label: string; value?: unknown }) {
   const v = value === null || value === undefined || value === '' ? '—' : String(value);
   return (
@@ -127,12 +219,24 @@ export default async function CampaignDetail({ params }: { params: { id: string 
   if (!c) notFound();
   const snap = (c.request_snapshot ?? {}) as Record<string, any>;
   const contents = await listCampaignContents(params.id);
+  const ops = await getCampaignOpsTrace(params.id);
+  const scoreByContent = new Map(ops.scores.map((score) => [score.content_id, score]));
   const fbAccounts = await listFacebookAccounts();
   const posts = await listCampaignPosts(params.id);
   const engByContent = aggregateByContent(posts);
   const canMeasure = ['posting', 'measuring', 'low_engagement'].includes(c.status);
   const pool = await soRecruitCheck(c.request_no);
   const ingredients = await contentGenIngredients(c.title);
+  const experimentDrafts = contents
+    .filter(
+      (ct) =>
+        ct.status === 'draft' &&
+        ct.factual_validation?.valid &&
+        ct.factual_validation?.poster_validated &&
+        ct.factual_validation?.content_hash &&
+        ct.quality_gate && Number(ct.quality_score) >= 70,
+    )
+    .slice(0, 2);
 
   // ป้ายบอกว่า "ต้องทำอะไรต่อ" — คนเปิดหน้ามาแล้วรู้ทันทีว่างานค้างที่ใคร
   const NEXT_ACTION: Record<string, { text: string; cls: string }> = {
@@ -187,6 +291,8 @@ export default async function CampaignDetail({ params }: { params: { id: string 
         )}
       </div>
 
+      <AiTeamFlow runs={ops.runs} contracts={ops.contracts} handoffs={ops.handoffs} />
+
       {/* Pool pre-check: มีคนใน So Recruit สำหรับใบขอนี้หรือยัง (อ่านอย่างเดียว คนตัดสินใจเอง) */}
       <div className="card p-4">
         <div className="flex flex-wrap items-center gap-2 text-sm">
@@ -233,6 +339,7 @@ export default async function CampaignDetail({ params }: { params: { id: string 
             <Field label="เพศ" value={snap.gender} />
             <Field label="อายุ" value={snap.age_min || snap.age_max ? `${snap.age_min ?? ''}-${snap.age_max ?? ''} ปี` : ''} />
             <Field label="หน่วยงาน" value={snap.unit_name} />
+            <Field label="แผนก/สายงาน" value={snap.department || snap.department_code} />
             <Field label="ผู้ขอ" value={snap.requested_by_name} />
             <div className="col-span-2 sm:col-span-3">
               <Field label="เหตุผลที่ขอโพส" value={snap.reason} />
@@ -240,6 +347,11 @@ export default async function CampaignDetail({ params }: { params: { id: string 
             {snap.note && (
               <div className="col-span-2 sm:col-span-3">
                 <Field label="หมายเหตุ" value={snap.note} />
+              </div>
+            )}
+            {snap.content_brief && (
+              <div className="col-span-2 sm:col-span-3">
+                <Field label="โจทย์ Content" value={snap.content_brief} />
               </div>
             )}
           </dl>
@@ -250,7 +362,7 @@ export default async function CampaignDetail({ params }: { params: { id: string 
           <dl className="grid grid-cols-2 gap-4 sm:grid-cols-3">
             <Field label="ไซต์" value={snap.site_name} />
             <Field label="รหัสไซต์" value={snap.site_code} />
-            <Field label="แผนก" value={snap.department_code} />
+            <Field label="แผนก" value={snap.department || snap.department_code} />
             <Field label="ประเภทใบขอ" value={snap.request_name} />
             <Field label="ผู้ขอ" value={snap.requester_name} />
             <Field label="สถานที่ทำงาน" value={snap.work_addr} />
@@ -271,7 +383,7 @@ export default async function CampaignDetail({ params }: { params: { id: string 
           </div>
           <div>
             <div className="text-xs font-medium text-subtle">2 · สองเวอร์ชันคนละแนว (A/B)</div>
-            <p className="mt-0.5 text-ink/80">A — ตรงไปตรงมา: พาดหัวชัด ข้อมูลครบ กระชับ · B — เน้นจุดขาย: นำด้วยรายได้/สวัสดิการ โทนชวนคุย</p>
+            <p className="mt-0.5 text-ink/80">A — ตรงไปตรงมา: พาดหัวชัด ข้อมูลครบ กระชับ · B — เน้นเฉพาะจุดขายที่มีจริงในใบขอ โทนชวนคุย</p>
           </div>
           <div>
             <div className="text-xs font-medium text-subtle">3 · แนวที่เคยได้ผลดี ({ingredients.winning.length} ตัวอย่าง)</div>
@@ -297,7 +409,7 @@ export default async function CampaignDetail({ params }: { params: { id: string 
               ))
             )}
           </div>
-          <p className="text-xs text-subtle">ตัวอย่างข้อ 3-4 เลือกจากตำแหน่งใกล้เคียงก่อน แล้วเรียงตามคะแนน engagement — อัปเดตทุกครั้งที่มีการวัดผลใหม่</p>
+          <p className="text-xs text-subtle">ตัวอย่างข้อ 3-4 ใช้เฉพาะ Job Family เดียวกัน แล้วเรียงตามคะแนน engagement — อัปเดตทุกครั้งที่มีการวัดผลใหม่</p>
         </div>
       </details>
 
@@ -309,9 +421,43 @@ export default async function CampaignDetail({ params }: { params: { id: string 
           </div>
         ) : (
           <div className="space-y-4">
+            {experimentDrafts.length === 2 && (
+              <form action={approveExperimentAction} className="card border-blue-200 bg-blue-50/50 p-4">
+                <input type="hidden" name="campaignId" value={c.id} />
+                <input type="hidden" name="contentA" value={experimentDrafts[0].id} />
+                <input type="hidden" name="contentB" value={experimentDrafts[1].id} />
+                <div className="flex flex-wrap items-end gap-3">
+                  <div className="min-w-[220px] flex-1">
+                    <div className="text-sm font-medium text-blue-900">🧪 ทดสอบ A/B แบบควบคุม</div>
+                    <p className="mt-1 text-xs text-blue-800">
+                      แบ่งกลุ่มของบัญชีเป็นสองชุดไม่ซ้ำกันแบบ deterministic แล้วโพสต์ A/B ในรอบเดียว
+                    </p>
+                  </div>
+                  <label className="text-xs text-blue-900">
+                    <span className="mb-1 block">บัญชีทดลอง (ต้องมี ≥2 กลุ่ม)</span>
+                    <select name="fbAccountId" required defaultValue="" className="rounded-lg border border-blue-200 bg-white px-2 py-1.5 text-sm text-ink">
+                      <option value="" disabled>เลือกบัญชี Facebook…</option>
+                      {fbAccounts.filter((a) => a.group_count >= 2).map((a) => (
+                        <option key={a.id} value={a.id}>{a.label} ({a.group_count} กลุ่ม)</option>
+                      ))}
+                    </select>
+                  </label>
+                  <button className="btn-primary btn-sm" disabled={!fbAccounts.some((a) => a.group_count >= 2)}>
+                    เริ่ม A/B experiment
+                  </button>
+                </div>
+              </form>
+            )}
             {contents.map((ct, idx) => {
               const meta = CONTENT_STATUS[ct.status] ?? { label: ct.status, cls: 'bg-black/5 text-ink' };
               const eng = engByContent.get(ct.id);
+              const factualReady = !!(
+                ct.factual_validation?.valid &&
+                ct.factual_validation?.poster_validated &&
+                ct.factual_validation?.content_hash
+              );
+              const quality = scoreByContent.get(ct.id);
+              const publishReady = factualReady && !!ct.quality_gate && Number(ct.quality_score) >= 70;
               return (
                 <div key={ct.id} className="card p-5">
                   <div className="mb-3 flex items-center justify-between">
@@ -359,6 +505,12 @@ export default async function CampaignDetail({ params }: { params: { id: string 
                         </>
                       )}
                       {ct.reject_reason && <div className="mt-2 text-xs text-red-600">เหตุผลตีกลับ: {ct.reject_reason}</div>}
+                      <div className={`mt-2 text-xs ${factualReady ? 'text-emerald-700' : 'text-amber-700'}`}>
+                        {factualReady
+                          ? '✓ ผ่าน factual gate และผูกกับข้อความเวอร์ชันนี้แล้ว'
+                          : '⚠ ร่างเดิมยังไม่มีหลักฐานตรวจข้อความ+โปสเตอร์ — ต้องสร้างใหม่ก่อนโพสต์'}
+                      </div>
+                      <QualityCard score={quality} />
 
                       {/* provenance จริงของร่างนี้ — AI คิดจากอะไร (research + A/B + ตัวอย่างที่ใช้) */}
                       {ct.gen_notes && (ct.gen_notes.angles?.length || ct.gen_notes.hooks?.length || ct.gen_notes.imageStyle || ct.gen_notes.style) && (
@@ -437,11 +589,20 @@ export default async function CampaignDetail({ params }: { params: { id: string 
                               <option value="caption">เฉพาะแคปชัน</option>
                             </select>
                           </label>
-                          <button className="btn-primary btn-sm" disabled={fbAccounts.length === 0}>✓ อนุมัติและโพสต์</button>
+                          <button className="btn-primary btn-sm" disabled={fbAccounts.length === 0 || !publishReady}>✓ อนุมัติและโพสต์</button>
                         </form>
-                        <form action={rejectContentAction}>
+                        <form action={rejectContentAction} className="flex min-w-[280px] flex-1 items-end gap-2">
                           <input type="hidden" name="contentId" value={ct.id} />
                           <input type="hidden" name="campaignId" value={c.id} />
+                          <label className="min-w-[210px] flex-1 text-xs text-subtle">
+                            <span className="mb-1 block">บอก AI ว่าต้องแก้อะไร</span>
+                            <input
+                              name="reason"
+                              required
+                              placeholder="เช่น ตำแหน่งต้องเป็นพนักงานขับรถ"
+                              className="w-full rounded-lg border border-hairline bg-transparent px-2 py-1.5 text-sm text-ink"
+                            />
+                          </label>
                           <button className="btn-ghost btn-sm">↻ ตีกลับ ให้ AI คิดใหม่</button>
                         </form>
                       </div>
@@ -474,7 +635,8 @@ export default async function CampaignDetail({ params }: { params: { id: string 
 
       {posts.length > 0 && (
         <p className="text-xs text-subtle">
-          คะแนนผล = คอมเมนต์ + (คนทัก × 2) · “ไลก์” จะมีเมื่อเปิดการอ่าน reactions ในตัวเก็บคอมเมนต์ (งานย่อยที่เหลือ) · คนสนใจน้อย = AI คิดคอนเทนต์ใหม่อัตโนมัติ
+          คะแนนต่อกลุ่ม = คนทัก × 4 + คอมเมนต์ + reaction × 0.25 + แชร์ × 2 ·
+          รออย่างน้อย 24 ชม. และต้องมี permalink ยืนยันแล้วก่อนตัดสิน · คนสนใจน้อย = สร้างร่างใหม่อัตโนมัติ
         </p>
       )}
     </div>

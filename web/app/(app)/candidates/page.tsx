@@ -1,5 +1,8 @@
 import Link from 'next/link';
-import { countCandidates, listCandidates, listCandidateProvinces } from '@/lib/repo';
+import { getServerSession } from 'next-auth';
+import { notFound } from 'next/navigation';
+import { authOptions } from '@/lib/auth';
+import { auditDataAccess, countCandidates, listCandidates, listCandidateProvinces } from '@/lib/repo';
 import { ScrapingNav } from '@/components/ScrapingNav';
 
 export const dynamic = 'force-dynamic';
@@ -44,6 +47,8 @@ export default async function CandidatesPage({
 }: {
   searchParams: { q?: string; platform?: string; position?: string; province?: string; updated?: string; page?: string };
 }) {
+  const session = await getServerSession(authOptions);
+  if (!session) notFound();
   const search = searchParams.q?.trim() || undefined;
   const platform = searchParams.platform || undefined;
   const position = searchParams.position?.trim() || undefined;
@@ -58,6 +63,20 @@ export default async function CandidatesPage({
     listCandidateProvinces(),
   ]);
   const pages = Math.max(1, Math.ceil(total / limit));
+  await auditDataAccess({
+    actor: session.user?.email ?? session.user?.name ?? null,
+    action: 'list',
+    subjectType: 'candidate',
+    subjectId: 'candidate-list',
+    purpose: 'recruitment_search',
+    metadata: {
+      result_count: rows.length,
+      platform: platform ?? null,
+      position_filter: !!position,
+      province_filter: !!province,
+      free_text_filter: !!search,
+    },
+  });
 
   // เก็บ query ปัจจุบัน (ยกเว้น page) เพื่อใส่ในลิงก์แท็บ/หน้า
   const baseParams = (extra: Record<string, string> = {}) => {

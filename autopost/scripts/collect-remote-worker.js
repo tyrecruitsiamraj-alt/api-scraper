@@ -137,50 +137,40 @@ async function fetchJson(url) {
 
 async function enqueueDailyCollectForYesterday() {
   const yesterday = getYesterdayByTz(AUTO_COLLECT_TZ);
-  console.log(`[collect-worker] auto-daily: preparing jobs for ${yesterday} (${AUTO_COLLECT_TZ})`);
-  const users = await fetchJson(`${API_BASE}/api/users`);
-  const runs = [];
-  for (const u of Array.isArray(users) ? users : []) {
-    const uid = String(u?.id || '').trim();
-    if (!uid) continue;
-    try {
-      const q =
-        `${API_BASE}/api/post-logs/for-comment-collect` +
-        `?start_date=${encodeURIComponent(yesterday)}` +
-        `&end_date=${encodeURIComponent(yesterday)}` +
-        `&user_id=${encodeURIComponent(uid)}` +
-        `&limit=2000`;
-      const out = await fetchJson(q);
-      const rows = Array.isArray(out?.rows) ? out.rows : [];
-      const post_log_ids = rows
-        .map((r) => String(r?.id || '').trim())
-        .filter(Boolean);
-      if (post_log_ids.length > 0) {
-        runs.push({ user_id: uid, post_log_ids });
-      }
-    } catch (e) {
-      console.error(`[collect-worker] auto-daily: skip user ${uid}: ${e.message || e}`);
-    }
-  }
-  if (runs.length === 0) {
-    console.log('[collect-worker] auto-daily: no posts from yesterday to collect');
-    return { queuedUsers: 0, queuedPosts: 0, date: yesterday };
-  }
-  const res = await fetch(`${API_BASE}/api/run/collect-comments`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ runs }),
-  });
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok || data?.ok === false) {
-    throw new Error(data?.error || (Array.isArray(data?.errors) && data.errors[0]?.error) || 'enqueue daily collect failed');
-  }
-  const queuedPosts = runs.reduce((s, r) => s + (Array.isArray(r.post_log_ids) ? r.post_log_ids.length : 0), 0);
-  console.log(`[collect-worker] auto-daily: queued ${queuedPosts} posts across ${runs.length} users`);
-  return { queuedUsers: runs.length, queuedPosts, date: yesterday };
+  console.log(`[collect-worker] auto-daily: enqueue verified posts due for 2h/24h/72h windows`);
+  const out = await callApi('/api/worker/collect/enqueue-due', { limit: 2000 });
+  console.log(
+    `[collect-worker] auto-daily: queued ${Number(out.queued_posts) || 0} posts across ${Number(out.queued_jobs) || 0} jobs`
+  );
+  return {
+    queuedUsers: Number(out.queued_jobs) || 0,
+    queuedPosts: Number(out.queued_posts) || 0,
+    date: yesterday,
+  };
 }
 
 let autoCollectRunning = false;
+let lastDueEnqueueAt = 0;
+
+async function enqueueDueCollectWindows() {
+  if (!AUTO_COLLECT_ENABLED || autoCollectRunning) return;
+  if (Date.now() - lastDueEnqueueAt < 10 * 60_000) return;
+  autoCollectRunning = true;
+  try {
+    const out = await callApi('/api/worker/collect/enqueue-due', { limit: 300 });
+    lastDueEnqueueAt = Date.now();
+    if (Number(out.queued_posts) > 0) {
+      console.log(
+        `[collect-worker] due windows: queued ${out.queued_posts} posts in ${out.queued_jobs} job(s)`
+      );
+    }
+  } catch (e) {
+    console.error('[collect-worker] enqueue due windows failed:', e.message || e);
+  } finally {
+    autoCollectRunning = false;
+  }
+}
+
 async function tickAutoDailySchedule() {
   if (!AUTO_COLLECT_ENABLED) return;
   if (autoCollectRunning) return;
@@ -343,3 +333,5 @@ setInterval(tick, INTERVAL_MS);
 tick();
 setInterval(tickAutoDailySchedule, 60_000);
 tickAutoDailySchedule();
+setInterval(enqueueDueCollectWindows, 60_000);
+enqueueDueCollectWindows();

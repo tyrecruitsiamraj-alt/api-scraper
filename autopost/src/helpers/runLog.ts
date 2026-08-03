@@ -18,12 +18,18 @@ export async function runLog(data: Omit<RunLogData, 'run_id'>): Promise<void> {
   const runId = process.env.RUN_ID;
   if (!runId) return;
   try {
-    await fetch(`${API_URL}/api/run-logs`, {
+    const response = await fetch(`${API_URL}/api/run-logs`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        'x-worker-token': String(process.env.POST_WORKER_TOKEN || ''),
+      },
       body: JSON.stringify({ ...data, run_id: runId }),
     });
-  } catch {
-    // Silent fail - don't break the bot if logging fails
+    if (!response.ok) {
+      throw new Error(`run-log API ${response.status}: ${await response.text()}`);
+    }
+  } catch (error) {
+    console.warn(`⚠️ บันทึก run log ไม่สำเร็จ: ${(error as Error).message}`);
   }
 }

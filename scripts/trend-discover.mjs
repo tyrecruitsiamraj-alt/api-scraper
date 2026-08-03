@@ -82,8 +82,10 @@ const TREND_SCHEMA = {
           label: { type: 'string', description: 'ชื่อเทรนด์/มุม/มีมสั้น ๆ ที่กำลังเห็นบ่อยในโพสต์รับสมัคร' },
           note: { type: 'string', description: 'วิธีเอาไปใช้กับคอนเทนต์รับสมัคร สั้น 1 ประโยค' },
           for_image: { type: 'boolean', description: 'เหมาะเอาไปใช้กับรูปด้วยไหม' },
+          job_family: { type: 'string', enum: ['A', 'B', 'C', 'D', 'E', 'F', ''], description: 'Job Family ที่เกี่ยวข้อง; ว่างเมื่อใช้ได้ทั่วไป' },
+          observed_count: { type: 'integer', description: 'จำนวน snippet ใน sample ที่เห็นสัญญาณนี้โดยประมาณ' },
         },
-        required: ['label', 'note', 'for_image'],
+        required: ['label', 'note', 'for_image', 'job_family', 'observed_count'],
       },
     },
   },
@@ -142,13 +144,21 @@ async function summarizeTrends(base, model, snippets) {
     // แตกทน: label = คำ/วลีไทย (จาก keyword arrays) โดยตรง, note = หมวด/คำอธิบาย
     const trends = [];
     const seen = new Set();
-    const push = (label, note) => {
+    const push = (label, note, meta = {}) => {
       const l = String(label ?? '').trim().slice(0, 100);
       const key = l.toLowerCase();
       if (!l || seen.has(key)) return;
       seen.add(key);
       // discovered = caption ก่อน (for_image=false) กันเทรนด์ text ไปเพี้ยนรูป — user ติ๊กรูปเองได้
-      trends.push({ label: l, note: String(note ?? '').trim().slice(0, 300), forImage: false });
+      const family = /^[A-F]$/.test(String(meta.jobFamily || '').trim()) ? String(meta.jobFamily).trim() : null;
+      const observedCount = Math.max(1, Math.min(sample.length, Number(meta.observedCount) || 1));
+      trends.push({
+        label: l,
+        note: String(note ?? '').trim().slice(0, 300),
+        forImage: false,
+        jobFamily: family,
+        observedCount,
+      });
     };
     for (const t of list) {
       if (!t || typeof t !== 'object') { if (t) push(t, ''); continue; }
@@ -158,8 +168,12 @@ async function summarizeTrends(base, model, snippets) {
       const kws = Array.isArray(kwRaw)
         ? kwRaw.map((x) => String(x).trim()).filter(Boolean)
         : (typeof kwRaw === 'string' && kwRaw.trim() ? [kwRaw.trim()] : []);
-      if (kws.length) kws.forEach((kw) => push(kw, cat));       // แต่ละคำ = 1 เทรนด์ (ไทย ใช้ได้เลย)
-      else if (cat) push(cat, note);                             // ไม่มีคำ ใช้หมวดเป็นเทรนด์
+      const meta = {
+        jobFamily: t.job_family ?? t.family ?? '',
+        observedCount: t.observed_count ?? t.count ?? 1,
+      };
+      if (kws.length) kws.forEach((kw) => push(kw, cat, meta));  // แต่ละคำ = 1 เทรนด์ (ไทย ใช้ได้เลย)
+      else if (cat) push(cat, note, meta);                        // ไม่มีคำ ใช้หมวดเป็นเทรนด์
     }
     if (trends.length === 0) {
       console.warn(`  [trend] สรุปว่าง — done=${json?.done_reason ?? '?'} contentLen=${content.length} listLen=${list.length} head=${content.slice(0, 400).replace(/\s+/g, ' ')}`);
@@ -221,11 +235,14 @@ if (uniq.length > 0) {
 
 let added = 0;
 for (const t of trends) {
+  const confidence = Math.min(0.9, Math.max(0.2, 0.25 + Number(t.observedCount || 1) / Math.max(10, uniq.length)));
   const r = await c.query(
-    `INSERT INTO content_trends (label, note, for_caption, for_image, active, source, discovered_at)
-     VALUES ($1, $2, true, $3, false, 'discovered', now())
+    `INSERT INTO content_trends
+       (label, note, for_caption, for_image, active, source, discovered_at,
+        job_family, confidence, sample_size, observed_count)
+     VALUES ($1, $2, true, $3, false, 'discovered', now(), $4, $5, $6, $7)
      ON CONFLICT (lower(label)) DO NOTHING`,
-    [t.label, t.note || null, t.forImage],
+    [t.label, t.note || null, t.forImage, t.jobFamily, confidence, uniq.length, t.observedCount || 1],
   );
   added += r.rowCount;
 }

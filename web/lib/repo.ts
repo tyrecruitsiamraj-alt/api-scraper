@@ -1,6 +1,7 @@
 import 'server-only';
 import { randomUUID } from 'node:crypto';
 import { pool, q } from './db';
+import { encryptAutopostCredential } from './crypto';
 
 // schema ของ autopost — แยกต่อ project ได้ผ่าน env (ไม่ตั้ง = so_autopost_jobs เดิม)
 // ใช้กับทุก query ข้าม schema ไปฝั่ง autopost. ค่าจาก env เราคุมเอง (ไม่ใช่ input ผู้ใช้)
@@ -123,6 +124,30 @@ export async function getAssetBytes(id: string) {
     [id],
   );
   return rows[0] ?? null;
+}
+
+/** Append-only audit trail for access to candidate PII. Logging failure must not expose the data. */
+export async function auditDataAccess(input: {
+  actor: string | null;
+  action: string;
+  subjectType: 'candidate' | 'candidate_asset';
+  subjectId: string;
+  purpose: string;
+  metadata?: Record<string, unknown>;
+}) {
+  await q(
+    `INSERT INTO data_access_audit
+       (actor, action, subject_type, subject_id, purpose, metadata)
+     VALUES ($1, $2, $3, $4, $5, $6::jsonb)`,
+    [
+      input.actor,
+      input.action,
+      input.subjectType,
+      input.subjectId,
+      input.purpose,
+      JSON.stringify(input.metadata ?? {}),
+    ],
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -272,7 +297,7 @@ export async function insertFacebookConnector(c: {
       c.label,
       c.posterName || c.label,
       c.username,
-      c.password,
+      encryptAutopostCredential(c.password),
       c.contactPhone || null,
       c.dailyCap,
       c.preferredWorker?.trim() || null,
@@ -311,7 +336,7 @@ export async function updateFacebookAccount(
   if (c.password) {
     await q(
       `UPDATE ${AP}.users SET name=$2, poster_name=$2, email=$3, password=$4, updated_at=now() WHERE id=$1`,
-      [id, c.label, c.username, c.password],
+      [id, c.label, c.username, encryptAutopostCredential(c.password)],
     );
   } else {
     await q(`UPDATE ${AP}.users SET name=$2, poster_name=$2, email=$3, updated_at=now() WHERE id=$1`, [
@@ -915,6 +940,11 @@ export type ContentTrend = {
   for_image: boolean;
   active: boolean;
   source: 'manual' | 'discovered';
+  job_family: string | null;
+  confidence: number | null;
+  sample_size: number | null;
+  observed_count: number | null;
+  source_url: string | null;
   created_at: string;
 };
 
@@ -923,7 +953,8 @@ export async function listContentTrends(): Promise<ContentTrend[]> {
   try {
     return await q<ContentTrend>(
       `SELECT id, label, note, for_caption, for_image, active,
-              COALESCE(source, 'manual') AS source, created_at
+              COALESCE(source, 'manual') AS source, job_family, confidence,
+              sample_size, observed_count, source_url, created_at
          FROM content_trends
         ORDER BY (source = 'discovered' AND active = false) DESC, active DESC, updated_at DESC`,
     );
@@ -946,11 +977,18 @@ export async function createContentTrend(input: {
   note?: string | null;
   forCaption?: boolean;
   forImage?: boolean;
+  jobFamily?: string | null;
 }): Promise<void> {
   await q(
-    `INSERT INTO content_trends (label, note, for_caption, for_image)
-     VALUES ($1, $2, $3, $4)`,
-    [input.label.trim(), input.note?.trim() || null, input.forCaption ?? true, input.forImage ?? true],
+    `INSERT INTO content_trends (label, note, for_caption, for_image, job_family, source, confidence)
+     VALUES ($1, $2, $3, $4, $5, 'manual', 1.0)`,
+    [
+      input.label.trim(),
+      input.note?.trim() || null,
+      input.forCaption ?? true,
+      input.forImage ?? true,
+      input.jobFamily?.trim() || null,
+    ],
   );
 }
 
@@ -1252,7 +1290,7 @@ export async function listSoRecruitPostingRequests(): Promise<PostingRequest[]> 
 
 /** ค่าที่คนแก้ก่อนรับงาน (จากฟอร์มบนการ์ด intake) — ทับข้อมูลใบขอเฉพาะช่องที่กรอก */
 export type IntakeOverrides = Partial<Record<
-  'position' | 'location' | 'income' | 'qty' | 'work_schedule' | 'gender' | 'age_min' | 'age_max' | 'unit_name' | 'note',
+  'position' | 'location' | 'income' | 'qty' | 'work_schedule' | 'gender' | 'age_min' | 'age_max' | 'unit_name' | 'note' | 'content_brief',
   string
 >>;
 
@@ -1420,6 +1458,117 @@ export async function listCampaigns() {
 export async function getCampaign(id: string) {
   const rows = await q<CampaignRow>(`SELECT * FROM recruit_campaigns WHERE id = $1`, [id]);
   return rows[0] ?? null;
+}
+
+export type ContentAgentContract = {
+  agent_key: string;
+  display_name: string;
+  version: number;
+  responsibility: string;
+  playbook_path: string | null;
+  reads: string[];
+  steps: string[];
+  output_schema: Record<string, unknown>;
+  hard_rules: string[];
+};
+
+export type CampaignStageRun = {
+  id: string;
+  campaign_id: string;
+  stage_key: string;
+  agent_key: string;
+  agent_name: string;
+  attempt: number;
+  status: string;
+  output_snapshot: Record<string, unknown>;
+  model: string | null;
+  prompt_version: string | null;
+  quality_score: number | null;
+  error: string | null;
+  started_at: string;
+  finished_at: string | null;
+};
+
+export type CampaignHandoff = {
+  id: string;
+  from_stage: string | null;
+  to_stage: string;
+  status: string;
+  reason: string | null;
+  payload: Record<string, unknown>;
+  created_at: string;
+  completed_at: string | null;
+};
+
+export type ContentQualityScore = {
+  content_id: string;
+  overall_score: number;
+  hard_gate_passed: boolean;
+  dimensions: Record<string, { score: number; max: number; notes?: string[] }>;
+  blockers: string[];
+  warnings: string[];
+  evaluator_version: string;
+  evaluated_at: string;
+};
+
+export async function getCampaignOpsTrace(campaignId: string) {
+  try {
+    const [contracts, runs, handoffs, scores] = await Promise.all([
+      q<ContentAgentContract>(
+        `SELECT agent_key, display_name, version, responsibility, playbook_path, reads, steps, output_schema, hard_rules
+           FROM content_agent_contracts WHERE active=true ORDER BY agent_key`,
+      ),
+      q<CampaignStageRun>(
+        `SELECT r.id, r.campaign_id, r.stage_key, r.agent_key,
+                c.display_name AS agent_name, r.attempt, r.status,
+                r.output_snapshot, r.model, r.prompt_version, r.quality_score,
+                r.error, r.started_at, r.finished_at
+           FROM campaign_stage_runs r
+           JOIN content_agent_contracts c ON c.agent_key=r.agent_key
+          WHERE r.campaign_id=$1
+          ORDER BY r.started_at ASC`,
+        [campaignId],
+      ),
+      q<CampaignHandoff>(
+        `SELECT id, from_stage, to_stage, status, reason, payload, created_at, completed_at
+           FROM campaign_handoffs WHERE campaign_id=$1 ORDER BY created_at ASC`,
+        [campaignId],
+      ),
+      q<ContentQualityScore>(
+        `SELECT content_id, overall_score, hard_gate_passed, dimensions,
+                blockers, warnings, evaluator_version, evaluated_at
+           FROM content_quality_scores WHERE campaign_id=$1 ORDER BY overall_score DESC`,
+        [campaignId],
+      ),
+    ]);
+    return { contracts, runs, handoffs, scores };
+  } catch {
+    return { contracts: [], runs: [], handoffs: [], scores: [] };
+  }
+}
+
+export async function recordCampaignHandoff(input: {
+  campaignId: string;
+  fromStage: string;
+  toStage: string;
+  status: 'pending' | 'accepted' | 'rejected';
+  reason?: string | null;
+  payload?: Record<string, unknown>;
+}) {
+  await q(
+    `INSERT INTO campaign_handoffs
+       (campaign_id, from_stage, to_stage, status, payload, reason, completed_at)
+     VALUES ($1,$2,$3,$4,$5::jsonb,$6,CASE WHEN $4='pending' THEN NULL ELSE now() END)`,
+    [
+      input.campaignId,
+      input.fromStage,
+      input.toStage,
+      input.status,
+      JSON.stringify(input.payload ?? {}),
+      input.reason ?? null,
+    ],
+  );
+  await q(`UPDATE recruit_campaigns SET current_stage=$2, updated_at=now() WHERE id=$1`, [input.campaignId, input.toStage]);
 }
 
 // --- Pool pre-check: มีคนใน So Recruit (jarvis_rm) สำหรับใบขอนี้หรือยัง ---
@@ -1618,6 +1767,8 @@ export type ContentRow = {
   gen_model: string | null;
   status: string;
   engagement_score: number | null;
+  quality_score: number | null;
+  quality_gate: boolean;
   reject_reason: string | null;
   created_at: string;
   has_image: boolean;
@@ -1630,6 +1781,15 @@ export type ContentRow = {
     used_winning?: number;
     used_losing?: number;
     research_model?: string;
+    poster_fields?: Record<string, unknown>;
+  } | null;
+  factual_validation: {
+    valid?: boolean;
+    content_hash?: string;
+    evidence_hash?: string;
+    poster_validated?: boolean;
+    errors?: { code?: string; message?: string }[];
+    checked_at?: string;
   } | null;
 };
 
@@ -1638,19 +1798,20 @@ export async function listCampaignContents(campaignId: string) {
   try {
     return await q<ContentRow>(
       `SELECT id, campaign_id, version, platform, caption, video_brief, gen_model, status,
-              engagement_score, reject_reason, created_at, (image_bytes IS NOT NULL) AS has_image, gen_notes
+              engagement_score, quality_score, quality_gate, reject_reason, created_at, (image_bytes IS NOT NULL) AS has_image,
+              gen_notes, factual_validation
          FROM campaign_contents WHERE campaign_id = $1 ORDER BY version DESC`,
       [campaignId],
     );
   } catch {
     // schema-015 (gen_notes) ยังไม่ migrate — query แบบไม่มีคอลัมน์นั้น
-    const rows = await q<Omit<ContentRow, 'gen_notes'>>(
+    const rows = await q<Omit<ContentRow, 'gen_notes' | 'factual_validation' | 'quality_score' | 'quality_gate'>>(
       `SELECT id, campaign_id, version, platform, caption, video_brief, gen_model, status,
               engagement_score, reject_reason, created_at, (image_bytes IS NOT NULL) AS has_image
          FROM campaign_contents WHERE campaign_id = $1 ORDER BY version DESC`,
       [campaignId],
     );
-    return rows.map((r) => ({ ...r, gen_notes: null }));
+    return rows.map((r) => ({ ...r, gen_notes: null, factual_validation: null, quality_score: null, quality_gate: false }));
   }
 }
 
@@ -1659,8 +1820,62 @@ export async function setContentStatus(id: string, status: string, reason: strin
 }
 
 /** แก้ caption ของร่างคอนเทนต์ (คนปรับข้อความก่อนอนุมัติ). แก้ได้เฉพาะที่ยังเป็น draft. */
-export async function updateContentCaption(id: string, caption: string) {
-  await q(`UPDATE campaign_contents SET caption = $2 WHERE id = $1 AND status = 'draft'`, [id, caption]);
+export async function updateContentCaption(
+  id: string,
+  caption: string,
+  factualValidation: Record<string, unknown>,
+  quality: {
+    overall_score: number;
+    hard_gate_passed: boolean;
+    dimensions: Record<string, unknown>;
+    blockers: unknown[];
+    warnings: unknown[];
+    evaluator_version: string;
+  },
+) {
+  const client = await pool().connect();
+  try {
+    await client.query('BEGIN');
+    const updated = await client.query<{ campaign_id: string }>(
+      `UPDATE campaign_contents
+          SET caption=$2, factual_validation=$3::jsonb,
+              quality_score=$4, quality_gate=$5
+        WHERE id=$1 AND status='draft'
+        RETURNING campaign_id`,
+      [id, caption, JSON.stringify(factualValidation), quality.overall_score, quality.hard_gate_passed],
+    );
+    if (!updated.rows[0]) throw new Error('แก้ได้เฉพาะร่างที่ยังไม่อนุมัติ');
+    await client.query(
+      `INSERT INTO content_quality_scores
+         (content_id, campaign_id, overall_score, hard_gate_passed, dimensions,
+          blockers, warnings, evaluator_version)
+       VALUES ($1,$2,$3,$4,$5::jsonb,$6::jsonb,$7::jsonb,$8)
+       ON CONFLICT (content_id) DO UPDATE SET
+         overall_score=EXCLUDED.overall_score,
+         hard_gate_passed=EXCLUDED.hard_gate_passed,
+         dimensions=EXCLUDED.dimensions,
+         blockers=EXCLUDED.blockers,
+         warnings=EXCLUDED.warnings,
+         evaluator_version=EXCLUDED.evaluator_version,
+         evaluated_at=now()`,
+      [
+        id,
+        updated.rows[0].campaign_id,
+        quality.overall_score,
+        quality.hard_gate_passed,
+        JSON.stringify(quality.dimensions),
+        JSON.stringify(quality.blockers),
+        JSON.stringify(quality.warnings),
+        quality.evaluator_version,
+      ],
+    );
+    await client.query('COMMIT');
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally {
+    client.release();
+  }
 }
 
 /**
@@ -1690,8 +1905,18 @@ export async function getContentImageBytes(id: string) {
 
 /** ร่างคอนเทนต์ 1 แถว (caption + มีรูปไหม) สำหรับตอนอนุมัติ→โพสต์. */
 export async function getContentById(id: string) {
-  const rows = await q<{ id: string; campaign_id: string; caption: string | null; has_image: boolean }>(
-    `SELECT id, campaign_id, caption, (image_bytes IS NOT NULL) AS has_image
+  const rows = await q<{
+    id: string;
+    campaign_id: string;
+    caption: string | null;
+    has_image: boolean;
+    factual_validation: ContentRow['factual_validation'];
+    quality_score: number | null;
+    quality_gate: boolean;
+    gen_notes: ContentRow['gen_notes'];
+  }>(
+    `SELECT id, campaign_id, caption, (image_bytes IS NOT NULL) AS has_image,
+            factual_validation, quality_score, quality_gate, gen_notes
        FROM campaign_contents WHERE id = $1`,
     [id],
   );
@@ -1889,6 +2114,108 @@ export async function enqueueApprovedPost(opts: {
   }
 
   return { jobId, assignmentId, queueId };
+}
+
+/**
+ * Controlled A/B: split one account's configured groups deterministically into
+ * two non-overlapping sets, then enqueue both variants in the same worker run.
+ */
+export async function enqueueApprovedExperiment(opts: {
+  campaign: CampaignRow;
+  contents: Array<{ id: string; caption: string | null; has_image: boolean }>;
+  userId: string;
+  requestedBy: string | null;
+}) {
+  const { campaign, userId, requestedBy } = opts;
+  const contents = opts.contents.slice(0, 2);
+  if (contents.length !== 2) throw new Error('A/B experiment ต้องมีร่าง 2 เวอร์ชัน');
+
+  const [user] = await q<{ group_ids: string[] }>(
+    `SELECT COALESCE(group_ids, '[]'::jsonb) AS group_ids FROM ${AP}.users WHERE id=$1`,
+    [userId],
+  );
+  const groupIds = Array.isArray(user?.group_ids) ? user.group_ids.map(String) : [];
+  if (groupIds.length < 2) throw new Error('A/B experiment ต้องผูกอย่างน้อย 2 กลุ่มกับบัญชีนี้');
+
+  const experimentKey = `${campaign.id}:${Date.now()}`;
+  const shuffled = await q<{ id: string }>(
+    `SELECT id FROM ${AP}.groups
+      WHERE id = ANY($1::text[])
+      ORDER BY md5(id || $2)`,
+    [groupIds, experimentKey],
+  );
+  const split: [string[], string[]] = [[], []];
+  shuffled.forEach((g, i) => split[i % 2].push(String(g.id)));
+  if (split[0].length === 0 || split[1].length === 0) {
+    throw new Error('แบ่งกลุ่ม A/B ไม่สำเร็จ');
+  }
+
+  await q(`ALTER TABLE ${AP}.jobs ADD COLUMN IF NOT EXISTS image_ref TEXT`);
+  const client = await pool().connect();
+  const assignmentIds: string[] = [];
+  const jobIds: string[] = [];
+  const queueId = autopostId();
+  try {
+    await client.query('BEGIN');
+    for (let i = 0; i < 2; i += 1) {
+      const content = contents[i];
+      const jobId = autopostId();
+      const assignmentId = autopostId();
+      jobIds.push(jobId);
+      assignmentIds.push(assignmentId);
+      const title = (campaign.title || campaign.request_no || 'ประกาศรับสมัครงาน').slice(0, 500);
+      await client.query(
+        `INSERT INTO ${AP}.jobs (id, title, owner, company, caption, status, image_ref)
+         VALUES ($1, $2, 'SO Recruitment', 'SO Recruitment', $3, 'pending', $4)`,
+        [jobId, title, content.caption || '', content.has_image ? `campaign-content:${content.id}` : null],
+      );
+      await client.query(
+        `INSERT INTO ${AP}.assignments (id, job_ids, group_ids, user_id)
+         VALUES ($1, $2::jsonb, $3::jsonb, $4)`,
+        [assignmentId, JSON.stringify([jobId]), JSON.stringify(split[i]), userId],
+      );
+      await client.query(
+        `INSERT INTO campaign_posts (campaign_id, content_id, platform, account_ref, job_ref)
+         VALUES ($1, $2, 'facebook', $3, $4)`,
+        [campaign.id, content.id, userId, jobId],
+      );
+      await client.query(
+        `UPDATE campaign_contents
+            SET status='approved', reject_reason=NULL,
+                experiment_key=$2, experiment_variant=$3
+          WHERE id=$1`,
+        [content.id, experimentKey, i === 0 ? 'A' : 'B'],
+      );
+    }
+    await client.query(
+      `INSERT INTO ${AP}.post_run_queue
+         (id, assignment_ids, user_id, status, requested_by, message)
+       VALUES ($1, $2::jsonb, $3, 'queued', $4, $5)`,
+      [
+        queueId,
+        JSON.stringify(assignmentIds),
+        userId,
+        requestedBy || 'orchestrator',
+        `controlled A/B ${experimentKey}: A=${split[0].length} groups B=${split[1].length} groups`,
+      ],
+    );
+    await client.query(
+      `UPDATE recruit_campaigns
+          SET status='posting', status_note=$2, updated_at=now()
+        WHERE id=$1`,
+      [
+        campaign.id,
+        `กำลังทดสอบ A/B แบบแบ่งกลุ่มไม่ซ้ำ: A ${split[0].length} กลุ่ม · B ${split[1].length} กลุ่ม`,
+      ],
+    );
+    await client.query('COMMIT');
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally {
+    client.release();
+  }
+  return { experimentKey, queueId, assignmentIds, jobIds, groups: split };
 }
 
 export type CampaignPostQueueState = {

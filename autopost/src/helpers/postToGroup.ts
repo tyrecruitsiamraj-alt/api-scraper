@@ -11,6 +11,11 @@ import {
   humanType,
 } from './humanBehavior';
 import { saveToSheet } from './saveToSheet';
+import {
+  buildPostIdentity,
+  reservePostAttempt,
+  updatePostAttempt,
+} from './postLog';
 
 /** รวม goto my_posted + pending + สำรองฟีด + POST Sheet + postLog */
 const SAVE_TO_SHEET_MAX_MS = Math.min(240000, Math.max(30000, Number(process.env.SAVE_TO_SHEET_MAX_MS) || 120000));
@@ -248,7 +253,7 @@ async function uploadImageToComposer(
   dialog: Locator,
   imagePath: string,
   userLabel: string
-): Promise<boolean> {
+): Promise<'posted' | 'duplicate' | 'needs_verification' | false> {
   try {
     let fileInput = dialog.locator('input[type="file"]').first();
     if (!(await fileInput.count())) {
@@ -304,6 +309,18 @@ export async function postToGroup(
   const { userLabel, posterName, sheetUrl, blacklistGroups = [] } = options;
 
   const groupUrl = `https://www.facebook.com/groups/${gID}`;
+  let postIdentity: ReturnType<typeof buildPostIdentity> | null = null;
+  let clickedPost = false;
+
+  const failReservedAttempt = async (reason: string) => {
+    if (!postIdentity || clickedPost) return;
+    await updatePostAttempt(postIdentity.idempotencyKey, {
+      lifecycle_state: 'failed',
+      post_status: 'โพสต์ไม่สำเร็จ',
+      post_link: '',
+      verification_error: reason.slice(0, 500),
+    }).catch(() => {});
+  };
 
   try {
     await page.goto(groupUrl, { waitUntil: 'domcontentloaded' });
@@ -317,6 +334,36 @@ export async function postToGroup(
         return m ? m[1] : '0';
       })
       .catch(() => '0');
+
+    postIdentity = buildPostIdentity({
+      userId: options.userId,
+      jobId: options.jobId || postItem.title,
+      groupId: gID,
+      caption: postItem.caption || '',
+    });
+    const reservation = await reservePostAttempt({
+      poster_name: posterName,
+      owner: postItem.owner,
+      job_title: postItem.title,
+      company: postItem.company,
+      group_name: normalizeGroupName(groupName),
+      member_count: memberCount,
+      post_link: '',
+      post_status: 'เตรียมโพสต์',
+      assignment_id: options.assignmentId,
+      user_id: options.userId,
+      job_id: options.jobId,
+      group_id: options.groupId || gID,
+      idempotency_key: postIdentity.idempotencyKey,
+      content_fingerprint: postIdentity.contentFingerprint,
+      lifecycle_state: 'planned',
+    });
+    if (!reservation.should_post) {
+      console.log(
+        `🛡️ [${userLabel}] ข้ามโพสต์ซ้ำกลุ่ม ${gID} — ledger อยู่สถานะ ${reservation.lifecycle_state || 'existing'}`
+      );
+      return 'duplicate';
+    }
 
     const postTriggerSel =
       'div[role="button"]:has-text("เขียนอะไรสักหน่อย"), div[role="button"]:has-text("Write something"), div[role="button"]:has-text("สร้างโพสต์สาธารณะ")';
@@ -431,6 +478,7 @@ export async function postToGroup(
         jobId: options.jobId,
         assignmentId: options.assignmentId,
       });
+      await failReservedAttempt(lastFailReason);
       return false;
     }
 
@@ -508,7 +556,20 @@ export async function postToGroup(
 
     if (postReady) {
       await humanPause(page, 400, 1100);
+      await updatePostAttempt(postIdentity.idempotencyKey, {
+        lifecycle_state: 'posting',
+        post_status: 'กำลังกดโพสต์',
+        post_link: '',
+        verification_error: '',
+      });
       await humanClick(page, postBtn);
+      clickedPost = true;
+      await updatePostAttempt(postIdentity.idempotencyKey, {
+        lifecycle_state: 'clicked_unverified',
+        post_status: 'กดโพสต์แล้ว รอยืนยันลิงก์',
+        post_link: '',
+        verification_error: '',
+      });
       console.log(`✅ [${userLabel}] กดโพสต์แล้ว: ${postItem.title}`);
       await closeComposerDialogAfterPost(page, composerDialog, userLabel);
       await dismissCommonFacebookPopups(page);
@@ -524,12 +585,15 @@ export async function postToGroup(
               userId: options.userId,
               jobId: options.jobId,
               groupId: options.groupId || gID,
+              idempotencyKey: postIdentity.idempotencyKey,
+              contentFingerprint: postIdentity.contentFingerprint,
             }
           : undefined;
+      let verification: 'verified' | 'needs_verification' = 'needs_verification';
       try {
-        await Promise.race([
+        verification = await Promise.race([
           saveToSheet(page, request, gID, posterName, postItem, groupNameForLog, memberCount, sheetUrl, postLogOpts),
-          new Promise<void>((_, reject) =>
+          new Promise<'verified' | 'needs_verification'>((_, reject) =>
             setTimeout(() => reject(new Error(`เก็บลิงก์/บันทึก Sheet เกิน ${SAVE_TO_SHEET_MAX_MS}ms`)), SAVE_TO_SHEET_MAX_MS)
           ),
         ]);
@@ -538,7 +602,7 @@ export async function postToGroup(
           `⚠️ [${userLabel}] ${(e as Error).message} — ข้ามไปกลุ่มถัดไป (โพสต์บน Facebook น่าจะสำเร็จแล้ว)`
         );
       }
-      return true;
+      return verification === 'verified' ? 'posted' : 'needs_verification';
     }
 
     console.log(`❌ [${userLabel}] ปุ่มโพสต์ใน dialog ไม่พร้อม — ปิด dialog แล้วไปกลุ่มถัดไป`);
@@ -551,6 +615,7 @@ export async function postToGroup(
       jobId: options.jobId,
       assignmentId: options.assignmentId,
     });
+    await failReservedAttempt('post_button_disabled_or_missing');
     return false;
   } catch (e) {
     const errMsg = (e as Error).message;
@@ -567,6 +632,7 @@ export async function postToGroup(
     } catch {
       /* ignore artifact errors */
     }
+    await failReservedAttempt(`exception:${errMsg}`);
     return false;
   }
 }

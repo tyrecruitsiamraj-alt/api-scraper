@@ -5,6 +5,7 @@
 require('dotenv').config();
 const express = require('express');
 const path = require('path');
+const { hasCredentialKey } = require('./credentialCrypto');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -26,12 +27,30 @@ app.use((req, res, next) => {
  * ประตูเข้า (Access gate) — ปิดรูรั่วที่ AUTO-POST UI เปิดโล่งบน Vercel (ใครรู้ URL ก็สั่งโพสต์/เห็นบัญชีได้)
  * เปิดใช้เมื่อ AUTOPOST_ACCESS_TOKEN ถูกตั้ง (ไม่ตั้ง = เปิดเหมือนเดิม กันของเก่าพัง)
  * ผ่านได้เมื่อ: header x-autopost-token, cookie ap_access, หรือ ?access_token= (จะ set cookie แล้ว redirect ทิ้ง query)
- * ยกเว้น: health check, /api/worker/* (มี POST_WORKER_TOKEN เอง), /api/run-logs (บอทส่ง log กลับ)
+ * ยกเว้น: health check และ /api/worker/* (มี POST_WORKER_TOKEN เอง)
  * console (Next.js/Azure AD) ฝัง iframe src ด้วย ?access_token=<token> จาก env ฝั่ง server → เฉพาะคนล็อกอินแล้วเข้าถึง
  */
 const AUTOPOST_ACCESS_TOKEN = String(process.env.AUTOPOST_ACCESS_TOKEN || '').trim();
+if (
+  (process.env.NODE_ENV === 'production' || process.env.VERCEL === '1') &&
+  !AUTOPOST_ACCESS_TOKEN
+) {
+  throw new Error('AUTOPOST_ACCESS_TOKEN is required in production');
+}
+if (
+  (process.env.NODE_ENV === 'production' || process.env.VERCEL === '1') &&
+  !hasCredentialKey()
+) {
+  throw new Error('AUTOPOST_CREDENTIAL_KEY (or APP_ENCRYPTION_KEY) is required in production');
+}
+if (
+  (process.env.NODE_ENV === 'production' || process.env.VERCEL === '1') &&
+  !String(process.env.POST_WORKER_TOKEN || '').trim()
+) {
+  throw new Error('POST_WORKER_TOKEN is required in production');
+}
 const ACCESS_COOKIE = 'ap_access';
-const ACCESS_GATE_EXEMPT = /^\/api\/(health|fb-session-health|worker\/|run-logs)/;
+const ACCESS_GATE_EXEMPT = /^\/api\/(health|fb-session-health|worker\/)/;
 
 function parseCookies(req) {
   const raw = String(req.headers.cookie || '');
@@ -63,6 +82,18 @@ app.use((req, res, next) => {
   const headerToken = String(req.get('x-autopost-token') || '').trim();
   const cookieToken = String(parseCookies(req)[ACCESS_COOKIE] || '').trim();
   if (headerToken === AUTOPOST_ACCESS_TOKEN || cookieToken === AUTOPOST_ACCESS_TOKEN) {
+    return next();
+  }
+  // Post worker writes evidence and operational logs with its own token.
+  const workerToken = String(req.get('x-worker-token') || '').trim();
+  const configuredWorkerToken = String(process.env.POST_WORKER_TOKEN || '').trim();
+  if (
+    (p.startsWith('/api/post-logs') ||
+      p.startsWith('/api/run-logs') ||
+      p === '/api/config') &&
+    configuredWorkerToken &&
+    workerToken === configuredWorkerToken
+  ) {
     return next();
   }
 
@@ -296,7 +327,6 @@ app.put('/api/users/:id', async (req, res) => {
     const body = { ...req.body };
     if (body.group_ids !== undefined) body.group_ids = parseArrayField(body.group_ids);
     if (body.blacklist_groups !== undefined) body.blacklist_groups = parseArrayField(body.blacklist_groups);
-    if (body.fb_access_token === '') body.fb_access_token = null;
     const user = await db.updateUser(req.params.id, body);
     if (!user) return res.status(404).json({ error: 'User not found' });
     res.json(user);
@@ -682,6 +712,7 @@ app.delete('/api/assignments/:id', async (req, res) => {
 // --- API: Run Logs ---
 app.post('/api/run-logs', async (req, res) => {
   try {
+    if (!requirePostWorkerToken(req, res)) return;
     const { run_id, level, message, assignment_id, user_id, job_id, group_id, meta } = req.body || {};
     if (!run_id || !message) {
       return res.status(400).json({ error: 'run_id และ message จำเป็น' });
@@ -707,6 +738,7 @@ app.get('/api/run-logs', async (req, res) => {
 // --- API: Post Logs (เธฃเธนปแบบ Log File) ---
 app.post('/api/post-logs', async (req, res) => {
   try {
+    if (!requirePostWorkerToken(req, res)) return;
     const body = req.body || {};
     const data = {
       run_id: body.run_id,
@@ -724,6 +756,10 @@ app.post('/api/post-logs', async (req, res) => {
       post_status: body.post_status,
       comment_count: body.comment_count ?? 0,
       customer_phone: body.customer_phone,
+      idempotency_key: body.idempotency_key,
+      content_fingerprint: body.content_fingerprint,
+      lifecycle_state: body.lifecycle_state,
+      verification_error: body.verification_error,
     };
     if (!data.run_id || !data.poster_name || !data.job_title) {
       return res.status(400).json({ error: 'run_id, poster_name, job_title จำเป็น' });
@@ -732,6 +768,50 @@ app.post('/api/post-logs', async (req, res) => {
     res.status(201).json({ ok: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
+  }
+});
+
+/** Reserve a deterministic post identity before opening Facebook (fail closed). */
+app.post('/api/post-logs/reserve', async (req, res) => {
+  try {
+    if (!requirePostWorkerToken(req, res)) return;
+    const body = req.body || {};
+    if (!body.run_id || !body.idempotency_key || !body.poster_name || !body.job_title) {
+      return res.status(400).json({
+        error: 'run_id, idempotency_key, poster_name, job_title จำเป็น',
+      });
+    }
+    const out = await db.reservePostAttempt(body);
+    res.status(out.created ? 201 : 200).json({
+      ok: true,
+      created: out.created,
+      should_post: out.should_post,
+      post: out.row
+        ? {
+            id: out.row.id,
+            lifecycle_state: out.row.lifecycle_state,
+            post_link: out.row.post_link,
+            post_status: out.row.post_status,
+          }
+        : null,
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message || String(err) });
+  }
+});
+
+app.post('/api/post-logs/state', async (req, res) => {
+  try {
+    if (!requirePostWorkerToken(req, res)) return;
+    const key = String(req.body?.idempotency_key || '').trim();
+    if (!key || !req.body?.lifecycle_state) {
+      return res.status(400).json({ error: 'idempotency_key และ lifecycle_state จำเป็น' });
+    }
+    const row = await db.updatePostAttemptState(key, req.body);
+    if (!row) return res.status(404).json({ error: 'post attempt not found' });
+    res.json({ ok: true, post: row });
+  } catch (err) {
+    res.status(500).json({ error: err.message || String(err) });
   }
 });
 
@@ -1491,6 +1571,19 @@ function requirePostWorkerToken(req, res) {
   return true;
 }
 
+/** Secret-bearing endpoints are worker-only even when the server posts locally. */
+function requireConfiguredWorkerToken(req, res) {
+  if (!POST_WORKER_TOKEN) {
+    res.status(503).json({ error: 'POST_WORKER_TOKEN not configured on server' });
+    return false;
+  }
+  if (!isValidPostWorkerToken(req)) {
+    res.status(403).json({ error: 'Forbidden worker token' });
+    return false;
+  }
+  return true;
+}
+
 function isValidPostWorkerToken(req) {
   const token = String(req.get('x-worker-token') || '').trim();
   return !!token && token === POST_WORKER_TOKEN;
@@ -1704,6 +1797,20 @@ app.post('/api/worker/collect/complete', async (req, res) => {
   }
 });
 
+app.post('/api/worker/collect/enqueue-due', async (req, res) => {
+  try {
+    if (!requirePostWorkerToken(req, res)) return;
+    const out = await db.enqueueDueCollectJobs(Number(req.body?.limit) || 300);
+    res.json({
+      ok: true,
+      queued_jobs: out.created.length,
+      queued_posts: out.posts,
+    });
+  } catch (e) {
+    res.status(500).json({ error: e.message || String(e) });
+  }
+});
+
 app.get('/api/worker/collect/queue-status', async (req, res) => {
   try {
     if (!requirePostWorkerToken(req, res)) return;
@@ -1901,6 +2008,7 @@ setInterval(async () => {
 // --- API: Config (for Bot) ---
 app.get('/api/config', async (req, res) => {
   try {
+    if (!requireConfiguredWorkerToken(req, res)) return;
     const config = await db.getDynamicConfig();
     res.json(config);
   } catch (err) {

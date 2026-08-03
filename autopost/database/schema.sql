@@ -142,11 +142,21 @@ CREATE TABLE IF NOT EXISTS post_logs (
   post_status VARCHAR(50),
   comment_count INT DEFAULT 0,
   customer_phone VARCHAR(2000),
-  created_at TIMESTAMPTZ DEFAULT NOW()
+  idempotency_key TEXT,
+  content_fingerprint TEXT,
+  lifecycle_state VARCHAR(40) NOT NULL DEFAULT 'logged',
+  verification_error TEXT,
+  collect_count INT NOT NULL DEFAULT 0,
+  last_collected_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
 CREATE INDEX IF NOT EXISTS idx_post_logs_run ON post_logs(run_id);
 CREATE INDEX IF NOT EXISTS idx_post_logs_created ON post_logs(created_at DESC);
+-- Runtime migration ensurePostLogIntegrityColumns() adds the idempotency
+-- columns first, then creates uq_post_logs_idempotency. Keeping the index there
+-- also supports existing databases whose post_logs table predates these columns.
 
 -- Post Schedules (ตั้งเวลาโพสต์ล่วงหน้า)
 CREATE TABLE IF NOT EXISTS post_schedules (
