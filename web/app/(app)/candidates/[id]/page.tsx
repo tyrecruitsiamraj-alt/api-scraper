@@ -1,6 +1,8 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
-import { getCandidate } from '@/lib/repo';
+import { getServerSession } from 'next-auth';
+import { authOptions } from '@/lib/auth';
+import { auditDataAccess, getCandidate } from '@/lib/repo';
 import { AttachmentViewer } from '@/components/AttachmentViewer';
 
 export const dynamic = 'force-dynamic';
@@ -26,8 +28,17 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 }
 
 export default async function CandidateDetail({ params }: { params: { id: string } }) {
+  const session = await getServerSession(authOptions);
+  if (!session) notFound();
   const c = await getCandidate(params.id);
   if (!c) notFound();
+  await auditDataAccess({
+    actor: session.user?.email ?? session.user?.name ?? null,
+    action: 'view',
+    subjectType: 'candidate',
+    subjectId: params.id,
+    purpose: 'recruitment_review',
+  });
 
   const profile = (c.assets ?? []).find((a: any) => a.kind === 'profile');
 

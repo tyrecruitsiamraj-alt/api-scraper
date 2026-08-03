@@ -9,6 +9,8 @@
     "start:raw": "node server/index.js",
     "migrate": "node scripts/migrate-from-json.js",
     "migrate:credentials": "node scripts/add-credentials-columns.js",
+    "migrate:encrypt-credentials": "node scripts/encrypt-user-credentials.js",
+    "verify:ledger": "node scripts/verify-ledger.js",
     "migrate:fix-4worker": "node scripts/remove-duplicate-4worker.js",
     "migrate:user-groups": "node scripts/migrate-user-groups.js",
     "migrate:fb-token": "node scripts/migrate-add-fb-token.js",
@@ -23,7 +25,7 @@
     "worker:collect": "node scripts/collect-remote-worker.js",
     "worker:watch": "node scripts/worker-queue-watch.js",
     "test": "playwright test --headed --project=GoogleChrome",
-    "test:logic": "playwright test tests/collectPostComments.logic.spec.ts --project=ChromiumCollect",
+    "test:logic": "playwright test tests/*.logic.spec.ts --project=ChromiumCollect",
     "test:postAll": "playwright test postAll --headed --project=GoogleChrome",
     "test:post": "playwright test postAll --headed --project=GoogleChrome"
   },

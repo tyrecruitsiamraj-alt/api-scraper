@@ -5,12 +5,17 @@ import { getServerSession } from 'next-auth';
 import { authOptions } from './auth';
 import { encryptSecret } from './crypto';
 import { kickWorker } from './worker-kick';
+import { createHash } from 'node:crypto';
+import { validateRecruitContent } from '../../src/core/content-factual-validator.js';
+import { scoreRecruitContent } from '../../src/core/content-quality-score.js';
+import { resolveContentJobSpec } from '../../src/core/content-job-spec.js';
 import {
   createAdjacentTask,
   createScrapeTaskFromSoRecruit,
   createCampaignFromRequest,
   enqueueDraftForCampaign,
   enqueueApprovedPost,
+  enqueueApprovedExperiment,
   retryCampaignPost,
   enqueueMeasureForCampaign,
   getCampaign,
@@ -43,11 +48,38 @@ import {
   createContentTrend,
   setContentTrendActive,
   deleteContentTrend,
+  recordCampaignHandoff,
 } from './repo';
 
 async function requireSession() {
   const session = await getServerSession(authOptions);
   if (!session) throw new Error('unauthorized');
+}
+
+function normalizedContentHash(caption: string | null) {
+  const normalized = String(caption ?? '')
+    .normalize('NFKC')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLowerCase();
+  return createHash('sha256').update(normalized, 'utf8').digest('hex');
+}
+
+function requireValidatedContent(content: Awaited<ReturnType<typeof getContentById>>) {
+  if (!content) throw new Error('ไม่พบ Content');
+  const validation = content.factual_validation;
+  if (!validation?.valid) {
+    throw new Error('Content ยังไม่ผ่านการตรวจข้อเท็จจริง กรุณาแก้ไขหรือสร้างร่างใหม่');
+  }
+  if (!validation.poster_validated) {
+    throw new Error('โปสเตอร์ยังไม่ผ่านการตรวจข้อเท็จจริง กรุณาสร้างร่างใหม่ก่อนอนุมัติ');
+  }
+  if (!content.quality_gate || Number(content.quality_score) < 70) {
+    throw new Error(`Content ยังไม่ผ่าน Quality Gate (${Number(content.quality_score) || 0}/100)`);
+  }
+  if (!validation.content_hash || validation.content_hash !== normalizedContentHash(content.caption)) {
+    throw new Error('Content ถูกแก้หลังตรวจข้อเท็จจริง กรุณาบันทึกข้อความอีกครั้งเพื่อ re-check');
+  }
 }
 
 // ---- เทรนด์คอนเทนต์ (schema-016) — คนกรอกเทรนด์ที่อยากให้คอนเทนต์เกาะ ----
@@ -60,6 +92,7 @@ export async function createTrendAction(formData: FormData) {
     note: String(formData.get('note') ?? '').trim() || null,
     forCaption: formData.get('forCaption') !== null,
     forImage: formData.get('forImage') !== null,
+    jobFamily: String(formData.get('jobFamily') ?? '').trim() || null,
   });
   revalidatePath('/settings/trends');
 }
@@ -268,6 +301,7 @@ function readIntakeOverrides(formData: FormData) {
     position: g('position'), location: g('location'), income: g('income'),
     qty: g('qty'), work_schedule: g('work_schedule'), gender: g('gender'),
     age_min: g('age_min'), age_max: g('age_max'), unit_name: g('unit_name'), note: g('note'),
+    content_brief: g('content_brief'),
   };
 }
 
@@ -351,6 +385,7 @@ export async function approveContentAction(formData: FormData) {
   if (!fbAccountId) throw new Error('กรุณาเลือกบัญชี Facebook ก่อนอนุมัติ');
   const [campaign, content] = await Promise.all([getCampaign(campaignId), getContentById(contentId)]);
   if (!campaign || !content || content.campaign_id !== campaignId) throw new Error('ไม่พบ Content ของ campaign นี้');
+  requireValidatedContent(content);
   // โพสต์อะไร: both/image/caption (default both) — เฉพาะรูปต้องมีรูปจริง
   const pm = String(formData.get('postMode') ?? 'both').trim();
   const postMode = pm === 'image' || pm === 'caption' ? pm : 'both';
@@ -362,11 +397,61 @@ export async function approveContentAction(formData: FormData) {
     requestedBy: session.user?.email ?? session.user?.name ?? null,
     postMode,
   });
-  await setSoRecruitRequestStatus(campaign.request_no, 'posted');
+  await recordCampaignHandoff({
+    campaignId,
+    fromStage: 'human_approval',
+    toStage: 'posting',
+    status: 'accepted',
+    payload: { content_id: contentId, account_id: fbAccountId, post_mode: postMode },
+  });
+  await setSoRecruitRequestStatus(campaign.request_no, 'in_progress');
   // autopost worker (npm run worker:post) โพล post_run_queue เองทุก ~5 วิ — ไม่ต้อง kick
   revalidatePath(`/orchestrator/${campaignId}`);
   revalidatePath('/orchestrator');
   revalidatePath('/autopost'); // อนุมัติจากหน้า Auto-Post ได้ด้วย → รีเฟรช section คิว
+}
+
+export async function approveExperimentAction(formData: FormData) {
+  const session = await getServerSession(authOptions);
+  if (!session) throw new Error('unauthorized');
+  const campaignId = String(formData.get('campaignId') ?? '').trim();
+  const fbAccountId = String(formData.get('fbAccountId') ?? '').trim();
+  const contentIds = [
+    String(formData.get('contentA') ?? '').trim(),
+    String(formData.get('contentB') ?? '').trim(),
+  ].filter(Boolean);
+  if (!campaignId || !fbAccountId || contentIds.length !== 2 || new Set(contentIds).size !== 2) {
+    throw new Error('ข้อมูล A/B experiment ไม่ครบ');
+  }
+  const [campaign, ...contents] = await Promise.all([
+    getCampaign(campaignId),
+    ...contentIds.map((id) => getContentById(id)),
+  ]);
+  if (!campaign || contents.some((c) => !c || c.campaign_id !== campaignId)) {
+    throw new Error('ไม่พบร่าง A/B ของ campaign นี้');
+  }
+  contents.forEach((content) => requireValidatedContent(content));
+  await enqueueApprovedExperiment({
+    campaign,
+    contents: contents.map((c) => ({
+      id: c!.id,
+      caption: c!.caption,
+      has_image: c!.has_image,
+    })),
+    userId: fbAccountId,
+    requestedBy: session.user?.email ?? session.user?.name ?? null,
+  });
+  await recordCampaignHandoff({
+    campaignId,
+    fromStage: 'human_approval',
+    toStage: 'posting',
+    status: 'accepted',
+    payload: { content_ids: contentIds, account_id: fbAccountId, mode: 'controlled_ab' },
+  });
+  await setSoRecruitRequestStatus(campaign.request_no, 'in_progress');
+  revalidatePath(`/orchestrator/${campaignId}`);
+  revalidatePath('/orchestrator');
+  revalidatePath('/autopost');
 }
 
 /** ลองให้ AI สร้าง Content ใหม่ หลัง worker/config ผิดพลาด. */
@@ -402,7 +487,48 @@ export async function editCaptionAction(formData: FormData) {
   const contentId = String(formData.get('contentId') ?? '');
   const campaignId = String(formData.get('campaignId') ?? '');
   const caption = String(formData.get('caption') ?? '').trim();
-  if (contentId && caption) await updateContentCaption(contentId, caption);
+  if (contentId && caption && campaignId) {
+    const [campaign, content] = await Promise.all([
+      getCampaign(campaignId),
+      getContentById(contentId),
+    ]);
+    if (!campaign || !content || content.campaign_id !== campaignId) {
+      throw new Error('ไม่พบ Content ของ campaign นี้');
+    }
+    const validation = validateRecruitContent({
+      campaign,
+      caption,
+      poster: null,
+      requireCaption: true,
+    });
+    if (!content.factual_validation?.poster_validated) {
+      throw new Error('ร่างเดิมไม่มีหลักฐานตรวจโปสเตอร์ กรุณาสร้างร่างใหม่แทนการแก้ข้อความ');
+    }
+    validation.poster_validated = true;
+    if (!validation.valid) {
+      throw new Error(
+        `ข้อความไม่ผ่าน factual gate: ${validation.errors.map((e: { message: string }) => e.message).join(' · ')}`,
+      );
+    }
+    const jobSpec = resolveContentJobSpec({
+      title: campaign.title ?? undefined,
+      positions: campaign.positions ?? undefined,
+      snapshot: campaign.request_snapshot ?? {},
+    });
+    const quality = scoreRecruitContent({
+      campaign: { ...campaign, snapshot: campaign.request_snapshot ?? {} },
+      jobSpec,
+      caption,
+      poster: (content.gen_notes?.poster_fields ?? null) as any,
+      factualValidation: validation,
+      research: (content.gen_notes ?? null) as any,
+      hasImage: content.has_image,
+    });
+    if (!quality.hard_gate_passed) {
+      throw new Error(`ข้อความไม่ผ่าน Quality Gate: ${quality.blockers.join(' · ')}`);
+    }
+    await updateContentCaption(contentId, caption, validation, quality);
+  }
   revalidatePath(`/orchestrator/${campaignId}`);
 }
 
@@ -426,9 +552,18 @@ export async function rejectContentAction(formData: FormData) {
   if (!session) throw new Error('unauthorized');
   const contentId = String(formData.get('contentId') ?? '');
   const campaignId = String(formData.get('campaignId') ?? '');
-  const reason = String(formData.get('reason') ?? '').trim() || null;
+  const reason = String(formData.get('reason') ?? '').trim();
+  if (!reason) throw new Error('กรุณาระบุว่าร่าง Content ต้องแก้อะไร ก่อนตีกลับ');
   if (contentId && campaignId) {
     await setContentStatus(contentId, 'rejected', reason);
+    await recordCampaignHandoff({
+      campaignId,
+      fromStage: 'human_approval',
+      toStage: 'copy',
+      status: 'rejected',
+      reason,
+      payload: { content_id: contentId },
+    });
     await setCampaignStatus(campaignId, 'drafting', reason);
     await enqueueDraftForCampaign(campaignId, session.user?.email ?? session.user?.name ?? null); // คิด version ใหม่
     kickWorker();

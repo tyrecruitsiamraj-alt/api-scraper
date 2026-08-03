@@ -219,7 +219,7 @@ async function startCollectCommentsRun(userId, postLogIds, opts) {
     throw err;
   }
 
-  const user = await db.getUserById(uid);
+  const user = await db.getUserByIdWithSecrets(uid);
   if (!user) {
     const err = new Error(`ไม่พบ user ${uid}`);
     err.statusCode = 400;

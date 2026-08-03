@@ -12,9 +12,13 @@
     "worker:pool": "node workers/runner.js",
     "scraper:pool": "node workers/scraper-pool.mjs",
     "extract": "node src/extract-worker.js",
+    "canary": "node src/canary-worker.js",
+    "privacy:retention": "node scripts/privacy-retention.mjs",
+    "audit:system": "node scripts/system-audit.mjs",
     "api": "node src/api/server.js",
     "connector": "node src/cli/connector.js",
-    "erp:sync": "node src/erp/sync.js"
+    "erp:sync": "node src/erp/sync.js",
+    "test:content": "node --test tests/content-*.test.mjs"
   },
   "license": "UNLICENSED",
   "private": true,

@@ -16,6 +16,8 @@ import {
   markTaskRunning,
   pendingExtractionsForRuns,
   recoverStaleRunningTasks,
+  recoverStaleRuns,
+  requeueRetryableExtractions,
   saveCachedFamilyPlan,
   saveExtraction,
   setTaskAdjacentPlan,
@@ -29,6 +31,7 @@ import { runConnector } from './pipeline.js';
 import { extractAttachment } from './core/ollama.js';
 import { contactsFromText } from './core/contacts.js';
 import { suggestAdjacentPositions, positionsFromDescription } from './core/job-family.js';
+import { processExtractionBatch } from './extract-worker.js';
 
 /**
  * Tasks worker — runs queued/due tasks as a full auto pipeline with live phases:
@@ -59,7 +62,9 @@ export async function runTask(t, runtime) {
   const target = t.mode === 'count' ? t.target_count || connector.scrape_limit : connector.scrape_limit;
   const criteria = { ...(t.criteria || {}), maxCandidates: target, updatedSince: t.updated_since ?? undefined };
   delete criteria.job_description; // meta ของโหมดเนื้องาน — ไม่ส่งเข้า connector
-  const resumeFrom = t.progress_got > 0 && t.status === 'queued' ? t.progress_got : 0;
+  // Re-run search from the beginning after recovery. Result ordering can change;
+  // DB upserts make replay safe, while skipping by old array index can lose people.
+  const resumeFrom = 0;
 
   // ---- โหมดเนื้องาน: แปลง "เนื้องาน" → ชุดคำค้นตำแหน่ง ก่อนเริ่ม scrape ----
   // ผู้ใช้กรอกเนื้องาน (criteria.job_description) แทนตำแหน่ง → AI เดาว่าควรค้นตำแหน่งอะไรบ้าง
@@ -78,13 +83,13 @@ export async function runTask(t, runtime) {
     }
     if (dp?.positions?.length) {
       descPositions = dp.positions;
-      // การันตี volume: เติม "คำมาแรง" ของ Family นี้จาก job_trends (seo-update รายสัปดาห์)
-      // ต่อท้ายเสมอ — ต่อให้ AI ออกคำเฉพาะเกินไป ก็ยังมีคำสามัญที่พิสูจน์แล้วว่าค้นเจอ
+      // เติม sourcing keywords ของ Family นี้ โดยให้ observed evidence มาก่อน
+      // และใช้ AI estimate เป็น fallback (ไม่อ้างว่าเป็น search volume จริง)
       try {
         const trends = await topTrendKeywords(dp.family, 4);
         const merged = [...descPositions, ...trends.filter((k) => !descPositions.includes(k))];
         if (merged.length > descPositions.length) {
-          console.log(`  📈 เติมคำมาแรงจาก job_trends (${dp.family}): ${merged.slice(descPositions.length).join(', ')}`);
+          console.log(`  🔎 เติม sourcing keywords (${dp.family}): ${merged.slice(descPositions.length).join(', ')}`);
           descPositions = merged;
         }
       } catch { /* fail-soft */ }
@@ -329,6 +334,10 @@ async function runDueTasksOnceInner() {
   const runtime = loadRuntime();
   const recovered = await recoverStaleRunningTasks(10);
   for (const t of recovered) console.log(`  ↻ recovered stale task: ${t.name}`);
+  const staleRuns = await recoverStaleRuns(30);
+  for (const r of staleRuns) console.log(`  ↻ closed stale ${r.platform} run: ${r.id}`);
+  const requeuedOcr = await requeueRetryableExtractions(500);
+  if (requeuedOcr) console.log(`  ↻ requeued OCR errors: ${requeuedOcr}`);
   const tasks = await dueTasks();
   console.log(`\n=== tasks-worker: ${tasks.length} task(s) due ===`);
   for (const t of tasks) {
@@ -339,6 +348,8 @@ async function runDueTasksOnceInner() {
       console.error(`  ${t.name} failed: ${e.message}`);
     }
   }
+  const backlogBatch = envInt('EXTRACT_BACKLOG_BATCH', 20);
+  if (backlogBatch > 0) await processExtractionBatch(backlogBatch);
   await closePool();
 }
 

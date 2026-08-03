@@ -29,10 +29,22 @@ export default async function TrendsSettingsPage() {
 
       {/* เพิ่มเทรนด์ */}
       <form action={createTrendAction} className="card space-y-3 p-4">
-        <div className="grid gap-3 sm:grid-cols-[1fr_1fr]">
+        <div className="grid gap-3 sm:grid-cols-3">
           <div>
             <label className="label" htmlFor="trend-label">เทรนด์ / มีม</label>
             <input id="trend-label" name="label" required placeholder="เช่น ไอติมอัลตร้าสมูท" className="field w-full" />
+          </div>
+          <div>
+            <label className="label" htmlFor="trend-family">ใช้กับสายงาน</label>
+            <select id="trend-family" name="jobFamily" className="field w-full">
+              <option value="">ทุกสายงาน</option>
+              <option value="A">A · บริการ/ประชาสัมพันธ์</option>
+              <option value="B">B · ช่าง/เทคนิค/IT</option>
+              <option value="C">C · พนักงานขับรถ</option>
+              <option value="D">D · ปฏิบัติการ/หลังบ้าน</option>
+              <option value="E">E · รักษาความปลอดภัย</option>
+              <option value="F">F · ภาคสนาม/สวน</option>
+            </select>
           </div>
           <div>
             <label className="label" htmlFor="trend-note">วิธีเกาะ / บริบท (ไม่บังคับ)</label>
@@ -76,8 +88,15 @@ export default async function TrendsSettingsPage() {
                   )}
                   {t.for_caption && <span className="pill bg-black/[0.04] text-[11px] text-subtle">แคปชัน</span>}
                   {t.for_image && <span className="pill bg-black/[0.04] text-[11px] text-subtle">รูป</span>}
+                  {t.job_family && <span className="pill bg-violet-50 text-[11px] text-violet-700">Family {t.job_family}</span>}
                 </div>
                 {t.note && <div className="mt-0.5 text-xs text-subtle">{t.note}</div>}
+                {(t.sample_size || t.observed_count || t.confidence) && (
+                  <div className="mt-1 text-[11px] text-subtle">
+                    หลักฐาน: พบประมาณ {t.observed_count ?? '-'} ครั้ง / sample {t.sample_size ?? '-'}
+                    {t.confidence != null ? ` · confidence ${Math.round(Number(t.confidence) * 100)}%` : ''}
+                  </div>
+                )}
               </div>
               <form action={toggleTrendAction}>
                 <input type="hidden" name="id" value={t.id} />

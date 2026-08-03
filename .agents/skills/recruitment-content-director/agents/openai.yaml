@@ -1,0 +1,4 @@
+interface:
+  display_name: "ผู้อำนวยการคอนเทนต์สรรหา"
+  short_description: "ถอดวิธีคิดทีมคอนเทนต์สรรหาและกำกับภาพ"
+  default_prompt: "ใช้ $recruitment-content-director เพื่อวางกลยุทธ์ เขียนข้อความ กำกับภาพ และตรวจคุณภาพคอนเทนต์สรรหา"

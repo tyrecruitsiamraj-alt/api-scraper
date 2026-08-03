@@ -11,6 +11,7 @@ import {
   saveConnectorSession,
   setConnectorCooldown,
   startRun,
+  touchRun,
   upsertCandidate,
   upsertSource,
   withTransaction,
@@ -50,6 +51,10 @@ export async function runConnector(connector, criteria, runtime, opts = {}) {
   let failed = 0;
   let found = 0;
   let filteredOut = 0; // ไม่ตรงเงื่อนไข local (อายุ/วุฒิ/จังหวัด/เพศ) — ข้ามโดยไม่นับเข้า target
+  let detailAttempts = 0;
+  let parsedCount = 0;
+  let contactsEnriched = 0;
+  let assetsDownloaded = 0;
   let status = 'success';
   let error = null;
   let browser = null;
@@ -92,6 +97,7 @@ export async function runConnector(connector, criteria, runtime, opts = {}) {
     const openSession = async (forceLogin = false) => {
       if (opts.onPhase) await opts.onPhase('login');
       if (opts.onHeartbeat) await opts.onHeartbeat();
+      await touchRun(runId);
       console.log(`  [${connector.label}] opening browser session${forceLogin ? ' (fresh login)' : ''}...`);
       return withTimeout(
         provider.getSession({
@@ -160,6 +166,7 @@ export async function runConnector(connector, criteria, runtime, opts = {}) {
       await browser.close().catch(() => {});
       if (opts.onPhase) await opts.onPhase('login');
       if (opts.onHeartbeat) await opts.onHeartbeat();
+      await touchRun(runId);
       sess = await openSession(true);
       browser = sess.browser;
       activeContext = sess.context;
@@ -176,12 +183,14 @@ export async function runConnector(connector, criteria, runtime, opts = {}) {
       if (opts.onHeartbeat) await opts.onHeartbeat();
       try {
         await withTimeout((async () => {
+        detailAttempts += 1;
         const url = provider.resumeDetailUrl(id);
         // Pass the whole session — providers pick what they need: JobBKK renders
         // the detail page in the browser context (data is client-side JS), while
         // JobThai reads it over HTTP via the request context.
         let html = await provider.fetchResumeHtml(sess, id, runtime);
         let parsed = provider.parseResumeHtml(html, { sourceUrl: url, index: saved + 1, focusPosition: criteria.position || '-' });
+        parsedCount += 1;
         const authBlocked = provider.isResumeAuthBlocked?.(html, url) ?? false;
         if (authBlocked) {
           await refreshSession(`resume ${id}: session expired (login page)`);
@@ -198,8 +207,12 @@ export async function runConnector(connector, criteria, runtime, opts = {}) {
             return;
           }
         }
-        if (provider.enrichContacts) await provider.enrichContacts(sess.request, id, parsed, runtime);
+        if (provider.enrichContacts) {
+          await provider.enrichContacts(sess.request, id, parsed, runtime);
+          contactsEnriched += 1;
+        }
         const assets = await provider.collectAssetsForDb(sess.request, parsed);
+        assetsDownloaded += assets.filter((a) => a.download_status === 'success').length;
 
         const { isNew } = await withTransaction(async (client) => {
           const cand = await upsertCandidate(client, parsed);
@@ -276,7 +289,25 @@ export async function runConnector(connector, criteria, runtime, opts = {}) {
   return finalize();
 
   async function finalize() {
-    await finishRun(runId, { status, requested, found, newCount, updatedCount, failed, error });
+    await finishRun(runId, {
+      status,
+      requested,
+      found,
+      newCount,
+      updatedCount,
+      failed,
+      error,
+      funnel: {
+        search_ids: found,
+        detail_attempts: detailAttempts,
+        parsed: parsedCount,
+        local_rejected: filteredOut,
+        contacts_enriched: contactsEnriched,
+        assets_downloaded: assetsDownloaded,
+        saved: newCount + updatedCount,
+        failed,
+      },
+    });
     return { runId, status, found, newCount, updatedCount, failed, error };
   }
 }

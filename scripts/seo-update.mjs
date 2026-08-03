@@ -1,5 +1,5 @@
-// SEO Trend Updater — หา "คำค้นตำแหน่งมาแรง" ต่อ Job Family ด้วย Ollama (ฟรี)
-// แล้ว upsert ลงตาราง job_trends (schema-012) ให้ jd-analyzer/content-orchestrator ใช้
+// AI sourcing-keyword suggester — คะแนน 1-100 คือ relevance estimate จาก Ollama
+// ไม่ใช่ search volume ที่สังเกตจากเครื่องมือค้นหา.
 //
 // รันเอง:      node scripts/seo-update.mjs
 // รันอัตโนมัติ: ติดตั้ง cron บน Mac ด้วย scripts/setup-seo-cron.command (ทุกจันทร์ 08:30)
@@ -26,7 +26,7 @@ const SCHEMA_JSON = {
         type: 'object',
         properties: {
           keyword: { type: 'string', description: 'คำค้นตำแหน่งภาษาไทยสั้น 1-3 คำ ที่คนใช้จริงในเรซูเม่' },
-          volume: { type: 'integer', description: 'ความต้องการในตลาด 1-100 (มาก=มาแรง)' },
+          volume: { type: 'integer', description: 'AI relevance estimate 1-100 (ไม่ใช่ search volume จริง)' },
           competition: { type: 'string', enum: ['low', 'medium', 'high'], description: 'การแข่งขันแย่งผู้สมัคร' },
           note: { type: 'string', description: 'insight สั้น 1 ประโยค' },
         },
@@ -77,8 +77,9 @@ async function trendsForFamily(base, model, [code, label, examples]) {
             role: 'user',
             content:
               `Job Family ${code} ${label} (ตัวอย่างตำแหน่ง: ${examples})\n` +
-              'ขอ "คำค้นตำแหน่งมาแรง" 5-8 คำของ Family นี้ในตลาดแรงงานไทยตอนนี้ ' +
-              'พร้อม volume (1-100), competition (low/medium/high), และ insight สั้น ๆ ต่อคำ',
+              'เสนอคำค้นตำแหน่ง 5-8 คำที่น่าจะใช้ค้นเรซูเม่ใน Family นี้ ' +
+              'พร้อม relevance estimate (1-100), competition (low/medium/high), และ insight สั้น ๆ ต่อคำ ' +
+              'คะแนนเป็นการประเมินของคุณ ห้ามอ้างว่าเป็น search volume จริง',
           },
         ],
       }),
@@ -128,7 +129,7 @@ const c = new pg.Client(process.env.DATABASE_URL
 await c.connect();
 const sc = process.env.DB_SCHEMA || 'public';
 
-console.log(`SEO Trend Update — ${new Date().toLocaleString('th-TH')} (model ${model})`);
+console.log(`AI Sourcing Keyword Update — ${new Date().toLocaleString('th-TH')} (model ${model}; scores are estimates)`);
 let total = 0;
 for (const fam of FAMILIES) {
   const [code, label] = fam;
@@ -141,19 +142,22 @@ for (const fam of FAMILIES) {
     }
     for (const k of keywords) {
       await c.query(
-        `INSERT INTO "${sc}".job_trends (family, keyword, volume, competition, note, source)
-         VALUES ($1,$2,$3,$4,$5,'seo-update')
+        `INSERT INTO "${sc}".job_trends
+           (family, keyword, volume, competition, note, source, score_type, confidence)
+         VALUES ($1,$2,$3,$4,$5,'ollama-estimate','ai_estimate',0.35)
          ON CONFLICT (family, keyword)
          DO UPDATE SET volume=EXCLUDED.volume, competition=EXCLUDED.competition,
-                       note=EXCLUDED.note, source=EXCLUDED.source, captured_at=now()`,
+                       note=EXCLUDED.note, source=EXCLUDED.source,
+                       score_type=EXCLUDED.score_type, confidence=EXCLUDED.confidence,
+                       captured_at=now()`,
         [code, k.keyword, k.volume, k.competition, k.note],
       );
     }
     total += keywords.length;
-    console.log(`[${code} ${label}] ${keywords.length} คำ: ${keywords.map((k) => `${k.keyword}(${k.volume}/${k.competition})`).join(', ')}`);
+    console.log(`[${code} ${label}] ${keywords.length} คำ: ${keywords.map((k) => `${k.keyword}(AI ${k.volume}/${k.competition})`).join(', ')}`);
   } catch (e) {
     console.warn(`[${code}] ข้าม — ${e.message}`);
   }
 }
-console.log(`\nเสร็จ ✓ อัปเดต ${total} คำเข้า job_trends`);
+console.log(`\nเสร็จ ✓ อัปเดต ${total} คำเข้า job_trends ในฐานะ ai_estimate`);
 await c.end();

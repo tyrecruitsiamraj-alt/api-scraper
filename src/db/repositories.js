@@ -158,7 +158,7 @@ export async function setTaskProgressTarget(id, target) {
 export async function recoverStaleRunningTasks(maxStaleMin = 10) {
   const { rows } = await query(
     `UPDATE scrape_tasks
-        SET status='queued', phase='idle', last_error=$2
+        SET status='queued', phase='idle', progress_got=0, last_error=$2
       WHERE status='running'
         AND updated_at < now() - ($1::text || ' minutes')::interval
       RETURNING id, name`,
@@ -206,6 +206,7 @@ export async function listPendingExtractions(limit = 10) {
   const { rows } = await query(
     `SELECT id, candidate_id, file_type, mime FROM candidate_assets
       WHERE kind='attachment' AND extract_status='pending' AND content IS NOT NULL
+        AND COALESCE(extract_attempts, 0) < 3
       ORDER BY created_at LIMIT $1`,
     [limit],
   );
@@ -217,9 +218,35 @@ export async function getAssetContent(id) {
 }
 export async function saveExtraction(id, { text, structured, status }) {
   await query(
-    `UPDATE candidate_assets SET extracted_text=$2, extracted=$3, extract_status=$4, extracted_at=now() WHERE id=$1`,
+    `UPDATE candidate_assets SET
+       extracted_text=$2,
+       extracted=$3,
+       extract_status=$4,
+       extracted_at=now(),
+       extract_attempts=COALESCE(extract_attempts, 0) + 1,
+       last_extract_error=CASE WHEN $4 LIKE 'error:%' THEN substring($4 from 7) ELSE NULL END
+     WHERE id=$1`,
     [id, text ?? null, structured ? JSON.stringify(structured) : null, status],
   );
+}
+
+export async function requeueRetryableExtractions(limit = 500) {
+  const { rows } = await query(
+    `WITH retry AS (
+       SELECT id FROM candidate_assets
+        WHERE extract_status LIKE 'error:%'
+          AND COALESCE(extract_attempts, 0) < 3
+        ORDER BY extracted_at NULLS FIRST, created_at
+        LIMIT $1
+     )
+     UPDATE candidate_assets a
+        SET extract_status='pending'
+       FROM retry
+      WHERE a.id=retry.id
+      RETURNING a.id`,
+    [limit],
+  );
+  return rows.length;
 }
 
 /** Pending attachment extractions for candidates touched by ONE run (for the per-task OCR phase). */
@@ -323,7 +350,8 @@ export async function fillCandidateContacts(id, { email, phone, line_id }) {
 export async function activeContentTrends(limit = 8) {
   try {
     const { rows } = await query(
-      `SELECT label, note, for_caption, for_image
+      `SELECT label, note, for_caption, for_image, job_family, source,
+              confidence, sample_size, observed_count, source_url, discovered_at
          FROM content_trends WHERE active = true
         ORDER BY updated_at DESC LIMIT $1`,
       [limit],
@@ -338,7 +366,15 @@ export async function topTrendKeywords(family, limit = 4) {
   if (!family) return [];
   try {
     const { rows } = await query(
-      `SELECT keyword FROM job_trends WHERE family = $1 ORDER BY volume DESC, captured_at DESC LIMIT $2`,
+      `SELECT keyword FROM job_trends
+        WHERE family = $1
+        ORDER BY
+          (score_type = 'observed') DESC,
+          observed_volume DESC NULLS LAST,
+          confidence DESC NULLS LAST,
+          volume DESC NULLS LAST,
+          captured_at DESC
+        LIMIT $2`,
       [family, limit],
     );
     return rows.map((r) => r.keyword);
@@ -349,17 +385,52 @@ export async function topTrendKeywords(family, limit = 4) {
 
 export async function startRun(connectorId, platform, criteria, taskId = null) {
   const { rows } = await query(
-    `INSERT INTO scrape_runs (connector_id, platform, criteria, task_id) VALUES ($1,$2,$3,$4) RETURNING id`,
+    `INSERT INTO scrape_runs (connector_id, platform, criteria, task_id, heartbeat_at)
+     VALUES ($1,$2,$3,$4,now()) RETURNING id`,
     [connectorId, platform, criteria, taskId],
   );
   return rows[0].id;
 }
 
-export async function finishRun(runId, { status, requested, found, newCount, updatedCount, failed, error }) {
+export async function touchRun(runId) {
+  await query(`UPDATE scrape_runs SET heartbeat_at=now() WHERE id=$1 AND status='running'`, [runId]);
+}
+
+export async function recoverStaleRuns(maxStaleMin = 30) {
+  const { rows } = await query(
+    `UPDATE scrape_runs
+        SET status='failed',
+            error=COALESCE(error, 'stale_run_watchdog'),
+            finished_at=now()
+      WHERE status='running'
+        AND COALESCE(heartbeat_at, started_at) < now() - ($1::text || ' minutes')::interval
+      RETURNING id, platform`,
+    [String(maxStaleMin)],
+  );
+  return rows;
+}
+
+export async function finishRun(runId, { status, requested, found, newCount, updatedCount, failed, error, funnel }) {
   await query(
     `UPDATE scrape_runs SET status=$2, requested=$3, found=$4, new_count=$5, updated_count=$6,
-       failed=$7, error=$8, finished_at=now() WHERE id=$1`,
-    [runId, status, requested, found, newCount, updatedCount, failed, error ?? null],
+       failed=$7, error=$8, funnel=$9, heartbeat_at=now(), finished_at=now() WHERE id=$1`,
+    [runId, status, requested, found, newCount, updatedCount, failed, error ?? null, funnel ?? {}],
+  );
+}
+
+export async function saveConnectorCanary({
+  connectorId,
+  platform,
+  status,
+  searchCount = 0,
+  parsedOk = false,
+  error = null,
+}) {
+  await query(
+    `INSERT INTO connector_canary_checks
+       (connector_id, platform, status, search_count, parsed_ok, error)
+     VALUES ($1,$2,$3,$4,$5,$6)`,
+    [connectorId, platform, status, searchCount, parsedOk, error],
   );
 }
 

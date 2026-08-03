@@ -1,5 +1,7 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { envString } from '../config.js';
+import { resolveContentJobSpec } from './content-job-spec.js';
+import { withHumanPlaybook } from './human-content-playbook.js';
 
 /**
  * Content generation (text) — Claude คิด "โพสต์สรรหา" ให้ 1 ใบขอที่หาคนไม่ได้:
@@ -15,12 +17,19 @@ import { envString } from '../config.js';
 const SYSTEM = `คุณคือนักการตลาดสรรหาบุคลากร (recruitment marketer) ของบริษัท Outsource ไทย
 หน้าที่: เขียน "โพสต์ประกาศรับสมัครงาน" ให้ดึงดูดผู้สมัครสำหรับ 1 ตำแหน่งที่บริษัทกำลังหาคนไม่ได้
 
+## Job Identity Gate (บังคับ)
+- ยึด "ตำแหน่งงานจริง" และ Job Family ที่ระบบระบุให้ ห้ามเดาตำแหน่งจากชื่อสถานที่/ลูกค้า
+- ตัวอย่าง: ทำงานที่โรงพยาบาลไม่ได้แปลว่าเป็นบุคลากรการแพทย์; ถ้าตำแหน่งคือพนักงานขับรถ ต้องเขียนเรื่องงานขับรถเท่านั้น
+- ถ้าข้อมูลใดไม่ระบุ ห้ามเติมเอง และห้ามอ้างว่าเริ่มงานได้ทันที/มีโอกาสเติบโต/งานมั่นคง เว้นแต่ใบขอระบุ
+- Feedback จากผู้ตรวจเป็นข้อบังคับของร่างใหม่ ต้องแก้ตามนั้นและห้ามทำจุดเดิมซ้ำ
+
 ## หลักการเขียน caption (Facebook)
 - ภาษาไทย เป็นกันเอง น่าเชื่อถือ กระตุ้นให้ทัก/สมัคร
 - ขึ้นต้นด้วยหัวเรื่องสะดุดตา (เปิดรับสมัคร + ตำแหน่ง) ใช้ emoji พองาม
-- ระบุ: ตำแหน่ง, สถานที่/จังหวัดทำงาน, จำนวนที่รับ (ถ้ามี), จุดขาย (เช่น มีสวัสดิการ/เริ่มงานได้เลย)
-- ปิดท้ายด้วย call-to-action ชัดเจน ("สนใจทักแชทได้เลย" / "สมัครด่วน") + hashtag 3–6 อันที่เกี่ยวข้อง
-- ห้ามแต่งเงินเดือน/สวัสดิการที่ไม่มีในข้อมูล ถ้าไม่รู้ให้ใช้คำกลาง ๆ ("สวัสดิการตามโครงสร้างบริษัท")
+- ระบุ: ตำแหน่ง, สถานที่/จังหวัดทำงาน, จำนวนที่รับ และจุดขายเฉพาะเมื่อมีระบุในใบขอ
+- ปิดท้ายด้วย call-to-action ชัดเจนตามช่องทางที่ให้มา; ถ้าไม่ระบุ ใช้ "สนใจสมัคร ติดต่อทีมสรรหา" โดยห้ามแต่ง LINE/เบอร์โทร
+- hashtag 3–6 อันต้องเกี่ยวข้องกับตำแหน่งจริง
+- ห้ามแต่งเงินเดือน/สวัสดิการที่ไม่มีในข้อมูล ถ้าไม่รู้ให้ไม่กล่าวถึง
 - ความยาวพอเหมาะกับโพสต์ FB (ไม่ยาวเกินไป)
 
 ## video_brief
@@ -34,7 +43,7 @@ const SYSTEM = `คุณคือนักการตลาดสรรหา�
 ## poster (ข้อมูลลงโปสเตอร์ — ระบบเอาไปวางบน template แบรนด์ SO WORK!)
 - ใช้เฉพาะข้อมูลที่มีในใบขอเท่านั้น: เงินเดือน/รายได้/เวลา/สถานที่ ไม่มีในใบขอ = เว้นว่าง ห้ามแต่งเอง
 - qualifications: ข้อละไม่เกิน ~40 ตัวอักษร อ่านปราดเดียวรู้เรื่อง
-- benefits: ป้ายสั้น 2-4 คำ เช่น "งานมั่นคง" "สวัสดิการครบ" (ไม่รู้จริงใช้คำกลางแบบนี้ได้)`;
+- benefits: ใช้เฉพาะสวัสดิการ/จุดขายที่มีในใบขอ ไม่รู้ให้เป็น array ว่าง ห้ามใช้คำกว้างอย่าง "งานมั่นคง" หรือ "รายได้ดี" เอง`;
 
 const TOOL = {
   name: 'recruit_content',
@@ -61,13 +70,13 @@ const POSTER_TOOL = {
     type: 'object',
     properties: {
       title: { type: 'string', description: 'ชื่อตำแหน่งสั้น กระชับ (เช่น "พนักงานขับรถส่วนกลาง")' },
-      badge: { type: 'string', description: 'ป้ายสั้น เช่น "เปิดรับสมัครด่วน", "รับหลายอัตรา"' },
+      badge: { type: 'string', description: 'ป้ายสั้น เช่น "เปิดรับสมัคร"; ใช้คำว่า "ด่วน" หรือ "รับหลายอัตรา" เฉพาะเมื่อข้อมูลรองรับ' },
       location: { type: 'string', description: 'สถานที่ทำงานสั้น ๆ ไม่รู้ให้ตอบ ""' },
       worktime: { type: 'string', description: 'วัน-เวลาทำงาน ไม่รู้ให้ตอบ ""' },
       salary_total: { type: 'string', description: 'รายได้รวมตัวเลขเด่น เช่น "17,000++" — มีในใบขอเท่านั้น ไม่มีให้ตอบ ""' },
       salary_breakdown: { type: 'string', description: 'ที่มารายได้ย่อ 1 บรรทัด — มีในใบขอเท่านั้น ไม่มีให้ตอบ ""' },
       qualifications: { type: 'array', items: { type: 'string' }, description: 'คุณสมบัติ 3-6 ข้อสั้น (ข้อละไม่เกิน 40 ตัวอักษร)' },
-      benefits: { type: 'array', items: { type: 'string' }, description: 'จุดขาย/สวัสดิการ 3-4 ป้ายสั้น 2-4 คำ' },
+      benefits: { type: 'array', items: { type: 'string' }, description: 'สวัสดิการที่มีจริงในใบขอ 0-4 ป้ายสั้น; ไม่มีข้อมูลให้ตอบ []' },
     },
     required: ['title', 'badge', 'qualifications', 'benefits'],
   },
@@ -78,7 +87,7 @@ const POSTER_SYSTEM = `คุณคือคนสรุปใบขอกำล
 ทุกอย่างต้องสั้น อ่านปราดเดียวรู้เรื่อง เป็นภาษาไทย
 
 ## รูปแบบคำตอบ (บังคับ) — JSON object เดียว ใช้ key เป๊ะ ๆ ตามตัวอย่างนี้เท่านั้น ห้ามตั้ง key เอง:
-{"title":"พนักงานขับรถส่วนกลาง","badge":"เปิดรับสมัครด่วน","location":"แยกเพลินจิต กรุงเทพฯ","worktime":"จ.-ศ. 08.30-17.30 น.","salary_total":"17,000++","salary_breakdown":"เงินเดือน 12,000 + เบี้ยขยัน 1,000 + ค่าโทร 500 + OT","qualifications":["เพศชาย อายุ 25-55 ปี","วุฒิ ม.3 ขึ้นไป","ประสบการณ์ขับรถ 1 ปีขึ้นไป"],"benefits":["งานมั่นคง","สวัสดิการครบ","รายได้ดี"]}`;
+{"title":"พนักงานขับรถส่วนกลาง","badge":"เปิดรับสมัคร","location":"แยกเพลินจิต กรุงเทพฯ","worktime":"จ.-ศ. 08.30-17.30 น.","salary_total":"17,000++","salary_breakdown":"เงินเดือน 12,000 + เบี้ยขยัน 1,000 + ค่าโทร 500 + OT","qualifications":["เพศชาย อายุ 25-55 ปี","วุฒิ ม.3 ขึ้นไป","ประสบการณ์ขับรถ 1 ปีขึ้นไป"],"benefits":[]}`;
 
 /**
  * @param {{ title?:string, positions?:string, province?:string, qty?:number,
@@ -117,52 +126,9 @@ export async function generateContent(campaign = {}) {
   if (!prov) return null; // feature off — ไม่มีทั้ง key และ ollama
   const { provider, apiKey, openaiKey, ollamaBase } = prov;
 
-  const ctx = campaignContext(campaign);
-  if (!ctx) return null; // ไม่มีตำแหน่งให้คิด
-
-  // แนวที่เคยเวิร์ค (engagement สูง) — ให้เป็นแรงบันดาลใจ ไม่ใช่ลอก
-  const wins = (campaign.winningExamples ?? [])
-    .map((s) => String(s ?? '').trim())
-    .filter(Boolean)
-    .slice(0, 2);
-  const winsBlock = wins.length
-    ? `\n\nแคปชันที่เคยได้ผลดี (คนสนใจเยอะ) — ใช้เป็นแนวทางโทน/โครงสร้าง ห้ามลอกคำต่อคำ:\n` +
-      wins.map((w, i) => `ตัวอย่าง ${i + 1}:\n${w}`).join('\n---\n')
-    : '';
-
-  // แนวที่ "ไม่เวิร์ค" (คนสนใจน้อย) — เตือน AI ให้เลี่ยงโทน/โครงสร้างแบบนี้
-  const loses = (campaign.losingExamples ?? [])
-    .map((s) => String(s ?? '').trim())
-    .filter(Boolean)
-    .slice(0, 2);
-  const losesBlock = loses.length
-    ? `\n\n⚠️ แคปชันที่เคยได้ผลไม่ดี (คนไม่สนใจ) — ห้ามเขียนแนวนี้ซ้ำ ให้เปลี่ยนมุม/พาดหัว/จุดขายให้ต่างออกไป:\n` +
-      loses.map((w, i) => `ตัวอย่างที่ไม่ควรทำ ${i + 1}:\n${w}`).join('\n---\n')
-    : '';
-
-  // ผลวิจัยตลาด (จาก content-research.js) — มุม/ฮุกที่ดึงคนตำแหน่งนี้บนกลุ่มหางาน FB ไทย
-  // ให้ AI ใช้เป็นแนวคิด (ไม่ใช่ก๊อป) — ตอบโจทย์ "รู้ได้ไงว่าดี" ตั้งแต่ยังไม่มีสถิติของเราเอง
-  const research = campaign.research ?? null;
-  const angles = (research?.angles ?? []).map((s) => String(s ?? '').trim()).filter(Boolean).slice(0, 4);
-  const hooks = (research?.hooks ?? []).map((s) => String(s ?? '').trim()).filter(Boolean).slice(0, 4);
-  const researchBlock = angles.length || hooks.length
-    ? `\n\n🔍 ผลวิเคราะห์ตลาด (แนวที่ดึงคนตำแหน่งนี้ได้บนกลุ่มหางาน FB) — ใช้เป็นแนวคิด:` +
-      (angles.length ? `\nมุมที่ควรเล่น: ${angles.join(' · ')}` : '') +
-      (hooks.length ? `\nประโยคฮุกเปิด (ดัดแปลงได้ ห้ามลอกตรง): ${hooks.join(' | ')}` : '')
-    : '';
-
-  // เทรนด์/มีมที่กำลังมา (คนเปิดไว้บนเว็บ) — เกาะกระแสในแคปชันแบบเนียน (เฉพาะ for_caption)
-  const trends = (campaign.trends ?? []).filter((t) => t && (t.for_caption ?? true) && String(t.label ?? '').trim());
-  const trendsBlock = trends.length
-    ? `\n\n🔥 เทรนด์ที่กำลังมาตอนนี้ — เกาะกระแสให้เนียน ถ้าเข้ากับงานได้ (อย่าฝืน/อย่าหยาบ):\n` +
-      trends.map((t) => `- ${String(t.label).trim()}${t.note ? ` (${String(t.note).trim()})` : ''}`).join('\n')
-    : '';
-
-  // A/B: บอกแนวการเขียนของเวอร์ชันนี้ (เช่น "ตรงไปตรงมา" vs "เน้นสวัสดิการ")
-  const styleBlock = String(campaign.styleHint ?? '').trim()
-    ? `\n\nแนวการเขียนของเวอร์ชันนี้ (บังคับ): ${String(campaign.styleHint).trim()}`
-    : '';
-  const userMsg = `เขียนคอนเทนต์สรรหาสำหรับใบขอนี้:\n${ctx}${winsBlock}${losesBlock}${researchBlock}${trendsBlock}${styleBlock}`;
+  const userMsg = buildContentPrompt(campaign);
+  if (!userMsg) return null; // ไม่มีตำแหน่งจริงให้คิด
+  const humanSystem = withHumanPlaybook(SYSTEM, ['content-strategy', 'copywriting', 'visual-direction']);
 
   // qwen/Ollama ตอบไม่นิ่งเป็นรอบ ๆ — ว่าง/พังให้ลองซ้ำสูงสุด 3 รอบ
   let out = null;
@@ -171,11 +137,11 @@ export async function generateContent(campaign = {}) {
     if (attempt > 1) console.log(`  [content-gen] caption รอบ ${attempt}/3 (รอบก่อนว่าง/พัง)`);
     try {
       if (provider === 'ollama') {
-        ({ out, modelUsed } = await callOllama({ base: ollamaBase, userMsg }));
+        ({ out, modelUsed } = await callOllama({ base: ollamaBase, userMsg, system: humanSystem }));
       } else if (provider === 'openai') {
-        ({ out, modelUsed } = await callOpenAI({ apiKey: openaiKey, userMsg }));
+        ({ out, modelUsed } = await callOpenAI({ apiKey: openaiKey, userMsg, system: humanSystem }));
       } else {
-        ({ out, modelUsed } = await callAnthropic({ apiKey, userMsg }));
+        ({ out, modelUsed } = await callAnthropic({ apiKey, userMsg, system: humanSystem }));
       }
     } catch (e) {
       console.warn(`  [content-gen] AI call failed (${provider}): ${e.message}`);
@@ -192,15 +158,17 @@ export async function generateContent(campaign = {}) {
   // สไตล์รูปจากผลวิจัย — ต่อท้าย image_prompt ให้รูปคุมโทน/องค์ประกอบตามที่สำรวจว่าเวิร์ค
   // (ตอบโจทย์ "รูปไม่สำรวจจะรู้ไงต้องสร้างแบบไหน" — style มาจาก research ไม่ใช่สุ่ม)
   // สไตล์รูป: ระบุตรง (campaign.imageStyle) ชนะ — ใช้ทำ A/B รูป (A ใช้สไตล์ 1, B ใช้สไตล์ 2)
-  const imageStyle = String(campaign.imageStyle ?? research?.imageStyle ?? '').trim();
+  const research = campaign.research ?? null;
+  const imageStyle = sanitizeImageStyle(campaign.imageStyle ?? research?.imageStyle ?? '');
   // เทรนด์ที่ติดธง for_image — เกาะกระแสในรูปด้วย (label ใช้เป็น hint สั้น ๆ)
-  const imageTrends = (campaign.trends ?? [])
-    .filter((t) => t && (t.for_image ?? true) && String(t.label ?? '').trim())
+  const spec = campaign.jobSpec ?? resolveContentJobSpec(campaign);
+  const imageTrends = selectRelevantTrends(campaign.trends ?? [], spec, 'image')
     .map((t) => String(t.label).trim());
   const basePrompt = String(out.image_prompt ?? '').trim();
   let imagePrompt = basePrompt;
   if (basePrompt && imageStyle) imagePrompt += `. Style: ${imageStyle}`;
   if (basePrompt && imageTrends.length) imagePrompt += `. เกาะเทรนด์: ${imageTrends.join(', ')}`;
+  if (basePrompt) imagePrompt += '. Do not include text, letters, words, logos, labels, captions, signage, or QR codes.';
 
   return {
     caption,
@@ -210,20 +178,131 @@ export async function generateContent(campaign = {}) {
   };
 }
 
-/** สร้าง context ใบขอ (แชร์ระหว่าง caption กับ poster) */
-function campaignContext(campaign = {}) {
+const GENERIC_TREND_RE = /(?:เปิดรับด่วน|เริ่มงานได้ทันที|ทิ้งเบอร์|แอดไลน์|แฮชแท็ก|ระบุรายได้|พื้นที่ทำงานเจาะจง)/iu;
+const FAMILY_TREND_HINTS = {
+  A: /(?:ประชาสัมพันธ์|ต้อนรับ|reception|\bpr\b|ลูกค้าสัมพันธ์|บุคลิก|บริการลูกค้า)/iu,
+  B: /(?:ช่าง|เทคนิค|ไฟฟ้า|เครื่องกล|โปรแกรม|developer|it support|network|server)/iu,
+  C: /(?:ขับรถ|คนขับ|driver|valet|ใบขับขี่|เส้นทาง|รถยนต์)/iu,
+  D: /(?:ธุรการ|แคชเชียร์|คลัง|แม่บ้าน|ทำความสะอาด|admin|cashier|warehouse)/iu,
+  E: /(?:รปภ|รักษาความปลอดภัย|security)/iu,
+  F: /(?:คนสวน|รุกขกร|ภูมิทัศน์|กลางแจ้ง|gardener)/iu,
+};
+
+/**
+ * ตัด "วิธีเขียนประกาศทั่วไป" ออกจากเทรนด์ เพราะ SYSTEM บอกเรื่อง CTA/hashtag อยู่แล้ว
+ * และเลือกเฉพาะเทรนด์ที่ระบุ family ตรงกันหรือมีสัญญาณเกี่ยวกับตำแหน่งนั้นจริง.
+ */
+export function selectRelevantTrends(trends = [], jobSpec = {}, mode = 'caption') {
+  const family = String(jobSpec?.family ?? '').trim();
+  const familyHint = FAMILY_TREND_HINTS[family] ?? null;
+  return trends
+    .filter((t) => t && (mode === 'image' ? (t.for_image ?? true) : (t.for_caption ?? true)))
+    .filter((t) => {
+      const taggedFamily = String(t.job_family ?? t.family ?? '').trim();
+      if (taggedFamily && family && taggedFamily !== family) return false;
+      const text = `${String(t.label ?? '')} ${String(t.note ?? '')}`.trim();
+      if (!text || GENERIC_TREND_RE.test(text)) return false;
+      if (taggedFamily && family) return true;
+      return familyHint ? familyHint.test(text) : true;
+    })
+    .slice(0, 2);
+}
+
+export function sanitizeImageStyle(value) {
+  return String(value ?? '')
+    .replace(/(?:พร้อม|มี|ใส่|แสดง)?\s*(?:ข้อความ|ตัวหนังสือ|คำว่า|แคปชัน|ป้ายคำ)[^,.。]*/giu, '')
+    .replace(/(?:พร้อม|มี|ใส่|แสดง)?\s*(?:QR\s*Code|คิวอาร์โค้ด)[^,.。]*/giu, '')
+    .replace(/\s{2,}/g, ' ')
+    .replace(/^[\s,.;:–—-]+|[\s,.;:–—-]+$/g, '')
+    .trim();
+}
+
+/** สร้าง context ใบขอแบบ Candidate Spec (แชร์ระหว่าง caption กับ poster) */
+export function campaignContext(campaign = {}) {
   const snap = campaign.snapshot ?? {};
-  const position = String(campaign.title || snap.request_name || snap.job_description_name || '').trim();
+  const spec = campaign.jobSpec ?? resolveContentJobSpec(campaign);
+  const position = String(spec?.position ?? '').trim();
   if (!position) return null;
+
+  const val = (...keys) => {
+    for (const key of keys) {
+      const value = String(snap[key] ?? '').trim();
+      if (value) return value;
+    }
+    return '';
+  };
+  const age = snap.age_min || snap.age_max ? `${snap.age_min ?? 'ไม่ระบุ'}–${snap.age_max ?? 'ไม่ระบุ'} ปี` : '';
+  const location = String(campaign.province || val('location', 'site_name', 'work_addr')).trim();
+
   return [
-    `ตำแหน่ง/งาน: ${position}`,
-    campaign.province || snap.site_name ? `สถานที่ทำงาน: ${campaign.province || snap.site_name}` : '',
-    snap.work_addr ? `ที่อยู่ไซต์งาน: ${snap.work_addr}` : '',
-    snap.detail ? `รายละเอียดใบขอ: ${snap.detail}` : '',
+    `ตำแหน่งงานจริง: ${position}`,
+    spec?.family ? `Job Family: ${spec.familyLabel || spec.family}` : '',
+    location ? `สถานที่ทำงาน: ${location}` : '',
+    val('work_addr') && val('work_addr') !== location ? `ที่อยู่ไซต์งาน: ${val('work_addr')}` : '',
+    val('unit_name') ? `หน่วยงาน/ลูกค้า: ${val('unit_name')}` : '',
+    val('department') ? `สายงาน/แผนกต้นทาง: ${val('department')}` : '',
+    val('detail', 'job_description', 'duties', 'scope_of_work') ? `รายละเอียดใบขอ/หน้าที่: ${val('detail', 'job_description', 'duties', 'scope_of_work')}` : '',
     campaign.qty ? `จำนวนที่รับ: ${campaign.qty}` : '',
     campaign.remaining_qty ? `ยังขาดอีก: ${campaign.remaining_qty} คน` : '',
-    snap.department_code ? `แผนก: ${snap.department_code}` : '',
+    val('income', 'salary') ? `รายได้ที่ระบุ: ${val('income', 'salary')}` : '',
+    val('work_schedule') ? `วันเวลาทำงาน: ${val('work_schedule')}` : '',
+    val('gender') ? `เพศตามใบขอ: ${val('gender')}` : '',
+    age ? `ช่วงอายุตามใบขอ: ${age}` : '',
+    val('education') ? `วุฒิการศึกษา: ${val('education')}` : '',
+    val('note') ? `ข้อมูลเพิ่มเติม/สวัสดิการ: ${val('note')}` : '',
+    val('content_brief') ? `โจทย์ Content จากผู้ตรวจ (บังคับ): ${val('content_brief')}` : '',
   ].filter(Boolean).join('\n');
+}
+
+/** ประกอบ prompt ทั้งหมดแบบ pure function เพื่อ test ได้โดยไม่เรียก provider. */
+export function buildContentPrompt(campaign = {}) {
+  const ctx = campaignContext(campaign);
+  if (!ctx) return null;
+
+  const wins = (campaign.winningExamples ?? []).map((s) => String(s ?? '').trim()).filter(Boolean).slice(0, 2);
+  const winsBlock = wins.length
+    ? `\n\nแคปชัน Job Family เดียวกันที่เคยได้ผลดี — ใช้เป็นแนวทาง ห้ามลอกคำต่อคำ:\n` +
+      wins.map((w, i) => `ตัวอย่าง ${i + 1}:\n${w}`).join('\n---\n')
+    : '';
+
+  const loses = (campaign.losingExamples ?? []).map((s) => String(s ?? '').trim()).filter(Boolean).slice(0, 2);
+  const losesBlock = loses.length
+    ? `\n\n⚠️ แคปชัน Job Family เดียวกันที่วัดผลแล้วไม่ดี — ห้ามทำแนวเดิมซ้ำ:\n` +
+      loses.map((w, i) => `ตัวอย่างที่ไม่ควรทำ ${i + 1}:\n${w}`).join('\n---\n')
+    : '';
+
+  const rejected = (campaign.rejectionFeedback ?? [])
+    .filter((item) => item && (String(item.reason ?? '').trim() || String(item.caption ?? '').trim()))
+    .slice(0, 3);
+  const rejectedBlock = rejected.length
+    ? `\n\n🚫 Feedback จากผู้ตรวจร่างก่อนหน้า (บังคับแก้ทุกข้อ):\n` +
+      rejected.map((item, i) => [
+        `${i + 1}. เหตุผลที่ตีกลับ: ${String(item.reason ?? '').trim() || 'ผู้ตรวจไม่เลือกแนวนี้'}`,
+        String(item.caption ?? '').trim() ? `ร่างเดิมที่ห้ามทำซ้ำ:\n${String(item.caption).trim().slice(0, 600)}` : '',
+      ].filter(Boolean).join('\n')).join('\n---\n')
+    : '';
+
+  const research = campaign.research ?? null;
+  const angles = (research?.angles ?? []).map((s) => String(s ?? '').trim()).filter(Boolean).slice(0, 4);
+  const hooks = (research?.hooks ?? []).map((s) => String(s ?? '').trim()).filter(Boolean).slice(0, 4);
+  const researchBlock = angles.length || hooks.length
+    ? `\n\n🔍 ผลวิเคราะห์ตลาดสำหรับ Job Family นี้ — ใช้เฉพาะข้อที่ไม่ขัดกับใบขอ:` +
+      (angles.length ? `\nมุมที่ควรเล่น: ${angles.join(' · ')}` : '') +
+      (hooks.length ? `\nประโยคฮุกเปิด (ดัดแปลงได้ ห้ามลอกตรง): ${hooks.join(' | ')}` : '')
+    : '';
+
+  const spec = campaign.jobSpec ?? resolveContentJobSpec(campaign);
+  const trends = selectRelevantTrends(campaign.trends ?? [], spec, 'caption');
+  const trendsBlock = trends.length
+    ? `\n\n🔥 เทรนด์เฉพาะสายงานที่เกี่ยวข้อง — ใช้ได้เมื่อไม่ขัดกับใบขอ:\n` +
+      trends.map((t) => `- ${String(t.label).trim()}${t.note ? ` (${String(t.note).trim()})` : ''}`).join('\n')
+    : '';
+
+  const styleBlock = String(campaign.styleHint ?? '').trim()
+    ? `\n\nแนวการเขียนของเวอร์ชันนี้ (บังคับ): ${String(campaign.styleHint).trim()}`
+    : '';
+
+  return `เขียนคอนเทนต์สรรหาสำหรับใบขอนี้:\n${ctx}${winsBlock}${losesBlock}${rejectedBlock}${researchBlock}${trendsBlock}${styleBlock}`;
 }
 
 /**
@@ -244,6 +323,7 @@ export async function generatePosterFields(campaign = {}) {
   const ctx = campaignContext(campaign);
   if (!ctx) return null;
   const userMsg = `สรุปใบขอนี้เป็นข้อมูลลงโปสเตอร์:\n${ctx}`;
+  const humanPosterSystem = withHumanPlaybook(POSTER_SYSTEM, ['visual-direction']);
 
   // retry จนเก็บเกี่ยวได้ครบเครื่อง (title + คุณสมบัติอย่างน้อย 1) — qwen ตอบไม่นิ่งเป็นรอบ ๆ
   let out = null;
@@ -255,11 +335,11 @@ export async function generatePosterFields(campaign = {}) {
     if (attempt > 1) console.log(`  [content-gen] poster รอบ ${attempt}/3 (รอบก่อนไม่ครบ)`);
     try {
       if (provider === 'ollama' && ollamaBase) {
-        ({ out } = await callOllama({ base: ollamaBase, userMsg, system: POSTER_SYSTEM, tool: POSTER_TOOL }));
+        ({ out } = await callOllama({ base: ollamaBase, userMsg, system: humanPosterSystem, tool: POSTER_TOOL }));
       } else if (provider === 'openai' && openaiKey) {
-        ({ out } = await callOpenAI({ apiKey: openaiKey, userMsg, system: POSTER_SYSTEM, tool: POSTER_TOOL }));
+        ({ out } = await callOpenAI({ apiKey: openaiKey, userMsg, system: humanPosterSystem, tool: POSTER_TOOL }));
       } else if (apiKey) {
-        ({ out } = await callAnthropic({ apiKey, userMsg, system: POSTER_SYSTEM, tool: POSTER_TOOL }));
+        ({ out } = await callAnthropic({ apiKey, userMsg, system: humanPosterSystem, tool: POSTER_TOOL }));
       } else {
         return null;
       }
@@ -330,12 +410,11 @@ function harvestPosterFields(out) {
   const extra = String(get('ข้อควรระวัง', 'เงื่อนไข', 'note')).trim();
   if (extra && quals.length < 6) quals.push(extra);
 
-  let benefits = asList(get('benefits', 'จุดขาย', 'สวัสดิการเด่น'));
-  if (benefits.length === 0) benefits = ['งานมั่นคง', 'สวัสดิการครบ', 'รายได้ดี'];
+  const benefits = asList(get('benefits', 'จุดขาย', 'สวัสดิการเด่น'));
 
   return {
     title,
-    badge: String(get('badge', 'ป้าย')).trim() || 'เปิดรับสมัครด่วน',
+    badge: String(get('badge', 'ป้าย')).trim() || 'เปิดรับสมัคร',
     location: String(get('location', 'สถานที่', 'สถานที่ทำงาน')).trim(),
     worktime: String(get('worktime', 'เวลาทำงาน', 'เวลา', 'วันเวลาทำงาน')).trim(),
     salaryTotal,

@@ -1,6 +1,6 @@
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth';
-import { getAssetBytes } from '@/lib/repo';
+import { auditDataAccess, getAssetBytes } from '@/lib/repo';
 
 // Stream a candidate asset (image/pdf) from Postgres bytea.
 // Auth-gated: only signed-in users may fetch candidate files.
@@ -11,6 +11,13 @@ export async function GET(_req: Request, { params }: { params: { id: string } })
   if (!/^[0-9a-f-]{36}$/i.test(params.id)) return new Response('Bad id', { status: 400 });
   const asset = await getAssetBytes(params.id);
   if (!asset || !asset.content) return new Response('Not found', { status: 404 });
+  await auditDataAccess({
+    actor: session.user?.email ?? session.user?.name ?? null,
+    action: 'view_asset',
+    subjectType: 'candidate_asset',
+    subjectId: params.id,
+    purpose: 'recruitment_review',
+  });
 
   const filename = `${(asset.title || 'file').replace(/[^\w.-]/g, '_')}.${asset.file_type || 'bin'}`;
   return new Response(asset.content as unknown as BodyInit, {

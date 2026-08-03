@@ -73,7 +73,7 @@ async function startCheckSession(userId, opts) {
     throw err;
   }
 
-  const user = await db.getUserById(uid);
+  const user = await db.getUserByIdWithSecrets(uid);
   if (!user) {
     const err = new Error('ไม่พบ User');
     err.statusCode = 404;

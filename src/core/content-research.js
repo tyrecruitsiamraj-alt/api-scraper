@@ -1,4 +1,6 @@
 import { resolveTextProvider, callAnthropic, callOpenAI, callOllama } from './content-gen.js';
+import { resolveContentJobSpec } from './content-job-spec.js';
+import { withHumanPlaybook } from './human-content-playbook.js';
 
 /**
  * Market research ก่อนคิดคอนเทนต์ — ตอบโจทย์ "รู้ได้ไงว่าอะไรดี ตั้งแต่ยังไม่มีสถิติของเราเอง"
@@ -42,8 +44,10 @@ const RESEARCH_TOOL = {
 
 const RESEARCH_SYSTEM = `คุณคือนักวางกลยุทธ์คอนเทนต์สรรหาบุคลากรบนกลุ่มหางาน Facebook ในไทย
 มีประสบการณ์ว่าโพสต์รับสมัครงานแบบไหนคนแห่ทัก แบบไหนคนเลื่อนผ่าน
-ให้วิเคราะห์จากตำแหน่ง+พื้นที่ที่ได้รับ ว่า "แนว/ฮุก/สไตล์รูป" ใดดึงผู้สมัครกลุ่มนี้ได้จริง
-ตอบสั้น กระชับ ใช้ได้จริง เป็นภาษาไทย ห้ามแต่งเงินเดือน/สวัสดิการที่ไม่ได้ให้มา`;
+ให้วิเคราะห์จากตำแหน่งงานจริง+Job Family ว่า "แนว/ฮุก/สไตล์รูป" ใดดึงผู้สมัครกลุ่มนี้ได้จริง
+ห้ามเดาตำแหน่งจากสถานที่หรือลูกค้า เช่น ทำงานโรงพยาบาลไม่ได้แปลว่าเป็นบุคลากรการแพทย์
+ตอบสั้น กระชับ ใช้ได้จริง เป็นภาษาไทย ห้ามแต่งเงินเดือน/สวัสดิการ/เริ่มงานทันทีที่ไม่ได้ให้มา
+image_style ต้องเป็นภาพคนทำงานและบรรยากาศเท่านั้น ห้ามเสนอข้อความ ตัวหนังสือ โลโก้ ป้าย หรือ QR Code ในภาพ`;
 
 /**
  * @param {{ title?:string, province?:string, snapshot?:Record<string,any>,
@@ -54,7 +58,8 @@ export async function researchContentAngles(input = {}) {
   const prov = resolveTextProvider();
   if (!prov) return null;
 
-  const position = String(input.title ?? input.snapshot?.request_name ?? '').trim();
+  const jobSpec = input.jobSpec ?? resolveContentJobSpec(input);
+  const position = String(jobSpec?.position ?? '').trim();
   if (!position) return null;
 
   const kw = (input.trendKeywords ?? []).map((s) => String(s ?? '').trim()).filter(Boolean).slice(0, 6);
@@ -66,8 +71,12 @@ export async function researchContentAngles(input = {}) {
     .slice(0, 8);
 
   const userMsg = [
-    `ตำแหน่งที่รับสมัคร: ${position}`,
+    `ตำแหน่งงานจริงที่รับสมัคร: ${position}`,
+    jobSpec?.family ? `Job Family: ${jobSpec.familyLabel || jobSpec.family}` : '',
     input.province ? `พื้นที่ทำงาน: ${input.province}` : '',
+    input.snapshot?.department ? `สายงาน/แผนกต้นทาง: ${String(input.snapshot.department).trim()}` : '',
+    input.snapshot?.job_description ? `หน้าที่จากใบขอ: ${String(input.snapshot.job_description).trim()}` : '',
+    input.snapshot?.detail ? `รายละเอียดใบขอ: ${String(input.snapshot.detail).trim()}` : '',
     kw.length ? `คำค้นที่คนไทยใช้หางานนี้ (มาแรง): ${kw.join(', ')}` : '',
     trends.length ? `เทรนด์/มีมที่กำลังมาตอนนี้ (อยากให้คอนเทนต์เกาะกระแสอย่างเนียน ไม่ฝืน):\n${trends.map((t) => `- ${t.label}${t.note ? ` (${t.note})` : ''}`).join('\n')}` : '',
     wins.length ? `แคปชันของเราที่เคยได้ผลดี (อ้างอิงโทน):\n${wins.map((w) => `- ${w.slice(0, 200)}`).join('\n')}` : '',
@@ -77,7 +86,7 @@ export async function researchContentAngles(input = {}) {
       ' — ตอบเป็น angles/hooks/image_style',
   ].filter(Boolean).join('\n');
 
-  const args = { userMsg, system: RESEARCH_SYSTEM, tool: RESEARCH_TOOL };
+  const args = { userMsg, system: withHumanPlaybook(RESEARCH_SYSTEM, ['content-strategy']), tool: RESEARCH_TOOL };
   let out = null;
   let model = '';
   // qwen ตอบไม่นิ่ง — ลองสูงสุด 2 รอบ

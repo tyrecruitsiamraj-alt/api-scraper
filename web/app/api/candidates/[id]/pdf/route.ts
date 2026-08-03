@@ -1,7 +1,7 @@
 import { getServerSession } from 'next-auth';
 import { NextResponse } from 'next/server';
 import { authOptions } from '@/lib/auth';
-import { getAssetBytes, getCandidate } from '@/lib/repo';
+import { auditDataAccess, getAssetBytes, getCandidate } from '@/lib/repo';
 import { buildResumeHtml, htmlToPdf, resumeFileName } from '@/lib/resumePdf';
 
 export const runtime = 'nodejs';
@@ -24,6 +24,13 @@ export async function GET(_req: Request, { params }: { params: { id: string } })
 
   const c = await getCandidate(params.id);
   if (!c) return NextResponse.json({ error: 'not found' }, { status: 404 });
+  await auditDataAccess({
+    actor: session.user?.email ?? session.user?.name ?? null,
+    action: 'download_pdf',
+    subjectType: 'candidate',
+    subjectId: params.id,
+    purpose: 'recruitment_review',
+  });
 
   let profileDataUrl: string | null = null;
   const profile = (c.assets ?? []).find((a: any) => a.kind === 'profile' && a.download_status === 'success');
