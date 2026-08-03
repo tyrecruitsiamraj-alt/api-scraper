@@ -32,7 +32,7 @@ export function NewTaskForm({ connectors }: { connectors: ConnectorOption[] }) {
       id="new-task-form"
       className="card p-5"
     >
-      <h2 className="text-base font-semibold mb-4">สร้างงาน Scraping</h2>
+      <h2 className="text-base font-semibold mb-4">สร้างงานค้นหาผู้สมัคร</h2>
 
       <div className="grid gap-4 md:grid-cols-2">
         <div>
@@ -40,7 +40,7 @@ export function NewTaskForm({ connectors }: { connectors: ConnectorOption[] }) {
           <input name="name" required placeholder="เช่น โปรแกรมเมอร์ กรุงเทพ" className="field" />
         </div>
         <div>
-          <label className="label">Connector (บัญชี)</label>
+          <label className="label">บัญชีที่ใช้ค้นหา</label>
           <select name="connectorId" required className="field" defaultValue="">
             <option value="" disabled>
               เลือก connector…

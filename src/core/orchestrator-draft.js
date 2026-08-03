@@ -39,18 +39,34 @@ export async function generateDraftForCampaign(campaignId) {
     [String(c.title ?? '').trim()],
   ).then((r) => r.rows.map((x) => x.caption)).catch(() => []);
 
+  // งานที่คนอนุมัติคือสัญญาณด้านคุณภาพก่อนโพสต์ แยกจาก "ผู้ชนะ" ที่ต้องมีผลลัพธ์จริง.
+  const preferredExamples = await query(
+    `SELECT cc.caption, cf.reason_codes, cf.note
+       FROM content_feedback cf
+       JOIN campaign_contents cc ON cc.id=cf.content_id
+       JOIN recruit_campaigns rc ON rc.id=cf.campaign_id
+      WHERE cf.decision='approved' AND cc.caption IS NOT NULL AND TRIM(cc.caption) <> ''
+      ORDER BY (rc.title IS NOT NULL AND $1 <> '' AND rc.title ILIKE '%' || $1 || '%') DESC,
+               cf.created_at DESC
+      LIMIT 2`,
+    [String(c.title ?? '').trim()],
+  ).then((r) => r.rows.map((x) => {
+    const why = [...(x.reason_codes || []), x.note].filter(Boolean).join(', ');
+    return `${x.caption}${why ? `\n[เหตุผลที่อนุมัติ: ${why}]` : ''}`;
+  })).catch(() => []);
+
   // แนวที่ "ไม่เวิร์ค" (คนสนใจน้อย): เอาแคปชันที่คะแนนต่ำสุดมาเตือน AI ให้เลี่ยง
   // (ตำแหน่งใกล้เคียงก่อน แล้วคะแนนต่ำก่อน; ตาราง schema-014 ยังไม่ migrate = [] ไม่กระทบ gen)
   const losingExamples = await query(
-    `SELECT cc.caption
+    `SELECT cc.caption, lp.reason
        FROM content_losing_patterns lp
        JOIN campaign_contents cc ON cc.id = lp.sample_content_id
       WHERE cc.caption IS NOT NULL AND TRIM(cc.caption) <> ''
       ORDER BY (lp.position_family IS NOT NULL AND $1 <> '' AND lp.position_family ILIKE '%' || $1 || '%') DESC,
-               lp.engagement_score ASC NULLS LAST
+               (lp.source = 'human_feedback') DESC, lp.engagement_score ASC NULLS LAST, lp.created_at DESC
       LIMIT 2`,
     [String(c.title ?? '').trim()],
-  ).then((r) => r.rows.map((x) => x.caption)).catch(() => []);
+  ).then((r) => r.rows.map((x) => `${x.caption}${x.reason ? `\n[เหตุผลที่ไม่ผ่าน: ${x.reason}]` : ''}`)).catch(() => []);
 
   // เทรนด์ที่กำลังมา (คนเปิดไว้บนเว็บ) — เกาะเทรนด์/มีมให้ทัน (ไอติมอัลตร้าสมูท ฯลฯ)
   const trends = await activeContentTrends().catch(() => []);
@@ -71,6 +87,7 @@ export async function generateDraftForCampaign(campaignId) {
     remaining_qty: c.remaining_qty,
     snapshot: c.request_snapshot ?? {},
     winningExamples,
+    preferredExamples,
     losingExamples,
     research,
     trends,
@@ -144,6 +161,7 @@ export async function generateDraftForCampaign(campaignId) {
       style: AB_STYLES[i] ?? null,
       imageStyle: styles[i] ?? styles[0] ?? research?.imageStyle ?? null, // สไตล์รูปของเวอร์ชันนี้ (ไว้เรียนรู้ว่าอันไหนชนะ)
       used_winning: winningExamples.length,
+      used_feedback: preferredExamples.length,
       used_losing: losingExamples.length,
     });
     try {

@@ -83,7 +83,7 @@ const POSTER_SYSTEM = `คุณคือคนสรุปใบขอกำล
 /**
  * @param {{ title?:string, positions?:string, province?:string, qty?:number,
  *   remaining_qty?:number, snapshot?:Record<string,any>,
- *   winningExamples?: string[], losingExamples?: string[] }} campaign
+ *   winningExamples?: string[], preferredExamples?: string[], losingExamples?: string[] }} campaign
  *   winningExamples = แคปชันที่เคยได้ engagement สูง (จาก content_winning_patterns)
  *   ใส่เป็นแรงบันดาลใจให้ AI คิดตามแนวที่เคยเวิร์ค — ไม่มีก็ gen ได้ปกติ
  *   losingExamples = แคปชันที่เคยได้ engagement ต่ำ (จาก content_losing_patterns)
@@ -130,6 +130,15 @@ export async function generateContent(campaign = {}) {
       wins.map((w, i) => `ตัวอย่าง ${i + 1}:\n${w}`).join('\n---\n')
     : '';
 
+  const preferred = (campaign.preferredExamples ?? [])
+    .map((s) => String(s ?? '').trim())
+    .filter(Boolean)
+    .slice(0, 2);
+  const preferredBlock = preferred.length
+    ? `\n\nตัวอย่างที่ผู้ตรวจเคยอนุมัติ — ใช้เป็นแนวทางด้านความครบถ้วนและน้ำเสียง แต่ห้ามลอกคำต่อคำ:\n` +
+      preferred.map((w, i) => `ตัวอย่าง ${i + 1}:\n${w}`).join('\n---\n')
+    : '';
+
   // แนวที่ "ไม่เวิร์ค" (คนสนใจน้อย) — เตือน AI ให้เลี่ยงโทน/โครงสร้างแบบนี้
   const loses = (campaign.losingExamples ?? [])
     .map((s) => String(s ?? '').trim())
@@ -162,7 +171,7 @@ export async function generateContent(campaign = {}) {
   const styleBlock = String(campaign.styleHint ?? '').trim()
     ? `\n\nแนวการเขียนของเวอร์ชันนี้ (บังคับ): ${String(campaign.styleHint).trim()}`
     : '';
-  const userMsg = `เขียนคอนเทนต์สรรหาสำหรับใบขอนี้:\n${ctx}${winsBlock}${losesBlock}${researchBlock}${trendsBlock}${styleBlock}`;
+  const userMsg = `เขียนคอนเทนต์สรรหาสำหรับใบขอนี้:\n${ctx}${winsBlock}${preferredBlock}${losesBlock}${researchBlock}${trendsBlock}${styleBlock}`;
 
   // qwen/Ollama ตอบไม่นิ่งเป็นรอบ ๆ — ว่าง/พังให้ลองซ้ำสูงสุด 3 รอบ
   let out = null;

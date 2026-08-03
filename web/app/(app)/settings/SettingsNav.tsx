@@ -4,9 +4,9 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 
 const ITEMS = [
-  { href: '/settings/connectors', label: 'บัญชีเชื่อมต่อ', detail: 'บัญชี Scraping และ Facebook' },
+  { href: '/settings/connectors', label: 'บัญชีที่ใช้งาน', detail: 'JobBKK, JobThai และ Facebook' },
   { href: '/settings/posting', label: 'กลุ่มโพสต์', detail: 'เลือกกลุ่มให้บัญชี และคลังกลุ่ม' },
-  { href: '/settings/trends', label: 'เทรนด์คอนเทนต์', detail: 'เทรนด์/มีมที่อยากให้คอนเทนต์เกาะ' },
+  { href: '/settings/trends', label: 'กระแสที่น่าสนใจ', detail: 'หัวข้อหรือมุกที่อยากให้ประกาศนำไปใช้' },
 ];
 
 export function SettingsNav() {

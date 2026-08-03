@@ -69,9 +69,9 @@ export function AutopostActivity({ initial }: { initial: Activity | null }) {
         {a.running > 0 ? (
           <span className="pill bg-blue-50 text-blue-700"><span className="dot bg-blue-500" />กำลังโพสต์ {a.running}</span>
         ) : jobsStuck ? (
-          <span className="pill bg-red-50 text-red-700"><span className="dot bg-red-500" />งานค้าง — worker อาจไม่รัน</span>
+          <span className="pill bg-red-50 text-red-700"><span className="dot bg-red-500" />งานค้าง — ระบบอัตโนมัติยังไม่ทำงาน</span>
         ) : workerActive ? (
-          <span className="pill bg-green-50 text-green-700"><span className="dot bg-green-500" />Worker ทำงานล่าสุด {timeAgo(a.worker_last_seen)}</span>
+          <span className="pill bg-green-50 text-green-700"><span className="dot bg-green-500" />ระบบทำงานล่าสุด {timeAgo(a.worker_last_seen)}</span>
         ) : (
           <span className="pill bg-black/5 text-subtle"><span className="dot bg-gray-400" />ไม่มีงานในคิว</span>
         )}
@@ -80,7 +80,7 @@ export function AutopostActivity({ initial }: { initial: Activity | null }) {
 
       {jobsStuck && (
         <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-2.5 text-[13px] text-red-700">
-          มีงาน {a.queued} รายการค้างในคิวแต่ไม่มี worker มาหยิบ — รัน <code>npm run worker:post</code> บนเครื่อง worker
+          มีงาน {a.queued} รายการรออยู่ แต่เครื่องเผยแพร่ Facebook ยังไม่ทำงาน — กรุณาเปิดระบบอัตโนมัติบนเครื่องหลัก
           {a.worker_last_seen && <> (แตะคิวล่าสุด {timeAgo(a.worker_last_seen)})</>}
         </div>
       )}

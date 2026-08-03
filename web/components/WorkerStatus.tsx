@@ -10,15 +10,15 @@ export async function WorkerStatus() {
     return (
       <div className="flex items-center gap-2.5 rounded-2xl border border-line/70 bg-white px-4 py-2.5 text-xs shadow-card text-subtle">
         <span className="inline-block h-1.5 w-1.5 rounded-full bg-gray-300" />
-        <span className="eyebrow">เครื่องทำงาน</span>
-        <span>ยังไม่มีเครื่องรายงานตัว — เปิด start-workers.bat (PC) / start-mac.command (Mac) แล้วรอ ~1 นาที</span>
+        <span className="eyebrow">ระบบอัตโนมัติ</span>
+        <span>เครื่องที่ทำงานเบื้องหลังยังไม่เปิด งานใหม่จะรออยู่จนกว่าเครื่องจะกลับมาทำงาน</span>
       </div>
     );
   }
   const offline = workers.filter((w) => !w.online);
   return (
     <div className="flex flex-wrap items-center gap-x-5 gap-y-2 rounded-2xl border border-line/70 bg-white px-4 py-2.5 text-xs shadow-card">
-      <span className="eyebrow">เครื่องทำงาน</span>
+      <span className="eyebrow">ระบบอัตโนมัติ</span>
       {workers.map((w) => (
         <span key={`${w.kind}:${w.name}`} className="inline-flex items-center gap-2">
           <span className={`relative inline-flex h-2 w-2`}>
@@ -27,13 +27,13 @@ export async function WorkerStatus() {
           </span>
           <span className={w.online ? 'text-ink' : 'font-medium text-accent'}>
             {w.name}
-            <span className="text-subtle"> · {w.kind === 'scraper' ? 'สแครป/AI' : 'โพสต์ FB'}</span>
+            <span className="text-subtle"> · {w.kind === 'scraper' ? 'ค้นหาผู้สมัคร/สร้างประกาศ' : 'เผยแพร่ Facebook'}</span>
             {!w.online && ` — ออฟไลน์ตั้งแต่ ${new Date(w.last_seen).toLocaleString('th-TH', { timeStyle: 'short', dateStyle: 'short' })}`}
           </span>
         </span>
       ))}
       {offline.length > 0 && (
-        <span className="ml-auto font-medium text-accent">{offline.length} เครื่องหาย — งานจะค้างคิวจนกว่าจะเปิดกลับ</span>
+        <span className="ml-auto font-medium text-accent">ระบบอัตโนมัติหยุด {offline.length} เครื่อง — งานจะรอจนกว่าเครื่องจะกลับมา</span>
       )}
     </div>
   );

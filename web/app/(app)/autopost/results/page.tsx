@@ -40,7 +40,7 @@ export default async function AutopostResultsPage({
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-2xl font-semibold tracking-tight">ผลลัพธ์ &amp; Leads</h1>
+        <h1 className="text-2xl font-semibold tracking-tight">ผลลัพธ์และผู้สนใจ</h1>
         <p className="mt-1 text-sm text-subtle">เบอร์ผู้สนใจที่เก็บได้จากคอมเมนต์ พร้อมทักกลับ · โพสต์ตำแหน่งไหนได้ผลจริง</p>
       </div>
 
@@ -53,10 +53,10 @@ export default async function AutopostResultsPage({
       ) : (
         <>
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-            <Stat label="Lead ทั้งหมด" value={summary.leads_total.toLocaleString()} sub="เบอร์จากคอมเมนต์ (ตัดซ้ำแล้ว)" accent />
-            <Stat label="Lead 7 วัน" value={summary.leads_7d.toLocaleString()} sub={`วันนี้ ${summary.leads_today.toLocaleString()}`} />
+            <Stat label="ผู้สนใจทั้งหมด" value={summary.leads_total.toLocaleString()} sub="เบอร์จากคอมเมนต์ (ตัดซ้ำแล้ว)" accent />
+            <Stat label="ผู้สนใจใน 7 วัน" value={summary.leads_7d.toLocaleString()} sub={`วันนี้ ${summary.leads_today.toLocaleString()}`} />
             <Stat
-              label="โพสต์ที่ได้ Lead"
+              label="โพสต์ที่ได้ผู้สนใจ"
               value={summary.posts_with_leads.toLocaleString()}
               sub={`จากโพสต์ทั้งหมด ${summary.posts_total.toLocaleString()}`}
             />
@@ -70,7 +70,7 @@ export default async function AutopostResultsPage({
           {/* leads แยกตามตำแหน่ง — ประกาศตำแหน่งไหนดึงคนได้ */}
           {byPosition.length > 0 && (
             <div>
-              <h2 className="mb-3 text-base font-semibold">Lead ตามตำแหน่ง</h2>
+              <h2 className="mb-3 text-base font-semibold">ผู้สนใจแยกตามตำแหน่ง</h2>
               <div className="card divide-y divide-hairline">
                 {byPosition.map((p) => (
                   <div key={p.position} className="flex items-center gap-3 px-4 py-2.5">
@@ -93,7 +93,7 @@ export default async function AutopostResultsPage({
           {/* โพสต์ที่เก็บ lead ได้ — เบอร์พร้อมทักกลับ */}
           <div>
             <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-              <h2 className="text-base font-semibold">โพสต์ที่ได้ Lead ({posts.length})</h2>
+              <h2 className="text-base font-semibold">โพสต์ที่ได้ผู้สนใจ ({posts.length})</h2>
               <div className="flex items-center gap-1">
                 {RANGES.map((r) => (
                   <Link
@@ -110,7 +110,7 @@ export default async function AutopostResultsPage({
             </div>
             {posts.length === 0 ? (
               <div className="card px-5 py-10 text-center text-sm text-subtle">
-                ยังไม่มีโพสต์ที่เก็บ lead ได้ในช่วงนี้ — โพสต์แล้วรอให้ตัวเก็บคอมเมนต์ทำงาน (หน้า “เก็บคอมเมนต์”)
+                ยังไม่มีโพสต์ที่พบผู้สนใจในช่วงนี้ — หลังเผยแพร่แล้ว ระบบจะตรวจคอมเมนต์และรวบรวมเบอร์ให้
               </div>
             ) : (
               <div className="grid gap-3">

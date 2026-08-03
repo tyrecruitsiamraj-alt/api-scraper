@@ -42,13 +42,13 @@ export default async function AutopostOverviewPage() {
     <div className="space-y-6">
       <div>
         <h1 className="text-2xl font-semibold tracking-tight">ภาพรวมการโพสต์</h1>
-        <p className="mt-1 text-sm text-subtle">คิวโพสต์ Facebook · สถานะ worker · โควต้า (ดูเบอร์ผู้สนใจได้ที่แท็บผลลัพธ์)</p>
+        <p className="mt-1 text-sm text-subtle">ดูงานที่กำลังรอโพสต์ ความพร้อมของระบบ และจำนวนที่แต่ละบัญชียังโพสต์ได้วันนี้</p>
       </div>
 
       <AutopostNav />
 
       {!a ? (
-        <p className="text-sm text-subtle">ยังไม่มีข้อมูล Auto-Post (ตรวจสอบการเชื่อมต่อฐานข้อมูล)</p>
+        <p className="text-sm text-subtle">ยังอ่านข้อมูลการโพสต์ไม่ได้ กรุณาตรวจว่าบริการเผยแพร่ Facebook เปิดอยู่</p>
       ) : (
         <>
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
@@ -60,17 +60,17 @@ export default async function AutopostOverviewPage() {
             <Stat
               label="บัญชีเต็มโควต้า"
               value={a.over_cap.toLocaleString()}
-              sub={a.paused > 0 ? `พัก (circuit breaker) ${a.paused}` : 'ไม่มีบัญชีถูกพัก'}
+              sub={a.paused > 0 ? `ระบบพักบัญชีชั่วคราว ${a.paused}` : 'ทุกบัญชีพร้อมใช้งาน'}
             />
-            <Stat label="Lead วันนี้" value={a.leads_today.toLocaleString()} sub="เบอร์จากคอมเมนต์" />
-            <Stat label="Lead 14 วัน" value={a.leads_14d.toLocaleString()} />
+            <Stat label="ผู้สนใจวันนี้" value={a.leads_today.toLocaleString()} sub="เบอร์ที่พบในคอมเมนต์" />
+            <Stat label="ผู้สนใจ 14 วัน" value={a.leads_14d.toLocaleString()} />
           </div>
           <div className="card flex flex-wrap items-center gap-x-4 gap-y-1.5 px-4 py-2.5 text-xs">
             <span className="eyebrow">ช่วงเวลาโพสต์แนะนำ</span>
             {bestTimes.length > 0 ? (
               bestTimes.map((t) => (
                 <span key={`${t.dow}-${t.hour}`} className="pill bg-emerald-50 text-emerald-700">
-                  {DOW_TH[t.dow]} {String(t.hour).padStart(2, '0')}:00 · score {t.score.toFixed(1)}
+                  {DOW_TH[t.dow]} {String(t.hour).padStart(2, '0')}:00 · คะแนน {t.score.toFixed(1)}
                 </span>
               ))
             ) : (
@@ -78,16 +78,16 @@ export default async function AutopostOverviewPage() {
             )}
           </div>
           <p className="text-xs text-subtle">
-            จัดการ Connector, Job และการตั้งค่าโพสต์ได้จากเมนู “ตั้งค่า” ด้านบน
+            จัดการบัญชี Facebook กลุ่มที่จะโพสต์ และเนื้อหางานได้จากเมนู “ตั้งค่า”
           </p>
         </>
       )}
 
       {/* การอนุมัติรวมไว้ที่ Work Center จุดเดียว เพื่อลดเส้นทางซ้ำและลดการกดผิดหน้า. */}
       <div>
-        <h2 className="mb-3 text-base font-semibold">Content รอตรวจ ({pending.length})</h2>
+        <h2 className="mb-3 text-base font-semibold">ประกาศที่รอตรวจ ({pending.length})</h2>
         <div className="card px-5 py-8 text-center text-sm text-subtle">
-          <p>{pending.length > 0 ? `มี ${pending.length} งานรอตรวจและเลือกบัญชีโพสต์` : 'ตอนนี้ไม่มี Content รอตรวจ'}</p>
+          <p>{pending.length > 0 ? `มี ${pending.length} งานรอตรวจและเลือกบัญชีที่จะใช้โพสต์` : 'ตอนนี้ไม่มีประกาศรอตรวจ'}</p>
           <Link href="/orchestrator" className="btn-primary btn-sm mt-3 inline-flex">ไปจัดการที่ศูนย์งาน</Link>
         </div>
       </div>

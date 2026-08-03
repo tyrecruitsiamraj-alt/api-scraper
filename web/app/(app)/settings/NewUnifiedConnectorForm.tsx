@@ -6,7 +6,7 @@ import { createConnectorAction } from '@/lib/actions';
 const PLATFORMS = [
   { value: 'jobbkk', label: 'JobBKK', detail: 'ดึง Resume', color: 'border-blue-200 bg-blue-50/60' },
   { value: 'jobthai', label: 'JobThai', detail: 'ดึง Resume', color: 'border-orange-200 bg-orange-50/60' },
-  { value: 'facebook', label: 'Facebook', detail: 'Auto-Post', color: 'border-indigo-200 bg-indigo-50/60' },
+  { value: 'facebook', label: 'Facebook', detail: 'ใช้เผยแพร่ประกาศ', color: 'border-indigo-200 bg-indigo-50/60' },
 ];
 
 export function NewUnifiedConnectorForm({ workers = [] }: { workers?: string[] }) {
@@ -23,7 +23,7 @@ export function NewUnifiedConnectorForm({ workers = [] }: { workers?: string[] }
         className="group flex w-full items-center justify-center gap-2.5 rounded-[18px] border border-dashed border-hairline py-4 text-sm font-medium text-subtle transition-colors hover:border-accent/40 hover:bg-accent/[0.03] hover:text-accent"
       >
         <span className="grid h-6 w-6 place-items-center rounded-full bg-black/5 text-base leading-none text-ink transition-colors group-hover:bg-accent group-hover:text-white">+</span>
-        เพิ่ม Connector ใหม่
+        เพิ่มบัญชีใหม่
       </button>
     );
   }
@@ -38,7 +38,7 @@ export function NewUnifiedConnectorForm({ workers = [] }: { workers?: string[] }
           setPlatform('jobbkk');
           setOpen(false);
         } catch (e) {
-          setError(e instanceof Error ? e.message : 'เพิ่ม Connector ไม่สำเร็จ');
+          setError(e instanceof Error ? e.message : 'เพิ่มบัญชีไม่สำเร็จ');
         } finally {
           setSubmitting(false);
         }
@@ -47,8 +47,8 @@ export function NewUnifiedConnectorForm({ workers = [] }: { workers?: string[] }
     >
       <div className="mb-5 flex items-center justify-between gap-3">
         <div>
-          <h2 className="text-[15px] font-semibold">เพิ่ม Connector</h2>
-          <p className="mt-0.5 text-xs text-subtle">เลือกได้ทั้งบัญชีดึงผู้สมัครและบัญชีโพสต์ Facebook</p>
+          <h2 className="text-[15px] font-semibold">เพิ่มบัญชีที่ระบบจะใช้งาน</h2>
+          <p className="mt-0.5 text-xs text-subtle">เลือกบัญชีสำหรับค้นหาผู้สมัครหรือเผยแพร่ประกาศบน Facebook</p>
         </div>
         <button type="button" onClick={() => setOpen(false)} className="grid h-8 w-8 place-items-center rounded-full text-subtle hover:bg-black/5 hover:text-ink" aria-label="ปิด">✕</button>
       </div>
@@ -76,11 +76,11 @@ export function NewUnifiedConnectorForm({ workers = [] }: { workers?: string[] }
           <input name="label" required placeholder={facebook ? 'Facebook - ทีมสรรหา 1' : 'JobBKK - ทีม HR 1'} className="field" />
         </div>
         <div>
-          <label className="label">{facebook ? 'อีเมลหรือเบอร์ที่ใช้ล็อกอิน' : 'Username'}</label>
+          <label className="label">{facebook ? 'อีเมลหรือเบอร์ที่ใช้เข้าสู่ระบบ' : 'ชื่อผู้ใช้'}</label>
           <input name="username" required autoComplete="off" placeholder={facebook ? 'email@example.com หรือ 08x...' : 'ชื่อผู้ใช้ของบัญชี'} className="field" />
         </div>
         <div>
-          <label className="label">Password</label>
+          <label className="label">รหัสผ่าน</label>
           <input name="password" type="password" required autoComplete="new-password" placeholder="••••••••" className="field" />
         </div>
 
@@ -92,10 +92,10 @@ export function NewUnifiedConnectorForm({ workers = [] }: { workers?: string[] }
             </div>
             <div>
               <label className="label">เบอร์ของบัญชีเอง</label>
-              <input name="contactPhone" placeholder="ใช้ตัดเบอร์ตัวเองออกจาก Lead" className="field" />
+              <input name="contactPhone" placeholder="ใช้แยกเบอร์ของเราออกจากรายชื่อผู้สนใจ" className="field" />
             </div>
             <div className="md:col-span-2">
-              <label className="label">ผูกบัญชีกับเครื่อง (Pin)</label>
+              <label className="label">กำหนดเครื่องประจำของบัญชี</label>
               <input
                 name="preferredWorker"
                 list="facebook-worker-names"
@@ -106,7 +106,7 @@ export function NewUnifiedConnectorForm({ workers = [] }: { workers?: string[] }
                 {workers.map((worker) => <option key={worker} value={worker} />)}
               </datalist>
               <p className="mt-1.5 text-xs text-subtle">
-                เลือกเครื่องเดิมให้บัญชีนี้เพื่อไม่ให้ IP สลับ · เว้นว่างได้หากยังไม่ทราบชื่อเครื่อง
+                ใช้เครื่องเดิมกับบัญชีนี้ทุกครั้ง เพื่อลดโอกาสที่ Facebook จะขอยืนยันตัวตน · เว้นว่างได้หากยังไม่ทราบชื่อเครื่อง
               </p>
             </div>
           </>
@@ -117,9 +117,9 @@ export function NewUnifiedConnectorForm({ workers = [] }: { workers?: string[] }
         <div className={`grid gap-4 ${facebook ? '' : 'sm:grid-cols-2'}`}>
           {!facebook && (
             <div>
-              <label className="label">จำนวนต่อรอบ</label>
+              <label className="label">จำนวนผู้สมัครต่อครั้ง</label>
               <input name="scrapeLimit" type="number" min={1} max={100} defaultValue={15} className="field" />
-              <p className="mt-1.5 text-xs text-subtle">ดึงสูงสุดต่อการรันหนึ่งครั้ง</p>
+              <p className="mt-1.5 text-xs text-subtle">จำนวนสูงสุดที่ระบบจะค้นหาในการทำงานหนึ่งครั้ง</p>
             </div>
           )}
           <div>
@@ -132,15 +132,15 @@ export function NewUnifiedConnectorForm({ workers = [] }: { workers?: string[] }
 
       {facebook && (
         <p className="mt-4 rounded-xl bg-amber-50 px-3 py-2 text-xs text-amber-800">
-          Worker จะใช้ข้อมูลนี้เปิด Chrome และล็อกอินเมื่อรับงานครั้งแรก หาก Facebook ขอ OTP ให้ยืนยันบนเครื่องที่ Pin ไว้
+          ระบบจะเปิด Facebook และเข้าสู่บัญชีนี้เมื่อเริ่มทำงานครั้งแรก หาก Facebook ขอรหัส OTP ให้ยืนยันบนเครื่องประจำที่เลือกไว้
         </p>
       )}
       {error && <p className="mt-4 rounded-xl bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
 
       <div className="mt-6 flex flex-wrap items-center gap-2.5">
-        <button type="submit" disabled={submitting} className="btn-primary">{submitting ? 'กำลังบันทึก…' : 'เพิ่ม Connector'}</button>
+        <button type="submit" disabled={submitting} className="btn-primary">{submitting ? 'กำลังบันทึก…' : 'เพิ่มบัญชี'}</button>
         <button type="button" onClick={() => setOpen(false)} className="btn-secondary">ยกเลิก</button>
-        {!facebook && <span className="ml-auto text-xs text-subtle">รหัสผ่าน Scraping เข้ารหัส AES‑256</span>}
+        {!facebook && <span className="ml-auto text-xs text-subtle">รหัสผ่านถูกเข้ารหัสก่อนบันทึก</span>}
       </div>
     </form>
   );

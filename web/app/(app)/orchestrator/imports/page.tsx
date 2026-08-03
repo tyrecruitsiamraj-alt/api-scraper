@@ -22,9 +22,9 @@ export default async function ImportsPage() {
         <Link href="/orchestrator" className="text-sm text-subtle hover:text-accent">← กลับ Dashboard</Link>
       </div>
       <div>
-        <h1 className="text-2xl font-semibold tracking-tight">คำขอ Content และ Scraping (จาก So Recruit)</h1>
+        <h1 className="text-2xl font-semibold tracking-tight">คำขอสร้างประกาศและค้นหาผู้สมัครจาก So Recruit</h1>
         <p className="mt-1 text-sm text-subtle">
-          คำขอที่ทีม Matching ส่งมาเมื่อคนใน pool ไม่พอ · Content จะเข้า AI Draft ส่วน Scraping ต้องเลือก Connector ก่อนเริ่ม
+          คำขอจากทีม Matching เมื่อผู้สมัครในคลังไม่พอ · งานประกาศจะให้ AI ช่วยร่าง ส่วนงานค้นหาต้องเลือกบัญชีก่อนเริ่ม
           (ระบบจะแจ้งสถานะกลับ So Recruit อัตโนมัติ)
         </p>
       </div>
@@ -55,7 +55,7 @@ export default async function ImportsPage() {
                   <td className="px-4 py-2.5 font-medium">{r.request_no}</td>
                   <td className="px-4 py-2.5">
                     <span className={`pill ${r.request_type === 'scraping' ? 'bg-emerald-50 text-emerald-700' : 'bg-orange-50 text-orange-700'}`}>
-                      {r.request_type === 'scraping' ? 'Scraping' : 'Content'}
+                      {r.request_type === 'scraping' ? 'ค้นหาผู้สมัคร' : 'สร้างประกาศ'}
                     </span>
                   </td>
                   <td className="px-4 py-2.5">
@@ -73,17 +73,17 @@ export default async function ImportsPage() {
                       <form action={startSoRecruitScrapeAction} className="ml-auto flex max-w-72 items-center justify-end gap-2">
                         <input type="hidden" name="requestNo" value={r.request_no} />
                         <select name="connectorId" required defaultValue="" className="field h-8 min-w-36 py-1 text-xs">
-                          <option value="" disabled>เลือก Connector…</option>
+                          <option value="" disabled>เลือกบัญชีที่ใช้ค้นหา…</option>
                           {connectors.map((connector) => (
                             <option key={connector.id} value={connector.id}>{connector.platform} · {connector.label}</option>
                           ))}
                         </select>
-                        <button className="btn-primary btn-sm shrink-0" disabled={connectors.length === 0}>เริ่ม Scraping</button>
+                        <button className="btn-primary btn-sm shrink-0" disabled={connectors.length === 0}>เริ่มค้นหาผู้สมัคร</button>
                       </form>
                     ) : (
                       <form action={startCampaignAction} className="inline">
                         <input type="hidden" name="requestNo" value={r.request_no} />
-                        <button className="btn-primary btn-sm">เริ่มทำ Content</button>
+                        <button className="btn-primary btn-sm">เริ่มสร้างประกาศ</button>
                       </form>
                     )}
                   </td>

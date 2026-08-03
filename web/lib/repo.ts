@@ -1628,6 +1628,7 @@ export type ContentRow = {
     imageStyle?: string;
     style?: string | null;
     used_winning?: number;
+    used_feedback?: number;
     used_losing?: number;
     research_model?: string;
   } | null;
@@ -1656,6 +1657,49 @@ export async function listCampaignContents(campaignId: string) {
 
 export async function setContentStatus(id: string, status: string, reason: string | null = null) {
   await q(`UPDATE campaign_contents SET status = $2, reject_reason = $3 WHERE id = $1`, [id, status, reason]);
+}
+
+const FEEDBACK_CODES = new Set([
+  'ready', 'strong_hook', 'complete_info', 'good_visual',
+  'incorrect_info', 'weak_hook', 'too_long', 'missing_details',
+  'wrong_tone', 'poor_visual', 'other',
+]);
+
+/** เก็บคำตัดสินของคนเป็นข้อมูลฝึกงานถัดไป โดยแยกจากผลตอบรับหลังโพสต์จริง. */
+export async function recordContentFeedback(opts: {
+  campaignId: string;
+  contentId: string;
+  decision: 'approved' | 'rejected';
+  reasonCodes: string[];
+  note: string | null;
+  reviewer: string | null;
+}) {
+  const reasonCodes = [...new Set(opts.reasonCodes.filter((code) => FEEDBACK_CODES.has(code)))];
+  await q(
+    `INSERT INTO content_feedback
+       (campaign_id, content_id, decision, reason_codes, note, reviewer)
+     VALUES ($1, $2, $3, $4::text[], $5, $6)
+     ON CONFLICT (content_id, decision) DO UPDATE SET
+       reason_codes=EXCLUDED.reason_codes, note=EXCLUDED.note,
+       reviewer=EXCLUDED.reviewer, created_at=now()`,
+    [opts.campaignId, opts.contentId, opts.decision, reasonCodes, opts.note, opts.reviewer],
+  );
+
+  // สิ่งที่คนปฏิเสธต้องถูกเตือนใน prompt งานถัดไปทันที แต่ไม่ปนกับผลลัพธ์หลังโพสต์จริง.
+  if (opts.decision === 'rejected') {
+    const reason = [reasonCodes.join(', '), opts.note].filter(Boolean).join(' · ') || 'ผู้ตรวจไม่อนุมัติ';
+    await q(
+      `INSERT INTO content_losing_patterns
+         (position_family, platform, sample_content_id, campaign_id, reason, source)
+       SELECT rc.title, cc.platform, cc.id, rc.id, $3, 'human_feedback'
+         FROM campaign_contents cc
+         JOIN recruit_campaigns rc ON rc.id=cc.campaign_id
+        WHERE cc.id=$1 AND rc.id=$2
+       ON CONFLICT (sample_content_id) WHERE sample_content_id IS NOT NULL DO UPDATE SET
+         reason=EXCLUDED.reason, source='human_feedback'`,
+      [opts.contentId, opts.campaignId, reason],
+    );
+  }
 }
 
 /** แก้ caption ของร่างคอนเทนต์ (คนปรับข้อความก่อนอนุมัติ). แก้ได้เฉพาะที่ยังเป็น draft. */
@@ -1835,6 +1879,8 @@ export async function enqueueApprovedPost(opts: {
   requestedBy: string | null;
   /** โพสต์อะไร: ทั้งคู่ / เฉพาะรูป / เฉพาะแคปชัน (default both) */
   postMode?: PostMode;
+  feedbackCode?: string;
+  feedbackNote?: string | null;
 }) {
   const { campaign, content, userId, requestedBy } = opts;
   const mode: PostMode = opts.postMode ?? 'both';
@@ -1854,6 +1900,18 @@ export async function enqueueApprovedPost(opts: {
   const client = await pool().connect();
   try {
     await client.query('BEGIN');
+    // ล็อก campaign ก่อนสร้างคิว กันกดอนุมัติซ้ำหรือชนกับ “ให้ AI คิดใหม่”.
+    const locked = await client.query<{ campaign_status: string; content_status: string }>(
+      `SELECT c.status AS campaign_status, cc.status AS content_status
+         FROM recruit_campaigns c
+         JOIN campaign_contents cc ON cc.id = $2 AND cc.campaign_id = c.id
+        WHERE c.id = $1
+        FOR UPDATE OF c, cc`,
+      [campaign.id, content.id],
+    );
+    if (locked.rows[0]?.campaign_status !== 'pending_approval' || locked.rows[0]?.content_status !== 'draft') {
+      throw new Error('Content นี้ถูกดำเนินการไปแล้ว กรุณารีเฟรชหน้า');
+    }
     await client.query(
       `INSERT INTO ${AP}.jobs (id, title, owner, company, caption, status, image_ref)
        VALUES ($1, $2, 'SO Recruitment', 'SO Recruitment', $3, 'pending', $4)`,
@@ -1876,6 +1934,16 @@ export async function enqueueApprovedPost(opts: {
       [campaign.id, content.id, userId, jobId],
     );
     await client.query(`UPDATE campaign_contents SET status = 'approved', reject_reason = NULL WHERE id = $1`, [content.id]);
+    const feedbackCode = FEEDBACK_CODES.has(String(opts.feedbackCode || '')) ? String(opts.feedbackCode) : 'ready';
+    await client.query(
+      `INSERT INTO content_feedback
+         (campaign_id, content_id, decision, reason_codes, note, reviewer)
+       VALUES ($1, $2, 'approved', ARRAY[$3]::text[], $4, $5)
+       ON CONFLICT (content_id, decision) DO UPDATE SET
+         reason_codes=EXCLUDED.reason_codes, note=EXCLUDED.note,
+         reviewer=EXCLUDED.reviewer, created_at=now()`,
+      [campaign.id, content.id, feedbackCode, opts.feedbackNote || null, requestedBy],
+    );
     await client.query(
       `UPDATE recruit_campaigns SET status = 'posting', status_note = NULL, updated_at = now() WHERE id = $1`,
       [campaign.id],
@@ -1917,6 +1985,78 @@ export async function listCampaignPostQueueStates(): Promise<CampaignPostQueueSt
     );
   } catch {
     return [];
+  }
+}
+
+/** สถานะคิวโพสต์ล่าสุดของ campaign เดียว ใช้ล็อก action ที่ชนกับงานโพสต์. */
+export async function getCampaignPostQueueState(campaignId: string): Promise<CampaignPostQueueState | null> {
+  try {
+    const rows = await q<CampaignPostQueueState>(
+      `SELECT cp.campaign_id, q.id AS queue_id, a.id AS assignment_id, q.user_id,
+              q.status, NULLIF(COALESCE(q.error, ''), '') AS error,
+              q.created_at, q.finished_at
+         FROM campaign_posts cp
+         JOIN ${AP}.assignments a ON a.job_ids ? cp.job_ref
+         JOIN ${AP}.post_run_queue q ON q.assignment_ids ? a.id
+        WHERE cp.campaign_id = $1
+        ORDER BY q.created_at DESC
+        LIMIT 1`,
+      [campaignId],
+    );
+    return rows[0] ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * เปลี่ยน campaign เข้าสู่ drafting แบบ atomic เฉพาะเมื่อไม่มี draft/post/measure ที่กำลังทำ.
+ * ป้องกัน action ถูกเรียกตรงหรือกดซ้อน แม้หน้า UI จะเก่าอยู่.
+ */
+export async function beginCampaignDraftRetry(campaignId: string, ownerUser: string | null): Promise<boolean> {
+  const client = await pool().connect();
+  try {
+    await client.query('BEGIN');
+    const campaigns = await client.query<{ status: string }>(
+      `SELECT status FROM recruit_campaigns WHERE id = $1 FOR UPDATE`,
+      [campaignId],
+    );
+    const status = campaigns.rows[0]?.status;
+    if (!status || ['researching', 'drafting', 'posting', 'measuring'].includes(status)) {
+      await client.query('ROLLBACK');
+      return false;
+    }
+    const busy = await client.query<{ busy: boolean }>(
+      `SELECT EXISTS (
+         SELECT 1
+           FROM campaign_posts cp
+           JOIN ${AP}.assignments a ON a.job_ids ? cp.job_ref
+           JOIN ${AP}.post_run_queue q ON q.assignment_ids ? a.id
+          WHERE cp.campaign_id = $1
+            AND q.status IN ('queued', 'running')
+       ) AS busy`,
+      [campaignId],
+    );
+    if (busy.rows[0]?.busy) {
+      await client.query('ROLLBACK');
+      return false;
+    }
+    await client.query(
+      `UPDATE recruit_campaigns SET status = 'drafting', status_note = NULL, updated_at = now() WHERE id = $1`,
+      [campaignId],
+    );
+    await client.query(
+      `INSERT INTO work_queue (type, module, connector_key, ref_id, payload, owner_user)
+       VALUES ('draft', 'orchestrator', $1, $2, '{}'::jsonb, $3)`,
+      [`orchestrator:${campaignId}`, campaignId, ownerUser],
+    );
+    await client.query('COMMIT');
+    return true;
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally {
+    client.release();
   }
 }
 

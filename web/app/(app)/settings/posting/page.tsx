@@ -44,7 +44,7 @@ export default async function SettingsPostingPage() {
             <AutopostFrame baseUrl={AUTOPOST_URL} token={AUTOPOST_ACCESS_TOKEN} tab="templates" subTabs={SUB_TABS} />
           ) : (
             <div className="px-6 py-10 text-center text-sm text-subtle">
-              บริการ Auto-Post ยังไม่พร้อม — เปิดบริการที่พอร์ต 3100 แล้วรีเฟรช
+              ระบบเผยแพร่ Facebook ยังไม่พร้อม กรุณาเปิดระบบบนเครื่องหลักแล้วรีเฟรชหน้านี้
             </div>
           )}
         </div>

@@ -7,6 +7,11 @@ const { Pool } = require('pg');
 const DATABASE_URL = process.env.DATABASE_URL;
 const SCHEMA = process.env.DB_SCHEMA || 'so_autopost_apiscraper';
 const ASSIGNMENTS_TABLE = SCHEMA.includes('-') ? `"${SCHEMA}".assignments` : `${SCHEMA}.assignments`;
+const CANDIDATE_SCHEMA = process.env.SCRAPER_SCHEMA || 'so-candidate-data';
+if (!/^[A-Za-z_][A-Za-z0-9_-]*$/.test(CANDIDATE_SCHEMA)) {
+  throw new Error(`SCRAPER_SCHEMA ไม่ถูกต้อง: ${CANDIDATE_SCHEMA}`);
+}
+const CANDIDATE = `"${CANDIDATE_SCHEMA}"`;
 
 let pool = null;
 
@@ -2168,7 +2173,43 @@ async function completePostRunJob(id, data = {}) {
      RETURNING *`,
     [String(id || ''), status, data.run_id || null, data.message || null, data.error || null]
   );
-  return rows[0] || null;
+  const completed = rows[0] || null;
+  if (ok && completed) {
+    // เมื่อเผยแพร่เสร็จ ให้ระบบเริ่มติดตามผลเอง ไม่ต้องรอผู้ใช้กดวัดผล.
+    try {
+      await query(
+        `WITH campaigns AS (
+           SELECT DISTINCT cp.campaign_id
+             FROM ${CANDIDATE}.campaign_posts cp
+             JOIN ${ASSIGNMENTS_TABLE} a ON a.job_ids ? cp.job_ref
+            WHERE $1::jsonb ? a.id
+         )
+         INSERT INTO ${CANDIDATE}.work_queue
+           (type, module, connector_key, ref_id, payload, available_at, max_attempts)
+         SELECT 'measure', 'orchestrator', 'orchestrator:' || c.campaign_id::text,
+                c.campaign_id::text, '{}'::jsonb, now(), 3
+           FROM campaigns c
+          WHERE NOT EXISTS (
+            SELECT 1 FROM ${CANDIDATE}.work_queue w
+             WHERE w.ref_id=c.campaign_id::text AND w.type='measure'
+               AND w.status IN ('queued','running'))`,
+        [JSON.stringify(completed.assignment_ids || [])]
+      );
+      await query(
+        `UPDATE ${CANDIDATE}.recruit_campaigns rc
+            SET status='measuring', status_note='กำลังติดตามผลตอบรับอัตโนมัติ', updated_at=now()
+          WHERE EXISTS (
+            SELECT 1 FROM ${CANDIDATE}.campaign_posts cp
+            JOIN ${ASSIGNMENTS_TABLE} a ON a.job_ids ? cp.job_ref
+            WHERE cp.campaign_id=rc.id AND $1::jsonb ? a.id
+          )`,
+        [JSON.stringify(completed.assignment_ids || [])]
+      );
+    } catch (e) {
+      console.warn('[learning] enqueue measurement failed:', e.message);
+    }
+  }
+  return completed;
 }
 
 async function getPostRunQueueSummary() {

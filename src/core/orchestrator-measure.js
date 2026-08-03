@@ -33,6 +33,16 @@ function countLeads(phoneStrings) {
   return set.size;
 }
 
+export function calculateEngagement({ comments, leads, shares, likes, sampleSize, highScore, leadWeight, mature }) {
+  const samples = Math.max(1, Number(sampleSize) || 1);
+  const rawScore = (Number(leads) || 0) * leadWeight
+    + (Number(shares) || 0) * 2
+    + (Number(comments) || 0)
+    + (Number(likes) || 0) * 0.1;
+  const score = Number((rawScore / samples).toFixed(2));
+  return { score, verdict: mature ? (score >= highScore ? 'high' : 'low') : 'pending' };
+}
+
 export async function measureCampaign(campaignId) {
   if (!campaignId) throw new Error('measureCampaign: missing campaignId');
 
@@ -41,7 +51,8 @@ export async function measureCampaign(campaignId) {
   if (!campaign) throw new Error(`campaign not found: ${campaignId}`);
 
   const highScore = envInt('ENGAGE_HIGH_SCORE', 5);
-  const leadWeight = envInt('ENGAGE_LEAD_WEIGHT', 2);
+  const leadWeight = envInt('ENGAGE_LEAD_WEIGHT', 5);
+  const minAgeMinutes = envInt('ENGAGE_MIN_AGE_MINUTES', 60);
 
   const { rows: posts } = await query(
     `SELECT id, content_id, job_ref FROM campaign_posts WHERE campaign_id = $1`,
@@ -89,16 +100,24 @@ export async function measureCampaign(campaignId) {
     const leads = countLeads(logs.map((r) => r.customer_phone));
     const postLink = logs.find((r) => r.post_link && String(r.post_link).trim())?.post_link ?? null;
     const postedAt = logs.reduce((min, r) => (r.created_at && (!min || r.created_at < min) ? r.created_at : min), null);
-    const score = comments + leads * leadWeight;
-    const verdict = score >= highScore ? 'high' : 'low';
+    const sampleSize = Math.max(1, logs.length);
+    // วัดผลต่อกลุ่มเพื่อไม่ให้งานที่โพสต์หลายกลุ่มชนะเพียงเพราะมีโอกาสถูกเห็นมากกว่า.
+    // เบอร์ผู้สนใจมีน้ำหนักสูงสุด ตามด้วยการแชร์/คอมเมนต์ ส่วน reaction เป็นสัญญาณเบา.
+    const ageMinutes = postedAt ? (Date.now() - new Date(postedAt).getTime()) / 60_000 : 0;
+    const mature = ageMinutes >= minAgeMinutes;
+    const { score, verdict } = calculateEngagement({
+      comments, leads, shares, likes, sampleSize, highScore, leadWeight, mature,
+    });
+    if (!mature) anyPending = true;
 
     await query(
       `UPDATE campaign_posts
           SET comments = $2, lead_count = $3, post_link = COALESCE($4, post_link),
               posted_at = COALESCE(posted_at, $5), engagement_score = $6,
-              verdict = $7, likes = $8, shares = $9, measured_at = now()
+              verdict = $7, likes = $8, shares = $9, measured_at = now(),
+              sample_size = $10, score_version = 'business_v2'
         WHERE id = $1`,
-      [p.id, comments, leads, postLink, postedAt, score, verdict, likes, shares],
+      [p.id, comments, leads, postLink, postedAt, score, verdict, likes, shares, sampleSize],
     );
 
     measured += 1;

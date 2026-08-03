@@ -24,7 +24,7 @@ function fmt(v: string | null): string {
 function whoRequested(v: string | null): string {
   if (!v) return '—';
   if (v === 'auto-daily') return '🕗 รอบอัตโนมัติ 8:00';
-  if (v === 'orchestrator') return '🤖 Content Orchestrator';
+  if (v === 'orchestrator') return '🤖 ระบบสร้างประกาศ';
   return `👤 ${v}`;
 }
 
@@ -50,7 +50,7 @@ export default async function AutopostRunsPage() {
             <thead>
               <tr className="border-b border-hairline text-left text-xs text-subtle">
                 <th className="px-4 py-2.5 font-medium">บัญชี Facebook</th>
-                <th className="px-4 py-2.5 font-medium">Worker (เครื่องที่รัน)</th>
+                <th className="px-4 py-2.5 font-medium">เครื่องที่ทำงาน</th>
                 <th className="px-4 py-2.5 font-medium">สั่งโดย</th>
                 <th className="px-4 py-2.5 font-medium">สถานะ</th>
                 <th className="px-4 py-2.5 font-medium text-right">โพสต์สำเร็จ</th>
@@ -90,8 +90,7 @@ export default async function AutopostRunsPage() {
         </div>
       )}
       <p className="text-xs text-subtle">
-        Worker = เครื่องที่รัน <code className="rounded bg-black/5 px-1">npm run worker:post</code> แล้วมาหยิบงานจากคิวกลาง ·
-        “สั่งโดย” บอกว่างานมาจากคน กด, Content Orchestrator, หรือรอบอัตโนมัติ 8:00
+        เครื่องที่ทำงานจะรับงานเผยแพร่ตามลำดับจากส่วนกลาง · “สั่งโดย” บอกว่างานมาจากผู้ใช้ ระบบสร้างประกาศ หรือรอบอัตโนมัติ 8:00
       </p>
     </div>
   );

@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
-import { contentGenIngredients, getCampaign, listCampaignContents, listCampaignPosts, listFacebookAccounts, soRecruitCheck } from '@/lib/repo';
+import { contentGenIngredients, getCampaign, getCampaignPostQueueState, listCampaignContents, listCampaignPosts, listFacebookAccounts, soRecruitCheck } from '@/lib/repo';
 import type { CampaignPostRow } from '@/lib/repo';
 import { approveContentAction, rejectContentAction, editCaptionAction, measureCampaignAction, retryCampaignDraftAction } from '@/lib/actions';
 
@@ -21,7 +21,7 @@ const VERDICT: Record<string, { label: string; cls: string }> = {
 
 const STAGE_LABEL: Record<string, string> = {
   new: 'งานใหม่',
-  researching: 'สำรวจแนว content',
+  researching: 'กำลังหาแนวทางที่เหมาะกับงานนี้',
   drafting: 'กำลังทำ content',
   pending_approval: 'รออนุมัติ',
   approved: 'อนุมัติแล้ว',
@@ -129,8 +129,11 @@ export default async function CampaignDetail({ params }: { params: { id: string 
   const contents = await listCampaignContents(params.id);
   const fbAccounts = await listFacebookAccounts();
   const posts = await listCampaignPosts(params.id);
+  const postQueue = await getCampaignPostQueueState(params.id);
   const engByContent = aggregateByContent(posts);
   const canMeasure = ['posting', 'measuring', 'low_engagement'].includes(c.status);
+  const activePostQueue = postQueue?.status === 'queued' || postQueue?.status === 'running';
+  const regenerateBusy = ['researching', 'drafting', 'posting', 'measuring'].includes(c.status) || activePostQueue;
   const pool = await soRecruitCheck(c.request_no);
   const ingredients = await contentGenIngredients(c.title);
 
@@ -139,10 +142,10 @@ export default async function CampaignDetail({ params }: { params: { id: string 
     drafting: { text: '🤖 AI กำลังคิดร่าง — รอสักครู่ ร่างใหม่จะโผล่ด้านล่างเอง', cls: 'border-blue-200 bg-blue-50 text-blue-800' },
     pending_approval: { text: '👉 รอคุณ: ตรวจร่างด้านล่าง เลือกเวอร์ชันที่ชอบแล้วกดอนุมัติ (หรือตีกลับให้ AI แก้)', cls: 'border-amber-200 bg-amber-50 text-amber-800' },
     posting: { text: '📤 กำลังโพสต์/รอคิวโพสต์ — เสร็จแล้วระบบจะเก็บคอมเมนต์และวัดผลเอง', cls: 'border-blue-200 bg-blue-50 text-blue-800' },
-    measuring: { text: '⏳ รอเก็บ engagement — ระบบวัดผลอัตโนมัติ หรือกด "วัดผลตอนนี้" มุมขวาบน', cls: 'border-amber-200 bg-amber-50 text-amber-800' },
+    measuring: { text: '⏳ รอเก็บผลตอบรับจากโพสต์ — เมื่อข้อมูลพร้อมให้กด “ตรวจผลตอนนี้”', cls: 'border-amber-200 bg-amber-50 text-amber-800' },
     low_engagement: { text: '📉 คนสนใจน้อย — ระบบบันทึกแนวนี้เป็น "ห้ามทำซ้ำ" และสั่ง AI คิดเวอร์ชันใหม่แล้ว', cls: 'border-red-200 bg-red-50 text-red-700' },
     done: { text: '✅ เสร็จสิ้น — แนวที่ได้ผลถูกเก็บเป็นต้นแบบ ระบบจะใช้เป็นแนวทางในงานถัดไป', cls: 'border-emerald-200 bg-emerald-50 text-emerald-800' },
-    draft_error: { text: '⚠️ สร้างร่างไม่สำเร็จ — กลับไปหน้าศูนย์งานแล้วกด "ลองสร้าง Content ใหม่"', cls: 'border-red-200 bg-red-50 text-red-700' },
+    draft_error: { text: '⚠️ สร้างประกาศไม่สำเร็จ — กลับไปหน้าศูนย์งานแล้วกด “ลองสร้างประกาศใหม่”', cls: 'border-red-200 bg-red-50 text-red-700' },
   };
   const nextAction = NEXT_ACTION[c.status];
 
@@ -153,7 +156,7 @@ export default async function CampaignDetail({ params }: { params: { id: string 
       <div className="card p-6">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
-            <h1 className="text-2xl font-semibold tracking-tight">{c.title || c.request_no || 'Campaign'}</h1>
+            <h1 className="text-2xl font-semibold tracking-tight">{c.title || c.request_no || 'งานรับสมัคร'}</h1>
             <p className="mt-1 text-sm text-subtle">
               ใบขอ {c.request_no || '—'}
               {c.province && ` · ${c.province}`}
@@ -168,12 +171,16 @@ export default async function CampaignDetail({ params }: { params: { id: string 
                 <button className="btn-ghost btn-sm">📊 วัดผลตอนนี้</button>
               </form>
             )}
-            {/* ให้ AI ทำร่างใหม่ได้จากทุกสถานะ (ยกเว้นกำลังคิดอยู่) — เช่น รูป/แคปชันออกมาไม่ดี */}
-            {c.status !== 'drafting' && (
+            {!regenerateBusy && (
               <form action={retryCampaignDraftAction}>
                 <input type="hidden" name="campaignId" value={c.id} />
                 <button className="btn-ghost btn-sm" title="สร้างเวอร์ชันใหม่ — ของเดิมยังอยู่ให้เทียบ">↻ ให้ AI คิดใหม่</button>
               </form>
+            )}
+            {regenerateBusy && ['posting', 'measuring'].includes(c.status) && (
+              <span className="text-xs text-subtle" title="ป้องกันประกาศคนละฉบับชนกับงานที่กำลังเผยแพร่">
+                รอโพสต์และวัดผลเสร็จก่อนจึงคิดใหม่ได้
+              </span>
             )}
           </div>
         </div>
@@ -261,8 +268,8 @@ export default async function CampaignDetail({ params }: { params: { id: string 
       {/* โปร่งใส: บอกคนตรวจว่า AI เอาอะไรมาประกอบตอนคิดร่าง — จะได้รู้ว่าต้องเช็คอะไร */}
       <details className="card px-6 py-4">
         <summary className="cursor-pointer select-none text-sm font-semibold">
-          🧠 AI ใช้อะไรคิดร่างนี้
-          <span className="ml-2 text-xs font-normal text-subtle">กดดูส่วนผสมที่ระบบส่งให้ AI</span>
+          🧠 AI ใช้ข้อมูลอะไรสร้างประกาศ
+          <span className="ml-2 text-xs font-normal text-subtle">กดดูข้อมูลที่นำมาประกอบการสร้าง</span>
         </summary>
         <div className="mt-4 space-y-3 text-sm">
           <div>
@@ -270,7 +277,7 @@ export default async function CampaignDetail({ params }: { params: { id: string 
             <p className="mt-0.5 text-ink/80">ตำแหน่ง พื้นที่ รายได้ จำนวน เวลางาน — กติกาเหล็ก: <b>ไม่มีในใบขอ = ห้าม AI แต่งเอง</b> (เงินเดือน/สวัสดิการใช้คำกลางแทน)</p>
           </div>
           <div>
-            <div className="text-xs font-medium text-subtle">2 · สองเวอร์ชันคนละแนว (A/B)</div>
+            <div className="text-xs font-medium text-subtle">2 · ตัวเลือกสองแบบให้เปรียบเทียบ</div>
             <p className="mt-0.5 text-ink/80">A — ตรงไปตรงมา: พาดหัวชัด ข้อมูลครบ กระชับ · B — เน้นจุดขาย: นำด้วยรายได้/สวัสดิการ โทนชวนคุย</p>
           </div>
           <div>
@@ -297,7 +304,7 @@ export default async function CampaignDetail({ params }: { params: { id: string 
               ))
             )}
           </div>
-          <p className="text-xs text-subtle">ตัวอย่างข้อ 3-4 เลือกจากตำแหน่งใกล้เคียงก่อน แล้วเรียงตามคะแนน engagement — อัปเดตทุกครั้งที่มีการวัดผลใหม่</p>
+          <p className="text-xs text-subtle">ตัวอย่างข้อ 3-4 เลือกจากตำแหน่งใกล้เคียงก่อน แล้วเรียงตามผลตอบรับ — อัปเดตเมื่อมีผลจากโพสต์ใหม่</p>
         </div>
       </details>
 
@@ -305,7 +312,7 @@ export default async function CampaignDetail({ params }: { params: { id: string 
         <h2 className="mb-3 text-base font-semibold">ร่างคอนเทนต์</h2>
         {contents.length === 0 ? (
           <div className="card border-dashed p-6 text-center text-sm text-subtle">
-            ยังไม่มีร่างคอนเทนต์ — ระบบจะให้ AI คิด caption + รูป + แนววิดีโอ (ต้องตั้ง ANTHROPIC/OPENAI key บนเครื่อง worker)
+            ยังไม่มีร่างประกาศ — ระบบจะสร้างข้อความ รูป และแนววิดีโอเมื่อเครื่องทำงานอัตโนมัติพร้อม
           </div>
         ) : (
           <div className="space-y-4">
@@ -363,19 +370,19 @@ export default async function CampaignDetail({ params }: { params: { id: string 
                       {/* provenance จริงของร่างนี้ — AI คิดจากอะไร (research + A/B + ตัวอย่างที่ใช้) */}
                       {ct.gen_notes && (ct.gen_notes.angles?.length || ct.gen_notes.hooks?.length || ct.gen_notes.imageStyle || ct.gen_notes.style) && (
                         <details className="mt-3 rounded-lg border border-hairline bg-black/[0.015] px-3 py-2">
-                          <summary className="cursor-pointer select-none text-xs font-medium text-subtle">🧠 ร่างนี้ AI คิดจากอะไร</summary>
+                          <summary className="cursor-pointer select-none text-xs font-medium text-subtle">🧠 ประกาศนี้สร้างจากข้อมูลอะไร</summary>
                           <div className="mt-2 space-y-1.5 text-xs text-ink/75">
                             {ct.gen_notes.style && <div><span className="text-subtle">แนวเขียน:</span> {ct.gen_notes.style}</div>}
                             {ct.gen_notes.angles && ct.gen_notes.angles.length > 0 && (
-                              <div><span className="text-subtle">มุมที่เล่น (research):</span> {ct.gen_notes.angles.join(' · ')}</div>
+                              <div><span className="text-subtle">แนวคิดที่เลือกใช้:</span> {ct.gen_notes.angles.join(' · ')}</div>
                             )}
                             {ct.gen_notes.hooks && ct.gen_notes.hooks.length > 0 && (
                               <div><span className="text-subtle">ฮุกที่แนะ:</span> {ct.gen_notes.hooks.join(' | ')}</div>
                             )}
                             {ct.gen_notes.imageStyle && <div><span className="text-subtle">สไตล์รูป:</span> {ct.gen_notes.imageStyle}</div>}
                             <div className="text-subtle/70">
-                              อ้างอิงแนวที่เวิร์ค {ct.gen_notes.used_winning ?? 0} · เลี่ยงแนวที่ไม่เวิร์ค {ct.gen_notes.used_losing ?? 0}
-                              {ct.gen_notes.research_model ? ` · research: ${ct.gen_notes.research_model}` : ''}
+                              อ้างอิงแนวที่ได้ผล {ct.gen_notes.used_winning ?? 0} · เรียนรู้จากงานที่เคยอนุมัติ {ct.gen_notes.used_feedback ?? 0} · เลี่ยงแนวที่ไม่ผ่าน {ct.gen_notes.used_losing ?? 0}
+                              {ct.gen_notes.research_model ? ` · วิเคราะห์ด้วย ${ct.gen_notes.research_model}` : ''}
                             </div>
                           </div>
                         </details>
@@ -437,11 +444,37 @@ export default async function CampaignDetail({ params }: { params: { id: string 
                               <option value="caption">เฉพาะแคปชัน</option>
                             </select>
                           </label>
+                          <label className="text-xs text-subtle">
+                            <span className="mb-1 block">จุดที่ทำได้ดี</span>
+                            <select name="feedbackCode" defaultValue="ready" className="rounded-lg border border-hairline bg-transparent px-2 py-1.5 text-sm text-ink">
+                              <option value="ready">พร้อมใช้ ไม่ต้องแก้</option>
+                              <option value="strong_hook">ประโยคเปิดน่าสนใจ</option>
+                              <option value="complete_info">ข้อมูลครบและถูกต้อง</option>
+                              <option value="good_visual">รูปเหมาะกับงาน</option>
+                            </select>
+                          </label>
                           <button className="btn-primary btn-sm" disabled={fbAccounts.length === 0}>✓ อนุมัติและโพสต์</button>
                         </form>
-                        <form action={rejectContentAction}>
+                        <form action={rejectContentAction} className="flex flex-wrap items-end gap-2">
                           <input type="hidden" name="contentId" value={ct.id} />
                           <input type="hidden" name="campaignId" value={c.id} />
+                          <label className="text-xs text-subtle">
+                            <span className="mb-1 block">ปัญหาหลัก</span>
+                            <select name="reasonCode" required defaultValue="" className="rounded-lg border border-hairline bg-transparent px-2 py-1.5 text-sm text-ink">
+                              <option value="" disabled>เลือกเหตุผล…</option>
+                              <option value="incorrect_info">ข้อมูลไม่ถูกต้อง</option>
+                              <option value="weak_hook">ประโยคเปิดไม่น่าสนใจ</option>
+                              <option value="too_long">เนื้อหายาวเกินไป</option>
+                              <option value="missing_details">ข้อมูลสำคัญไม่ครบ</option>
+                              <option value="wrong_tone">ภาษาไม่เหมาะกับกลุ่มเป้าหมาย</option>
+                              <option value="poor_visual">รูปไม่เหมาะสม</option>
+                              <option value="other">เหตุผลอื่น</option>
+                            </select>
+                          </label>
+                          <label className="min-w-[220px] flex-1 text-xs text-subtle">
+                            <span className="mb-1 block">รายละเอียดเพิ่มเติม</span>
+                            <input name="reason" className="w-full rounded-lg border border-hairline bg-transparent px-2 py-1.5 text-sm text-ink" placeholder="บอกให้ AI รู้ว่ารอบใหม่ควรแก้อะไร" />
+                          </label>
                           <button className="btn-ghost btn-sm">↻ ตีกลับ ให้ AI คิดใหม่</button>
                         </form>
                       </div>

@@ -6,13 +6,13 @@ import { usePathname } from 'next/navigation';
 // แท็บย่อยใต้ "งาน Scraping" — คลังผู้สมัคร + สร้างงาน Scraping อยู่ใต้หัวข้อเดียวกัน
 const ITEMS = [
   { href: '/candidates', label: 'คลังผู้สมัคร', detail: 'ค้นหา/กรองผู้สมัครที่ดึงมา' },
-  { href: '/scraping', label: 'สร้างงาน Scraping', detail: 'ตั้งงานดึงข้อมูลใหม่ + ติดตามผล' },
+  { href: '/scraping', label: 'สร้างงานค้นหาผู้สมัคร', detail: 'กำหนดเงื่อนไขและติดตามผล' },
 ];
 
 export function ScrapingNav() {
   const pathname = usePathname();
   return (
-    <nav className="mb-6 grid gap-3 sm:grid-cols-2" aria-label="เมนูงาน Scraping">
+    <nav className="mb-6 grid gap-3 sm:grid-cols-2" aria-label="เมนูค้นหาผู้สมัคร">
       {ITEMS.map((item) => {
         const active = pathname === item.href || pathname.startsWith(`${item.href}/`);
         return (

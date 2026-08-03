@@ -11,12 +11,14 @@ import {
   createCampaignFromRequest,
   enqueueDraftForCampaign,
   enqueueApprovedPost,
+  beginCampaignDraftRetry,
   retryCampaignPost,
   enqueueMeasureForCampaign,
   getCampaign,
   getContentById,
   setCampaignStatus,
   setContentStatus,
+  recordContentFeedback,
   updateContentCaption,
   deleteConnector,
   updateScraperConnector,
@@ -347,6 +349,8 @@ export async function approveContentAction(formData: FormData) {
   const contentId = String(formData.get('contentId') ?? '');
   const campaignId = String(formData.get('campaignId') ?? '');
   const fbAccountId = String(formData.get('fbAccountId') ?? '').trim();
+  const feedbackCode = String(formData.get('feedbackCode') ?? 'ready').trim();
+  const feedbackNote = String(formData.get('feedbackNote') ?? '').trim() || null;
   if (!contentId || !campaignId) throw new Error('ข้อมูล Content ไม่ครบ');
   if (!fbAccountId) throw new Error('กรุณาเลือกบัญชี Facebook ก่อนอนุมัติ');
   const [campaign, content] = await Promise.all([getCampaign(campaignId), getContentById(contentId)]);
@@ -355,14 +359,18 @@ export async function approveContentAction(formData: FormData) {
   const pm = String(formData.get('postMode') ?? 'both').trim();
   const postMode = pm === 'image' || pm === 'caption' ? pm : 'both';
   if (postMode === 'image' && !content.has_image) throw new Error('ร่างนี้ไม่มีรูป — เลือก “เฉพาะรูป” ไม่ได้');
+  const reviewer = session.user?.email ?? session.user?.name ?? null;
   await enqueueApprovedPost({
     campaign,
     content,
     userId: fbAccountId,
-    requestedBy: session.user?.email ?? session.user?.name ?? null,
+    requestedBy: reviewer,
     postMode,
+    feedbackCode,
+    feedbackNote,
   });
   await setSoRecruitRequestStatus(campaign.request_no, 'posted');
+  kickWorker(); // เปิดระบบกลางค้างไว้ เพื่อรับงานติดตามผลอัตโนมัติหลัง Facebook โพสต์เสร็จ
   // autopost worker (npm run worker:post) โพล post_run_queue เองทุก ~5 วิ — ไม่ต้อง kick
   revalidatePath(`/orchestrator/${campaignId}`);
   revalidatePath('/orchestrator');
@@ -375,8 +383,8 @@ export async function retryCampaignDraftAction(formData: FormData) {
   if (!session) throw new Error('unauthorized');
   const campaignId = String(formData.get('campaignId') ?? '').trim();
   if (!campaignId) throw new Error('ไม่พบ campaign');
-  await setCampaignStatus(campaignId, 'drafting');
-  await enqueueDraftForCampaign(campaignId, session.user?.email ?? session.user?.name ?? null);
+  const started = await beginCampaignDraftRetry(campaignId, session.user?.email ?? session.user?.name ?? null);
+  if (!started) throw new Error('ยังสร้าง Content ใหม่ไม่ได้ — รอให้งานเดิมโพสต์หรือวัดผลเสร็จก่อน');
   kickWorker();
   revalidatePath(`/orchestrator/${campaignId}`);
   revalidatePath('/orchestrator');
@@ -426,8 +434,18 @@ export async function rejectContentAction(formData: FormData) {
   if (!session) throw new Error('unauthorized');
   const contentId = String(formData.get('contentId') ?? '');
   const campaignId = String(formData.get('campaignId') ?? '');
-  const reason = String(formData.get('reason') ?? '').trim() || null;
+  const reasonCode = String(formData.get('reasonCode') ?? 'other').trim();
+  const note = String(formData.get('reason') ?? '').trim() || null;
+  const reason = [reasonCode, note].filter(Boolean).join(' · ');
   if (contentId && campaignId) {
+    await recordContentFeedback({
+      campaignId,
+      contentId,
+      decision: 'rejected',
+      reasonCodes: [reasonCode],
+      note,
+      reviewer: session.user?.email ?? session.user?.name ?? null,
+    });
     await setContentStatus(contentId, 'rejected', reason);
     await setCampaignStatus(campaignId, 'drafting', reason);
     await enqueueDraftForCampaign(campaignId, session.user?.email ?? session.user?.name ?? null); // คิด version ใหม่

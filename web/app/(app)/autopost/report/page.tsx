@@ -108,14 +108,14 @@ export default async function WeeklyReportPage({ searchParams }: { searchParams?
         <>
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
             <MetricCard label="โพสต์" m={report.posts} />
-            <MetricCard label="Lead (เบอร์)" m={report.leads} accent />
+            <MetricCard label="ผู้สนใจ (เบอร์โทร)" m={report.leads} accent />
             <MetricCard label="ผู้สมัครที่ดึงได้" m={report.candidates} />
             <MetricCard label="แคมเปญที่โพสต์" m={report.campaigns} />
           </div>
 
           {/* โพสต์ & lead รายวัน */}
           <div>
-            <h2 className="mb-3 text-base font-semibold">รายวัน (โพสต์ &amp; Lead)</h2>
+            <h2 className="mb-3 text-base font-semibold">ผลรายวัน (โพสต์และผู้สนใจ)</h2>
             <div className="card p-4">
               <div className="flex items-end justify-between gap-2" style={{ height: 140 }}>
                 {days.map((d) => (
@@ -130,14 +130,14 @@ export default async function WeeklyReportPage({ searchParams }: { searchParams?
                   </div>
                 ))}
               </div>
-              <p className="mt-3 text-[11px] text-subtle">แท่ง = จำนวน Lead ต่อวัน · ตัวเลขล่าง (p) = จำนวนโพสต์</p>
+              <p className="mt-3 text-[11px] text-subtle">แท่ง = จำนวนผู้สนใจต่อวัน · ตัวเลขด้านล่าง = จำนวนโพสต์</p>
             </div>
           </div>
 
           {/* lead ตามตำแหน่ง */}
           {report.byPosition.length > 0 && (
             <div>
-              <h2 className="mb-3 text-base font-semibold">Lead ตามตำแหน่ง</h2>
+              <h2 className="mb-3 text-base font-semibold">ผู้สนใจแยกตามตำแหน่ง</h2>
               <div className="card divide-y divide-hairline">
                 {report.byPosition.map((p) => (
                   <div key={p.position} className="flex items-center gap-3 px-4 py-2.5">

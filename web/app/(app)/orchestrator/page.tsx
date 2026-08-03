@@ -18,7 +18,7 @@ const STATUS_TH: Record<string, string> = {
   new: 'เพิ่งเริ่ม',
   researching: 'สำรวจแนว',
   drafting: 'AI กำลังคิด',
-  draft_error: 'สร้าง Content ไม่สำเร็จ',
+  draft_error: 'สร้างประกาศไม่สำเร็จ',
   low_engagement: 'คนสนใจน้อย — คิดใหม่',
   pending_approval: 'รอตรวจ',
   approved: 'อนุมัติแล้ว',
@@ -28,7 +28,7 @@ const STATUS_TH: Record<string, string> = {
 };
 
 // เส้นทางงาน 6 ป้ายเดียวกันทุกงาน — งานไหนไม่ใช้ขั้นไหน = 'skip' (วิ่งทะลุผ่านให้เห็น)
-const STEP_LABELS = ['รับงาน', 'เตรียมของ', 'อนุมัติ', 'Scrape', 'Auto post', 'เสร็จ'] as const;
+const STEP_LABELS = ['รับงาน', 'เตรียมงาน', 'ตรวจงาน', 'หาผู้สมัคร', 'เผยแพร่', 'เห็นผล'] as const;
 type S = Step['state'];
 const mkSteps = (states: [S, S, S, S, S, S]): Step[] =>
   STEP_LABELS.map((label, i) => ({ label, state: states[i] }));
@@ -155,13 +155,13 @@ export default async function OrchestratorPage() {
           : post?.status === 'running'
             ? 'กำลังโพสต์'
             : canMeasure
-              ? (campaign.status === 'measuring' ? 'รอข้อมูล Engagement' : 'โพสต์แล้ว · รอตรวจผล')
+              ? (campaign.status === 'measuring' ? 'รอเก็บผลตอบรับ' : 'โพสต์แล้ว · รอตรวจผล')
               : STATUS_TH[campaign.status] || campaign.status) + adminSuffix;
       return {
         id: `content:${campaign.id}`,
         kind: 'content',
         stage: campaignStage(campaign.status, post?.status),
-        title: campaign.title || campaign.request_no || 'Content campaign',
+        title: campaign.title || campaign.request_no || 'งานสร้างประกาศรับสมัคร',
         requestNo: campaign.request_no,
         detail: postFailed ? (post.error || 'งานโพสต์หยุดก่อนสำเร็จ กดลองใหม่ได้') : (content?.caption || campaign.status_note),
         requester: campaign.created_by,
@@ -195,7 +195,7 @@ export default async function OrchestratorPage() {
         detail: task.last_error || (task.criteria.job_description ? String(task.criteria.job_description) : null),
         requester: null,
         connector: `${task.platform} · ${task.connector_label}`,
-        statusLabel: task.status === 'done' && task.review_status === 'pending' ? 'รอตรวจรับข้อมูล' : task.status === 'error' ? 'ผิดพลาด' : task.status === 'queued' ? 'รอคิว' : task.status === 'running' ? 'กำลัง Scraping' : 'สำเร็จ',
+        statusLabel: task.status === 'done' && task.review_status === 'pending' ? 'รอตรวจรับข้อมูล' : task.status === 'error' ? 'ค้นหาไม่สำเร็จ' : task.status === 'queued' ? 'รอเริ่มค้นหา' : task.status === 'running' ? 'กำลังค้นหาผู้สมัคร' : 'สำเร็จ',
         createdAt: task.created_at,
         href: '/scraping',
         progress: { got: task.progress_got, target: task.progress_target || task.target_count || 0 },

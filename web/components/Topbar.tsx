@@ -9,8 +9,8 @@ import { useEffect, useState } from 'react';
 // เมนูย้ายไปเป็น drawer ด้านข้าง (hamburger) — รวมตั้งค่าเข้ามาในลิสต์เดียว
 const NAV: { href: string; label: string; also?: string[] }[] = [
   { href: '/orchestrator', label: 'ศูนย์งาน' },
-  { href: '/scraping', label: 'งาน Scraping', also: ['/candidates'] },
-  { href: '/autopost', label: 'โพสต์ & ผลลัพธ์' },
+  { href: '/scraping', label: 'ค้นหาผู้สมัคร', also: ['/candidates'] },
+  { href: '/autopost', label: 'โพสต์และติดตามผล' },
   { href: '/settings', label: 'ตั้งค่า', also: ['/connectors'] },
 ];
 

@@ -30,7 +30,7 @@ export function ConnectorEditButton({
           onClick={() => setOpen(false)}
         >
           <div className="card w-full max-w-sm p-5" onClick={(e) => e.stopPropagation()}>
-            <h3 className="mb-3 text-sm font-semibold">แก้ไข {isFb ? 'บัญชี Facebook' : 'Connector'}</h3>
+            <h3 className="mb-3 text-sm font-semibold">แก้ไขบัญชี {isFb ? 'Facebook' : 'ค้นหาผู้สมัคร'}</h3>
             <form action={editConnectorAction} className="space-y-3" onSubmit={() => setOpen(false)}>
               <input type="hidden" name="id" value={id} />
               <input type="hidden" name="platform" value={platform} />

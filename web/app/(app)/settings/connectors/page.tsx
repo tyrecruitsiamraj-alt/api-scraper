@@ -32,11 +32,11 @@ export default async function SettingsConnectorsPage() {
     <div className="space-y-8">
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Connector</h1>
-          <p className="mt-1 text-sm text-subtle">จัดการบัญชี Scraping และ Facebook Auto‑Post จากที่เดียว</p>
+          <h1 className="text-2xl font-semibold tracking-tight">บัญชีที่ใช้งาน</h1>
+          <p className="mt-1 text-sm text-subtle">เพิ่มและดูแลบัญชีสำหรับค้นหาผู้สมัครและเผยแพร่ Facebook จากที่เดียว</p>
         </div>
         <div className="flex gap-2 text-xs text-subtle">
-          <span className="pill bg-blue-50 text-blue-700">Scraping {scraperCount}</span>
+          <span className="pill bg-blue-50 text-blue-700">ค้นหาผู้สมัคร {scraperCount}</span>
           <span className="pill bg-indigo-50 text-indigo-700">Facebook {facebookCount}</span>
         </div>
       </div>
@@ -44,8 +44,8 @@ export default async function SettingsConnectorsPage() {
       <section className="space-y-3">
         <div className="flex items-baseline justify-between">
           <div>
-            <h2 className="text-[15px] font-semibold">Connector ทั้งหมด</h2>
-            <p className="mt-0.5 text-xs text-subtle">บัญชีเดียวต่อหนึ่ง session/worker lock เพื่อไม่ให้ล็อกอินชนกัน</p>
+            <h2 className="text-[15px] font-semibold">บัญชีทั้งหมด</h2>
+            <p className="mt-0.5 text-xs text-subtle">แต่ละบัญชีจะทำงานทีละงาน เพื่อป้องกันการเข้าสู่ระบบซ้อนกัน</p>
           </div>
           <span className="text-xs text-subtle">{connectors.length} บัญชี</span>
         </div>
@@ -69,7 +69,7 @@ export default async function SettingsConnectorsPage() {
                       {c.username || 'ไม่ระบุผู้ใช้'}
                       {c.platform !== 'facebook' && ` · ล็อกอินล่าสุด ${fmtDate(c.last_login_at)}`}
                       {paused && c.pause_reason ? ` · ${c.pause_reason}` : ''}
-                      {c.platform === 'facebook' && ` · Pin: ${c.preferred_worker || 'ยังไม่ผูกเครื่อง'}`}
+                      {c.platform === 'facebook' && ` · เครื่องประจำ: ${c.preferred_worker || 'ยังไม่ได้เลือก'}`}
                     </div>
                   </div>
 
@@ -110,7 +110,7 @@ export default async function SettingsConnectorsPage() {
                             className="field w-28 py-1.5 font-mono text-xs"
                             aria-label={`เครื่องสำหรับ ${c.label}`}
                           />
-                          <button className="btn-secondary btn-sm">Pin</button>
+                          <button className="btn-secondary btn-sm">บันทึกเครื่อง</button>
                         </form>
                         <ConnectorEditButton id={id} platform="facebook" label={c.label} username={c.username ?? ''} />
                         <form action={deleteFacebookAccountAction}>
@@ -138,7 +138,7 @@ export default async function SettingsConnectorsPage() {
             })}
           </div>
         ) : (
-          <div className="card p-8 text-center text-sm text-subtle">ยังไม่มี Connector — เพิ่มบัญชีแรกด้านล่าง</div>
+          <div className="card p-8 text-center text-sm text-subtle">ยังไม่มีบัญชี — เพิ่มบัญชีแรกด้านล่าง</div>
         )}
 
         <datalist id="known-facebook-workers">
@@ -150,7 +150,7 @@ export default async function SettingsConnectorsPage() {
       <section className="space-y-4">
         <div>
           <h2 className="text-[15px] font-semibold">โควต้าการใช้งาน</h2>
-          <p className="mt-0.5 text-xs text-subtle">Scraping คุมรวมระดับแพลตฟอร์ม ส่วน Facebook คุมรายบัญชี</p>
+          <p className="mt-0.5 text-xs text-subtle">กำหนดจำนวนค้นหาผู้สมัครรวมตามเว็บไซต์ และจำนวนโพสต์แยกตามบัญชี Facebook</p>
         </div>
         <ProviderLimitsPanel initialLimits={limits} />
         <FacebookQuotaPanel initialFb={fbQuota} />

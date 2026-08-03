@@ -51,7 +51,7 @@ export default async function AutopostRunDetail({ params }: { params: { id: stri
           <span className={`pill ${st.cls}`}>{st.label}</span>
         </div>
         <dl className="mt-5 grid grid-cols-2 gap-4 sm:grid-cols-4">
-          <Field label="Worker (เครื่อง)" value={run.worker_id} />
+          <Field label="เครื่องที่ทำงาน" value={run.worker_id} />
           <Field label="สั่งโดย" value={run.requested_by === 'auto-daily' ? 'รอบอัตโนมัติ 8:00' : run.requested_by} />
           <Field label="เริ่ม" value={fmt(run.started_at)} />
           <Field label="เสร็จ" value={fmt(run.finished_at)} />

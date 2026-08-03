@@ -75,12 +75,12 @@ const CARD_ACCENT: Record<WorkCenterStage, string> = {
 
 // กล่องสถานะบนหัว = เส้นทางงาน 6 ป้ายเดียวกับ stepper บนการ์ด (นับว่างานค้างป้ายไหนกี่งาน)
 const STEP_BOXES: { label: string; hint: string }[] = [
-  { label: 'รับงาน', hint: 'รอกดรับ' },
-  { label: 'เตรียมของ', hint: 'ระบบกำลังทำ' },
-  { label: 'อนุมัติ', hint: 'รอคุณตรวจ' },
-  { label: 'Scrape', hint: 'กำลังดึงข้อมูล' },
-  { label: 'Auto post', hint: 'กำลังโพสต์' },
-  { label: 'เสร็จ', hint: 'จบงาน' },
+  { label: 'รับงาน', hint: 'รอคุณกดรับ' },
+  { label: 'เตรียมงาน', hint: 'ระบบกำลังเตรียม' },
+  { label: 'ตรวจงาน', hint: 'รอคุณตรวจ' },
+  { label: 'หาผู้สมัคร', hint: 'กำลังค้นหา' },
+  { label: 'เผยแพร่', hint: 'กำลังโพสต์' },
+  { label: 'เห็นผล', hint: 'งานเสร็จแล้ว' },
 ];
 
 /** งานอยู่ป้ายไหนของเส้นทาง — ป้ายแรกที่ active/failed; ไม่มีเลย = เสร็จ (ป้ายสุดท้าย) */
@@ -99,7 +99,7 @@ function fmtDate(value: string) {
 }
 
 function KindTag({ kind }: { kind: WorkCenterItem['kind'] }) {
-  return <span className="ml-1.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-subtle/70">{kind === 'content' ? 'Content' : 'Scraping'}</span>;
+  return <span className="ml-1.5 text-[10px] font-semibold tracking-[0.04em] text-subtle/70">{kind === 'content' ? 'สร้างประกาศ' : 'ค้นหาผู้สมัคร'}</span>;
 }
 
 // ---- Stepper 6 ป้าย: done=ดำเข้ม✓, active=แดง(voltage), failed=แดงขอบ✕, skip=จุดจาง, todo=ว่าง ----
@@ -223,7 +223,7 @@ function WorkAction({ item, connectors, facebookAccounts }: {
     return (
       <form action={retryCampaignDraftAction}>
         <input type="hidden" name="campaignId" value={item.campaignId} />
-        <button className="btn-primary">ลองสร้าง Content ใหม่</button>
+        <button className="btn-primary">ลองสร้างประกาศใหม่</button>
       </form>
     );
   }
@@ -241,7 +241,7 @@ function WorkAction({ item, connectors, facebookAccounts }: {
     return (
       <form action={measureCampaignAction}>
         <input type="hidden" name="campaignId" value={item.campaignId} />
-        <button className="btn-primary">ตรวจผล Engagement</button>
+        <button className="btn-primary">ตรวจผลตอบรับ</button>
       </form>
     );
   }
@@ -281,7 +281,7 @@ function WorkAction({ item, connectors, facebookAccounts }: {
           {item.requestFields && <RequestFieldsEditor fields={item.requestFields} formId={formId} />}
           <form id={formId} action={startCampaignAction}>
             <input type="hidden" name="requestNo" value={item.requestNo} />
-            <button className="btn-primary">อนุมัติรับงาน Content</button>
+            <button className="btn-primary">รับงานและเริ่มสร้างประกาศ</button>
           </form>
           {rejectForm}
         </div>
@@ -296,7 +296,7 @@ function WorkAction({ item, connectors, facebookAccounts }: {
           <div className="rounded-2xl border border-line bg-black/[0.015] px-4 py-3">
             <div className="text-[13px] font-medium text-ink">
               🔎 แผนการค้น
-              <span className="ml-1 font-normal text-subtle">— ระบบจะ scrape ตามนี้ แก้ได้ก่อนกด</span>
+              <span className="ml-1 font-normal text-subtle">— ระบบจะค้นหาตามนี้ แก้ได้ก่อนกด</span>
             </div>
             <div className="mt-2 grid gap-x-3 gap-y-2 sm:grid-cols-3">
               <div>
@@ -315,15 +315,15 @@ function WorkAction({ item, connectors, facebookAccounts }: {
           </div>
           <div className="flex flex-wrap items-end gap-2">
             <div>
-              <label className="label" htmlFor={`connector-${item.id}`}>เลือก Connector</label>
+              <label className="label" htmlFor={`connector-${item.id}`}>เลือกบัญชีสำหรับค้นหา</label>
               <select id={`connector-${item.id}`} name="connectorId" required defaultValue="" className="field">
-                <option value="" disabled>เลือกบัญชี Scraping…</option>
+                <option value="" disabled>เลือกบัญชี JobBKK หรือ JobThai…</option>
                 {connectors.map((connector) => <option key={connector.id} value={connector.id}>{connector.label}</option>)}
               </select>
             </div>
-            <button className="btn-primary" disabled={connectors.length === 0}>อนุมัติและเริ่ม Scraping</button>
+            <button className="btn-primary" disabled={connectors.length === 0}>รับงานและเริ่มค้นหา</button>
             {connectors.length === 0 && (
-              <Link href="/settings/connectors" className="text-xs text-accent hover:underline">เพิ่ม Connector ก่อน</Link>
+              <Link href="/settings/connectors" className="text-xs text-accent hover:underline">เพิ่มบัญชีสำหรับค้นหาก่อน</Link>
             )}
           </div>
         </form>
@@ -361,6 +361,15 @@ function WorkAction({ item, connectors, facebookAccounts }: {
               <option value="caption">เฉพาะแคปชัน</option>
             </select>
           </div>
+          <div>
+            <label className="label" htmlFor={`approve-feedback-${item.id}`}>จุดที่ทำได้ดี</label>
+            <select id={`approve-feedback-${item.id}`} name="feedbackCode" defaultValue="ready" className="field">
+              <option value="ready">พร้อมใช้ ไม่ต้องแก้</option>
+              <option value="strong_hook">ประโยคเปิดน่าสนใจ</option>
+              <option value="complete_info">ข้อมูลครบและถูกต้อง</option>
+              <option value="good_visual">รูปเหมาะกับงาน</option>
+            </select>
+          </div>
           <button className="btn-primary" disabled={noReady}>
             {noAccount ? 'ยังไม่มีบัญชี' : noReady ? 'ทุกบัญชียังไม่มีกลุ่ม' : 'อนุมัติและโพสต์'}
           </button>
@@ -375,12 +384,25 @@ function WorkAction({ item, connectors, facebookAccounts }: {
         <form action={rejectContentAction} className="flex flex-wrap items-end gap-2 border-t border-line/60 pt-3">
           <input type="hidden" name="contentId" value={item.content.id} />
           <input type="hidden" name="campaignId" value={item.content.campaignId} />
+          <div>
+            <label className="label" htmlFor={`reject-code-${item.id}`}>ปัญหาหลัก</label>
+            <select id={`reject-code-${item.id}`} name="reasonCode" required defaultValue="" className="field">
+              <option value="" disabled>เลือกเหตุผล…</option>
+              <option value="incorrect_info">ข้อมูลไม่ถูกต้อง</option>
+              <option value="weak_hook">ประโยคเปิดไม่น่าสนใจ</option>
+              <option value="too_long">เนื้อหายาวเกินไป</option>
+              <option value="missing_details">ข้อมูลสำคัญไม่ครบ</option>
+              <option value="wrong_tone">ภาษาไม่เหมาะกับกลุ่มเป้าหมาย</option>
+              <option value="poor_visual">รูปไม่เหมาะสม</option>
+              <option value="other">เหตุผลอื่น</option>
+            </select>
+          </div>
           <div className="min-w-[220px] flex-1">
-            <label className="label" htmlFor={`reject-${item.id}`}>ตีกลับ — บอกว่าต้องแก้อะไร</label>
+            <label className="label" htmlFor={`reject-${item.id}`}>รายละเอียดเพิ่มเติม</label>
             <input
               id={`reject-${item.id}`}
               name="reason"
-              placeholder="เช่น เพิ่มเงินเดือน, เน้นสวัสดิการ, เปลี่ยนรูป, แคปชั่นยาวไป"
+              placeholder="บอกให้ AI รู้ว่ารอบใหม่ควรแก้อะไร"
               className="field"
             />
           </div>
@@ -394,7 +416,7 @@ function WorkAction({ item, connectors, facebookAccounts }: {
     return (
       <form action={approveScrapeResultAction}>
         <input type="hidden" name="taskId" value={item.taskId} />
-        <button className="btn-primary">ตรวจรับผล Scraping</button>
+        <button className="btn-primary">ยืนยันว่าข้อมูลผู้สมัครถูกต้อง</button>
       </form>
     );
   }
@@ -408,7 +430,7 @@ function Readiness({ facebookAccounts }: { facebookAccounts: FbAccountOption[] }
   const problems: { text: string; href: string; btn: string }[] = [];
   if (facebookAccounts.length === 0) {
     problems.push({
-      text: 'ยังไม่มีบัญชี Facebook สำหรับโพสต์ — งาน Auto post จะทำไม่ได้',
+      text: 'ยังไม่มีบัญชี Facebook สำหรับเผยแพร่ — งานจะไปต่อไม่ได้',
       href: '/settings/connectors',
       btn: 'เพิ่มบัญชี',
     });
@@ -417,7 +439,7 @@ function Readiness({ facebookAccounts }: { facebookAccounts: FbAccountOption[] }
     if (noGroup.length > 0) {
       const names = noGroup.map((a) => a.label).join(', ');
       problems.push({
-        text: `บัญชี ${names} ยังไม่ได้เลือกกลุ่มโพสต์ — งานที่ต้อง Auto post จะค้างที่ป้ายอนุมัติ`,
+        text: `บัญชี ${names} ยังไม่ได้เลือกกลุ่ม Facebook — งานจะค้างอยู่ที่ขั้นตรวจงาน`,
         href: '/settings/posting',
         btn: 'เลือกกลุ่มตอนนี้',
       });
@@ -602,7 +624,7 @@ export function WorkCenter({ items, connectors, facebookAccounts }: {
         })}
       </div>
 
-      {filter ? (
+      {filter != null ? (
         /* โหมดกรอง: โชว์เฉพาะกลุ่มที่กด */
         <div className="space-y-3">
           <div className="flex items-center justify-between">

@@ -13,6 +13,8 @@
 //   node workers/runner.js            # loop forever (daemon)
 //   node workers/runner.js --once     # claim+run a single job, then exit
 import os from 'node:os';
+import { closeSync, existsSync, mkdirSync, openSync, statSync, unlinkSync, utimesSync, writeFileSync } from 'node:fs';
+import { dirname, resolve } from 'node:path';
 import { sleep } from '../src/config.js';
 import { loadRuntime } from '../src/config.js';
 import { query, closePool } from '../src/db/pool.js';
@@ -23,9 +25,50 @@ import { generateDraftForCampaign } from '../src/core/orchestrator-draft.js';
 import { measureCampaign } from '../src/core/orchestrator-measure.js';
 import { sendAlert } from '../src/core/alert.js';
 
-const WORKER_ID = `${os.hostname()}#${process.pid}`;
+const WORKER_NAME = os.hostname();
+const WORKER_ID = `${WORKER_NAME}#${process.pid}`;
 const POLL_MS = Number.parseInt(process.env.WORKER_POLL_MS ?? '3000', 10);
 const STALE_SECONDS = Number.parseInt(process.env.WORKER_STALE_SECONDS ?? '1800', 10); // 30 min
+const LEASE_HEARTBEAT_MS = Number.parseInt(process.env.WORKER_LEASE_HEARTBEAT_MS ?? '30000', 10);
+const RETRY_BASE_SECONDS = Number.parseInt(process.env.WORKER_RETRY_BASE_SECONDS ?? '30', 10);
+const MEASURE_RETRY_MINUTES = Number.parseInt(process.env.MEASURE_RETRY_MINUTES ?? '30', 10);
+const MEASURE_MAX_CHECKS = Number.parseInt(process.env.MEASURE_MAX_CHECKS ?? '96', 10);
+const PROCESS_LOCK_PATH = resolve(process.cwd(), 'output', 'runner.lock');
+const PROCESS_LOCK_STALE_MS = 60_000;
+let ownsProcessLock = false;
+
+function touchProcessLock() {
+  if (!ownsProcessLock) return;
+  try {
+    const now = new Date();
+    utimesSync(PROCESS_LOCK_PATH, now, now);
+  } catch { /* the DB lease remains the source of truth for individual jobs */ }
+}
+
+function acquireProcessLock() {
+  mkdirSync(dirname(PROCESS_LOCK_PATH), { recursive: true });
+  if (existsSync(PROCESS_LOCK_PATH)) {
+    try {
+      if (Date.now() - statSync(PROCESS_LOCK_PATH).mtimeMs < PROCESS_LOCK_STALE_MS) return false;
+      unlinkSync(PROCESS_LOCK_PATH);
+    } catch { return false; }
+  }
+  try {
+    const fd = openSync(PROCESS_LOCK_PATH, 'wx');
+    writeFileSync(fd, `${process.pid} ${new Date().toISOString()}`);
+    closeSync(fd);
+    ownsProcessLock = true;
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function releaseProcessLock() {
+  if (!ownsProcessLock) return;
+  ownsProcessLock = false;
+  try { unlinkSync(PROCESS_LOCK_PATH); } catch { /* ignore */ }
+}
 
 // ---- heartbeat: บอกเว็บว่าเครื่องนี้ยังมีชีวิต (ตาราง workers, schema-011) ----
 // key = hostname (ไม่มี pid) — pool หลาย process บนเครื่องเดียวกันแชร์แถวเดียว
@@ -33,6 +76,7 @@ const STALE_SECONDS = Number.parseInt(process.env.WORKER_STALE_SECONDS ?? '1800'
 const HEARTBEAT_MS = 15_000;
 let lastBeat = 0;
 async function heartbeat() {
+  touchProcessLock();
   if (Date.now() - lastBeat < HEARTBEAT_MS) return;
   lastBeat = Date.now();
   try {
@@ -124,7 +168,8 @@ async function claimNext() {
         SELECT q.id FROM work_queue q
          WHERE q.status='queued'
            AND q.type = ANY($2)
-           AND (q.preferred_worker IS NULL OR q.preferred_worker = $1)
+           AND q.available_at <= now()
+           AND (q.preferred_worker IS NULL OR q.preferred_worker = $3)
            AND NOT EXISTS (
              SELECT 1 FROM work_queue r
               WHERE r.connector_key = q.connector_key AND r.status='running')
@@ -132,16 +177,91 @@ async function claimNext() {
          FOR UPDATE SKIP LOCKED
          LIMIT 1)
       RETURNING *`,
-    [WORKER_ID, SUPPORTED],
+    [WORKER_ID, SUPPORTED, WORKER_NAME],
   );
   return rows[0] ?? null;
 }
 
 async function finish(id, status, error = null) {
-  await query(
-    `UPDATE work_queue SET status=$2, finished_at=now(), last_error=$3 WHERE id=$1`,
-    [id, status, error],
+  const { rowCount } = await query(
+    `UPDATE work_queue
+        SET status=$2, finished_at=now(), last_error=$3, locked_at=NULL
+      WHERE id=$1 AND worker_id=$4 AND status='running'`,
+    [id, status, error, WORKER_ID],
   );
+  if (!rowCount) throw new Error(`queue lease lost before finish: ${id}`);
+}
+
+async function renewLease(id) {
+  touchProcessLock();
+  const { rowCount } = await query(
+    `UPDATE work_queue SET locked_at=now()
+      WHERE id=$1 AND worker_id=$2 AND status='running'`,
+    [id, WORKER_ID],
+  );
+  if (!rowCount) throw new Error(`queue lease lost: ${id}`);
+}
+
+async function runWithLease(job, handler) {
+  let leaseError = null;
+  const timer = setInterval(() => {
+    void renewLease(job.id).catch((e) => { leaseError = e; });
+  }, Math.max(5_000, LEASE_HEARTBEAT_MS));
+  timer.unref?.();
+  try {
+    const result = await handler(job);
+    if (leaseError) throw leaseError;
+    return result;
+  } finally {
+    clearInterval(timer);
+  }
+}
+
+async function retryOrFail(job, error) {
+  const attempts = Number(job.attempts || 0) + 1;
+  const maxAttempts = Math.max(1, Number(job.max_attempts || 3));
+  if (attempts >= maxAttempts) {
+    await query(
+      `UPDATE work_queue
+          SET status='error', attempts=$3, finished_at=now(), last_error=$4, locked_at=NULL
+        WHERE id=$1 AND worker_id=$2 AND status='running'`,
+      [job.id, WORKER_ID, attempts, error],
+    );
+    return false;
+  }
+  const delaySeconds = RETRY_BASE_SECONDS * (2 ** (attempts - 1));
+  await query(
+    `UPDATE work_queue
+        SET status='queued', attempts=$3, worker_id=NULL, locked_at=NULL,
+            available_at=now() + ($4 || ' seconds')::interval, last_error=$5
+      WHERE id=$1 AND worker_id=$2 AND status='running'`,
+    [job.id, WORKER_ID, attempts, String(delaySeconds), error],
+  );
+  return true;
+}
+
+async function reschedulePendingMeasurement(job) {
+  const payload = { ...(job.payload || {}) };
+  const checks = Number(payload.measure_checks || 0) + 1;
+  if (checks >= MEASURE_MAX_CHECKS) {
+    await query(
+      `UPDATE recruit_campaigns
+          SET status_note=$2, updated_at=now()
+        WHERE id=$1 AND status='measuring'`,
+      [job.ref_id, 'ยังมีข้อมูลไม่พอสำหรับสรุปผล กรุณาตรวจสอบการเก็บคอมเมนต์'],
+    );
+    await finish(job.id, 'error', 'measurement timed out waiting for collected results');
+    return false;
+  }
+  payload.measure_checks = checks;
+  await query(
+    `UPDATE work_queue
+        SET status='queued', worker_id=NULL, locked_at=NULL, payload=$3::jsonb,
+            available_at=now() + ($4 || ' minutes')::interval, last_error=NULL
+      WHERE id=$1 AND worker_id=$2 AND status='running'`,
+    [job.id, WORKER_ID, JSON.stringify(payload), String(MEASURE_RETRY_MINUTES)],
+  );
+  return true;
 }
 
 async function runOne() {
@@ -151,15 +271,24 @@ async function runOne() {
   if (!job) return false;
   console.log(`▶ [${WORKER_ID}] ${job.type} ${job.connector_key} (job ${job.id})`);
   try {
-    const r = await HANDLERS[job.type](job);
+    const r = await runWithLease(job, HANDLERS[job.type]);
+    if (job.type === 'measure' && r?.verdict === 'pending') {
+      const scheduled = await reschedulePendingMeasurement(job);
+      console.log(scheduled
+        ? `  ↻ waiting for results; checking again in ${MEASURE_RETRY_MINUTES} minute(s)`
+        : '  ✗ measurement stopped after reaching its waiting limit');
+      return true;
+    }
     await finish(job.id, 'done');
     console.log(`  ✓ done: ${JSON.stringify(r).slice(0, 200)}`);
   } catch (e) {
     const errMsg = String(e?.message ?? e).slice(0, 500);
-    await finish(job.id, 'error', errMsg);
-    console.error(`  ✗ error: ${e?.message ?? e}`);
+    const retrying = await retryOrFail(job, errMsg);
+    console.error(`  ✗ ${retrying ? 'retry scheduled' : 'error'}: ${e?.message ?? e}`);
     // แจ้งเตือนทันทีที่งานพัง (fail-soft — ไม่มี ALERT_WEBHOOK_URL = เงียบ)
-    await sendAlert(`❌ งาน ${job.type} พังบนเครื่อง ${WORKER_ID}\nกุญแจ: ${job.connector_key}\nสาเหตุ: ${errMsg}`);
+    if (!retrying) {
+      await sendAlert(`งาน ${job.type} ไม่สำเร็จบนเครื่อง ${WORKER_NAME}\nงาน: ${job.connector_key}\nสาเหตุ: ${errMsg}`);
+    }
   }
   return true;
 }
@@ -168,6 +297,11 @@ async function main() {
   const once = process.argv.includes('--once');
   const drain = process.argv.includes('--drain');
   const mode = once ? '--once' : drain ? '--drain' : `poll ${POLL_MS}ms`;
+  if (!once && !drain && !acquireProcessLock()) {
+    console.log('work-queue runner already active — exit');
+    await closePool();
+    return;
+  }
   console.log(`work-queue runner up — id=${WORKER_ID} types=[${SUPPORTED}] (${mode})`);
   if (once) {
     const did = await runOne();
@@ -191,7 +325,13 @@ async function main() {
     if (!did) await sleep(POLL_MS);
   }
   await closePool();
+  releaseProcessLock();
   console.log('runner stopped');
 }
 
-main().catch(async (e) => { console.error('runner fatal:', e.message); await closePool(); process.exit(1); });
+main().catch(async (e) => {
+  console.error('runner fatal:', e.message);
+  releaseProcessLock();
+  await closePool();
+  process.exit(1);
+});
