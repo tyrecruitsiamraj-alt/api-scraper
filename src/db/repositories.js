@@ -121,6 +121,24 @@ export async function getTaskById(id) {
   return rows[0] ?? null;
 }
 
+/**
+ * Atomically reserve a task before starting its pipeline.  The queue lease alone
+ * is not sufficient here: a dead worker can be reclaimed while its old browser
+ * process is still unwinding.  Without this gate both processes would create
+ * scrape_runs for the same task.
+ */
+export async function claimTaskExecution(id) {
+  const { rows } = await query(
+    `UPDATE scrape_tasks
+        SET status='running', phase=CASE WHEN phase='idle' THEN 'starting' ELSE phase END,
+            updated_at=now()
+      WHERE id=$1 AND status IN ('idle','queued','done','error')
+      RETURNING *`,
+    [id],
+  );
+  return rows[0] ?? null;
+}
+
 /** Enqueue a job into the unified work_queue. Returns the new row id. */
 export async function enqueueWorkTask({ type, module, connectorKey, refId = null, payload = {}, ownerUser = null, preferredWorker = null, priority = 0 }) {
   const { rows } = await query(
@@ -353,6 +371,11 @@ export async function startRun(connectorId, platform, criteria, taskId = null) {
     [connectorId, platform, criteria, taskId],
   );
   return rows[0].id;
+}
+
+/** Keep the run alive independently of UI progress so stale recovery is accurate. */
+export async function touchRun(runId) {
+  await query(`UPDATE scrape_runs SET heartbeat_at=now() WHERE id=$1 AND status='running'`, [runId]);
 }
 
 export async function finishRun(runId, { status, requested, found, newCount, updatedCount, failed, error }) {

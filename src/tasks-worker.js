@@ -6,6 +6,7 @@ import { PROJECT_ROOT } from './config.js';
 import {
   bumpTaskProgress,
   candidatesForRuns,
+  claimTaskExecution,
   dueTasks,
   extractedTextForCandidate,
   fillCandidateContacts,
@@ -50,6 +51,12 @@ function nextRunFrom(cron) {
 }
 
 export async function runTask(t, runtime) {
+  const claimedTask = await claimTaskExecution(t.id);
+  if (!claimedTask) {
+    console.log(`  ${t.name}: skipped — another worker already owns this task`);
+    return { skipped: true, reason: 'task_already_running' };
+  }
+  t = claimedTask;
   const connector = await getConnector(t.connector_id);
   if (!connector) {
     await finishTask(t.id, { status: 'error', phase: 'error', error: 'connector missing' });

@@ -41,6 +41,7 @@ CREATE TABLE IF NOT EXISTS scrape_runs (
   updated_count integer DEFAULT 0,
   failed       integer DEFAULT 0,
   error        text,
+  heartbeat_at timestamptz,
   started_at   timestamptz NOT NULL DEFAULT now(),
   finished_at  timestamptz
 );

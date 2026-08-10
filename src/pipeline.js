@@ -11,6 +11,7 @@ import {
   saveConnectorSession,
   setConnectorCooldown,
   startRun,
+  touchRun,
   upsertCandidate,
   upsertSource,
   withTransaction,
@@ -44,6 +45,18 @@ export async function runConnector(connector, criteria, runtime, opts = {}) {
   const provider = resolveProvider(connector.platform);
   const limiter = new RateLimiter({ minMs: runtime.delayMin, maxMs: runtime.delayMax });
   const runId = await startRun(connector.id, connector.platform, criteria, opts.taskId ?? null);
+  // A provider can spend minutes in login or loading a browser page.  Persist a
+  // small, independent heartbeat so recovery can distinguish a live slow run
+  // from an abandoned process.  It also keeps the task's UI timestamp fresh.
+  const beat = async () => {
+    await touchRun(runId);
+    await opts.onHeartbeat?.();
+  };
+  await beat();
+  const heartbeatTimer = setInterval(() => {
+    void beat().catch((e) => console.warn(`  [${connector.label}] run heartbeat failed: ${e.message}`));
+  }, 15_000);
+  heartbeatTimer.unref?.();
 
   let newCount = 0;
   let updatedCount = 0;
@@ -267,6 +280,7 @@ export async function runConnector(connector, criteria, runtime, opts = {}) {
     }
     console.error(`  [${connector.label}] run error: ${e.message}`);
   } finally {
+    clearInterval(heartbeatTimer);
     // Log out so the platform frees the single active session — otherwise the next
     // run's login collides and JobBKK renders resumes masked (contact hidden).
     if (provider.logout && activeContext) await provider.logout(activeContext, { debug: runtime.debug }).catch(() => {});
