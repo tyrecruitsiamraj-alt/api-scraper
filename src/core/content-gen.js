@@ -1,5 +1,6 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { envString } from '../config.js';
+import { buildVisualBrief, composeVisualPrompt } from './visual-brief.js';
 
 /**
  * Content generation (text) — Claude คิด "โพสต์สรรหา" ให้ 1 ใบขอที่หาคนไม่ได้:
@@ -207,14 +208,18 @@ export async function generateContent(campaign = {}) {
     .filter((t) => t && (t.for_image ?? true) && String(t.label ?? '').trim())
     .map((t) => String(t.label).trim());
   const basePrompt = String(out.image_prompt ?? '').trim();
-  let imagePrompt = basePrompt;
-  if (basePrompt && imageStyle) imagePrompt += `. Style: ${imageStyle}`;
-  if (basePrompt && imageTrends.length) imagePrompt += `. เกาะเทรนด์: ${imageTrends.join(', ')}`;
+  const visualBrief = buildVisualBrief({
+    position: campaign.title || campaign.snapshot?.request_name || '',
+    title: campaign.title || campaign.snapshot?.request_name || '',
+    family: campaign.jobSpec?.family || campaign.family || '',
+  }, { style: [imageStyle, ...imageTrends].filter(Boolean).join('; ') });
+  const imagePrompt = composeVisualPrompt(visualBrief, basePrompt);
 
   return {
     caption,
     videoBrief: String(out.video_brief ?? '').trim(),
     imagePrompt,
+    visualBrief,
     model: modelUsed,
   };
 }

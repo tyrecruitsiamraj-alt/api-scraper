@@ -160,6 +160,7 @@ export async function generateDraftForCampaign(campaignId) {
       ...genNotesBase,
       style: AB_STYLES[i] ?? null,
       imageStyle: styles[i] ?? styles[0] ?? research?.imageStyle ?? null, // สไตล์รูปของเวอร์ชันนี้ (ไว้เรียนรู้ว่าอันไหนชนะ)
+      visual_brief: v.visualBrief ?? null,
       used_winning: winningExamples.length,
       used_feedback: preferredExamples.length,
       used_losing: losingExamples.length,

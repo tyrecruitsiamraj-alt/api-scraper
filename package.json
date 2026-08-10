@@ -12,6 +12,7 @@
     "worker:pool": "node workers/runner.js",
     "scraper:pool": "node workers/scraper-pool.mjs",
     "extract": "node src/extract-worker.js",
+    "trends:google": "node scripts/google-trends-suggest.mjs",
     "api": "node src/api/server.js",
     "connector": "node src/cli/connector.js",
     "erp:sync": "node src/erp/sync.js"
