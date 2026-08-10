@@ -596,12 +596,13 @@ export default async function CampaignDetail({ params }: { params: { id: string 
                           <input type="hidden" name="campaignId" value={c.id} />
                           <label className="min-w-[210px] flex-1 text-xs text-subtle">
                             <span className="mb-1 block">บอก AI ว่าต้องแก้อะไร</span>
-                            <input
-                              name="reason"
-                              required
-                              placeholder="เช่น ตำแหน่งต้องเป็นพนักงานขับรถ"
-                              className="w-full rounded-lg border border-hairline bg-transparent px-2 py-1.5 text-sm text-ink"
-                            />
+                            <select name="reason" required defaultValue="" className="w-full rounded-lg border border-hairline bg-transparent px-2 py-1.5 text-sm text-ink">
+                              <option value="" disabled>เลือกเหตุผลที่ตีกลับ…</option>
+                              <option value="ภาพไม่ตรงตำแหน่งงาน ให้ยึดตำแหน่งจากใบขอเท่านั้น">ภาพไม่ตรงตำแหน่งงาน</option>
+                              <option value="เปลี่ยนคน ชุด และอุปกรณ์ให้ตรงตำแหน่งงาน">คนหรือชุดไม่ตรงงาน</option>
+                              <option value="ปรับภาพให้เป็นสถานที่ทำงานจริงและน่าเชื่อถือ">บรรยากาศไม่ตรงงาน</option>
+                              <option value="เปลี่ยนมุมสื่อสารและภาพใหม่ทั้งหมด โดยยึดข้อมูลเดิม">คิดใหม่ทั้งชุด</option>
+                            </select>
                           </label>
                           <button className="btn-ghost btn-sm">↻ ตีกลับ ให้ AI คิดใหม่</button>
                         </form>

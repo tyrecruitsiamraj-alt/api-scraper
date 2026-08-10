@@ -1,6 +1,7 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { envString } from '../config.js';
 import { resolveContentJobSpec } from './content-job-spec.js';
+import { buildVisualBrief, composeVisualPrompt } from './visual-brief.js';
 import { withHumanPlaybook } from './human-content-playbook.js';
 
 /**
@@ -165,15 +166,17 @@ export async function generateContent(campaign = {}) {
   const imageTrends = selectRelevantTrends(campaign.trends ?? [], spec, 'image')
     .map((t) => String(t.label).trim());
   const basePrompt = String(out.image_prompt ?? '').trim();
-  let imagePrompt = basePrompt;
-  if (basePrompt && imageStyle) imagePrompt += `. Style: ${imageStyle}`;
-  if (basePrompt && imageTrends.length) imagePrompt += `. เกาะเทรนด์: ${imageTrends.join(', ')}`;
-  if (basePrompt) imagePrompt += '. Do not include text, letters, words, logos, labels, captions, signage, or QR codes.';
+  const visualBrief = buildVisualBrief(spec, {
+    style: [imageStyle, ...imageTrends].filter(Boolean).join('; '),
+  });
+  // The visual contract is authoritative. Model-written prompt is only an aesthetic hint.
+  const imagePrompt = composeVisualPrompt(visualBrief, basePrompt);
 
   return {
     caption,
     videoBrief: String(out.video_brief ?? '').trim(),
     imagePrompt,
+    visualBrief,
     model: modelUsed,
   };
 }

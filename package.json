@@ -15,6 +15,7 @@
     "canary": "node src/canary-worker.js",
     "privacy:retention": "node scripts/privacy-retention.mjs",
     "audit:system": "node scripts/system-audit.mjs",
+    "trends:google": "node scripts/google-trends-suggest.mjs",
     "api": "node src/api/server.js",
     "connector": "node src/cli/connector.js",
     "erp:sync": "node src/erp/sync.js",

@@ -12,7 +12,7 @@ import { envString } from '../config.js';
 
 /** OpenAI Images API (gpt-image-1) — คืน { bytes, mime } หรือ null. */
 async function openaiAdapter({ prompt, apiKey, transparent }) {
-  const model = envString('CONTENT_IMAGE_MODEL', 'gpt-image-1');
+  const model = envString('CONTENT_IMAGE_MODEL', 'gpt-image-2');
   const size = envString('CONTENT_IMAGE_SIZE', '1024x1024');
   const payload = { model, prompt, size, n: 1 };
   // โหมดรูปคน diecut สำหรับวางบนโปสเตอร์ (gpt-image-1 เท่านั้น; dall-e ไม่รองรับ)
@@ -59,7 +59,7 @@ export async function generateImage({ prompt, transparent = false } = {}) {
   try {
     const r = await adapter.run({ prompt: p, apiKey, transparent });
     if (!r?.bytes?.length) return null;
-    return { ...r, provider: providerName, model: envString('CONTENT_IMAGE_MODEL', 'gpt-image-1') };
+    return { ...r, provider: providerName, model: envString('CONTENT_IMAGE_MODEL', 'gpt-image-2') };
   } catch (e) {
     console.warn(`  [ai-image] สร้างรูปไม่สำเร็จ: ${e.message} — draft จะไม่มีรูป`);
     return null;
