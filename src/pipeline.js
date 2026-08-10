@@ -21,18 +21,35 @@ const COOLDOWN_MS = 2 * 60 * 60 * 1000; // 2h after a soft-ban
 const CANDIDATE_TIMEOUT_MS = envInt('CANDIDATE_TIMEOUT_MS', 180_000); // skip hung resume fetches
 const LOGIN_TIMEOUT_MS = envInt('LOGIN_TIMEOUT_MS', 300_000); // browser login must finish within 5 min
 
-function withTimeout(promise, ms, label) {
+function timeoutMessage(label, ms) {
+  if (label === 'login') {
+    const minutes = Math.max(1, Math.round(ms / 60_000));
+    return `เข้าสู่ระบบไม่สำเร็จภายใน ${minutes} นาที กรุณาตรวจสอบ CAPTCHA, บัญชีที่เปิดค้างในเครื่องอื่น หรือการเชื่อมต่อของ Worker [timeout:login:${ms}ms]`;
+  }
+  return `timeout:${label}:${ms}ms`;
+}
+
+export function withTimeout(promise, ms, label, { onTimeout } = {}) {
   let timer;
   return Promise.race([
     promise,
     new Promise((_, reject) => {
-      timer = setTimeout(() => reject(new Error(`timeout:${label}:${ms}ms`)), ms);
+      timer = setTimeout(() => {
+        try {
+          onTimeout?.();
+        } catch {
+          // Cleanup is best-effort and must not hide the original timeout.
+        }
+        const error = new Error(timeoutMessage(label, ms));
+        error.code = label === 'login' ? 'LOGIN_TIMEOUT' : 'OPERATION_TIMEOUT';
+        reject(error);
+      }, ms);
     }),
   ]).finally(() => clearTimeout(timer));
 }
 
 function isSessionError(e) {
-  if (e?.needsRelogin) return true;
+  if (e?.needsRelogin || e?.code === 'LOGIN_TIMEOUT') return true;
   const m = String(e?.message ?? '');
   return /session_expired|session_redirect|Max redirect|jobpost|not_authenticated|logged-out|timeout:login/i.test(m);
 }
@@ -99,6 +116,7 @@ export async function runConnector(connector, criteria, runtime, opts = {}) {
       if (opts.onHeartbeat) await opts.onHeartbeat();
       await touchRun(runId);
       console.log(`  [${connector.label}] opening browser session${forceLogin ? ' (fresh login)' : ''}...`);
+      const loginController = new AbortController();
       return withTimeout(
         provider.getSession({
           // Some providers (JobBKK) only work in a visible browser — headless login is
@@ -110,9 +128,11 @@ export async function runConnector(connector, criteria, runtime, opts = {}) {
           storageState: connector.session_state ?? undefined,
           forceLogin,
           onHeartbeat: opts.onHeartbeat,
+          signal: loginController.signal,
         }),
         LOGIN_TIMEOUT_MS,
         'login',
+        { onTimeout: () => loginController.abort() },
       );
     };
 
