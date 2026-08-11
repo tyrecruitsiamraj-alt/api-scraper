@@ -63,7 +63,7 @@ export async function runTask(t, runtime) {
   const connector = await getConnector(t.connector_id);
   if (!connector) {
     await finishTask(t.id, { status: 'error', phase: 'error', error: 'connector missing' });
-    return;
+    return { status: 'error', error: 'connector missing', taskId: t.id };
   }
 
   const target = t.mode === 'count' ? t.target_count || connector.scrape_limit : connector.scrape_limit;
@@ -73,7 +73,7 @@ export async function runTask(t, runtime) {
     await bumpTaskProgress(t.id, alreadyMatched);
     await finishTask(t.id, { status: 'done', phase: 'done', runId: t.last_run_id, error: null, nextRunAt: nextRunFrom(t.schedule_cron) });
     console.log(`  ${t.name}: ครบเป้าแล้ว ${alreadyMatched}/${target} Resume (ไม่ค้นซ้ำ)`);
-    return;
+    return { status: 'done', taskId: t.id, matchedTotal: alreadyMatched, target };
   }
   const remainingTarget = Math.max(1, target - alreadyMatched);
   const criteria = { ...(t.criteria || {}), maxCandidates: remainingTarget, updatedSince: t.updated_since ?? undefined };
@@ -166,7 +166,13 @@ export async function runTask(t, runtime) {
       nextRunAt: nextRunFrom(t.schedule_cron),
     });
     console.log(`  ${t.name}: ${r.status} (${r.error ?? ''})`);
-    return;
+    return {
+      status: 'error',
+      runStatus: r.status,
+      error: r.error ?? 'run failed',
+      runId: r.runId,
+      taskId: t.id,
+    };
   }
 
   // ---- phase 1b: expand to adjacent positions if we came up short (auto 🟢) ----
@@ -248,6 +254,14 @@ export async function runTask(t, runtime) {
     nextRunAt: nextRunFrom(t.schedule_cron),
   });
   console.log(`  ${t.name}: ${resultStatus} | ผ่าน ${matchedTotal}/${target} · ตรวจเพิ่ม ${qualificationStats.needs_review} · ไม่ผ่าน ${qualificationStats.rejected} across ${runIds.length} run(s) | ocr ${pending.length} | enriched ${filled}`);
+  return {
+    status: resultStatus,
+    taskId: t.id,
+    runId: r.runId,
+    matchedTotal,
+    target,
+    qualificationStats,
+  };
 }
 
 const MAX_ADJACENT_ROUNDS = envInt('MAX_ADJACENT_ROUNDS', 6);

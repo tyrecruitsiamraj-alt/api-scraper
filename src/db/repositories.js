@@ -245,7 +245,8 @@ export async function linkCandidateToTask(client, { taskId, candidateId, sourceI
      ON CONFLICT (task_id, candidate_id) DO NOTHING
      RETURNING task_id`,
     [taskId, candidateId, sourceId ?? null, matchedPosition ?? null, status,
-     qualification?.reasons ?? [], qualification?.score ?? null, qualification?.evidence ?? {}],
+     stringifyForJsonb(qualification?.reasons ?? []), qualification?.score ?? null,
+     stringifyForJsonb(qualification?.evidence ?? {})],
   );
   if (inserted.rowCount > 0) return { isNewForTask: true, becameQualified: status === 'qualified', previousStatus: null };
   const previous = await client.query(
@@ -265,7 +266,8 @@ export async function linkCandidateToTask(client, { taskId, candidateId, sourceI
        last_matched_at=now()
      WHERE task_id=$1 AND candidate_id=$2`,
     [taskId, candidateId, sourceId ?? null, matchedPosition ?? null, status,
-     qualification?.reasons ?? [], qualification?.score ?? null, qualification?.evidence ?? {}],
+     stringifyForJsonb(qualification?.reasons ?? []), qualification?.score ?? null,
+     stringifyForJsonb(qualification?.evidence ?? {})],
   );
   return { isNewForTask: false, becameQualified: previousStatus !== 'qualified' && status === 'qualified', previousStatus };
 }
@@ -530,6 +532,13 @@ const TEXT_COLS = [
 ];
 const JSON_COLS = ['education', 'work_experience', 'hard_skills', 'soft_skills', 'language_skills'];
 
+/** PostgreSQL jsonb cannot store the Unicode NUL escape (\\u0000). */
+export function stringifyForJsonb(value) {
+  return JSON.stringify(value ?? [], (_key, current) => (
+    typeof current === 'string' ? current.replace(/\u0000/g, '') : current
+  ));
+}
+
 function validEmail(v) {
   const e = String(v ?? '').trim().toLowerCase();
   return /^[^@\s]+@[^@\s]+\.[^@\s]{2,}$/.test(e) ? e : '';
@@ -546,7 +555,7 @@ function buildRow(parsed) {
   const text = {};
   for (const c of TEXT_COLS) text[c] = c === 'full_name' ? (parsed.name ?? '') : (parsed[c] ?? '');
   const json = {};
-  for (const c of JSON_COLS) json[c] = JSON.stringify(parsed[c] ?? []);
+  for (const c of JSON_COLS) json[c] = stringifyForJsonb(parsed[c]);
   return { phoneNorm, emailNorm, dedupeKey, text, json };
 }
 

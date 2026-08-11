@@ -18,12 +18,13 @@ import { dirname, resolve } from 'node:path';
 import { sleep } from '../src/config.js';
 import { loadRuntime } from '../src/config.js';
 import { query, closePool } from '../src/db/pool.js';
-import { getConnector, getTaskById } from '../src/db/repositories.js';
+import { getConnector, getTaskById, recoverStaleRunningTasks } from '../src/db/repositories.js';
 import { runConnector } from '../src/pipeline.js';
 import { runTask } from '../src/tasks-worker.js';
 import { generateDraftForCampaign } from '../src/core/orchestrator-draft.js';
 import { measureCampaign } from '../src/core/orchestrator-measure.js';
 import { sendAlert } from '../src/core/alert.js';
+import { requireSuccessfulScrapeTaskResult } from '../src/core/scrape-task-result.js';
 
 const WORKER_NAME = os.hostname();
 const WORKER_ID = `${WORKER_NAME}#${process.pid}`;
@@ -109,8 +110,8 @@ const HANDLERS = {
     if (job.ref_id) {
       const task = await getTaskById(job.ref_id);
       if (!task) throw new Error(`scrape_task not found: ${job.ref_id}`);
-      await runTask(task, runtime); // manages task status + OCR + enrich itself
-      return { taskId: job.ref_id };
+      const result = await runTask(task, runtime); // manages task status + OCR + enrich itself
+      return requireSuccessfulScrapeTaskResult(result);
     }
     const { id: connectorId } = splitConnectorKey(job.connector_key);
     const connector = await getConnector(connectorId);
@@ -154,6 +155,8 @@ async function recoverStale() {
     [STALE_SECONDS],
   );
   if (rowCount) console.log(`  ↻ recovered ${rowCount} stale job(s)`);
+  const recoveredTasks = await recoverStaleRunningTasks(10);
+  for (const task of recoveredTasks) console.log(`  ↻ recovered stale scrape task: ${task.name}`);
 }
 
 /**

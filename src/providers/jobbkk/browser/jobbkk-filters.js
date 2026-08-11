@@ -9,6 +9,7 @@ import {
   firstTrulyVisibleLocator,
   waitForPremiumSearchResults,
 } from './resume-premium-search.js';
+import { clickWithoutNavigationWait } from './safe-click.js';
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -134,7 +135,7 @@ export async function clickSearchButton(page) {
   const desktopBtn = await firstTrulyVisibleLocator(page, 'button#btn-search');
   if (desktopBtn) {
     await desktopBtn.scrollIntoViewIfNeeded().catch(() => {});
-    await desktopBtn.click();
+    await clickWithoutNavigationWait(desktopBtn);
     console.log('Clicked button#btn-search');
     await page.waitForLoadState('domcontentloaded').catch(() => {});
     await page.waitForLoadState('networkidle').catch(() => {});
@@ -144,7 +145,7 @@ export async function clickSearchButton(page) {
 
   const textBtn = page.getByRole('button', { name: 'ค้นหา', exact: false }).first();
   if ((await textBtn.count()) > 0 && (await textBtn.isVisible().catch(() => false))) {
-    await textBtn.click();
+    await clickWithoutNavigationWait(textBtn);
     await sleep(2500);
     return 'button:text=ค้นหา';
   }
@@ -152,7 +153,7 @@ export async function clickSearchButton(page) {
   for (const sel of ['input[type="submit"]', 'button[type="submit"]']) {
     const el = await firstTrulyVisibleLocator(page, sel);
     if (el) {
-      await el.click();
+      await clickWithoutNavigationWait(el);
       await sleep(1200);
       return sel;
     }

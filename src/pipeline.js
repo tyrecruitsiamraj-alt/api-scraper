@@ -222,7 +222,10 @@ export async function runConnector(connector, criteria, runtime, opts = {}) {
 
     for (let i = resumeFrom; i < search.ids.length; i += 1) {
       const id = search.ids[i];
-      if (saved >= target || opened >= target) break;
+      // Keep opening candidates until the qualified, unique target is reached or
+      // this search result set is exhausted. Rejected/needs-review resumes must
+      // not consume the requested delivery count.
+      if (saved >= target) break;
       if (priorExternalIds.has(String(id))) {
         duplicate += 1;
         reasonCounts.duplicate = (reasonCounts.duplicate || 0) + 1;

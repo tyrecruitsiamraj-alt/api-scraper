@@ -3,6 +3,8 @@
  * Uses visible desktop elements only; confirms each popover with "ตกลง".
  */
 
+import { clickWithoutNavigationWait } from './safe-click.js';
+
 const POPOVER_FIELDS = [
   { key: 'jobTypes', buttonText: 'ประเภทงาน (สาขาอาชีพ)', checkboxIdPrefix: 'occupation_desktop_' },
   { key: 'areas', buttonText: 'พื้นที่ที่ต้องการทำงาน', checkboxIdPrefix: 'province_desktop_' },
@@ -907,7 +909,10 @@ export async function clickPremiumSearchButton(page) {
     throw new Error('Visible desktop search button #btn-search not found');
   }
   await desktopBtn.scrollIntoViewIfNeeded().catch(() => {});
-  await desktopBtn.click();
+  // JobBKK sometimes starts a navigation that never reaches Playwright's
+  // navigation-complete signal. The result waiter below is the source of truth,
+  // so do not let locator.click() spend 30s waiting for that navigation.
+  await clickWithoutNavigationWait(desktopBtn);
   console.log('Clicked button#btn-search (desktop)');
   await page.waitForLoadState('domcontentloaded').catch(() => {});
   await sleep(1500);
