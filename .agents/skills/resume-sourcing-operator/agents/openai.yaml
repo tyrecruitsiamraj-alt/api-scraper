@@ -1,0 +1,4 @@
+interface:
+  display_name: "พนักงานค้นหา Resume"
+  short_description: "วิเคราะห์งานและค้น Resume ไม่ซ้ำจนถึงเป้าหมาย"
+  default_prompt: "ใช้ $resume-sourcing-operator วิเคราะห์เนื้องานและค้น Resume ที่ตรงเกณฑ์ให้ครบจำนวน"

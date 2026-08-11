@@ -7,6 +7,7 @@ import {
   listTasks,
   listCampaignPostQueueStates,
   listCampaignPendingAdminCounts,
+  getContentBrainSummary,
 } from '@/lib/repo';
 import { AutoRefresh } from '@/components/AutoRefresh';
 import { WorkerStatus } from '@/components/WorkerStatus';
@@ -16,6 +17,7 @@ export const dynamic = 'force-dynamic';
 
 const STATUS_TH: Record<string, string> = {
   new: 'เพิ่งเริ่ม',
+  needs_input: 'ต้องยืนยันข้อมูล',
   researching: 'สำรวจแนว',
   drafting: 'AI กำลังคิด',
   draft_error: 'สร้างประกาศไม่สำเร็จ',
@@ -37,7 +39,7 @@ function campaignStage(status: string, postStatus?: string): WorkCenterStage {
   if (postStatus === 'failed' || postStatus === 'cancelled') return 'attention';
   if (status === 'pending_approval') return 'review';
   if (status === 'done') return 'completed';
-  if (status === 'low_engagement' || status === 'draft_error') return 'attention';
+  if (status === 'low_engagement' || status === 'draft_error' || status === 'needs_input') return 'attention';
   return 'working';
 }
 
@@ -45,7 +47,7 @@ function campaignStage(status: string, postStatus?: string): WorkCenterStage {
 function contentSteps(status: string, postStatus?: string): Step[] {
   let draft: S = 'done';
   if (['new', 'researching', 'drafting'].includes(status)) draft = 'active';
-  else if (status === 'draft_error') draft = 'failed';
+  else if (status === 'draft_error' || status === 'needs_input') draft = 'failed';
 
   let approve: S = 'todo';
   if (status === 'pending_approval') approve = 'active';
@@ -67,7 +69,7 @@ function contentSteps(status: string, postStatus?: string): Step[] {
 function scrapeSteps(status: string, reviewStatus?: string): Step[] {
   let scrape: S = 'todo';
   if (status === 'queued' || status === 'running') scrape = 'active';
-  else if (status === 'error') scrape = 'failed';
+  else if (status === 'error' || status === 'partial') scrape = 'failed';
   else if (status === 'done') scrape = 'done';
 
   let done: S = 'todo';
@@ -84,7 +86,7 @@ function intakeSteps(kind: 'content' | 'scraping'): Step[] {
 }
 
 export default async function OrchestratorPage() {
-  const [reqs, campaigns, pending, fb, connectors, tasks, postStates, pendingAdmin] = await Promise.all([
+  const [reqs, campaigns, pending, fb, connectors, tasks, postStates, pendingAdmin, contentBrain] = await Promise.all([
     listSoRecruitPostingRequests(),
     listCampaigns(),
     listPendingApprovalContents(),
@@ -93,6 +95,7 @@ export default async function OrchestratorPage() {
     listTasks(),
     listCampaignPostQueueStates(),
     listCampaignPendingAdminCounts(),
+    getContentBrainSummary(),
   ]);
   const contentByCampaign = new Map(pending.map((content) => [content.campaign_id, content]));
   const postByCampaign = new Map(postStates.map((state) => [state.campaign_id, state]));
@@ -169,7 +172,15 @@ export default async function OrchestratorPage() {
         statusLabel,
         createdAt: campaign.created_at,
         href: `/orchestrator/${campaign.id}`,
-        content: content ? { id: content.id, campaignId: campaign.id, caption: content.caption, hasImage: content.has_image } : null,
+        content: content ? {
+          id: content.id,
+          campaignId: campaign.id,
+          caption: content.caption,
+          hasImage: content.has_image,
+          qualityStatus: content.quality_status,
+          qualityScore: content.quality_score,
+          qualitySummary: content.quality_checks?.summary ?? null,
+        } : null,
         campaignId: campaign.id,
         nextAction: postFailed
           ? 'retry_post'
@@ -183,7 +194,7 @@ export default async function OrchestratorPage() {
     }),
     ...tasks.filter((task) => task.status !== 'idle' || task.source_request_no).map((task): WorkCenterItem => {
       let stage: WorkCenterStage = 'working';
-      if (task.status === 'error') stage = 'attention';
+      if (task.status === 'error' || task.status === 'partial') stage = 'attention';
       else if (task.status === 'done' && task.review_status === 'pending') stage = 'review';
       else if (task.status === 'done') stage = 'completed';
       return {
@@ -195,7 +206,7 @@ export default async function OrchestratorPage() {
         detail: task.last_error || (task.criteria.job_description ? String(task.criteria.job_description) : null),
         requester: null,
         connector: `${task.platform} · ${task.connector_label}`,
-        statusLabel: task.status === 'done' && task.review_status === 'pending' ? 'รอตรวจรับข้อมูล' : task.status === 'error' ? 'ค้นหาไม่สำเร็จ' : task.status === 'queued' ? 'รอเริ่มค้นหา' : task.status === 'running' ? 'กำลังค้นหาผู้สมัคร' : 'สำเร็จ',
+        statusLabel: task.status === 'done' && task.review_status === 'pending' ? 'รอตรวจรับข้อมูล' : task.status === 'partial' ? 'ยังได้ Resume ไม่ครบ' : task.status === 'error' ? 'ค้นหาไม่สำเร็จ' : task.status === 'queued' ? 'รอเริ่มค้นหา' : task.status === 'running' ? 'กำลังค้นหาผู้สมัคร' : 'สำเร็จ',
         createdAt: task.created_at,
         href: '/scraping',
         progress: { got: task.progress_got, target: task.progress_target || task.target_count || 0 },
@@ -209,6 +220,22 @@ export default async function OrchestratorPage() {
     <div className="space-y-4">
       <AutoRefresh seconds={8} />
       <WorkerStatus />
+      <section className="rounded-2xl border border-violet-200 bg-violet-50 p-4 text-violet-950">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h2 className="font-semibold">สมองเรียนรู้การสร้าง Content</h2>
+            <p className="mt-1 text-sm text-violet-800">
+              เก็บผลจริงจากข้อความ รูป เวลาโพสต์ และกลุ่ม Facebook — ต้องพบซ้ำอย่างน้อย 3 แคมเปญจึงนำมาเป็นสูตรแนะนำ
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-2 text-sm">
+            <span className="rounded-full bg-white px-3 py-1">หลักฐาน {contentBrain.learning_events}</span>
+            <span className="rounded-full bg-white px-3 py-1">แคมเปญ {contentBrain.campaigns_with_evidence}</span>
+            <span className="rounded-full bg-amber-100 px-3 py-1">กำลังเรียนรู้ {contentBrain.collecting_patterns}</span>
+            <span className="rounded-full bg-emerald-100 px-3 py-1">ยืนยันแล้ว {contentBrain.proven_patterns}</span>
+          </div>
+        </div>
+      </section>
       <WorkCenter
         items={items}
         connectors={connectors.map((connector) => ({ id: connector.id, label: `${connector.platform} · ${connector.label}` }))}

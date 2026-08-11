@@ -14,6 +14,10 @@ type LiveStatus = {
   last_error: string | null;
   last_run_at: string | null;
   updated_at: string | null;
+  qualified_count: number;
+  needs_review_count: number;
+  rejected_count: number;
+  assessed_total: number;
 };
 
 const PLATFORM_LABEL: Record<string, string> = { jobbkk: 'JobBKK', jobthai: 'JobThai' };
@@ -35,6 +39,7 @@ const STATUS: Record<string, { label: string; cls: string }> = {
   queued: { label: 'รอคิว', cls: 'bg-amber-50 text-amber-700' },
   running: { label: 'กำลังทำงาน', cls: 'bg-blue-50 text-blue-700' },
   done: { label: 'เสร็จ', cls: 'bg-green-50 text-green-700' },
+  partial: { label: 'ยังไม่ครบเป้า', cls: 'bg-amber-50 text-amber-700' },
   error: { label: 'ผิดพลาด', cls: 'bg-red-50 text-red-700' },
 };
 
@@ -56,6 +61,7 @@ function filterChips(criteria: Record<string, unknown>): string[] {
   };
   const fmtBaht = (v: string) => (v ? Number(v).toLocaleString('en-US') : v);
   const chips: string[] = [];
+  if (val('job_description')) chips.push(`เนื้องาน: ${val('job_description')}`);
   if (val('position')) chips.push(`ตำแหน่ง: ${val('position')}`);
   if (val('keyword')) chips.push(`คำค้น: ${val('keyword')}`);
   if (val('gender')) chips.push(`เพศ: ${val('gender')}`);
@@ -197,6 +203,10 @@ export function TaskList({ initialTasks }: { initialTasks: TaskRow[] }) {
         const pct = target > 0 ? Math.min(100, Math.round((got / target) * 100)) : 0;
         const busy = status === 'running' || status === 'queued';
         const phase = s?.phase ?? t.phase ?? 'idle';
+        const qualified = s?.qualified_count ?? t.qualified_count ?? got;
+        const needsReview = s?.needs_review_count ?? t.needs_review_count ?? 0;
+        const rejected = s?.rejected_count ?? t.rejected_count ?? 0;
+        const assessed = s?.assessed_total ?? t.assessed_total ?? 0;
         const phaseIdx = PHASES.indexOf(phase as (typeof PHASES)[number]);
 
         return (
@@ -213,6 +223,13 @@ export function TaskList({ initialTasks }: { initialTasks: TaskRow[] }) {
                   {t.mode === 'count' ? `จำนวน ${t.target_count ?? '-'}` : `ตั้งแต่ ${t.updated_since ?? '-'}`} ·{' '}
                   {scheduleLabel(t.schedule_cron)}
                 </div>
+                {assessed > 0 && (
+                  <div className="mt-2 flex flex-wrap gap-1.5 text-[11px]">
+                    <span className="pill bg-green-50 text-green-700">ผ่าน {qualified}</span>
+                    <span className="pill bg-amber-50 text-amber-700">ต้องตรวจเพิ่ม {needsReview}</span>
+                    <span className="pill bg-red-50 text-red-700">ไม่ผ่าน {rejected}</span>
+                  </div>
+                )}
                 {filterChips(t.criteria).length > 0 && (
                   <div className="mt-2 flex flex-wrap gap-1.5">
                     {filterChips(t.criteria).map((chip) => (
@@ -254,7 +271,7 @@ export function TaskList({ initialTasks }: { initialTasks: TaskRow[] }) {
                 {PHASES.map((p, idx) => {
                   // state of this step relative to the current phase
                   let state: 'done' | 'active' | 'pending' | 'error';
-                  if (status === 'done') state = 'done';
+                  if (status === 'done' || status === 'partial') state = 'done';
                   else if (status === 'error') state = phaseIdx > idx ? 'done' : phaseIdx === idx ? 'error' : 'pending';
                   else if (phaseIdx < 0) state = 'pending';
                   else state = phaseIdx > idx ? 'done' : phaseIdx === idx ? 'active' : 'pending';
@@ -292,7 +309,12 @@ export function TaskList({ initialTasks }: { initialTasks: TaskRow[] }) {
                 {status === 'done' && (
                   <div className="mt-1 flex items-center gap-2 text-xs font-medium text-green-700">
                     <span className="grid h-4 w-4 place-items-center rounded-full bg-green-100 text-[10px]">✓</span>
-                    Task ทั้งหมดเสร็จสิ้น
+                    ได้ Resume ผ่านเกณฑ์ครบ {qualified}/{target}
+                  </div>
+                )}
+                {status === 'partial' && (
+                  <div className="mt-1 flex items-center gap-2 text-xs font-medium text-amber-700">
+                    ได้ Resume ผ่านเกณฑ์ไม่ซ้ำ {qualified}/{target} — กด “รันตอนนี้” เพื่อค้นหาต่อ
                   </div>
                 )}
               </div>
@@ -304,10 +326,7 @@ export function TaskList({ initialTasks }: { initialTasks: TaskRow[] }) {
                 ไม่พบผลลัพธ์ในรอบนี้ — มักเกิดจากใส่ฟิลเตอร์ซ้อนกันแน่นเกิน (ตำแหน่ง + จังหวัด + วุฒิ + อายุ พร้อมกัน) หรือคำค้นตำแหน่งไม่ตรงกับที่คนไทยเขียนในเรซูเม่ ลองลดฟิลเตอร์ (เอาอายุ/วุฒิออก) แล้วกด “รันตอนนี้” อีกครั้ง
               </p>
             )}
-            {status === 'done' && got > 0 && target > 0 && got < target && (
-              <p className="mt-2 text-xs text-amber-700">ดึงได้ไม่ครบ ({got}/{target}) — อาจติด daily cap หรือผลลัพธ์มีไม่พอ</p>
-            )}
-
+            {status === 'partial' && error && <p className="mt-2 text-xs text-amber-700">{error}</p>}
             {status === 'error' && error && <p className="mt-2 text-xs text-red-600">⚠ {error}</p>}
 
             {/* แก้เกณฑ์การค้นหลังสร้าง — ปิดตอนกำลังวิ่ง (จะมีผลรอบถัดไปที่กดรัน) */}

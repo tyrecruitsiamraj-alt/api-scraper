@@ -199,6 +199,137 @@ export async function setTaskAdjacentPlan(id, plan) {
   await query(`UPDATE scrape_tasks SET adjacent_plan=$2, updated_at=now() WHERE id=$1`, [id, plan]);
 }
 
+/** Exact qualified result count. One candidate counts once across retries/search terms/platform pages. */
+export async function countTaskCandidates(taskId) {
+  const { rows } = await query(
+    `SELECT count(*)::int AS n FROM scrape_task_candidates WHERE task_id=$1 AND qualification_status='qualified'`,
+    [taskId],
+  );
+  return rows[0]?.n ?? 0;
+}
+
+export async function taskCandidateStats(taskId) {
+  const { rows } = await query(
+    `SELECT
+       count(*) FILTER (WHERE qualification_status='qualified')::int AS qualified,
+       count(*) FILTER (WHERE qualification_status='needs_review')::int AS needs_review,
+       count(*) FILTER (WHERE qualification_status='rejected')::int AS rejected,
+       count(*)::int AS total
+     FROM scrape_task_candidates WHERE task_id=$1`,
+    [taskId],
+  );
+  return rows[0] ?? { qualified: 0, needs_review: 0, rejected: 0, total: 0 };
+}
+
+/** Platform resume IDs already counted for this task, so retries can search past them without reopening them. */
+export async function taskExternalIds(taskId, platform) {
+  if (!taskId) return [];
+  const { rows } = await query(
+    `SELECT DISTINCT s.external_id
+       FROM scrape_task_candidates tc
+       JOIN candidate_sources s ON s.candidate_id=tc.candidate_id
+      WHERE tc.task_id=$1 AND s.platform=$2 AND s.external_id IS NOT NULL`,
+    [taskId, platform],
+  );
+  return rows.map((r) => String(r.external_id));
+}
+
+export async function linkCandidateToTask(client, { taskId, candidateId, sourceId, matchedPosition, qualification = { status: 'qualified', reasons: [], score: 100, evidence: {} } }) {
+  if (!taskId || !candidateId) return { isNewForTask: true, becameQualified: true, previousStatus: null };
+  const status = ['qualified', 'needs_review', 'rejected'].includes(qualification?.status) ? qualification.status : 'needs_review';
+  const inserted = await client.query(
+    `INSERT INTO scrape_task_candidates
+       (task_id, candidate_id, candidate_source_id, matched_position, qualification_status,
+        qualification_reasons, qualification_score, qualification_evidence, evaluated_at)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,now())
+     ON CONFLICT (task_id, candidate_id) DO NOTHING
+     RETURNING task_id`,
+    [taskId, candidateId, sourceId ?? null, matchedPosition ?? null, status,
+     qualification?.reasons ?? [], qualification?.score ?? null, qualification?.evidence ?? {}],
+  );
+  if (inserted.rowCount > 0) return { isNewForTask: true, becameQualified: status === 'qualified', previousStatus: null };
+  const previous = await client.query(
+    `SELECT qualification_status FROM scrape_task_candidates WHERE task_id=$1 AND candidate_id=$2 FOR UPDATE`,
+    [taskId, candidateId],
+  );
+  const previousStatus = previous.rows[0]?.qualification_status;
+  await client.query(
+    `UPDATE scrape_task_candidates SET
+       candidate_source_id=$3,
+       matched_position=COALESCE($4, matched_position),
+       qualification_status=$5,
+       qualification_reasons=$6,
+       qualification_score=$7,
+       qualification_evidence=$8,
+       evaluated_at=now(),
+       last_matched_at=now()
+     WHERE task_id=$1 AND candidate_id=$2`,
+    [taskId, candidateId, sourceId ?? null, matchedPosition ?? null, status,
+     qualification?.reasons ?? [], qualification?.score ?? null, qualification?.evidence ?? {}],
+  );
+  return { isNewForTask: false, becameQualified: previousStatus !== 'qualified' && status === 'qualified', previousStatus };
+}
+
+export async function recommendedSourcingTerms({ jobFamily = '', location = '', platform, limit = 5 }) {
+  const { rows } = await query(
+    `SELECT search_term, attempt_count, opened_count, qualified_count, confidence,
+            qualified_count::float / NULLIF(opened_count, 0) AS qualified_yield
+       FROM resume_sourcing_patterns
+      WHERE job_family=$1 AND platform=$2
+        AND (location=$3 OR location='')
+        AND confidence IN ('candidate_pattern','recommended_pattern')
+        AND last_observed_at >= now() - interval '90 days'
+      ORDER BY qualified_yield DESC NULLS LAST, qualified_count DESC, last_observed_at DESC
+      LIMIT $4`,
+    [jobFamily, platform, location ?? '', limit],
+  );
+  return rows;
+}
+
+export async function recordResumeSearchAttempt(attempt) {
+  const a = {
+    taskId: attempt.taskId ?? null, runId: attempt.runId ?? null, connectorId: attempt.connectorId ?? null,
+    platform: String(attempt.platform || ''), jobFamily: String(attempt.jobFamily || ''), location: String(attempt.location || ''),
+    searchTerm: String(attempt.searchTerm || ''), searchTier: String(attempt.searchTier || 'direct'),
+    found: attempt.found ?? 0, opened: attempt.opened ?? 0, unique: attempt.unique ?? 0,
+    qualified: attempt.qualified ?? 0, needsReview: attempt.needsReview ?? 0, rejected: attempt.rejected ?? 0,
+    duplicate: attempt.duplicate ?? 0, quotaUsed: attempt.quotaUsed ?? attempt.opened ?? 0,
+    durationSeconds: attempt.durationSeconds ?? 0, reasonCounts: attempt.reasonCounts ?? {},
+  };
+  const inserted = await query(
+    `INSERT INTO resume_search_attempts
+       (task_id, run_id, connector_id, platform, job_family, location, search_term, search_tier,
+        found_count, opened_count, unique_count, qualified_count, needs_review_count, rejected_count,
+        duplicate_count, quota_used, duration_seconds, reason_counts)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)
+     ON CONFLICT (run_id) DO NOTHING`,
+    [a.taskId, a.runId, a.connectorId, a.platform, a.jobFamily, a.location, a.searchTerm, a.searchTier,
+     a.found, a.opened, a.unique, a.qualified, a.needsReview, a.rejected, a.duplicate,
+     a.quotaUsed, a.durationSeconds, a.reasonCounts],
+  );
+  if (inserted.rowCount === 0 || !a.searchTerm || !a.platform) return;
+  await query(
+    `INSERT INTO resume_sourcing_patterns
+       (job_family, location, platform, search_term, attempt_count, opened_count, unique_count,
+        qualified_count, needs_review_count, rejected_count, quota_used, confidence, last_observed_at)
+     VALUES ($1,$2,$3,$4,1,$5,$6,$7,$8,$9,$10,'observation',now())
+     ON CONFLICT (job_family, location, platform, search_term) DO UPDATE SET
+       attempt_count=resume_sourcing_patterns.attempt_count+1,
+       opened_count=resume_sourcing_patterns.opened_count+EXCLUDED.opened_count,
+       unique_count=resume_sourcing_patterns.unique_count+EXCLUDED.unique_count,
+       qualified_count=resume_sourcing_patterns.qualified_count+EXCLUDED.qualified_count,
+       needs_review_count=resume_sourcing_patterns.needs_review_count+EXCLUDED.needs_review_count,
+       rejected_count=resume_sourcing_patterns.rejected_count+EXCLUDED.rejected_count,
+       quota_used=resume_sourcing_patterns.quota_used+EXCLUDED.quota_used,
+       confidence=CASE
+         WHEN resume_sourcing_patterns.attempt_count+1 >= 6 AND resume_sourcing_patterns.opened_count+EXCLUDED.opened_count >= 40 THEN 'recommended_pattern'
+         WHEN resume_sourcing_patterns.attempt_count+1 >= 3 AND resume_sourcing_patterns.opened_count+EXCLUDED.opened_count >= 20 THEN 'candidate_pattern'
+         ELSE 'observation' END,
+       last_observed_at=now()`,
+    [a.jobFamily, a.location, a.platform, a.searchTerm, a.opened, a.unique, a.qualified, a.needsReview, a.rejected, a.quotaUsed],
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Job-family AI cache — avoid re-calling the model for the same position
 // ---------------------------------------------------------------------------
@@ -378,11 +509,13 @@ export async function touchRun(runId) {
   await query(`UPDATE scrape_runs SET heartbeat_at=now() WHERE id=$1 AND status='running'`, [runId]);
 }
 
-export async function finishRun(runId, { status, requested, found, newCount, updatedCount, failed, error }) {
+export async function finishRun(runId, { status, requested, found, newCount, updatedCount, failed, error, opened = 0, qualified = 0, needsReview = 0, rejected = 0, duplicate = 0, reasonCounts = {} }) {
   await query(
     `UPDATE scrape_runs SET status=$2, requested=$3, found=$4, new_count=$5, updated_count=$6,
-       failed=$7, error=$8, finished_at=now() WHERE id=$1`,
-    [runId, status, requested, found, newCount, updatedCount, failed, error ?? null],
+       failed=$7, error=$8, opened_count=$9, qualified_count=$10, needs_review_count=$11,
+       rejected_count=$12, duplicate_count=$13, reason_counts=$14, finished_at=now() WHERE id=$1`,
+    [runId, status, requested, found, newCount, updatedCount, failed, error ?? null,
+     opened, qualified, needsReview, rejected, duplicate, reasonCounts],
   );
 }
 

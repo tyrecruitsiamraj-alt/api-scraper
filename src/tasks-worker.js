@@ -5,6 +5,7 @@ import { closePool } from './db/pool.js';
 import { PROJECT_ROOT } from './config.js';
 import {
   bumpTaskProgress,
+  countTaskCandidates,
   candidatesForRuns,
   claimTaskExecution,
   dueTasks,
@@ -16,12 +17,14 @@ import {
   getConnector,
   markTaskRunning,
   pendingExtractionsForRuns,
+  recommendedSourcingTerms,
   recoverStaleRunningTasks,
   saveCachedFamilyPlan,
   saveExtraction,
   setTaskAdjacentPlan,
   setTaskPhase,
   setTaskProgressTarget,
+  taskCandidateStats,
   topTrendKeywords,
   touchTask,
 } from './db/repositories.js';
@@ -64,14 +67,27 @@ export async function runTask(t, runtime) {
   }
 
   const target = t.mode === 'count' ? t.target_count || connector.scrape_limit : connector.scrape_limit;
-  const criteria = { ...(t.criteria || {}), maxCandidates: target, updatedSince: t.updated_since ?? undefined };
+  const alreadyMatched = t.mode === 'count' ? await countTaskCandidates(t.id).catch(() => 0) : 0;
+  if (t.mode === 'count' && alreadyMatched >= target) {
+    await setTaskPhase(t.id, 'done', target);
+    await bumpTaskProgress(t.id, alreadyMatched);
+    await finishTask(t.id, { status: 'done', phase: 'done', runId: t.last_run_id, error: null, nextRunAt: nextRunFrom(t.schedule_cron) });
+    console.log(`  ${t.name}: ครบเป้าแล้ว ${alreadyMatched}/${target} Resume (ไม่ค้นซ้ำ)`);
+    return;
+  }
+  const remainingTarget = Math.max(1, target - alreadyMatched);
+  const criteria = { ...(t.criteria || {}), maxCandidates: remainingTarget, updatedSince: t.updated_since ?? undefined };
   delete criteria.job_description; // meta ของโหมดเนื้องาน — ไม่ส่งเข้า connector
-  const resumeFrom = t.progress_got > 0 && t.status === 'queued' ? t.progress_got : 0;
+  // ทุก retry เริ่ม search page ใหม่ แต่จำนวนผลลัพธ์อิงตาราง dedupe ของ task
+  // จึงไม่ skip ตาม progress เดิม (ซึ่งเคยทำให้ Resume ต้นหน้าเว็บหายไปหลัง retry).
+  const resumeFrom = 0;
 
   // ---- โหมดเนื้องาน: แปลง "เนื้องาน" → ชุดคำค้นตำแหน่ง ก่อนเริ่ม scrape ----
   // ผู้ใช้กรอกเนื้องาน (criteria.job_description) แทนตำแหน่ง → AI เดาว่าควรค้นตำแหน่งอะไรบ้าง
   // แล้ว scrape วนตำแหน่งเหล่านั้นจนครบ target (ตำแหน่งไหนก็ได้ที่เนื้องานใกล้เคียงกัน)
   let descPositions = null;
+  let qualificationSpec = t.adjacent_plan?.sourcing_spec || {};
+  let jobFamily = t.adjacent_plan?.family || '';
   const jobDesc = String((t.criteria || {}).job_description || '').trim();
   const hasPosition = String((t.criteria || {}).position || '').trim() || String((t.criteria || {}).keyword || '').trim();
   if (jobDesc && !hasPosition) {
@@ -85,6 +101,22 @@ export async function runTask(t, runtime) {
     }
     if (dp?.positions?.length) {
       descPositions = dp.positions;
+      jobFamily = dp.family || '';
+      qualificationSpec = {
+        job_dna: dp.jobDna || '',
+        hard_filters: dp.hardFilters || [],
+        accepted_positions: dp.positions,
+      };
+      try {
+        const learned = await recommendedSourcingTerms({
+          jobFamily, location: (t.criteria || {}).province || '', platform: connector.platform, limit: 5,
+        });
+        const learnedTerms = learned.map((x) => x.search_term).filter((x) => x && !descPositions.includes(x));
+        if (learnedTerms.length) {
+          descPositions = [...descPositions, ...learnedTerms];
+          console.log(`  🧠 Second Brain เพิ่มคำค้นที่มี Qualified Yield ดี: ${learnedTerms.join(', ')}`);
+        }
+      } catch { /* fail-soft */ }
       // การันตี volume: เติม "คำมาแรง" ของ Family นี้จาก job_trends (seo-update รายสัปดาห์)
       // ต่อท้ายเสมอ — ต่อให้ AI ออกคำเฉพาะเกินไป ก็ยังมีคำสามัญที่พิสูจน์แล้วว่าค้นเจอ
       try {
@@ -100,7 +132,7 @@ export async function runTask(t, runtime) {
       try {
         await setTaskAdjacentPlan(t.id, {
           family: dp.family, family_label: dp.familyLabel, reason: dp.reason, model: dp.model,
-          from_description: jobDesc, positions: descPositions, target,
+          from_description: jobDesc, positions: descPositions, target, sourcing_spec: qualificationSpec,
         });
       } catch { /* non-fatal */ }
     } else {
@@ -110,13 +142,17 @@ export async function runTask(t, runtime) {
   }
 
   // ---- phase 1: scrape ----
-  await markTaskRunning(t.id, target, { resume: resumeFrom > 0 });
-  console.log(`▶ ${t.name} → ${connector.label} (scrape, target ${target}${resumeFrom ? `, resume @${resumeFrom}` : ''})`);
+  await markTaskRunning(t.id, target);
+  if (alreadyMatched > 0) await bumpTaskProgress(t.id, alreadyMatched);
+  console.log(`▶ ${t.name} → ${connector.label} (ต้องการ ${target} · มีแล้ว ${alreadyMatched} · ค้นเพิ่ม ${remainingTarget})`);
   const r = await runConnector(connector, criteria, runtime, {
     taskId: t.id,
+    qualificationSpec,
+    jobFamily,
+    searchTier: 'direct',
     resumeFrom,
-    onTarget: (n) => setTaskProgressTarget(t.id, n),
-    onProgress: (got) => bumpTaskProgress(t.id, got),
+    onTarget: () => setTaskProgressTarget(t.id, target),
+    onProgress: (got) => bumpTaskProgress(t.id, Math.min(target, alreadyMatched + got)),
     onHeartbeat: () => touchTask(t.id),
     onPhase: (phase) => setTaskPhase(t.id, phase, 0),
   });
@@ -137,7 +173,7 @@ export async function runTask(t, runtime) {
   // A run may spawn several scrape_runs (base + expansions), so OCR/enrich below
   // must cover EVERY run, not just the first.
   const runIds = [r.runId];
-  let savedTotal = r.newCount + r.updatedCount;
+  let savedTotal = await countTaskCandidates(t.id).catch(() => alreadyMatched + r.newCount + r.updatedCount);
   if (descPositions && descPositions.length > 1 && savedTotal < target && r.status !== 'cooldown') {
     // โหมดเนื้องาน: วนตำแหน่งที่เหลือ (ที่ AI เสนอ) จนครบ target
     try {
@@ -146,6 +182,7 @@ export async function runTask(t, runtime) {
       const res = await scrapePositionList({
         t, connector, target, savedTotal, runtime, runIds,
         positions: descPositions.slice(1), platform: connector.platform, base, maxRounds: descPositions.length,
+        qualificationSpec, jobFamily,
       });
       savedTotal = res.savedTotal;
     } catch (e) {
@@ -153,7 +190,7 @@ export async function runTask(t, runtime) {
     }
   } else if (t.expand_adjacent && savedTotal < target && r.status !== 'cooldown') {
     try {
-      savedTotal = await expandAdjacent({ t, connector, target, savedTotal, runtime, runIds });
+      savedTotal = await expandAdjacent({ t, connector, target, savedTotal, runtime, runIds, qualificationSpec, jobFamily });
     } catch (e) {
       console.warn(`  ${t.name}: adjacent expansion skipped — ${e.message}`);
     }
@@ -196,14 +233,21 @@ export async function runTask(t, runtime) {
     await bumpTaskProgress(t.id, (i += 1));
   }
 
+  const matchedTotal = t.mode === 'count' ? await countTaskCandidates(t.id).catch(() => savedTotal) : savedTotal;
+  const qualificationStats = await taskCandidateStats(t.id).catch(() => ({ qualified: matchedTotal, needs_review: 0, rejected: 0, total: matchedTotal }));
+  const complete = t.mode !== 'count' || matchedTotal >= target;
+  const resultStatus = complete ? 'done' : 'partial';
+  const resultNote = complete ? null : `ยังไม่ครบเป้า: ผ่านเกณฑ์ไม่ซ้ำ ${matchedTotal}/${target} · ต้องตรวจเพิ่ม ${qualificationStats.needs_review} · ไม่ผ่าน ${qualificationStats.rejected} — ระบบค้นครบทุกตำแหน่งที่ตรง Job Family ในรอบนี้แล้ว`;
+  await setTaskPhase(t.id, resultStatus, target);
+  await bumpTaskProgress(t.id, matchedTotal);
   await finishTask(t.id, {
-    status: 'done',
-    phase: 'done',
+    status: resultStatus,
+    phase: resultStatus,
     runId: r.runId,
-    error: null,
+    error: resultNote,
     nextRunAt: nextRunFrom(t.schedule_cron),
   });
-  console.log(`  ${t.name}: done | saved ${savedTotal}/${target} across ${runIds.length} run(s) | ocr ${pending.length} | enriched ${filled}`);
+  console.log(`  ${t.name}: ${resultStatus} | ผ่าน ${matchedTotal}/${target} · ตรวจเพิ่ม ${qualificationStats.needs_review} · ไม่ผ่าน ${qualificationStats.rejected} across ${runIds.length} run(s) | ocr ${pending.length} | enriched ${filled}`);
 }
 
 const MAX_ADJACENT_ROUNDS = envInt('MAX_ADJACENT_ROUNDS', 6);
@@ -220,7 +264,7 @@ function chunk(arr, n) {
  * JobBKK ค้นได้ 3 ตำแหน่ง/ครั้ง, JobThai 1 ตำแหน่ง/ครั้ง.
  * @returns {Promise<{ savedTotal:number, used:string[] }>}
  */
-async function scrapePositionList({ t, connector, target, savedTotal, runtime, runIds, positions, platform, base, maxRounds }) {
+async function scrapePositionList({ t, connector, target, savedTotal, runtime, runIds, positions, platform, base, maxRounds, qualificationSpec = {}, jobFamily = '' }) {
   const list = Array.isArray(positions) ? positions.filter(Boolean) : [];
   const batches = platform === 'jobbkk' ? chunk(list, 3) : list.map((g) => [g]);
   const cap = maxRounds ?? batches.length;
@@ -235,13 +279,17 @@ async function scrapePositionList({ t, connector, target, savedTotal, runtime, r
     console.log(`  ↳ ค้น [${batch.join(', ')}] (ต้องการอีก ${remaining})`);
     const er = await runConnector(connector, crit, runtime, {
       taskId: t.id,
+      qualificationSpec,
+      jobFamily,
+      searchTier: 'green',
       onTarget: () => setTaskProgressTarget(t.id, target), // คงเป้ารวมบน progress bar
       onProgress: (got) => bumpTaskProgress(t.id, savedBefore + got),
       onHeartbeat: () => touchTask(t.id),
       onPhase: (phase) => setTaskPhase(t.id, phase, target),
     });
     runIds.push(er.runId);
-    savedTotal += (er.newCount || 0) + (er.updatedCount || 0);
+    savedTotal = await countTaskCandidates(t.id).catch(() => savedTotal + (er.newCount || 0) + (er.updatedCount || 0));
+    await bumpTaskProgress(t.id, Math.min(target, savedTotal));
     used.push(...batch);
     if (er.status === 'cooldown') { // daily cap reached — stop
       console.warn(`  ↳ หยุดค้น: ${er.error || 'daily cap'}`);
@@ -257,7 +305,7 @@ async function scrapePositionList({ t, connector, target, savedTotal, runtime, r
  * until we hit target, run out of green, or the daily cap is reached. 🟡/🔴 are
  * only recorded as suggestions (not auto-run). Returns the updated saved total.
  */
-async function expandAdjacent({ t, connector, target, savedTotal, runtime, runIds }) {
+async function expandAdjacent({ t, connector, target, savedTotal, runtime, runIds, qualificationSpec = {}, jobFamily = '' }) {
   const base = { ...(t.criteria || {}) };
   const position = String(base.position || '').trim();
   const keyword = String(base.keyword || '').trim();
@@ -281,6 +329,7 @@ async function expandAdjacent({ t, connector, target, savedTotal, runtime, runId
   const { savedTotal: newTotal, used: usedGreen } = await scrapePositionList({
     t, connector, target, savedTotal, runtime, runIds,
     positions: green, platform, base, maxRounds: MAX_ADJACENT_ROUNDS,
+    qualificationSpec, jobFamily: jobFamily || plan.family || '',
   });
   savedTotal = newTotal;
 

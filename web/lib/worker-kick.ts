@@ -74,3 +74,29 @@ async function drain() {
 export function kickWorker() {
   void drain();
 }
+
+/** รัน worker แบบจำกัดสิทธิ์ให้รับเฉพาะ selftest หนึ่งงาน ไม่แตะคิวงานจริงและไม่โพสต์ Facebook. */
+export async function runSafeWorkflowSelfTest(): Promise<void> {
+  const root = path.resolve(process.cwd(), '..');
+  await new Promise<void>((resolve, reject) => {
+    const child = spawn(process.execPath, ['workers/runner.js', '--selftest', '--once'], {
+      cwd: root,
+      stdio: 'ignore',
+      env: process.env,
+      windowsHide: true,
+    });
+    const timer = setTimeout(() => {
+      child.kill();
+      reject(new Error('การทดสอบใช้เวลานานเกิน 30 วินาที'));
+    }, 30_000);
+    child.once('error', (error) => {
+      clearTimeout(timer);
+      reject(error);
+    });
+    child.once('exit', (code) => {
+      clearTimeout(timer);
+      if (code === 0) resolve();
+      else reject(new Error(`เครื่องทดสอบจบด้วยรหัส ${code ?? 'ไม่ทราบ'}`));
+    });
+  });
+}

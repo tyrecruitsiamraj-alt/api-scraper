@@ -4,7 +4,7 @@ import { revalidatePath } from 'next/cache';
 import { getServerSession } from 'next-auth';
 import { authOptions } from './auth';
 import { encryptSecret } from './crypto';
-import { kickWorker } from './worker-kick';
+import { kickWorker, runSafeWorkflowSelfTest } from './worker-kick';
 import {
   createAdjacentTask,
   createScrapeTaskFromSoRecruit,
@@ -20,6 +20,7 @@ import {
   setContentStatus,
   recordContentFeedback,
   updateContentCaption,
+  refreshContentQuality,
   deleteConnector,
   updateScraperConnector,
   updateFacebookAccount,
@@ -45,7 +46,23 @@ import {
   createContentTrend,
   setContentTrendActive,
   deleteContentTrend,
+  enqueueWorkflowSelfTest,
+  getWorkflowSelfTest,
 } from './repo';
+
+/** ทดสอบ Web → Queue → Worker แบบไม่แตะงานจริงหรือ Facebook. */
+export async function runWorkflowSelfTestAction() {
+  const session = await getServerSession(authOptions);
+  if (!session) throw new Error('unauthorized');
+  const owner = session.user?.email ?? session.user?.name ?? null;
+  const id = await enqueueWorkflowSelfTest(owner);
+  await runSafeWorkflowSelfTest();
+  const result = await getWorkflowSelfTest(id);
+  if (result?.status !== 'done') {
+    throw new Error(`ระบบทดสอบไม่สำเร็จ: ${result?.last_error || 'Worker ไม่ได้ปิดงานทดสอบ'}`);
+  }
+  revalidatePath('/orchestrator');
+}
 
 async function requireSession() {
   const session = await getServerSession(authOptions);
@@ -134,7 +151,7 @@ function firstNextRun(cron: string | null): string | null {
 // ---------------------------------------------------------------------------
 export async function createTaskAction(formData: FormData) {
   await requireSession();
-  const name = String(formData.get('name') ?? '').trim();
+  const requestedName = String(formData.get('name') ?? '').trim();
   const connectorId = String(formData.get('connectorId') ?? '');
   const mode = (String(formData.get('mode') ?? 'count') === 'date_range' ? 'date_range' : 'count') as
     | 'count'
@@ -144,11 +161,12 @@ export async function createTaskAction(formData: FormData) {
   // Checkbox is checked by default in the form; absent => user turned it off.
   const expandAdjacent = formData.get('expandAdjacent') === 'on';
 
-  if (!name || !connectorId) throw new Error('กรุณากรอกชื่องานและเลือก connector');
-
   const position = String(formData.get('position') ?? '').trim();
   const keyword = String(formData.get('keyword') ?? '').trim();
   const jobDescription = String(formData.get('jobDescription') ?? '').trim();
+  if (!jobDescription) throw new Error('กรุณาใส่รายละเอียดเนื้องาน');
+  if (!connectorId) throw new Error('ยังไม่มีบัญชีสำหรับค้นหา Resume กรุณาเพิ่ม Connector ก่อน');
+  const name = requestedName || jobDescription.replace(/\s+/g, ' ').slice(0, 80);
   const criteria: Record<string, unknown> = {};
   if (position) criteria.position = position;
   if (keyword) criteria.keyword = keyword;
@@ -181,6 +199,7 @@ export async function createTaskAction(formData: FormData) {
   if (mode === 'count') {
     const n = Number.parseInt(String(formData.get('targetCount') ?? ''), 10);
     targetCount = Number.isFinite(n) && n > 0 ? n : null;
+    if (!targetCount) throw new Error('กรุณาระบุจำนวน Resume ที่ต้องการ');
   } else {
     updatedSince = String(formData.get('updatedSince') ?? '').trim() || null;
   }
@@ -410,7 +429,10 @@ export async function editCaptionAction(formData: FormData) {
   const contentId = String(formData.get('contentId') ?? '');
   const campaignId = String(formData.get('campaignId') ?? '');
   const caption = String(formData.get('caption') ?? '').trim();
-  if (contentId && caption) await updateContentCaption(contentId, caption);
+  if (contentId && caption) {
+    await updateContentCaption(contentId, caption);
+    await refreshContentQuality(contentId);
+  }
   revalidatePath(`/orchestrator/${campaignId}`);
 }
 

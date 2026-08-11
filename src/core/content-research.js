@@ -5,8 +5,7 @@ import { resolveTextProvider, callAnthropic, callOpenAI, callOllama } from './co
  *
  * ให้โมเดลสรุป "แนว/ฮุก/สไตล์รูป" ที่ดึงคนตำแหน่งนี้ได้บนกลุ่มหางาน Facebook ไทย
  * โดย ground ด้วยข้อมูลจริงเท่าที่มี: คำค้นมาแรง (job_trends) + แคปชันที่เคยได้ผลของเรา
- * → เป็น "research แบบใช้ความรู้โมเดล + สัญญาณจริง" (cold-start) ไม่ใช่ดึงโพสต์คู่แข่งสด
- *   (การดึงโพสต์กลุ่ม FB จริงเป็นงาน scraping browser แยก — ยังไม่ทำในนี้)
+ * → เป็น research จากหลักฐานสดที่ตัวเก็บตลาดบันทึกไว้ + สถิติของเรา + ความรู้โมเดล
  *
  * fail-soft: ไม่มี provider / โมเดลตอบพัง = คืน null (draft เดินต่อได้แบบไม่มี research)
  */
@@ -47,7 +46,7 @@ const RESEARCH_SYSTEM = `คุณคือนักวางกลยุทธ�
 
 /**
  * @param {{ title?:string, province?:string, snapshot?:Record<string,any>,
- *   trendKeywords?:string[], winningExamples?:string[] }} input
+ *   trendKeywords?:string[], winningExamples?:string[], marketEvidence?:Record<string,any>[] }} input
  * @returns {Promise<null | { angles:string[], hooks:string[], imageStyle:string, model:string }>}
  */
 export async function researchContentAngles(input = {}) {
@@ -59,6 +58,14 @@ export async function researchContentAngles(input = {}) {
 
   const kw = (input.trendKeywords ?? []).map((s) => String(s ?? '').trim()).filter(Boolean).slice(0, 6);
   const wins = (input.winningExamples ?? []).map((s) => String(s ?? '').trim()).filter(Boolean).slice(0, 2);
+  const facebookSignals = (input.marketEvidence ?? [])
+    .filter((item) => item?.source_type === 'facebook_post')
+    .slice(0, 8)
+    .map((item) => {
+      const excerpt = String(item.findings?.excerpt ?? '').replace(/\s+/g, ' ').trim().slice(0, 260);
+      return `${excerpt} [Reaction ${Number(item.reactions) || 0} · Comment ${Number(item.comments) || 0} · Share ${Number(item.shares) || 0}]`;
+    })
+    .filter(Boolean);
   // เทรนด์/มีมที่กำลังมา (คนกรอกไว้บนเว็บ) — ให้เกาะกระแสตอนคิดมุม/ฮุก/สไตล์รูป
   const trends = (input.trends ?? [])
     .map((t) => (t && typeof t === 'object' ? { label: String(t.label ?? '').trim(), note: String(t.note ?? '').trim() } : { label: String(t ?? '').trim(), note: '' }))
@@ -71,6 +78,7 @@ export async function researchContentAngles(input = {}) {
     kw.length ? `คำค้นที่คนไทยใช้หางานนี้ (มาแรง): ${kw.join(', ')}` : '',
     trends.length ? `เทรนด์/มีมที่กำลังมาตอนนี้ (อยากให้คอนเทนต์เกาะกระแสอย่างเนียน ไม่ฝืน):\n${trends.map((t) => `- ${t.label}${t.note ? ` (${t.note})` : ''}`).join('\n')}` : '',
     wins.length ? `แคปชันของเราที่เคยได้ผลดี (อ้างอิงโทน):\n${wins.map((w) => `- ${w.slice(0, 200)}`).join('\n')}` : '',
+    facebookSignals.length ? `โพสต์ Facebook ที่สำรวจสดสำหรับตำแหน่งนี้ (ยอดเป็นสัญญาณประกอบ ไม่ใช่ข้อเท็จจริงของงาน):\n${facebookSignals.map((item) => `- ${item}`).join('\n')}` : '',
     '',
     'วิเคราะห์ว่าจะโพสต์ตำแหน่งนี้ให้คนบนกลุ่มหางาน FB ไทยหยุดดูและทักเข้ามาได้อย่างไร' +
       (trends.length ? ' โดยเกาะเทรนด์ข้างต้นถ้าเข้ากับงานได้' : '') +

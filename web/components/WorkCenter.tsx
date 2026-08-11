@@ -34,7 +34,15 @@ export type WorkCenterItem = {
   createdAt: string;
   href: string | null;
   progress?: { got: number; target: number } | null;
-  content?: { id: string; campaignId: string; caption: string | null; hasImage: boolean } | null;
+  content?: {
+    id: string;
+    campaignId: string;
+    caption: string | null;
+    hasImage: boolean;
+    qualityStatus: 'pending' | 'pass' | 'warning' | 'fail';
+    qualityScore: number | null;
+    qualitySummary: string | null;
+  } | null;
   taskId?: string | null;
   campaignId?: string | null;
   nextAction?: 'retry_draft' | 'retry_post' | 'measure' | null;
@@ -339,6 +347,19 @@ function WorkAction({ item, connectors, facebookAccounts }: {
     // เลือกบัญชีที่พร้อม (มีกลุ่ม) เป็นค่าเริ่มต้น — บัญชีที่ไม่มีกลุ่มเลือกไม่ได้ (กันโพสต์ไปตายทีหลัง)
     return (
       <div className="w-full space-y-3">
+        <div className={`rounded-lg border px-3 py-2 text-sm ${
+          item.content.qualityStatus === 'fail'
+            ? 'border-red-200 bg-red-50 text-red-700'
+            : item.content.qualityStatus === 'pass'
+              ? 'border-green-200 bg-green-50 text-green-700'
+              : 'border-amber-200 bg-amber-50 text-amber-700'
+        }`}>
+          <span className="font-medium">
+            {item.content.qualityStatus === 'fail' ? 'ยังอนุมัติไม่ได้' : item.content.qualityStatus === 'pass' ? 'ตรวจข้อมูลสำคัญแล้ว' : 'ควรตรวจเพิ่ม'}
+          </span>
+          {item.content.qualityScore != null ? ` · ${item.content.qualityScore}/100` : ''}
+          {item.content.qualitySummary ? ` — ${item.content.qualitySummary}` : ''}
+        </div>
         <form action={approveContentAction} className="flex flex-wrap items-end gap-2">
           <input type="hidden" name="contentId" value={item.content.id} />
           <input type="hidden" name="campaignId" value={item.content.campaignId} />
@@ -370,8 +391,8 @@ function WorkAction({ item, connectors, facebookAccounts }: {
               <option value="good_visual">รูปเหมาะกับงาน</option>
             </select>
           </div>
-          <button className="btn-primary" disabled={noReady}>
-            {noAccount ? 'ยังไม่มีบัญชี' : noReady ? 'ทุกบัญชียังไม่มีกลุ่ม' : 'อนุมัติและโพสต์'}
+          <button className="btn-primary" disabled={noReady || item.content.qualityStatus === 'fail'}>
+            {item.content.qualityStatus === 'fail' ? 'แก้ข้อมูลก่อนอนุมัติ' : noAccount ? 'ยังไม่มีบัญชี' : noReady ? 'ทุกบัญชียังไม่มีกลุ่ม' : 'อนุมัติและโพสต์'}
           </button>
           {noReady && (
             <Link href="/settings/posting" className="text-xs text-accent hover:underline">

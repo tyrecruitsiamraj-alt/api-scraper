@@ -9,11 +9,8 @@ type ConnectorOption = { id: string; platform: string; label: string; scrape_lim
 const PLATFORM_LABEL: Record<string, string> = { jobbkk: 'JobBKK', jobthai: 'JobThai' };
 
 export function NewTaskForm({ connectors }: { connectors: ConnectorOption[] }) {
-  const [mode, setMode] = useState<'count' | 'date_range'>('count');
   const [scheduled, setScheduled] = useState(false);
   const [submitting, setSubmitting] = useState(false);
-
-  const today = new Date().toISOString().slice(0, 10);
 
   return (
     <form
@@ -23,7 +20,6 @@ export function NewTaskForm({ connectors }: { connectors: ConnectorOption[] }) {
           await createTaskAction(fd);
           // reset the uncontrolled fields after a successful create
           (document.getElementById('new-task-form') as HTMLFormElement | null)?.reset();
-          setMode('count');
           setScheduled(false);
         } finally {
           setSubmitting(false);
@@ -32,91 +28,51 @@ export function NewTaskForm({ connectors }: { connectors: ConnectorOption[] }) {
       id="new-task-form"
       className="card p-5"
     >
-      <h2 className="text-base font-semibold mb-4">สร้างงานค้นหาผู้สมัคร</h2>
+      <h2 className="text-base font-semibold">ค้นหา Resume จากรายละเอียดงาน</h2>
+      <p className="mt-1 text-sm text-subtle">ระบบจะวิเคราะห์ประเภทงาน ค้นหาตำแหน่งที่ตรงกัน และเก็บเฉพาะ Resume ไม่ซ้ำจนถึงจำนวนที่ต้องการ</p>
+      <input type="hidden" name="mode" value="count" />
 
-      <div className="grid gap-4 md:grid-cols-2">
-        <div>
-          <label className="label">ชื่องาน</label>
-          <input name="name" required placeholder="เช่น โปรแกรมเมอร์ กรุงเทพ" className="field" />
-        </div>
-        <div>
-          <label className="label">บัญชีที่ใช้ค้นหา</label>
-          <select name="connectorId" required className="field" defaultValue="">
-            <option value="" disabled>
-              เลือก connector…
-            </option>
-            {connectors.map((c) => (
-              <option key={c.id} value={c.id}>
-                {PLATFORM_LABEL[c.platform] ?? c.platform} — {c.label} (รอบละ {c.scrape_limit})
-              </option>
-            ))}
-          </select>
-        </div>
-      </div>
-
-      {/* mode */}
-      <div className="mt-4">
-        <label className="label">โหมด</label>
-        <div className="flex gap-2">
-          {(
-            [
-              ['count', 'ตามจำนวน'],
-              ['date_range', 'ตามช่วงวันที่อัปเดต'],
-            ] as const
-          ).map(([key, lbl]) => (
-            <button
-              type="button"
-              key={key}
-              onClick={() => setMode(key)}
-              className={`pill ${mode === key ? 'bg-ink text-white' : 'bg-black/5 text-ink hover:bg-black/10'}`}
-            >
-              {lbl}
-            </button>
-          ))}
-        </div>
-        <input type="hidden" name="mode" value={mode} />
-      </div>
-
-      <div className="mt-4 grid gap-4 md:grid-cols-2">
-        {mode === 'count' ? (
-          <div>
-            <label className="label">จำนวนที่ต้องการ</label>
-            <input
-              name="targetCount"
-              type="number"
-              min={1}
-              max={1000}
-              defaultValue={15}
-              className="field"
-            />
-            <p className="mt-1 text-xs text-subtle">ดึงตามจำนวนนี้ แต่ไม่เกิน daily cap ของ connector/แพลตฟอร์ม</p>
-          </div>
-        ) : (
-          <div>
-            <label className="label">อัปเดตตั้งแต่วันที่</label>
-            <input name="updatedSince" type="date" max={today} defaultValue={today} className="field" />
-            <p className="mt-1 text-xs text-subtle">ดึงโปรไฟล์ที่อัปเดตล่าสุดย้อนไปถึงวันที่นี้</p>
-          </div>
-        )}
-      </div>
-
-      {/* โหมดเนื้องาน: กรอกภาระงาน แล้วให้ AI หาตำแหน่งเอง (ใช้แทนตำแหน่ง/คำค้น) */}
-      <div className="mt-4 rounded-lg border border-line/60 bg-black/[0.015] px-4 py-3">
-        <label className="label">🧠 บอกเป็น “เนื้องาน” (ไม่บังคับ — ใช้แทนตำแหน่ง)</label>
+      <div className="mt-5 rounded-lg border border-line/60 bg-black/[0.015] px-4 py-3">
+        <label className="label">รายละเอียดเนื้องาน</label>
         <textarea
           name="jobDescription"
-          rows={2}
-          placeholder="เช่น ยกของ จัดเรียงสินค้าในคลัง เช็คสต็อก ขับโฟล์คลิฟท์ แพ็คของส่ง"
+          required
+          rows={5}
+          placeholder="วางรายละเอียดหน้าที่ คุณสมบัติ พื้นที่ทำงาน และเงื่อนไขที่ต้องการได้เลย"
           className="field"
         />
         <p className="mt-1 text-xs text-subtle">
-          กรอกภาระงานที่อยากได้คนมาทำ → AI จะหาว่าควรค้นตำแหน่งอะไรบ้าง แล้วกวาดผู้สมัครจากทุกตำแหน่งที่เนื้องานใกล้เคียงกันจนครบจำนวนที่ต้องการ
-          <br />
-          <span className="text-ink/70">ถ้ากรอกช่องนี้ ระบบจะใช้แทน “ตำแหน่ง/คำค้น” ด้านล่าง</span>
+          ไม่ต้องคิดคำค้นเอง ระบบจะเลือกคำค้นและตำแหน่งใกล้เคียงใน Job Family เดียวกันให้
         </p>
       </div>
 
-      <div className="mt-4 grid gap-4 md:grid-cols-2">
+      <div className="mt-4 md:w-72">
+        <label className="label">จำนวน Resume ที่ต้องการ</label>
+        <input name="targetCount" type="number" min={1} max={1000} defaultValue={15} required className="field" />
+        <p className="mt-1 text-xs text-subtle">ระบบจะนับคนเดิมเพียงครั้งเดียว และจะไม่ขึ้นว่าสำเร็จจนกว่าจะครบเป้า</p>
+      </div>
+
+      <details className="mt-4 rounded-lg border border-line/60 px-4 py-3">
+        <summary className="cursor-pointer text-sm font-medium text-ink">ตัวเลือกเพิ่มเติม</summary>
+        <div className="mt-4 grid gap-4 md:grid-cols-2">
+          <div>
+            <label className="label">ชื่องาน (ไม่บังคับ)</label>
+            <input name="name" placeholder="ระบบจะตั้งชื่อจากรายละเอียดงานให้อัตโนมัติ" className="field" />
+          </div>
+          <div>
+            <label className="label">แหล่งค้นหา</label>
+            <select name="connectorId" required className="field" defaultValue={connectors[0]?.id ?? ''}>
+              {connectors.length === 0 && <option value="">ยังไม่มีบัญชีที่พร้อมใช้งาน</option>}
+              {connectors.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {PLATFORM_LABEL[c.platform] ?? c.platform} — {c.label} (รอบละ {c.scrape_limit})
+                </option>
+              ))}
+            </select>
+          </div>
+        </div>
+
+        <div className="mt-4 grid gap-4 md:grid-cols-2">
         <div>
           <label className="label">ตำแหน่ง (ไม่บังคับ)</label>
           <input name="position" placeholder="เช่น Developer" className="field" />
@@ -128,7 +84,7 @@ export function NewTaskForm({ connectors }: { connectors: ConnectorOption[] }) {
       </div>
 
       {/* auto-expand to adjacent positions when short of target */}
-      <div className="mt-3 rounded-lg border border-line/60 bg-black/[0.015] px-4 py-3">
+      <div className="mt-4 rounded-lg border border-line/60 bg-black/[0.015] px-4 py-3">
         <label className="flex items-center gap-2 text-sm font-medium text-ink">
           <input type="checkbox" name="expandAdjacent" defaultChecked className="h-4 w-4 rounded border-hairline" />
           🧭 หาไม่ครบ → ขยายไปตำแหน่งใกล้เคียงอัตโนมัติ
@@ -230,15 +186,17 @@ export function NewTaskForm({ connectors }: { connectors: ConnectorOption[] }) {
           </select>
         )}
       </div>
+      </details>
 
       <div className="mt-5 flex items-center gap-3">
-        <button type="submit" name="runNow" value="on" disabled={submitting} className="btn-primary disabled:opacity-50">
+        <button type="submit" name="runNow" value="on" disabled={submitting || connectors.length === 0} className="btn-primary disabled:opacity-50">
           {submitting ? 'กำลังบันทึก…' : 'สร้าง & เริ่มทันที'}
         </button>
-        <button type="submit" disabled={submitting} className="btn-ghost disabled:opacity-50">
+        <button type="submit" disabled={submitting || connectors.length === 0} className="btn-ghost disabled:opacity-50">
           บันทึกไว้เฉยๆ
         </button>
       </div>
+      {connectors.length === 0 && <p className="mt-2 text-xs text-red-600">ยังเริ่มค้นหาไม่ได้ — กรุณาเพิ่มบัญชี Connector ก่อน</p>}
     </form>
   );
 }

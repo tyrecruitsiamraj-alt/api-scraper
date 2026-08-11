@@ -1,0 +1,4 @@
+interface:
+  display_name: "เจ้าหน้าที่สรรหาและเผยแพร่ประกาศอัตโนมัติ"
+  short_description: "รับงาน สร้างประกาศ เผยแพร่ และเรียนรู้ผลลัพธ์"
+  default_prompt: "ใช้ $recruitment-autopost-operator ดำเนินงานสรรหาและเผยแพร่ประกาศนี้ให้จบครบวงจร"

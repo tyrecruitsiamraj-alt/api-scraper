@@ -1,0 +1,95 @@
+/**
+ * Facts used by recruitment content.  This is deliberately deterministic:
+ * an LLM may phrase facts, but it must never become their source of truth.
+ */
+
+const clean = (value) => String(value ?? '').replace(/\s+/g, ' ').trim();
+const compact = (value) => clean(value).toLowerCase().replace(/[\s,._\-–—/()\[\]:]+/g, '');
+const pick = (...values) => values.map(clean).find(Boolean) ?? '';
+const BROAD_TITLES = new Set(['งาน', 'พนักงาน', 'เจ้าหน้าที่', 'ช่าง', 'พนักงานทั่วไป', 'รับสมัครงาน', 'ไม่ระบุ']);
+
+function specificRoleFromEvidence(evidence) {
+  const text = clean(evidence).toLowerCase();
+  const rules = [
+    [/driver|ขับรถ/, 'พนักงานขับรถ'],
+    [/security|รปภ|รักษาความปลอดภัย/, 'พนักงานรักษาความปลอดภัย'],
+    [/cleaner|แม่บ้าน|ทำความสะอาด/, 'พนักงานทำความสะอาด'],
+    [/warehouse|คลังสินค้า|สโตร์|แพ็คสินค้า/, 'พนักงานคลังสินค้า'],
+    [/forklift|โฟล์คลิฟท์/, 'พนักงานขับรถโฟล์คลิฟท์'],
+    [/technician|ช่าง/, 'ช่างเทคนิค'],
+    [/nurse|พยาบาล/, 'พยาบาล'],
+  ];
+  return rules.find(([pattern]) => pattern.test(text))?.[1] ?? '';
+}
+
+export function extractCampaignFacts(campaign = {}) {
+  const snap = campaign.request_snapshot ?? campaign.snapshot ?? {};
+  const originalTitle = pick(snap.position, snap.request_name, campaign.title, snap.job_description_name);
+  const roleEvidence = clean([
+    snap.job_family, snap.department, snap.department_code, snap.unit_name,
+    snap.detail, snap.note, snap.job_description, campaign.positions,
+  ].filter(Boolean).join(' · '));
+  const inferredRole = BROAD_TITLES.has(compact(originalTitle)) ? specificRoleFromEvidence(roleEvidence) : '';
+  const position = inferredRole || originalTitle;
+  const incomeDisclosure = pick(snap.income_disclosure, snap.salary_visibility, snap.income_visibility);
+  return {
+    originalTitle,
+    position,
+    roleEvidence,
+    positionWasInferred: Boolean(inferredRole),
+    location: pick(snap.location, snap.work_addr, campaign.province, snap.site_name),
+    qty: Number(snap.qty ?? campaign.qty) || null,
+    income: pick(snap.income),
+    incomeDisclosure,
+    workSchedule: pick(snap.work_schedule),
+    gender: pick(snap.gender),
+    ageMin: Number(snap.age_min) || null,
+    ageMax: Number(snap.age_max) || null,
+    education: pick(snap.education),
+    sourceText: clean([campaign.title, campaign.province, campaign.qty, campaign.positions, ...Object.values(snap)]
+      .filter((value) => typeof value !== 'object').join(' · ')),
+  };
+}
+
+export function preflightCampaign(campaign = {}) {
+  const facts = extractCampaignFacts(campaign);
+  const issues = [];
+  if (!facts.position || BROAD_TITLES.has(compact(facts.position))) issues.push('ต้องระบุตำแหน่งงานให้ชัดเจน');
+  if (!facts.location) issues.push('ต้องระบุสถานที่ทำงาน');
+  if (!facts.income && !facts.incomeDisclosure) issues.push('ต้องระบุรายได้ หรือยืนยันว่าไม่เปิดเผยรายได้');
+  return { ready: issues.length === 0, facts, issues };
+}
+
+/** Non-negotiable image context appended after a model writes its creative prompt. */
+export function visualBriefFromFacts(facts = {}) {
+  const role = clean(facts.position);
+  const evidence = clean(facts.roleEvidence);
+  const location = clean(facts.location);
+  if (!role) return '';
+  return [
+    `Depict exactly this Thai job role: ${role}.`,
+    evidence ? `ERP job context: ${evidence}.` : '',
+    location ? `Workplace context: ${location}.` : '',
+    'Do not depict a different occupation. No text, letters, numbers, logos, or hospital/office role unless explicitly required above.',
+  ].filter(Boolean).join(' ');
+}
+
+function salaryHighlight(income) {
+  const raw = clean(income);
+  const numeric = raw.match(/\d[\d,]*/)?.[0] ?? '';
+  const digits = numeric.replace(/,/g, '');
+  return /^\d+$/.test(digits) ? Number(digits).toLocaleString('en-US') : numeric;
+}
+
+/** Force display fields that must never be invented or mutated by a model. */
+export function applyTrustedPosterFacts(fields = {}, campaign = {}) {
+  const facts = extractCampaignFacts(campaign);
+  return {
+    ...fields,
+    title: facts.position || clean(fields.title),
+    location: facts.location || '',
+    worktime: facts.workSchedule || '',
+    salaryTotal: facts.income ? salaryHighlight(facts.income) : '',
+    salaryBreakdown: facts.income || '',
+  };
+}

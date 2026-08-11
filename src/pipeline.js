@@ -1,6 +1,7 @@
 import { resolveProvider } from './connectors/registry.js';
 import { RateLimiter } from './core/anti-ban.js';
-import { matchesCriteria, splitCriteria } from './core/candidate-match.js';
+import { splitCriteria } from './core/candidate-match.js';
+import { evaluateResumeQualification } from './core/resume-qualification.js';
 import { envInt } from './config.js';
 import {
   countScrapedToday,
@@ -9,9 +10,12 @@ import {
   platformScrapedToday,
   saveAsset,
   saveConnectorSession,
+  linkCandidateToTask,
+  recordResumeSearchAttempt,
   setConnectorCooldown,
   startRun,
   touchRun,
+  taskExternalIds,
   upsertCandidate,
   upsertSource,
   withTransaction,
@@ -21,18 +25,37 @@ const COOLDOWN_MS = 2 * 60 * 60 * 1000; // 2h after a soft-ban
 const CANDIDATE_TIMEOUT_MS = envInt('CANDIDATE_TIMEOUT_MS', 180_000); // skip hung resume fetches
 const LOGIN_TIMEOUT_MS = envInt('LOGIN_TIMEOUT_MS', 300_000); // browser login must finish within 5 min
 
-function withTimeout(promise, ms, label) {
+function timeoutMessage(label, ms) {
+  if (label === 'login') {
+    const minutes = Math.max(1, Math.round(ms / 60_000));
+    return `เข้าสู่ระบบไม่สำเร็จภายใน ${minutes} นาที กรุณาตรวจสอบ CAPTCHA, บัญชีที่เปิดค้างในเครื่องอื่น หรือการเชื่อมต่อของ Worker [timeout:login:${ms}ms]`;
+  }
+  return `timeout:${label}:${ms}ms`;
+}
+
+export function withTimeout(promise, ms, label, { onTimeout } = {}) {
   let timer;
   return Promise.race([
     promise,
     new Promise((_, reject) => {
-      timer = setTimeout(() => reject(new Error(`timeout:${label}:${ms}ms`)), ms);
+      timer = setTimeout(() => {
+        // Promise.race only rejects the caller; it does not cancel the work that
+        // is still running. Give session providers a chance to close Chromium.
+        try {
+          onTimeout?.();
+        } catch {
+          // Cleanup is best-effort and must not hide the original timeout.
+        }
+        const error = new Error(timeoutMessage(label, ms));
+        error.code = label === 'login' ? 'LOGIN_TIMEOUT' : 'OPERATION_TIMEOUT';
+        reject(error);
+      }, ms);
     }),
   ]).finally(() => clearTimeout(timer));
 }
 
 function isSessionError(e) {
-  if (e?.needsRelogin) return true;
+  if (e?.needsRelogin || e?.code === 'LOGIN_TIMEOUT') return true;
   const m = String(e?.message ?? '');
   return /session_expired|session_redirect|Max redirect|jobpost|not_authenticated|logged-out|timeout:login/i.test(m);
 }
@@ -42,6 +65,7 @@ function isSessionError(e) {
  * Honors per-round limit, daily cap, rate limiting, and soft-ban cooldown.
  */
 export async function runConnector(connector, criteria, runtime, opts = {}) {
+  const runStartedAt = Date.now();
   const provider = resolveProvider(connector.platform);
   const limiter = new RateLimiter({ minMs: runtime.delayMin, maxMs: runtime.delayMax });
   const runId = await startRun(connector.id, connector.platform, criteria, opts.taskId ?? null);
@@ -63,6 +87,12 @@ export async function runConnector(connector, criteria, runtime, opts = {}) {
   let failed = 0;
   let found = 0;
   let filteredOut = 0; // ไม่ตรงเงื่อนไข local (อายุ/วุฒิ/จังหวัด/เพศ) — ข้ามโดยไม่นับเข้า target
+  let opened = 0;
+  let qualified = 0;
+  let needsReview = 0;
+  let rejected = 0;
+  let duplicate = 0;
+  const reasonCounts = {};
   let status = 'success';
   let error = null;
   let browser = null;
@@ -106,6 +136,7 @@ export async function runConnector(connector, criteria, runtime, opts = {}) {
       if (opts.onPhase) await opts.onPhase('login');
       if (opts.onHeartbeat) await opts.onHeartbeat();
       console.log(`  [${connector.label}] opening browser session${forceLogin ? ' (fresh login)' : ''}...`);
+      const loginController = new AbortController();
       return withTimeout(
         provider.getSession({
           // Some providers (JobBKK) only work in a visible browser — headless login is
@@ -117,9 +148,11 @@ export async function runConnector(connector, criteria, runtime, opts = {}) {
           storageState: connector.session_state ?? undefined,
           forceLogin,
           onHeartbeat: opts.onHeartbeat,
+          signal: loginController.signal,
         }),
         LOGIN_TIMEOUT_MS,
         'login',
+        { onTimeout: () => loginController.abort() },
       );
     };
 
@@ -128,8 +161,13 @@ export async function runConnector(connector, criteria, runtime, opts = {}) {
     activeContext = sess.context;
     await saveConnectorSession(connector.id, await sess.dumpState());
 
-    // เผื่อ id ให้พอ: กรอง local จะคัดคนออกส่วนหนึ่ง เลยขอ id จากเว็บมากกว่า target
-    const idTarget = localFilterActive ? Math.min(target * 3, target + 300) : target;
+    // ขอผลค้นให้เลยคนที่ task นี้เคยเก็บแล้ว เพื่อให้ retry วิ่งต่อไปหาคนใหม่
+    // โดยไม่เปิด Resume เดิมซ้ำและไม่กิน daily cap โดยเปล่าประโยชน์.
+    const priorExternalIds = new Set(
+      opts.taskId ? await taskExternalIds(opts.taskId, connector.platform).catch(() => []) : [],
+    );
+    const baseIdTarget = target + priorExternalIds.size;
+    const idTarget = localFilterActive ? Math.min(baseIdTarget * 3, baseIdTarget + 300) : baseIdTarget;
     const runSearch = () => provider.searchResumeIds(sess, { ...siteCriteria, maxCandidates: idTarget }, runtime);
     let search;
     try {
@@ -184,7 +222,12 @@ export async function runConnector(connector, criteria, runtime, opts = {}) {
 
     for (let i = resumeFrom; i < search.ids.length; i += 1) {
       const id = search.ids[i];
-      if (saved >= target) break;
+      if (saved >= target || opened >= target) break;
+      if (priorExternalIds.has(String(id))) {
+        duplicate += 1;
+        reasonCounts.duplicate = (reasonCounts.duplicate || 0) + 1;
+        continue;
+      }
       await limiter.wait();
       if (opts.onHeartbeat) await opts.onHeartbeat();
       try {
@@ -201,20 +244,22 @@ export async function runConnector(connector, criteria, runtime, opts = {}) {
           html = await provider.fetchResumeHtml(sess, id, runtime);
           parsed = provider.parseResumeHtml(html, { sourceUrl: url, index: saved + 1, focusPosition: criteria.position || '-' });
         }
-        // กรองเงื่อนไข local ก่อน "เปิดเผยเบอร์" (enrichContacts กิน quota บัญชี) —
-        // คนไม่ตรงเงื่อนไข = ข้ามเลย ไม่เปลือง quota ไม่นับเข้า target
-        if (localFilterActive) {
-          const verdict = matchesCriteria(parsed, localFilters);
-          if (!verdict.ok) {
-            filteredOut += 1;
-            console.log(`  ⏭ ${parsed.name || id}: ${verdict.reason}`);
-            return;
-          }
-        }
-        if (provider.enrichContacts) await provider.enrichContacts(sess.request, id, parsed, runtime);
-        const assets = await provider.collectAssetsForDb(sess.request, parsed);
+        opened += 1;
+        const qualification = evaluateResumeQualification(parsed, {
+          criteria: { ...criteria, ...localFilters },
+          sourcingSpec: opts.qualificationSpec || {},
+        });
+        for (const reason of qualification.reasons) reasonCounts[reason] = (reasonCounts[reason] || 0) + 1;
 
-        const { isNew } = await withTransaction(async (client) => {
+        // เปิดเผยข้อมูลติดต่อ/ดาวน์โหลดเอกสารเฉพาะคนที่ผ่าน Hard Filter เท่านั้น.
+        if (qualification.status === 'qualified' && provider.enrichContacts) {
+          await provider.enrichContacts(sess.request, id, parsed, runtime);
+        }
+        const assets = qualification.status === 'qualified'
+          ? await provider.collectAssetsForDb(sess.request, parsed)
+          : [];
+
+        const { isNew, taskLink } = await withTransaction(async (client) => {
           const cand = await upsertCandidate(client, parsed);
           const sourceId = await upsertSource(client, cand.id, {
             platform: connector.platform,
@@ -225,18 +270,33 @@ export async function runConnector(connector, criteria, runtime, opts = {}) {
             parseStatus: parsed.parse_status,
             rawText: parsed.raw_text,
           });
+          const taskLink = await linkCandidateToTask(client, {
+            taskId: opts.taskId ?? null,
+            candidateId: cand.id,
+            sourceId,
+            matchedPosition: criteria.position || criteria.keyword || null,
+            qualification,
+          });
           for (const a of assets) {
             if (a.sha256) await saveAsset(client, cand.id, sourceId, a);
           }
-          return cand;
+          return { ...cand, taskLink };
         });
 
         if (isNew) newCount += 1;
         else updatedCount += 1;
-        saved += 1;
+        if (qualification.status === 'qualified') qualified += 1;
+        else if (qualification.status === 'needs_review') { needsReview += 1; filteredOut += 1; }
+        else { rejected += 1; filteredOut += 1; }
+        if (!taskLink.isNewForTask) {
+          duplicate += 1;
+          reasonCounts.duplicate = (reasonCounts.duplicate || 0) + 1;
+        }
+        // Progress and completion count only candidates newly qualified for this task.
+        if (taskLink.becameQualified || !opts.taskId) saved += qualification.status === 'qualified' ? 1 : 0;
         if (opts.onProgress) await opts.onProgress(saved, target);
         const att = assets.filter((a) => a.kind === 'attachment' && a.download_status === 'success').length;
-        console.log(`  [${saved}/${target}] ${parsed.name || '(no name)'} ${isNew ? 'NEW' : 'upd'} | ☎ ${parsed.phone || '-'} 📎 ${att}`);
+        console.log(`  [${saved}/${target}] ${parsed.name || '(no name)'} ${qualification.status} ${taskLink.isNewForTask ? (isNew ? 'NEW' : 'matched') : 'duplicate'} | ☎ ${parsed.phone || '-'} 📎 ${att}`);
         })(), CANDIDATE_TIMEOUT_MS, `resume_${id}`);
       } catch (e) {
         if (e.fatal) {
@@ -264,7 +324,7 @@ export async function runConnector(connector, criteria, runtime, opts = {}) {
 
     if (status === 'success' && saved < target) status = 'partial';
     if (localFilterActive) {
-      console.log(`  [${connector.label}] สรุปกรอง: ตรงเงื่อนไข ${saved - resumeFrom} · คัดออก ${filteredOut} (จาก ${found} id ที่เว็บให้)`);
+      console.log(`  [${connector.label}] สรุปกรอง: ผ่าน ${qualified} · ตรวจเพิ่ม ${needsReview} · ไม่ผ่าน ${rejected} · ซ้ำ ${duplicate}`);
       // บันทึกไว้ใน error field (ว่างอยู่) เมื่อได้ 0 — ให้หน้าเว็บอธิบายเหตุถูก
       if (saved - resumeFrom === 0 && filteredOut > 0 && !error) {
         error = `เว็บให้มา ${found} คน แต่ถูกคัดออกทั้งหมดด้วยเงื่อนไข (${Object.entries(localFilters).map(([k, v]) => `${k}=${v}`).join(', ')}) — ลองผ่อนเงื่อนไข`;
@@ -290,7 +350,14 @@ export async function runConnector(connector, criteria, runtime, opts = {}) {
   return finalize();
 
   async function finalize() {
-    await finishRun(runId, { status, requested, found, newCount, updatedCount, failed, error });
-    return { runId, status, found, newCount, updatedCount, failed, error };
+    await finishRun(runId, { status, requested, found, newCount, updatedCount, failed, error, opened, qualified, needsReview, rejected, duplicate, reasonCounts });
+    await recordResumeSearchAttempt({
+      taskId: opts.taskId, runId, connectorId: connector.id, platform: connector.platform,
+      jobFamily: opts.jobFamily, location: criteria.province, searchTerm: criteria.position || criteria.keyword || '',
+      searchTier: opts.searchTier || 'direct', found, opened,
+      unique: Math.max(0, opened - duplicate), qualified, needsReview, rejected, duplicate,
+      quotaUsed: opened, durationSeconds: Math.max(0, Math.round((Date.now() - runStartedAt) / 1000)), reasonCounts,
+    }).catch((e) => console.warn(`  [second-brain] บันทึก Search Attempt ไม่สำเร็จ: ${e.message}`));
+    return { runId, status, found, newCount, updatedCount, failed, error, opened, qualified, needsReview, rejected, duplicate, reasonCounts };
   }
 }

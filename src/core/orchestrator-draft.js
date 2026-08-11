@@ -4,6 +4,10 @@ import { generateContent, generatePosterFields } from './content-gen.js';
 import { researchContentAngles } from './content-research.js';
 import { generateImage } from './ai-image.js';
 import { renderPoster } from './poster.js';
+import { evaluateContentQuality } from './content-quality.js';
+import { applyTrustedPosterFacts, preflightCampaign, visualBriefFromFacts } from './campaign-facts.js';
+import { collectCampaignMarketResearch } from './market-research.js';
+import { formatPerformanceInsight, patternDecision } from './content-second-brain.js';
 
 /**
  * สร้างร่างคอนเทนต์ 1 version ให้ campaign หนึ่ง (งานเบื้องหลังของ work_queue
@@ -23,6 +27,23 @@ export async function generateDraftForCampaign(campaignId) {
   const { rows } = await query(`SELECT * FROM recruit_campaigns WHERE id = $1`, [campaignId]);
   const c = rows[0];
   if (!c) throw new Error(`campaign not found: ${campaignId}`);
+
+  // Stop before spending tokens or creating an image when ERP facts are not
+  // sufficient.  This keeps generic titles from becoming a generic poster.
+  const preflight = preflightCampaign(c);
+  if (!preflight.ready) {
+    const note = `ต้องยืนยันข้อมูลก่อนสร้างประกาศ: ${preflight.issues.join(' · ')}`;
+    await query(`UPDATE recruit_campaigns SET status='needs_input', status_note=$2, updated_at=now() WHERE id=$1`, [campaignId, note]);
+    return { campaignId, status: 'needs_input', issues: preflight.issues };
+  }
+  const facts = preflight.facts;
+
+  await query(`UPDATE recruit_campaigns SET status='researching', status_note='กำลังสำรวจคำค้นและโพสต์ Facebook ที่เกี่ยวข้อง', updated_at=now() WHERE id=$1`, [campaignId]);
+  const marketResearch = await collectCampaignMarketResearch({ campaignId, facts }).catch((error) => ({
+    keywords: [], facebookPosts: [], evidence: [], warnings: [error.message],
+  }));
+  console.log(`  [research] Google ${marketResearch.keywords.length} คำ · Facebook ${marketResearch.facebookPosts.length} โพสต์ · หลักฐาน ${marketResearch.evidence.length}`);
+  if (marketResearch.warnings.length) console.warn(`  [research] ${marketResearch.warnings.join(' · ')}`);
 
   await query(`UPDATE recruit_campaigns SET status='drafting', status_note=NULL, updated_at=now() WHERE id=$1`, [campaignId]);
 
@@ -68,6 +89,36 @@ export async function generateDraftForCampaign(campaignId) {
     [String(c.title ?? '').trim()],
   ).then((r) => r.rows.map((x) => `${x.caption}${x.reason ? `\n[เหตุผลที่ไม่ผ่าน: ${x.reason}]` : ''}`)).catch(() => []);
 
+  // Proven outcome patterns are separate from human approval. A pattern is
+  // usable only after content_pattern_stats sees it in at least 3 campaigns.
+  const patternStats = await query(
+    `SELECT ps.*, cc.caption AS representative_caption
+       FROM content_pattern_stats ps
+       LEFT JOIN campaign_contents cc ON cc.id=ps.representative_content_id
+      WHERE ps.confidence >= 1
+        AND (ps.pattern_type IN ('posting_slot','facebook_group','facebook_account')
+             OR ($1 <> '' AND ps.position_family ILIKE '%' || $1 || '%'))
+      ORDER BY (ps.position_family ILIKE '%' || $1 || '%') DESC,
+               ps.campaign_count DESC, ps.post_count DESC
+      LIMIT 12`,
+    [String(c.title ?? '').trim()],
+  ).then((r) => r.rows).catch(() => []);
+  const highScore = Number(process.env.ENGAGE_HIGH_SCORE || 5);
+  const provenPatterns = patternStats.map((stat) => ({
+    ...stat,
+    decision: patternDecision(stat, { highScore, minCampaigns: 3 }),
+  })).filter((stat) => stat.decision !== 'collecting');
+  const performanceInsights = provenPatterns.map((stat) => formatPerformanceInsight(stat, stat.decision));
+  for (const stat of provenPatterns) {
+    const caption = String(stat.representative_caption || '').trim();
+    if (!caption || stat.pattern_type !== 'caption_style') continue;
+    const target = stat.decision === 'preferred' ? winningExamples : losingExamples;
+    if (!target.includes(caption)) target.push(caption);
+  }
+  const provenImageStyle = provenPatterns.find(
+    (stat) => stat.pattern_type === 'image_style' && stat.decision === 'preferred',
+  )?.pattern_value || null;
+
   // เทรนด์ที่กำลังมา (คนเปิดไว้บนเว็บ) — เกาะเทรนด์/มีมให้ทัน (ไอติมอัลตร้าสมูท ฯลฯ)
   const trends = await activeContentTrends().catch(() => []);
   if (trends.length) console.log(`  [draft] เกาะเทรนด์: ${trends.map((t) => t.label).join(', ')}`);
@@ -75,12 +126,13 @@ export async function generateDraftForCampaign(campaignId) {
   // Research ก่อนคิด: แนว/ฮุก/สไตล์รูปที่ดึงคนตำแหน่งนี้ได้ (cold-start — ใช้ก่อนมีสถิติของเราเอง)
   // ground ด้วยแคปชันที่เคยเวิร์คของเรา + เทรนด์ที่กำลังมา; fail-soft = null (draft เดินต่อได้)
   const research = await researchContentAngles({
-    title: c.title, province: c.province, snapshot: c.request_snapshot ?? {}, winningExamples, trends,
+    title: facts.position, province: facts.location, snapshot: c.request_snapshot ?? {}, winningExamples, trends,
+    trendKeywords: marketResearch.keywords, marketEvidence: marketResearch.evidence,
   }).catch(() => null);
   if (research) console.log(`  [draft] research: ${research.angles.length} มุม · ${research.hooks.length} ฮุก · imageStyle=${research.imageStyle ? 'มี' : '-'}`);
 
   const base = {
-    title: c.title,
+    title: facts.position,
     positions: c.positions,
     province: c.province,
     qty: c.qty,
@@ -89,8 +141,10 @@ export async function generateDraftForCampaign(campaignId) {
     winningExamples,
     preferredExamples,
     losingExamples,
+    performanceInsights,
     research,
     trends,
+    visualBrief: visualBriefFromFacts(facts),
   };
 
   // A/B: 2 เวอร์ชันคนละแนว — คนอนุมัติเลือกอันที่ชอบ (ผลชนะถูกเก็บเข้า winning patterns ต่อ)
@@ -99,7 +153,8 @@ export async function generateDraftForCampaign(campaignId) {
     'B — เน้นจุดขาย: นำด้วยรายได้/สวัสดิการ/ความมั่นคง โทนชวนคุย',
   ];
   // A/B รูป: 2 สไตล์รูปคนละแบบ (จาก research — เปลี่ยนตามเทรนด์ ไม่ล็อกตายตัว) เวอร์ชัน A ใช้สไตล์ 1, B ใช้สไตล์ 2
-  const styles = research?.imageStyles?.length ? research.imageStyles : (research?.imageStyle ? [research.imageStyle] : []);
+  const researchStyles = research?.imageStyles?.length ? research.imageStyles : (research?.imageStyle ? [research.imageStyle] : []);
+  const styles = [...new Set([provenImageStyle, ...researchStyles].filter(Boolean))];
   const content = await generateContent({ ...base, styleHint: AB_STYLES[0], imageStyle: styles[0] });
   const contentB = content
     ? await generateContent({ ...base, styleHint: AB_STYLES[1], imageStyle: styles[1] ?? styles[0] }).catch(() => null)
@@ -117,7 +172,7 @@ export async function generateDraftForCampaign(campaignId) {
   // รูป+โปสเตอร์ต่อเวอร์ชัน (A/B คนละสไตล์รูป) — โปสเตอร์ text-layout ใบเดียวกัน แต่รูปคน/โทนต่างกัน
   // รูปเป็น optional — ไม่มี OPENAI_API_KEY ก็ยังบันทึก draft (caption/brief) ได้
   let posterFields = await generatePosterFields({
-    title: c.title, positions: c.positions, province: c.province,
+    title: facts.position, positions: c.positions, province: facts.location,
     qty: c.qty, remaining_qty: c.remaining_qty, snapshot: c.request_snapshot ?? {},
   }).catch((e) => {
     console.warn(`  [draft] poster fields โยน error: ${e.message}`);
@@ -129,6 +184,9 @@ export async function generateDraftForCampaign(campaignId) {
     if (posterFields) console.warn('  [draft] ⚠️ AI สรุปข้อมูลโปสเตอร์ไม่ได้ — ใช้ข้อมูลใบขอตรง ๆ ทำโปสเตอร์แทน');
     else console.warn('  [draft] ⚠️ ไม่มีข้อมูลพอทำโปสเตอร์ (ไม่มีชื่อตำแหน่ง) — ร่างนี้จะได้รูปคนเดี่ยว');
   }
+  // The model may summarize presentation text, but the fields below are facts
+  // and always come from ERP.  In particular it cannot turn 12,000 into 120.
+  if (posterFields) posterFields = applyTrustedPosterFacts(posterFields, c);
   const contactLine = process.env.CONTENT_CONTACT_LINE || '';
   const images = [];
   for (const v of versions) {
@@ -152,10 +210,15 @@ export async function generateDraftForCampaign(campaignId) {
   const genNotesBase = {
     ...(research ? { angles: research.angles, hooks: research.hooks, research_model: research.model } : {}),
     ...(trends.length ? { trends: trends.map((t) => t.label) } : {}),
+    research_evidence: marketResearch.evidence.length,
+    research_keywords: marketResearch.keywords,
+    research_warnings: marketResearch.warnings,
   };
   for (let i = 0; i < versions.length; i += 1) {
     const v = versions[i];
     const image = images[i];
+    const quality = evaluateContentQuality({ campaign: c, caption: v.caption, posterFields });
+    console.log(`  [draft] ด่านคุณภาพเวอร์ชัน ${version + i}: ${quality.status} ${quality.score}/100 — ${quality.summary}`);
     const genNotes = JSON.stringify({
       ...genNotesBase,
       style: AB_STYLES[i] ?? null,
@@ -168,9 +231,12 @@ export async function generateDraftForCampaign(campaignId) {
     try {
       await query(
         `INSERT INTO campaign_contents
-           (campaign_id, version, platform, caption, image_bytes, image_mime, video_brief, gen_model, status, gen_notes)
-         VALUES ($1, $2, 'facebook', $3, $4, $5, $6, $7, 'draft', $8::jsonb)`,
-        [campaignId, version + i, v.caption, image?.bytes ?? null, image?.mime ?? null, v.videoBrief, v.model, genNotes],
+           (campaign_id, version, platform, caption, image_bytes, image_mime, video_brief, gen_model, status, gen_notes,
+            quality_status, quality_score, quality_checks, quality_checked_at)
+         VALUES ($1, $2, 'facebook', $3, $4, $5, $6, $7, 'draft', $8::jsonb,
+                 $9, $10, $11::jsonb, now())`,
+        [campaignId, version + i, v.caption, image?.bytes ?? null, image?.mime ?? null, v.videoBrief, v.model, genNotes,
+          quality.status, quality.score, JSON.stringify(quality)],
       );
     } catch {
       // schema-015 (gen_notes) ยังไม่ migrate — บันทึกแบบไม่มีคอลัมน์นั้น

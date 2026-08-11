@@ -19,7 +19,7 @@ const SYSTEM = `คุณคือนักการตลาดสรรหา�
 ## หลักการเขียน caption (Facebook)
 - ภาษาไทย เป็นกันเอง น่าเชื่อถือ กระตุ้นให้ทัก/สมัคร
 - ขึ้นต้นด้วยหัวเรื่องสะดุดตา (เปิดรับสมัคร + ตำแหน่ง) ใช้ emoji พองาม
-- ระบุ: ตำแหน่ง, สถานที่/จังหวัดทำงาน, จำนวนที่รับ (ถ้ามี), จุดขาย (เช่น มีสวัสดิการ/เริ่มงานได้เลย)
+- ระบุ: ตำแหน่ง, สถานที่/จังหวัดทำงาน, จำนวนที่รับ, รายได้ และวันเวลาทำงาน เมื่อมีข้อมูลในใบขอ
 - ปิดท้ายด้วย call-to-action ชัดเจน ("สนใจทักแชทได้เลย" / "สมัครด่วน") + hashtag 3–6 อันที่เกี่ยวข้อง
 - ห้ามแต่งเงินเดือน/สวัสดิการที่ไม่มีในข้อมูล ถ้าไม่รู้ให้ใช้คำกลาง ๆ ("สวัสดิการตามโครงสร้างบริษัท")
 - ความยาวพอเหมาะกับโพสต์ FB (ไม่ยาวเกินไป)
@@ -35,7 +35,7 @@ const SYSTEM = `คุณคือนักการตลาดสรรหา�
 ## poster (ข้อมูลลงโปสเตอร์ — ระบบเอาไปวางบน template แบรนด์ SO WORK!)
 - ใช้เฉพาะข้อมูลที่มีในใบขอเท่านั้น: เงินเดือน/รายได้/เวลา/สถานที่ ไม่มีในใบขอ = เว้นว่าง ห้ามแต่งเอง
 - qualifications: ข้อละไม่เกิน ~40 ตัวอักษร อ่านปราดเดียวรู้เรื่อง
-- benefits: ป้ายสั้น 2-4 คำ เช่น "งานมั่นคง" "สวัสดิการครบ" (ไม่รู้จริงใช้คำกลางแบบนี้ได้)`;
+- benefits: ใช้เฉพาะสวัสดิการ/จุดขายที่มีในใบขอ ไม่รู้จริงให้ส่ง array ว่าง ห้ามใช้คำว่า "งานมั่นคง" "สวัสดิการครบ" หรือ "รายได้ดี" เอง`;
 
 const TOOL = {
   name: 'recruit_content',
@@ -68,18 +68,18 @@ const POSTER_TOOL = {
       salary_total: { type: 'string', description: 'รายได้รวมตัวเลขเด่น เช่น "17,000++" — มีในใบขอเท่านั้น ไม่มีให้ตอบ ""' },
       salary_breakdown: { type: 'string', description: 'ที่มารายได้ย่อ 1 บรรทัด — มีในใบขอเท่านั้น ไม่มีให้ตอบ ""' },
       qualifications: { type: 'array', items: { type: 'string' }, description: 'คุณสมบัติ 3-6 ข้อสั้น (ข้อละไม่เกิน 40 ตัวอักษร)' },
-      benefits: { type: 'array', items: { type: 'string' }, description: 'จุดขาย/สวัสดิการ 3-4 ป้ายสั้น 2-4 คำ' },
+      benefits: { type: 'array', items: { type: 'string' }, description: 'จุดขาย/สวัสดิการจากใบขอเท่านั้น ไม่มีข้อมูลให้ตอบ []' },
     },
     required: ['title', 'badge', 'qualifications', 'benefits'],
   },
 };
 
 const POSTER_SYSTEM = `คุณคือคนสรุปใบขอกำลังคนลง "โปสเตอร์รับสมัครงาน" ของบริษัท Outsource ไทย
-กติกาเหล็ก: ใช้เฉพาะข้อมูลที่มีในใบขอ ห้ามแต่งตัวเลขเงินเดือน/สวัสดิการ/เวลาเอง ไม่มี = ตอบ ""
+กติกาเหล็ก: ใช้เฉพาะข้อมูลที่มีในใบขอ ห้ามแต่งตัวเลขเงินเดือน/สวัสดิการ/เวลาเอง ช่องข้อความไม่มี = ตอบ "" และ benefits ไม่มี = ตอบ []
 ทุกอย่างต้องสั้น อ่านปราดเดียวรู้เรื่อง เป็นภาษาไทย
 
 ## รูปแบบคำตอบ (บังคับ) — JSON object เดียว ใช้ key เป๊ะ ๆ ตามตัวอย่างนี้เท่านั้น ห้ามตั้ง key เอง:
-{"title":"พนักงานขับรถส่วนกลาง","badge":"เปิดรับสมัครด่วน","location":"แยกเพลินจิต กรุงเทพฯ","worktime":"จ.-ศ. 08.30-17.30 น.","salary_total":"17,000++","salary_breakdown":"เงินเดือน 12,000 + เบี้ยขยัน 1,000 + ค่าโทร 500 + OT","qualifications":["เพศชาย อายุ 25-55 ปี","วุฒิ ม.3 ขึ้นไป","ประสบการณ์ขับรถ 1 ปีขึ้นไป"],"benefits":["งานมั่นคง","สวัสดิการครบ","รายได้ดี"]}`;
+{"title":"พนักงานขับรถส่วนกลาง","badge":"เปิดรับสมัครด่วน","location":"แยกเพลินจิต กรุงเทพฯ","worktime":"จ.-ศ. 08.30-17.30 น.","salary_total":"17,000++","salary_breakdown":"เงินเดือน 12,000","qualifications":["เพศชาย อายุ 25-55 ปี","วุฒิ ม.3 ขึ้นไป","ประสบการณ์ขับรถ 1 ปีขึ้นไป"],"benefits":[]}`;
 
 /**
  * @param {{ title?:string, positions?:string, province?:string, qty?:number,
@@ -150,6 +150,16 @@ export async function generateContent(campaign = {}) {
       loses.map((w, i) => `ตัวอย่างที่ไม่ควรทำ ${i + 1}:\n${w}`).join('\n---\n')
     : '';
 
+  // Only statistically confirmed outcomes arrive here (>=3 campaigns). Human
+  // approval remains in preferredBlock and is never presented as market proof.
+  const performanceInsights = (campaign.performanceInsights ?? [])
+    .map((s) => String(s ?? '').trim())
+    .filter(Boolean)
+    .slice(0, 8);
+  const performanceBlock = performanceInsights.length
+    ? `\n\nบทเรียนจากผลจริงหลังเผยแพร่ (ยืนยันจากอย่างน้อย 3 แคมเปญ):\n${performanceInsights.map((s) => `- ${s}`).join('\n')}\nใช้เฉพาะบทเรียนที่เกี่ยวกับข้อความหรือภาพในการสร้างร่างนี้ ส่วนเวลา/กลุ่ม/บัญชีใช้เป็นคำแนะนำการเผยแพร่ ห้ามแต่งข้อเท็จจริงของงานเพิ่ม`
+    : '';
+
   // ผลวิจัยตลาด (จาก content-research.js) — มุม/ฮุกที่ดึงคนตำแหน่งนี้บนกลุ่มหางาน FB ไทย
   // ให้ AI ใช้เป็นแนวคิด (ไม่ใช่ก๊อป) — ตอบโจทย์ "รู้ได้ไงว่าดี" ตั้งแต่ยังไม่มีสถิติของเราเอง
   const research = campaign.research ?? null;
@@ -172,7 +182,7 @@ export async function generateContent(campaign = {}) {
   const styleBlock = String(campaign.styleHint ?? '').trim()
     ? `\n\nแนวการเขียนของเวอร์ชันนี้ (บังคับ): ${String(campaign.styleHint).trim()}`
     : '';
-  const userMsg = `เขียนคอนเทนต์สรรหาสำหรับใบขอนี้:\n${ctx}${winsBlock}${preferredBlock}${losesBlock}${researchBlock}${trendsBlock}${styleBlock}`;
+  const userMsg = `เขียนคอนเทนต์สรรหาสำหรับใบขอนี้:\n${ctx}${winsBlock}${preferredBlock}${losesBlock}${performanceBlock}${researchBlock}${trendsBlock}${styleBlock}`;
 
   // qwen/Ollama ตอบไม่นิ่งเป็นรอบ ๆ — ว่าง/พังให้ลองซ้ำสูงสุด 3 รอบ
   let out = null;
@@ -208,11 +218,12 @@ export async function generateContent(campaign = {}) {
     .filter((t) => t && (t.for_image ?? true) && String(t.label ?? '').trim())
     .map((t) => String(t.label).trim());
   const basePrompt = String(out.image_prompt ?? '').trim();
+  const trustedVisualDirection = String(campaign.visualBrief ?? '').trim();
   const visualBrief = buildVisualBrief({
     position: campaign.title || campaign.snapshot?.request_name || '',
     title: campaign.title || campaign.snapshot?.request_name || '',
     family: campaign.jobSpec?.family || campaign.family || '',
-  }, { style: [imageStyle, ...imageTrends].filter(Boolean).join('; ') });
+  }, { style: [trustedVisualDirection, imageStyle, ...imageTrends].filter(Boolean).join('; ') });
   const imagePrompt = composeVisualPrompt(visualBrief, basePrompt);
 
   return {
@@ -344,8 +355,7 @@ function harvestPosterFields(out) {
   const extra = String(get('ข้อควรระวัง', 'เงื่อนไข', 'note')).trim();
   if (extra && quals.length < 6) quals.push(extra);
 
-  let benefits = asList(get('benefits', 'จุดขาย', 'สวัสดิการเด่น'));
-  if (benefits.length === 0) benefits = ['งานมั่นคง', 'สวัสดิการครบ', 'รายได้ดี'];
+  const benefits = asList(get('benefits', 'จุดขาย', 'สวัสดิการเด่น'));
 
   return {
     title,

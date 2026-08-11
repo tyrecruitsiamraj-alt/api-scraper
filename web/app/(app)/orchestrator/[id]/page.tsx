@@ -21,6 +21,7 @@ const VERDICT: Record<string, { label: string; cls: string }> = {
 
 const STAGE_LABEL: Record<string, string> = {
   new: 'งานใหม่',
+  needs_input: 'ต้องยืนยันข้อมูล',
   researching: 'กำลังหาแนวทางที่เหมาะกับงานนี้',
   drafting: 'กำลังทำ content',
   pending_approval: 'รออนุมัติ',
@@ -43,6 +44,7 @@ const STRIP = [
 ];
 const STATUS_TO_STEP: Record<string, number> = {
   new: 0,
+  needs_input: 0,
   researching: 1,
   drafting: 2,
   low_engagement: 2,
@@ -367,6 +369,34 @@ export default async function CampaignDetail({ params }: { params: { id: string 
                       )}
                       {ct.reject_reason && <div className="mt-2 text-xs text-red-600">เหตุผลตีกลับ: {ct.reject_reason}</div>}
 
+                      <div className={`mt-3 rounded-lg border px-3 py-2 ${
+                        ct.quality_status === 'fail'
+                          ? 'border-red-200 bg-red-50'
+                          : ct.quality_status === 'pass'
+                            ? 'border-green-200 bg-green-50'
+                            : 'border-amber-200 bg-amber-50'
+                      }`}>
+                        <div className="flex flex-wrap items-center justify-between gap-2 text-sm">
+                          <span className="font-medium">
+                            {ct.quality_status === 'fail' ? '⛔ ยังอนุมัติไม่ได้' : ct.quality_status === 'pass' ? '✓ ข้อมูลสำคัญผ่านการตรวจ' : '⚠ ควรตรวจเพิ่ม'}
+                          </span>
+                          {ct.quality_score != null && <span>{ct.quality_score}/100</span>}
+                        </div>
+                        {ct.quality_checks?.summary && <p className="mt-1 text-xs text-ink/75">{ct.quality_checks.summary}</p>}
+                        {ct.quality_checks?.checks?.length ? (
+                          <details className="mt-2 text-xs">
+                            <summary className="cursor-pointer select-none text-subtle">ดูผลตรวจทีละข้อ</summary>
+                            <ul className="mt-1.5 space-y-1">
+                              {ct.quality_checks.checks.map((item) => (
+                                <li key={item.code} className={item.status === 'fail' ? 'text-red-700' : item.status === 'warning' ? 'text-amber-700' : 'text-green-700'}>
+                                  {item.status === 'fail' ? '✕' : item.status === 'warning' ? '!' : '✓'} {item.label}: {item.message}
+                                </li>
+                              ))}
+                            </ul>
+                          </details>
+                        ) : null}
+                      </div>
+
                       {/* provenance จริงของร่างนี้ — AI คิดจากอะไร (research + A/B + ตัวอย่างที่ใช้) */}
                       {ct.gen_notes && (ct.gen_notes.angles?.length || ct.gen_notes.hooks?.length || ct.gen_notes.imageStyle || ct.gen_notes.style) && (
                         <details className="mt-3 rounded-lg border border-hairline bg-black/[0.015] px-3 py-2">
@@ -453,7 +483,9 @@ export default async function CampaignDetail({ params }: { params: { id: string 
                               <option value="good_visual">รูปเหมาะกับงาน</option>
                             </select>
                           </label>
-                          <button className="btn-primary btn-sm" disabled={fbAccounts.length === 0}>✓ อนุมัติและโพสต์</button>
+                          <button className="btn-primary btn-sm" disabled={fbAccounts.length === 0 || ct.quality_status === 'fail'}>
+                            {ct.quality_status === 'fail' ? 'แก้ข้อมูลก่อนอนุมัติ' : '✓ อนุมัติและโพสต์'}
+                          </button>
                         </form>
                         <form action={rejectContentAction} className="flex flex-wrap items-end gap-2">
                           <input type="hidden" name="contentId" value={ct.id} />

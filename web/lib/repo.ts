@@ -1,6 +1,10 @@
 import 'server-only';
 import { randomUUID } from 'node:crypto';
 import { pool, q } from './db';
+import { evaluateContentQuality, qualityFailureMessages } from '../../src/core/content-quality.js';
+import type { ContentQualityResult } from '../../src/core/content-quality.js';
+import { evaluateWorkflowReadiness } from '../../src/core/workflow-readiness.js';
+import type { WorkflowReadiness } from '../../src/core/workflow-readiness.js';
 
 // schema ของ autopost — แยกต่อ project ได้ผ่าน env (ไม่ตั้ง = so_autopost_jobs เดิม)
 // ใช้กับทุก query ข้าม schema ไปฝั่ง autopost. ค่าจาก env เราคุมเอง (ไม่ใช่ input ผู้ใช้)
@@ -1015,12 +1019,27 @@ export type TaskRow = {
   review_status: 'not_required' | 'pending' | 'approved' | 'rejected';
   reviewed_by: string | null;
   reviewed_at: string | null;
+  qualified_count: number;
+  needs_review_count: number;
+  rejected_count: number;
+  assessed_total: number;
 };
 
 export async function listTasks() {
   return q<TaskRow>(
-    `SELECT t.*, c.label AS connector_label, c.platform
+    `SELECT t.*, c.label AS connector_label, c.platform,
+            COALESCE(s.qualified_count,0)::int AS qualified_count,
+            COALESCE(s.needs_review_count,0)::int AS needs_review_count,
+            COALESCE(s.rejected_count,0)::int AS rejected_count,
+            COALESCE(s.assessed_total,0)::int AS assessed_total
        FROM scrape_tasks t JOIN connectors c ON c.id = t.connector_id
+       LEFT JOIN LATERAL (
+         SELECT count(*) FILTER (WHERE qualification_status='qualified') AS qualified_count,
+                count(*) FILTER (WHERE qualification_status='needs_review') AS needs_review_count,
+                count(*) FILTER (WHERE qualification_status='rejected') AS rejected_count,
+                count(*) AS assessed_total
+           FROM scrape_task_candidates tc WHERE tc.task_id=t.id
+       ) s ON true
       ORDER BY t.created_at DESC`,
   );
 }
@@ -1134,8 +1153,14 @@ export async function deleteTask(id: string) {
 
 /** Compact live status for polling the progress counters. */
 export async function taskStatuses() {
-  return q<{ id: string; status: string; phase: string; progress_got: number; progress_target: number; last_error: string | null; last_run_at: string | null; updated_at: string }>(
-    `SELECT id, status, phase, progress_got, progress_target, last_error, last_run_at, updated_at FROM scrape_tasks`,
+  return q<{ id: string; status: string; phase: string; progress_got: number; progress_target: number; last_error: string | null; last_run_at: string | null; updated_at: string; qualified_count: number; needs_review_count: number; rejected_count: number; assessed_total: number }>(
+    `SELECT t.id, t.status, t.phase, t.progress_got, t.progress_target, t.last_error, t.last_run_at, t.updated_at,
+            count(tc.candidate_id) FILTER (WHERE tc.qualification_status='qualified')::int AS qualified_count,
+            count(tc.candidate_id) FILTER (WHERE tc.qualification_status='needs_review')::int AS needs_review_count,
+            count(tc.candidate_id) FILTER (WHERE tc.qualification_status='rejected')::int AS rejected_count,
+            count(tc.candidate_id)::int AS assessed_total
+       FROM scrape_tasks t LEFT JOIN scrape_task_candidates tc ON tc.task_id=t.id
+      GROUP BY t.id`,
   );
 }
 
@@ -1417,6 +1442,29 @@ export async function listCampaigns() {
   return q<CampaignRow>(`SELECT * FROM recruit_campaigns ORDER BY created_at DESC`);
 }
 
+export type ContentBrainSummary = {
+  learning_events: number;
+  campaigns_with_evidence: number;
+  collecting_patterns: number;
+  proven_patterns: number;
+};
+
+export async function getContentBrainSummary(): Promise<ContentBrainSummary> {
+  try {
+    const rows = await q<ContentBrainSummary>(
+      `SELECT
+         (SELECT count(*)::int FROM content_learning_events) AS learning_events,
+         (SELECT count(DISTINCT campaign_id)::int FROM content_learning_events) AS campaigns_with_evidence,
+         count(*) FILTER (WHERE confidence < 1)::int AS collecting_patterns,
+         count(*) FILTER (WHERE confidence >= 1)::int AS proven_patterns
+       FROM content_pattern_stats`,
+    );
+    return rows[0] ?? { learning_events: 0, campaigns_with_evidence: 0, collecting_patterns: 0, proven_patterns: 0 };
+  } catch {
+    return { learning_events: 0, campaigns_with_evidence: 0, collecting_patterns: 0, proven_patterns: 0 };
+  }
+}
+
 export async function getCampaign(id: string) {
   const rows = await q<CampaignRow>(`SELECT * FROM recruit_campaigns WHERE id = $1`, [id]);
   return rows[0] ?? null;
@@ -1621,6 +1669,10 @@ export type ContentRow = {
   reject_reason: string | null;
   created_at: string;
   has_image: boolean;
+  quality_status: 'pending' | 'pass' | 'warning' | 'fail';
+  quality_score: number | null;
+  quality_checks: ContentQualityResult | null;
+  quality_checked_at: string | null;
   /** provenance ว่าร่างนี้ AI คิดจากอะไร (schema-015) — {angles,hooks,imageStyle,style,used_winning,used_losing} */
   gen_notes: {
     angles?: string[];
@@ -1637,21 +1689,39 @@ export type ContentRow = {
 /** ร่างคอนเทนต์ทุก version ของ campaign (ใหม่สุดก่อน). image bytes ไม่ดึงมา (สตรีมแยก). */
 export async function listCampaignContents(campaignId: string) {
   try {
-    return await q<ContentRow>(
+    const [rows, campaign] = await Promise.all([
+      q<ContentRow>(
       `SELECT id, campaign_id, version, platform, caption, video_brief, gen_model, status,
-              engagement_score, reject_reason, created_at, (image_bytes IS NOT NULL) AS has_image, gen_notes
+              engagement_score, reject_reason, created_at, (image_bytes IS NOT NULL) AS has_image, gen_notes,
+              quality_status, quality_score, quality_checks, quality_checked_at
          FROM campaign_contents WHERE campaign_id = $1 ORDER BY version DESC`,
       [campaignId],
-    );
+      ),
+      getCampaign(campaignId),
+    ]);
+    // ร่างเก่าก่อน schema-019 ยังเป็น pending: คำนวณเพื่อให้หน้าจอบอกปัญหาจริงได้ทันที
+    // (ตอนอนุมัติจะตรวจซ้ำและบันทึกผลภายใน transaction อีกครั้งเสมอ).
+    return rows.map((row) => {
+      if (row.quality_status !== 'pending' || !campaign) return row;
+      const quality = evaluateContentQuality({ campaign, caption: row.caption });
+      return { ...row, quality_status: quality.status, quality_score: quality.score, quality_checks: quality };
+    });
   } catch {
     // schema-015 (gen_notes) ยังไม่ migrate — query แบบไม่มีคอลัมน์นั้น
-    const rows = await q<Omit<ContentRow, 'gen_notes'>>(
+    const rows = await q<Omit<ContentRow, 'gen_notes' | 'quality_status' | 'quality_score' | 'quality_checks' | 'quality_checked_at'>>(
       `SELECT id, campaign_id, version, platform, caption, video_brief, gen_model, status,
               engagement_score, reject_reason, created_at, (image_bytes IS NOT NULL) AS has_image
          FROM campaign_contents WHERE campaign_id = $1 ORDER BY version DESC`,
       [campaignId],
     );
-    return rows.map((r) => ({ ...r, gen_notes: null }));
+    return rows.map((r) => ({
+      ...r,
+      gen_notes: null,
+      quality_status: 'pending' as const,
+      quality_score: null,
+      quality_checks: null,
+      quality_checked_at: null,
+    }));
   }
 }
 
@@ -1705,6 +1775,30 @@ export async function recordContentFeedback(opts: {
 /** แก้ caption ของร่างคอนเทนต์ (คนปรับข้อความก่อนอนุมัติ). แก้ได้เฉพาะที่ยังเป็น draft. */
 export async function updateContentCaption(id: string, caption: string) {
   await q(`UPDATE campaign_contents SET caption = $2 WHERE id = $1 AND status = 'draft'`, [id, caption]);
+}
+
+/** ตรวจร่างล่าสุดกับใบขอจริง และเก็บผลไว้ให้ UI แสดงทันที. */
+export async function refreshContentQuality(id: string): Promise<ContentQualityResult> {
+  const rows = await q<{ caption: string | null; campaign: CampaignRow; quality_checks: ContentQualityResult | null }>(
+    `SELECT cc.caption, cc.quality_checks, to_jsonb(c.*) AS campaign
+       FROM campaign_contents cc
+       JOIN recruit_campaigns c ON c.id=cc.campaign_id
+      WHERE cc.id=$1`,
+    [id],
+  );
+  if (!rows[0]) throw new Error('ไม่พบร่างประกาศนี้');
+  const result = evaluateContentQuality({
+    campaign: rows[0].campaign,
+    caption: rows[0].caption,
+    posterFields: rows[0].quality_checks?.posterFields ?? null,
+  });
+  await q(
+    `UPDATE campaign_contents
+        SET quality_status=$2, quality_score=$3, quality_checks=$4::jsonb, quality_checked_at=now()
+      WHERE id=$1`,
+    [id, result.status, result.score, JSON.stringify(result)],
+  );
+  return result;
 }
 
 /**
@@ -1901,8 +1995,9 @@ export async function enqueueApprovedPost(opts: {
   try {
     await client.query('BEGIN');
     // ล็อก campaign ก่อนสร้างคิว กันกดอนุมัติซ้ำหรือชนกับ “ให้ AI คิดใหม่”.
-    const locked = await client.query<{ campaign_status: string; content_status: string }>(
-      `SELECT c.status AS campaign_status, cc.status AS content_status
+    const locked = await client.query<{ campaign_status: string; content_status: string; campaign: CampaignRow; caption: string | null; quality_checks: ContentQualityResult | null }>(
+      `SELECT c.status AS campaign_status, cc.status AS content_status,
+              to_jsonb(c.*) AS campaign, cc.caption, cc.quality_checks
          FROM recruit_campaigns c
          JOIN campaign_contents cc ON cc.id = $2 AND cc.campaign_id = c.id
         WHERE c.id = $1
@@ -1911,6 +2006,21 @@ export async function enqueueApprovedPost(opts: {
     );
     if (locked.rows[0]?.campaign_status !== 'pending_approval' || locked.rows[0]?.content_status !== 'draft') {
       throw new Error('Content นี้ถูกดำเนินการไปแล้ว กรุณารีเฟรชหน้า');
+    }
+    // ตรวจซ้ำภายใน transaction หลังล็อกแถว เพื่อกันทั้งการกดซ้ำและการแก้ caption แข่งกับการอนุมัติ.
+    const quality = evaluateContentQuality({
+      campaign: locked.rows[0].campaign,
+      caption: locked.rows[0].caption,
+      posterFields: locked.rows[0].quality_checks?.posterFields ?? null,
+    });
+    await client.query(
+      `UPDATE campaign_contents
+          SET quality_status=$2, quality_score=$3, quality_checks=$4::jsonb, quality_checked_at=now()
+        WHERE id=$1`,
+      [content.id, quality.status, quality.score, JSON.stringify(quality)],
+    );
+    if (quality.blocking) {
+      throw new Error(`ยังอนุมัติไม่ได้ กรุณาแก้ข้อมูลเหล่านี้ก่อน: ${qualityFailureMessages(quality).join(' · ')}`);
     }
     await client.query(
       `INSERT INTO ${AP}.jobs (id, title, owner, company, caption, status, image_ref)
@@ -2098,19 +2208,29 @@ export type PendingApproval = {
   has_image: boolean;
   title: string | null;
   request_no: string | null;
+  quality_status: 'pending' | 'pass' | 'warning' | 'fail';
+  quality_score: number | null;
+  quality_checks: ContentQualityResult | null;
 };
 
 /** ร่างคอนเทนต์ที่รออนุมัติ (campaign อยู่สถานะ pending_approval) — เก่าก่อน. */
 export async function listPendingApprovalContents(): Promise<PendingApproval[]> {
   try {
-    return await q<PendingApproval>(
+    const rows = await q<PendingApproval & { campaign: CampaignRow }>(
       `SELECT cc.id, cc.campaign_id, cc.version, cc.caption,
-              (cc.image_bytes IS NOT NULL) AS has_image, c.title, c.request_no
+              (cc.image_bytes IS NOT NULL) AS has_image, c.title, c.request_no,
+              cc.quality_status, cc.quality_score, cc.quality_checks,
+              to_jsonb(c.*) AS campaign
          FROM campaign_contents cc
          JOIN recruit_campaigns c ON c.id = cc.campaign_id
         WHERE cc.status = 'draft' AND c.status = 'pending_approval'
         ORDER BY cc.created_at ASC`,
     );
+    return rows.map(({ campaign, ...row }) => {
+      if (row.quality_status !== 'pending') return row;
+      const quality = evaluateContentQuality({ campaign, caption: row.caption });
+      return { ...row, quality_status: quality.status, quality_score: quality.score, quality_checks: quality };
+    });
   } catch {
     return [];
   }
@@ -2187,6 +2307,7 @@ export type WorkerHeartbeat = {
   kind: string; // scraper | autopost
   last_seen: string;
   online: boolean; // last_seen ใหม่กว่า 2 นาที (heartbeat เขียนทุก ~15 วิ)
+  meta: Record<string, unknown> | null;
 };
 
 /** รวม worker ทั้งสองฝั่ง (scraper + autopost) เพื่อโชว์บนศูนย์งาน. fail-soft: ตารางยังไม่มี = list ว่าง */
@@ -2195,7 +2316,7 @@ export async function listWorkerHeartbeats(): Promise<WorkerHeartbeat[]> {
   for (const src of ['workers', `${AP}.workers`]) {
     try {
       const rows = await q<WorkerHeartbeat>(
-        `SELECT name, kind, last_seen, (last_seen > now() - interval '2 minutes') AS online
+        `SELECT name, kind, last_seen, (last_seen > now() - interval '2 minutes') AS online, meta
            FROM ${src} ORDER BY name`,
       );
       out.push(...rows);
@@ -2204,6 +2325,67 @@ export async function listWorkerHeartbeats(): Promise<WorkerHeartbeat[]> {
     }
   }
   return out;
+}
+
+export type WorkflowReadinessSnapshot = WorkflowReadiness & { workers: WorkerHeartbeat[] };
+
+/** ตรวจความพร้อมครบเส้นแบบ read-only สำหรับศูนย์งาน. ทุกจุด fail-soft แต่รายงานว่าไม่พร้อมแทนการเงียบ. */
+export async function getWorkflowReadiness(): Promise<WorkflowReadinessSnapshot> {
+  const [workers, facebookAccounts, queue, postQueue, inconsistent, selftest] = await Promise.all([
+    listWorkerHeartbeats(),
+    listFacebookAccounts(),
+    q<{ queued: number; oldest_queued_minutes: number | null; stale_running: number; errors_24h: number }>(
+      `SELECT
+         count(*) FILTER (WHERE status='queued')::int AS queued,
+         EXTRACT(EPOCH FROM (now() - min(created_at) FILTER (WHERE status='queued'))) / 60 AS oldest_queued_minutes,
+         count(*) FILTER (WHERE status='running' AND locked_at < now() - interval '30 minutes')::int AS stale_running,
+         count(*) FILTER (WHERE status='error' AND finished_at > now() - interval '24 hours')::int AS errors_24h
+       FROM work_queue`,
+    ).then((rows) => rows[0] ?? {}).catch(() => ({})),
+    q<{ queued: number; running: number; failed_24h: number }>(
+      `SELECT
+         count(*) FILTER (WHERE status='queued')::int AS queued,
+         count(*) FILTER (WHERE status='running')::int AS running,
+         count(*) FILTER (WHERE status IN ('failed','cancelled') AND COALESCE(finished_at, created_at) > now() - interval '24 hours')::int AS failed_24h
+       FROM ${AP}.post_run_queue`,
+    ).then((rows) => rows[0] ?? {}).catch(() => ({})),
+    q<{ count: number }>(
+      `SELECT count(*)::int AS count
+         FROM recruit_campaigns c
+         JOIN "jarvis_rm".job_posting_requests r ON r.request_no=c.request_no
+        WHERE r.status IN ('cancelled','rejected')
+          AND c.status NOT IN ('done','cancelled')`,
+    ).then((rows) => rows[0]?.count ?? 0).catch(() => 0),
+    q<{ status: string; finished_at: string | null; last_error: string | null }>(
+      `SELECT status, finished_at, last_error
+         FROM work_queue WHERE type='selftest'
+        ORDER BY created_at DESC LIMIT 1`,
+    ).then((rows) => rows[0] ?? null).catch(() => null),
+  ]);
+  return {
+    ...evaluateWorkflowReadiness({ workers, facebookAccounts, queue, postQueue, inconsistentCampaigns: inconsistent, lastSelftest: selftest }),
+    workers,
+  };
+}
+
+/** สร้างงาน smoke test ที่ไม่มีข้อมูลผู้สมัครและไม่แตะ Facebook. */
+export async function enqueueWorkflowSelfTest(ownerUser: string | null): Promise<string> {
+  const id = randomUUID();
+  await q(
+    `INSERT INTO work_queue
+       (id, type, module, connector_key, payload, owner_user, priority, max_attempts)
+     VALUES ($1, 'selftest', 'system', 'system:selftest', $2::jsonb, $3, 1000, 1)`,
+    [id, JSON.stringify({ started_from: 'work_center', safe: true }), ownerUser],
+  );
+  return id;
+}
+
+export async function getWorkflowSelfTest(id: string) {
+  const rows = await q<{ status: string; last_error: string | null }>(
+    `SELECT status, last_error FROM work_queue WHERE id=$1 AND type='selftest'`,
+    [id],
+  );
+  return rows[0] ?? null;
 }
 
 // --- ช่วงเวลาโพสต์ที่ได้ผล (post_time_insights — best-time-update.mjs อัปเดตรายสัปดาห์) ---

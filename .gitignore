@@ -14,3 +14,6 @@ logs/
 
 # แผงควบคุม so-control.command เก็บ pid/log ของ worker ที่นี่
 .run/
+
+# Codex temporary worktrees/clones are local build artifacts, not project source.
+.codex-tmp/

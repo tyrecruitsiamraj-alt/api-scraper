@@ -76,6 +76,7 @@ function releaseProcessLock() {
 const HEARTBEAT_MS = 15_000;
 let lastBeat = 0;
 async function heartbeat() {
+  if (process.argv.includes('--selftest')) return; // งานทดสอบต้องไม่เขียนทับ heartbeat ของ worker จริงบนเครื่องเดียวกัน
   touchProcessLock();
   if (Date.now() - lastBeat < HEARTBEAT_MS) return;
   lastBeat = Date.now();
@@ -141,7 +142,8 @@ const HANDLERS = {
   // queued (never claimed) until the autopost handler is wired + tested carefully.
 };
 
-const SUPPORTED = Object.keys(HANDLERS);
+// --selftest จำกัด worker ให้รับเฉพาะงานทดสอบ ป้องกันการแตะงานจริงที่กำลังรออยู่.
+const SUPPORTED = process.argv.includes('--selftest') ? ['selftest'] : Object.keys(HANDLERS);
 
 /** Reclaim jobs left 'running' by a worker that died (lock older than STALE_SECONDS). */
 async function recoverStale() {
@@ -294,7 +296,7 @@ async function runOne() {
 }
 
 async function main() {
-  const once = process.argv.includes('--once');
+  const once = process.argv.includes('--once') || process.argv.includes('--selftest');
   const drain = process.argv.includes('--drain');
   const mode = once ? '--once' : drain ? '--drain' : `poll ${POLL_MS}ms`;
   if (!once && !drain && !acquireProcessLock()) {

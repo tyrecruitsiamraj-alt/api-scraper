@@ -10,6 +10,7 @@
     "worker": "node src/worker.js",
     "tasks": "node src/tasks-worker.js",
     "worker:pool": "node workers/runner.js",
+    "smoke:workflow": "node workers/runner.js --selftest --once",
     "scraper:pool": "node workers/scraper-pool.mjs",
     "extract": "node src/extract-worker.js",
     "trends:google": "node scripts/google-trends-suggest.mjs",
