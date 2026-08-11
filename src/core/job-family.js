@@ -104,6 +104,37 @@ const DESC_TOOL = {
 
 const FAMILIES = new Set(['A', 'B', 'C', 'D', 'E', 'F']);
 
+const KNOWN_DESCRIPTION_PLANS = [
+  {
+    match: /(?:ฝ่าย)?ขาย|เซลล์|เสนอขาย|ปิดการขาย|ดูแลลูกค้า/u,
+    family: 'A',
+    familyLabel: 'Customer-facing',
+    positions: ['พนักงานขาย', 'เซลล์', 'เจ้าหน้าที่ฝ่ายขาย', 'ที่ปรึกษาการขาย', 'นักพัฒนาธุรกิจ', 'ฝ่ายขาย'],
+    jobDna: 'ค้นหาลูกค้า นำเสนอสินค้า ดูแลความสัมพันธ์ และปิดการขาย',
+  },
+];
+
+/**
+ * Fast, deterministic safety net for common Thai job descriptions.  A known
+ * short title must not wait three minutes for AI and then search only one term.
+ * It expands within the same Job Family and never invents a Hard Filter.
+ */
+export function knownPositionsFromDescription(description) {
+  const text = String(description || '').trim();
+  if (!text) return null;
+  const plan = KNOWN_DESCRIPTION_PLANS.find((item) => item.match.test(text));
+  if (!plan) return null;
+  return {
+    family: plan.family,
+    familyLabel: plan.familyLabel,
+    positions: [...plan.positions],
+    jobDna: plan.jobDna,
+    hardFilters: [],
+    reason: 'ใช้พจนานุกรมคำค้นตำแหน่งไทยที่อยู่ใน Job Family เดียวกันเมื่อ AI ช้าหรือใช้งานไม่ได้',
+    model: 'deterministic:thai-job-family',
+  };
+}
+
 function cleanList(v) {
   if (!Array.isArray(v)) return [];
   const seen = new Set();
@@ -263,6 +294,11 @@ export async function positionsFromDescription({ description, province, platform
   const desc = String(description || '').trim();
   if (!desc) return null;
 
+  const knownPlan = knownPositionsFromDescription(desc);
+  // A short phrase is already a recognizable job title, not a detailed job
+  // description. Prefer the stable dictionary and start sourcing immediately.
+  if (knownPlan && desc.length <= 40) return knownPlan;
+
   const ctx = [
     `เนื้องาน/ภาระงานที่ต้องการหาคนมาทำ:\n"${desc}"`,
     province ? `จังหวัดที่ทำงาน: ${province}` : '',
@@ -278,7 +314,7 @@ export async function positionsFromDescription({ description, province, platform
     tool: DESC_TOOL,
     userMsg: `แปลงเนื้องานนี้เป็นชุดคำค้นตำแหน่ง:\n${ctx}`,
   });
-  if (!res) return null;
+  if (!res) return knownPlan;
   const out = res.out;
   let positions = cleanList(out?.positions);
   // sanitize กันโมเดลดื้อ: ตัดคำที่มีอังกฤษปน + วลียาวเกินจริง (คนไม่เขียนแบบนี้ในเรซูเม่ → ค้นได้ 0)

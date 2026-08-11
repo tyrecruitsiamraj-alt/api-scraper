@@ -60,6 +60,7 @@ export async function runTask(t, runtime) {
     return { skipped: true, reason: 'task_already_running' };
   }
   t = claimedTask;
+  try {
   const connector = await getConnector(t.connector_id);
   if (!connector) {
     await finishTask(t.id, { status: 'error', phase: 'error', error: 'connector missing' });
@@ -119,14 +120,19 @@ export async function runTask(t, runtime) {
       } catch { /* fail-soft */ }
       // การันตี volume: เติม "คำมาแรง" ของ Family นี้จาก job_trends (seo-update รายสัปดาห์)
       // ต่อท้ายเสมอ — ต่อให้ AI ออกคำเฉพาะเกินไป ก็ยังมีคำสามัญที่พิสูจน์แล้วว่าค้นเจอ
-      try {
-        const trends = await topTrendKeywords(dp.family, 4);
-        const merged = [...descPositions, ...trends.filter((k) => !descPositions.includes(k))];
-        if (merged.length > descPositions.length) {
-          console.log(`  📈 เติมคำมาแรงจาก job_trends (${dp.family}): ${merged.slice(descPositions.length).join(', ')}`);
-          descPositions = merged;
-        }
-      } catch { /* fail-soft */ }
+      // A broad family can contain roles that share a service gate but are not
+      // substitutes (for example sales and receptionist). A deterministic plan
+      // already has role-safe terms, so do not dilute it with family-wide trends.
+      if (!String(dp.model || '').startsWith('deterministic:')) {
+        try {
+          const trends = await topTrendKeywords(dp.family, 4);
+          const merged = [...descPositions, ...trends.filter((k) => !descPositions.includes(k))];
+          if (merged.length > descPositions.length) {
+            console.log(`  📈 เติมคำมาแรงจาก job_trends (${dp.family}): ${merged.slice(descPositions.length).join(', ')}`);
+            descPositions = merged;
+          }
+        } catch { /* fail-soft */ }
+      }
       criteria.position = descPositions[0]; // ตำแหน่งแรก (ตรงสุด) = base scrape
       console.log(`  🧭 ${dp.familyLabel || ''} → [${descPositions.join(', ')}]`);
       try {
@@ -262,6 +268,21 @@ export async function runTask(t, runtime) {
     target,
     qualificationStats,
   };
+  } catch (error) {
+    // An unexpected provider/browser/network exception used to leave the task
+    // permanently "running". The queue would retry, fail to claim the task,
+    // and eventually surface task_already_running even though no work remained.
+    const message = String(error?.message ?? error).slice(0, 500);
+    await finishTask(t.id, {
+      status: 'error',
+      phase: 'error',
+      error: message,
+      nextRunAt: nextRunFrom(t.schedule_cron),
+    }).catch((finishError) => {
+      console.error(`  ${t.name}: could not release failed task: ${finishError.message}`);
+    });
+    throw error;
+  }
 }
 
 const MAX_ADJACENT_ROUNDS = envInt('MAX_ADJACENT_ROUNDS', 6);

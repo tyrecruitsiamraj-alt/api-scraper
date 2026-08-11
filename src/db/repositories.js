@@ -175,11 +175,32 @@ export async function setTaskProgressTarget(id, target) {
 /** Unstick tasks whose worker died or hung (no heartbeat for maxStaleMin). */
 export async function recoverStaleRunningTasks(maxStaleMin = 10) {
   const { rows } = await query(
-    `UPDATE scrape_tasks
-        SET status='queued', phase='idle', last_error=$2
-      WHERE status='running'
-        AND updated_at < now() - ($1::text || ' minutes')::interval
-      RETURNING id, name`,
+    `WITH recovered AS (
+       UPDATE scrape_tasks t
+          SET status='queued', phase='idle', progress_got=0,
+              progress_target=COALESCE(t.target_count, 0), last_error=$2,
+              updated_at=now()
+        WHERE t.status='running'
+          AND t.updated_at < now() - ($1::text || ' minutes')::interval
+          -- A unified queue worker renews its lease while the browser is alive.
+          -- Never steal the task from that worker; recoverStale() resets the
+          -- queue row first when the worker really died.
+          AND NOT EXISTS (
+            SELECT 1 FROM work_queue w
+             WHERE w.type='scrape'
+               AND w.ref_id=t.id::text
+               AND w.status='running'
+          )
+        RETURNING t.id, t.name
+     ), abandoned_runs AS (
+       UPDATE scrape_runs r
+          SET status='failed', finished_at=now(),
+              error=COALESCE(r.error, 'worker stopped responding; task recovered automatically')
+        WHERE r.status='running'
+          AND r.task_id IN (SELECT id FROM recovered)
+        RETURNING r.id
+     )
+     SELECT id, name FROM recovered`,
     [String(maxStaleMin), `ค้างนานเกิน ${maxStaleMin} นาที — จะลองรันใหม่อัตโนมัติ`],
   );
   return rows;
