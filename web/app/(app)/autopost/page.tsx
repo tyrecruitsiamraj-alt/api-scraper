@@ -47,6 +47,26 @@ export default async function AutopostOverviewPage() {
 
       <AutopostNav />
 
+      <Link
+        href="/autopost/example"
+        className="card card-hover group grid overflow-hidden border-blue-100 bg-gradient-to-r from-[#eef7ff] to-white sm:grid-cols-[180px_1fr_auto] sm:items-center"
+      >
+        <div className="relative aspect-[16/9] h-full min-h-28 overflow-hidden sm:aspect-auto">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src="/content-samples/driver-recruitment-background-v1.png"
+            alt="ตัวอย่างโปสเตอร์พนักงานขับรถ"
+            className="absolute inset-0 h-full w-full object-cover object-left"
+          />
+        </div>
+        <div className="px-5 py-4">
+          <span className="pill bg-blue-100 text-blue-700">ตัวอย่างใหม่</span>
+          <h2 className="mt-2 text-base font-semibold">ดู Content พนักงานขับรถบนหน้า Web</h2>
+          <p className="mt-1 text-sm text-subtle">มีข้อความบนภาพ Caption และช่องให้ลองแก้ข้อมูลแบบเห็นผลทันที · ไม่โพสต์จริง</p>
+        </div>
+        <span className="px-5 pb-5 text-sm font-semibold text-accent transition group-hover:translate-x-1 sm:pb-0">เปิดตัวอย่าง →</span>
+      </Link>
+
       {!a ? (
         <p className="text-sm text-subtle">ยังอ่านข้อมูลการโพสต์ไม่ได้ กรุณาตรวจว่าบริการเผยแพร่ Facebook เปิดอยู่</p>
       ) : (

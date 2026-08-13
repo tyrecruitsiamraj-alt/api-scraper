@@ -6,6 +6,7 @@ import { usePathname } from 'next/navigation';
 // แท็บย่อยใต้ "โพสต์ & ผลลัพธ์" — แยกงานที่กำลังทำ (ภาพรวม/คิว) ออกจากผลที่เก็บเกี่ยวได้ (leads)
 const ITEMS = [
   { href: '/autopost', label: 'ภาพรวมการโพสต์', detail: 'งานที่รอ · สถานะระบบ · จำนวนที่โพสต์ได้' },
+  { href: '/autopost/example', label: 'ตัวอย่าง Content', detail: 'ภาพ · Caption · ลองแก้ข้อความ' },
   { href: '/autopost/results', label: 'ผลลัพธ์และผู้สนใจ', detail: 'เบอร์ผู้สนใจที่เก็บได้ · โพสต์ที่ได้ผล' },
   { href: '/autopost/report', label: 'รายงานสัปดาห์', detail: 'สรุปผลรายสัปดาห์ · ส่งหัวหน้า' },
 ];
@@ -13,7 +14,7 @@ const ITEMS = [
 export function AutopostNav() {
   const pathname = usePathname();
   return (
-    <nav className="mb-6 grid gap-3 sm:grid-cols-3" aria-label="เมนูโพสต์ & ผลลัพธ์">
+    <nav className="mb-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-4" aria-label="เมนูโพสต์ & ผลลัพธ์">
       {ITEMS.map((item) => {
         // exact match — /autopost ไม่ควร active เมื่ออยู่ /autopost/results
         const active =

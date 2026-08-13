@@ -1,0 +1,30 @@
+{
+  "source": "anonymized_demo",
+  "request_no": "DEMO-001",
+  "draft_status": "editable_needs_position_confirmation",
+  "position_source": "พนักงาน",
+  "position_display": "พนักงานขับรถ",
+  "position_display_reason": "ตัวอย่างการตีความจาก Job Family: Driver",
+  "company": "บริษัทตัวอย่าง จำกัด",
+  "location": "ตัวอย่าง: โรงพยาบาลเอกชน เขตห้วยขวาง กรุงเทพฯ",
+  "income": 12000,
+  "quantity": 1,
+  "gender": "ชาย",
+  "age_min": 25,
+  "age_max": 45,
+  "required_date": "ตัวอย่างเท่านั้น",
+  "work_schedule": "วันจันทร์ - วันอาทิตย์ ปฏิบัติงานตามตารางกะ ทำงาน 10 ชม. (รวมพัก, รวม OT เหมา 1 ชม.)",
+  "editable_fields": [
+    "position_display",
+    "company",
+    "location",
+    "income",
+    "quantity",
+    "gender",
+    "age_min",
+    "age_max",
+    "required_date",
+    "work_schedule",
+    "call_to_action"
+  ]
+}
