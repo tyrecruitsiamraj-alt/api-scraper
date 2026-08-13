@@ -14,7 +14,15 @@ echo "  SO Recruitment - เปิด Worker (Mac)"
 echo "=================================================="
 
 echo "[1/3] อัปเดตโค้ดล่าสุด (git pull)..."
-git pull
+git pull --ff-only
+PULLED_SHA="$(git rev-parse HEAD 2>/dev/null || true)"
+REMOTE_SHA="$(git rev-parse '@{u}' 2>/dev/null || true)"
+if [ -z "$PULLED_SHA" ] || [ -z "$REMOTE_SHA" ] || [ "$PULLED_SHA" != "$REMOTE_SHA" ]; then
+  echo "  ✗ อัปเดตโค้ดไม่สำเร็จหรือ branch ไม่ตรง origin — จะไม่เปิด Worker เก่า"
+  echo "    local=${PULLED_SHA:-unknown} remote=${REMOTE_SHA:-unknown}"
+  exit 1
+fi
+echo "  ✓ ใช้โค้ด $PULLED_SHA"
 
 # --- ฟังก์ชันตั้งค่า .env แบบไม่ทับค่าอื่น (รันซ้ำได้ปลอดภัย) ---
 set_env() {

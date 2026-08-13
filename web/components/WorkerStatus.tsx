@@ -10,6 +10,9 @@ export async function WorkerStatus() {
   const readiness = await getWorkflowReadiness();
   const workers = readiness.workers;
   const offline = workers.filter((w) => !w.online);
+  const workerNeedsRefresh = readiness.checks.some((check) => (
+    ['image_provider', 'facebook_preflight'].includes(check.code) && check.status !== 'pass'
+  ));
   return (
     <div className={`rounded-2xl border px-4 py-3 text-xs shadow-card ${
       readiness.status === 'ready' ? 'border-emerald-200 bg-emerald-50/60' : readiness.status === 'blocked' ? 'border-red-200 bg-red-50/60' : 'border-amber-200 bg-amber-50/60'
@@ -34,6 +37,11 @@ export async function WorkerStatus() {
           ))}
         </div>
       </details>
+      {workerNeedsRefresh && (
+        <div className="mt-2 rounded-lg border border-red-200 bg-white/70 px-3 py-2 text-red-800">
+          ที่ Mac Worker: เปิด <code>so-control.command</code> แล้วกด <b>R</b> “รีเฟรช” 1 ครั้ง ระบบจะดึงโค้ดล่าสุดและไม่ยอมเปิด Worker เก่าถ้าดึงไม่สำเร็จ
+        </div>
+      )}
       {workers.length > 0 && offline.length > 0 && (
         <div className="mt-2 text-subtle">เครื่องออฟไลน์: {offline.map((worker) => worker.name).join(', ')}</div>
       )}

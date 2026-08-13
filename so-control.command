@@ -13,7 +13,18 @@ running() { local f="$RUN/$1.pid"; [ -f "$f" ] && kill -0 "$(cat "$f" 2>/dev/nul
 
 start_workers() {
   printf "\n${B}▶ ดึงโค้ดล่าสุด (git pull)...${N}\n"
-  git pull 2>&1 | tail -n 3 | sed "s/^/  /"
+  if ! git pull --ff-only 2>&1 | tail -n 3 | sed "s/^/  /"; then
+    printf "  ${R}✗ ดึงโค้ดไม่สำเร็จ — จะไม่เปิด Worker เก่า${N}\n"
+    return 1
+  fi
+  local pulled_sha remote_sha
+  pulled_sha="$(git rev-parse HEAD 2>/dev/null || true)"
+  remote_sha="$(git rev-parse '@{u}' 2>/dev/null || true)"
+  if [ -z "$pulled_sha" ] || [ -z "$remote_sha" ] || [ "$pulled_sha" != "$remote_sha" ]; then
+    printf "  ${R}✗ branch ยังไม่ตรง origin — จะไม่เปิด Worker เก่า${N}\n"
+    return 1
+  fi
+  printf "  ${G}✓ ใช้โค้ด %s${N}\n" "$pulled_sha"
 
   if running scraper; then
     printf "  ${D}scraper ทำงานอยู่แล้ว (pid %s)${N}\n" "$(cat "$RUN/scraper.pid")"
