@@ -1103,13 +1103,32 @@ export async function enqueueScrapeForTask(taskId: string, ownerUser: string | n
   );
   if (!rows[0]) throw new Error(`task not found: ${taskId}`);
   const { connector_id, platform, criteria } = rows[0];
+  const readyWorkers = (await listWorkerHeartbeats()).filter((worker) => {
+    if (!worker.online || worker.kind !== 'scraper') return false;
+    const types = Array.isArray(worker.meta?.types) ? worker.meta.types.map(String) : [];
+    const image = worker.meta?.image_generation as { configured?: boolean } | undefined;
+    return types.includes('scrape') && types.includes('draft') && Boolean(image);
+  });
+  if (readyWorkers.length === 0) {
+    await q(
+      `UPDATE scrape_tasks
+          SET status='idle', phase='idle', last_error=$2, updated_at=now()
+        WHERE id=$1 AND status <> 'running'`,
+      [taskId, 'ยังไม่เริ่มค้นหา: Worker บน Mac ยังเป็นรุ่นเดิม กรุณาปิดแผงเดิม เปิด so-control.command ใหม่ แล้วกด R รีเฟรช'],
+    );
+    return false;
+  }
+  // Pin to a capability-verified machine. Old processes can remain online but
+  // cannot claim new work after this point.
+  const preferredWorker = readyWorkers[0].name;
   await q(
-    `INSERT INTO work_queue (type, module, connector_key, ref_id, payload, owner_user)
-     SELECT 'scrape', 'scraper', $1, $2, $3::jsonb, $4
+    `INSERT INTO work_queue (type, module, connector_key, ref_id, payload, owner_user, preferred_worker)
+     SELECT 'scrape', 'scraper', $1, $2, $3::jsonb, $4, $5
       WHERE NOT EXISTS (
         SELECT 1 FROM work_queue w WHERE w.ref_id = $2 AND w.status IN ('queued','running'))`,
-    [`${platform}:${connector_id}`, taskId, JSON.stringify(criteria ?? {}), ownerUser],
+    [`${platform}:${connector_id}`, taskId, JSON.stringify(criteria ?? {}), ownerUser, preferredWorker],
   );
+  return true;
 }
 
 /**

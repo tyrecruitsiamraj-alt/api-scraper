@@ -11,7 +11,7 @@ export type WorkflowReadiness = {
   checks: WorkflowCheck[];
 };
 export function evaluateWorkflowReadiness(input?: {
-  workers?: Array<{ kind?: string; online?: boolean; meta?: Record<string, unknown> | null }>;
+  workers?: Array<{ name?: string; kind?: string; online?: boolean; meta?: Record<string, unknown> | null }>;
   facebookAccounts?: Array<{ group_count?: number }>;
   queue?: { queued?: number; oldest_queued_minutes?: number | null; stale_running?: number; errors_24h?: number };
   postQueue?: { queued?: number; running?: number; failed_24h?: number };

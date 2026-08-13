@@ -38,6 +38,18 @@ test('worker สร้างประกาศออฟไลน์ถูกบ�
   assert.equal(result.checks.find((x) => x.code === 'content_worker')?.status, 'fail');
 });
 
+test('worker รุ่นเก่าที่ไม่มี Golden Flow capability ถูกบล็อก ไม่ใช่เพียง warning', () => {
+  const result = evaluateWorkflowReadiness({
+    ...readyInput,
+    workers: [
+      { kind: 'scraper', online: true, meta: { types: ['scrape', 'draft', 'measure', 'selftest'] } },
+      readyInput.workers[1],
+    ],
+  });
+  assert.equal(result.status, 'blocked');
+  assert.equal(result.checks.find((x) => x.code === 'image_provider')?.status, 'fail');
+});
+
 test('คิวเกิน 10 นาทีถูกมองว่าเป็นงานค้าง', () => {
   const result = evaluateWorkflowReadiness({ ...readyInput, queue: { queued: 2, oldest_queued_minutes: 45 } });
   assert.equal(result.status, 'blocked');

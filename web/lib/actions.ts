@@ -237,8 +237,8 @@ export async function createTaskAction(formData: FormData) {
     expandAdjacent,
   });
   if (runNow) {
-    await enqueueScrapeForTask(taskId); // hand off to the unified work_queue runner
-    kickWorker(); // drain the queue now (no manual worker run needed)
+    const queued = await enqueueScrapeForTask(taskId); // hand off to the unified work_queue runner
+    if (queued) kickWorker(); // drain only when a capability-verified worker owns it
   }
   revalidatePath('/scraping');
 }
@@ -248,8 +248,8 @@ export async function queueTaskAction(formData: FormData) {
   const id = String(formData.get('id') ?? '');
   if (id) {
     await queueTask(id);
-    await enqueueScrapeForTask(id); // hand off to the unified work_queue runner
-    kickWorker(); // "run now" → drain the queue right away
+    const queued = await enqueueScrapeForTask(id); // hand off to the unified work_queue runner
+    if (queued) kickWorker(); // no generic Next.js Digest when worker is not ready
   }
   revalidatePath('/scraping');
 }
@@ -276,8 +276,8 @@ export async function expandAdjacentTaskAction(formData: FormData) {
   const position = String(formData.get('position') ?? '').trim();
   if (id && position) {
     const newId = await createAdjacentTask(id, position);
-    await enqueueScrapeForTask(newId);
-    kickWorker();
+    const queued = await enqueueScrapeForTask(newId);
+    if (queued) kickWorker();
   }
   revalidatePath('/scraping');
 }
@@ -358,8 +358,8 @@ export async function startSoRecruitScrapeAction(formData: FormData) {
     province: String(formData.get('scrapeProvince') ?? '').trim() || undefined,
     target: Number(formData.get('scrapeTarget')) || undefined,
   });
-  await enqueueScrapeForTask(taskId, owner);
-  kickWorker();
+  const queued = await enqueueScrapeForTask(taskId, owner);
+  if (queued) kickWorker();
   revalidatePath('/orchestrator');
   revalidatePath('/orchestrator/imports');
   revalidatePath('/scraping');

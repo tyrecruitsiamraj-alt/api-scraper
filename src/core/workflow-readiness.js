@@ -45,7 +45,10 @@ export function evaluateWorkflowReadiness(input = {}) {
   } else if (contentCapability?.configured) {
     checks.push(item('image_provider', 'สิทธิ์สร้างรูป AI', 'pass', `พร้อมสร้างรูปด้วย ${contentCapability.model || contentCapability.provider}`));
   } else {
-    checks.push(item('image_provider', 'สิทธิ์สร้างรูป AI', 'warning', 'Worker รุ่นเดิมยังไม่รายงานความพร้อมของผู้ให้บริการรูป กรุณา restart หลัง deploy'));
+    // Missing provenance means this is an old worker. Treat it as unavailable,
+    // not degraded: it lacks the search timeout/content-image contracts required
+    // by the Golden Flow and can otherwise keep a task alive forever.
+    checks.push(item('image_provider', 'สิทธิ์สร้างรูป AI', 'fail', 'Worker รุ่นเดิมยังไม่รายงานความพร้อมของรูปและ Golden Flow กรุณารีเฟรช Worker ก่อนรับงานใหม่'));
   }
 
   const postWorker = workers.some((worker) => worker.online && worker.kind === 'autopost');
