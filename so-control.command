@@ -3,6 +3,7 @@
 # เปิด/รีเฟรช/หยุด worker + ดูสถานะ + รันงานประจำ ในหน้าต่างเดียว
 # worker วิ่งเป็น background (nohup) → ปิดหน้าต่างนี้ได้ worker ยังทำงานต่อ
 cd "$(dirname "$0")" || exit 1
+ROOT="$PWD"
 
 RUN=".run"; LOGT="logs/tasks"
 mkdir -p "$RUN" "$LOGT"
@@ -46,6 +47,8 @@ cleanup_legacy_workers() {
 }
 
 start_workers() {
+  local script_sha_before script_sha_after
+  script_sha_before="$(git rev-parse HEAD 2>/dev/null || true)"
   printf "\n${B}▶ ดึงโค้ดล่าสุด (git pull)...${N}\n"
   if ! git pull --ff-only 2>&1 | tail -n 3 | sed "s/^/  /"; then
     printf "  ${R}✗ ดึงโค้ดไม่สำเร็จ — จะไม่เปิด Worker เก่า${N}\n"
@@ -60,6 +63,12 @@ start_workers() {
   fi
   printf "  ${G}✓ ใช้โค้ด %s${N}\n" "$pulled_sha"
   printf "  ${D}build ที่ Worker จะใช้: %s${N}\n" "$pulled_sha"
+  script_sha_after="$pulled_sha"
+  if [ -n "$script_sha_before" ] && [ "$script_sha_before" != "$script_sha_after" ] && [ "${SO_CONTROL_RELOADED:-0}" != "1" ]; then
+    printf "  ${C}↻ แผงควบคุมมีรุ่นใหม่ — โหลดคำสั่งใหม่ก่อนเปิด Worker${N}\n"
+    export SO_CONTROL_RELOADED=1
+    exec "$ROOT/so-control.command" --start-after-update
+  fi
 
   if running scraper; then
     printf "  ${D}scraper ทำงานอยู่แล้ว (pid %s)${N}\n" "$(cat "$RUN/scraper.pid")"
@@ -276,6 +285,11 @@ $(git log -1 --format='%h %s' 2>/dev/null | cut -c1-70)" ;;
 }
 
 # ---------- entry: มี GUI = โหมดปุ่มคลิก / ไม่มีหรือ SO_CONTROL_TUI=1 = โหมดพิมพ์ ----------
+if [ "${1:-}" = "--start-after-update" ]; then
+  start_workers
+  exit $?
+fi
+
 if have_gui; then
   printf "${B}SO Recruitment · แผงควบคุม${N}\n${D}โหมดปุ่มคลิก — หน้าต่างเลือกคำสั่งจะเด้งขึ้นมา (log งานโชว์ที่นี่)${N}\n"
   gui_loop

@@ -28,3 +28,18 @@ test('completed operation clears its deadline without calling cleanup', async ()
   assert.equal(result, 'ok');
   assert.equal(aborted, false);
 });
+
+test('search timeout runs browser cleanup and reports an operation timeout', async () => {
+  let browserClosed = false;
+  await assert.rejects(
+    withTimeout(new Promise(() => {}), 10, 'search', {
+      onTimeout: () => { browserClosed = true; },
+    }),
+    (error) => {
+      assert.equal(error.code, 'OPERATION_TIMEOUT');
+      assert.match(error.message, /timeout:search:10ms/);
+      return true;
+    },
+  );
+  assert.equal(browserClosed, true);
+});

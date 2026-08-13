@@ -24,6 +24,11 @@ import {
 const COOLDOWN_MS = 2 * 60 * 60 * 1000; // 2h after a soft-ban
 const CANDIDATE_TIMEOUT_MS = envInt('CANDIDATE_TIMEOUT_MS', 180_000); // skip hung resume fetches
 const LOGIN_TIMEOUT_MS = envInt('LOGIN_TIMEOUT_MS', 300_000); // browser login must finish within 5 min
+// Provider search can hang while its browser/page is technically alive. A DB
+// heartbeat alone must not keep such a run "running" forever. Bound each search
+// round and close Chromium on timeout so the queue can retry or finish as an
+// infrastructure error instead of showing fake activity.
+const SEARCH_TIMEOUT_MS = envInt('SEARCH_TIMEOUT_MS', 180_000);
 
 function timeoutMessage(label, ms) {
   if (label === 'login') {
@@ -168,7 +173,12 @@ export async function runConnector(connector, criteria, runtime, opts = {}) {
     );
     const baseIdTarget = target + priorExternalIds.size;
     const idTarget = localFilterActive ? Math.min(baseIdTarget * 3, baseIdTarget + 300) : baseIdTarget;
-    const runSearch = () => provider.searchResumeIds(sess, { ...siteCriteria, maxCandidates: idTarget }, runtime);
+    const runSearch = () => withTimeout(
+      provider.searchResumeIds(sess, { ...siteCriteria, maxCandidates: idTarget }, runtime),
+      SEARCH_TIMEOUT_MS,
+      'search',
+      { onTimeout: () => void browser?.close().catch(() => {}) },
+    );
     let search;
     try {
       search = await runSearch();
