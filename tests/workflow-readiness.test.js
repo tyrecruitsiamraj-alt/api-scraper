@@ -5,7 +5,7 @@ import { evaluateWorkflowReadiness } from '../src/core/workflow-readiness.js';
 const readyInput = {
   workers: [
     { kind: 'scraper', online: true, meta: { types: ['draft', 'measure'], image_generation: { configured: true, model: 'gpt-image-2' } } },
-    { kind: 'autopost', online: true, meta: {} },
+    { kind: 'autopost', online: true, meta: { capabilities: ['post', 'preflight'] } },
   ],
   facebookAccounts: [{ group_count: 3 }],
   queue: { queued: 0, stale_running: 0, errors_24h: 0 },

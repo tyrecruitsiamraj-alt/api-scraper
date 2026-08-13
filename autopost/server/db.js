@@ -1806,7 +1806,7 @@ async function touchWorkerHeartbeat(name, meta = {}) {
   }
 }
 
-async function claimNextPostRunJob(workerId, runId, workerName) {
+async function claimNextPostRunJob(workerId, runId, workerName, capabilities = []) {
   await ensurePostRunQueueUserColumn();
   await ensureUsersPostControlColumns();
   await ensureUsersPreferredWorkerColumn();
@@ -1814,6 +1814,9 @@ async function claimNextPostRunJob(workerId, runId, workerName) {
   const rid = String(runId || '').trim() || null;
   /** ชื่อเครื่องสำหรับเทียบ pin (WORKER_NAME/hostname — ไม่มี pid ต่อท้าย ต่างจาก worker_id) */
   const wname = String(workerName || '').trim() || null;
+  const workerCapabilities = Array.isArray(capabilities)
+    ? [...new Set(capabilities.map((item) => String(item).trim()).filter(Boolean))]
+    : [];
   let rows;
   try {
     ({ rows } = await query(
@@ -1822,6 +1825,9 @@ async function claimNextPostRunJob(workerId, runId, workerName) {
          FROM post_run_queue q
          LEFT JOIN users u ON u.id = q.user_id
          WHERE q.status = 'queued'
+           /** Safety gate: worker รุ่นเก่าที่ไม่รู้จัก preflight ห้ามรับงานนี้
+                มิฉะนั้นมันจะเปิด postAll และอาจโพสต์จริงแทนการตรวจแบบ dry-run */
+           AND (COALESCE(q.mode, 'post') <> 'preflight' OR $4::jsonb ? 'preflight')
            /** ข้ามบัญชีที่โดนพัก (circuit breaker) */
            AND (u.paused_until IS NULL OR u.paused_until <= NOW())
            /** pin บัญชี→เครื่อง: บัญชีที่ผูกเครื่องไว้ ให้เครื่องนั้นหยิบเท่านั้น
@@ -1846,7 +1852,7 @@ async function claimNextPostRunJob(workerId, runId, workerName) {
        FROM next
        WHERE q.id = next.id
        RETURNING q.*`,
-      [wid, rid, wname]
+      [wid, rid, wname, JSON.stringify(workerCapabilities)]
     ));
   } catch (e) {
     /** unique index (one running per user) ชนตอนสอง claim แข่งกันพอดี — ถือว่ารอบนี้ไม่มีงาน */

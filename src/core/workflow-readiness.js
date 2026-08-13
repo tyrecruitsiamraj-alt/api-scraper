@@ -52,6 +52,15 @@ export function evaluateWorkflowReadiness(input = {}) {
   checks.push(postWorker
     ? item('post_worker', 'เครื่องเผยแพร่ Facebook', 'pass', 'พร้อมรับงานเผยแพร่')
     : item('post_worker', 'เครื่องเผยแพร่ Facebook', 'fail', 'ยังไม่มีเครื่องเผยแพร่ Facebook ออนไลน์'));
+  const preflightWorker = workers.some((worker) => (
+    worker.online
+    && worker.kind === 'autopost'
+    && Array.isArray(worker.meta?.capabilities)
+    && worker.meta.capabilities.includes('preflight')
+  ));
+  checks.push(preflightWorker
+    ? item('facebook_preflight', 'การทดสอบ Facebook แบบไม่โพสต์จริง', 'pass', 'Worker รองรับการตรวจ session และกลุ่มโดยไม่เผยแพร่โพสต์')
+    : item('facebook_preflight', 'การทดสอบ Facebook แบบไม่โพสต์จริง', 'fail', 'Worker ยังเป็นรุ่นเดิม กรุณารีเฟรช Worker ก่อนทดสอบ Facebook'));
 
   const readyAccounts = accounts.filter((account) => Number(account.group_count || 0) > 0).length;
   checks.push(readyAccounts > 0

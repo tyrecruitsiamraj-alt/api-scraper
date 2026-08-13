@@ -1502,10 +1502,13 @@ app.post('/api/worker/post/claim', async (req, res) => {
     const workerId = String(req.body?.worker_id || req.get('x-worker-id') || '').trim() || 'worker';
     /** ชื่อเครื่องแบบนิ่ง (ไม่มี pid) — ใช้เทียบ users.preferred_worker (pin บัญชี→เครื่อง) */
     const workerName = String(req.body?.worker_name || req.get('x-worker-name') || '').trim() || null;
+    const capabilities = Array.isArray(req.body?.capabilities)
+      ? req.body.capabilities.map((item) => String(item).trim()).filter(Boolean)
+      : [];
     // heartbeat: worker โพลทุก ~5 วิ → แตะ last_seen ให้เว็บเห็นว่าเครื่องยังมีชีวิต (fail-soft ใน db)
-    await db.touchWorkerHeartbeat(workerName || workerId, { worker_id: workerId });
+    await db.touchWorkerHeartbeat(workerName || workerId, { worker_id: workerId, capabilities });
     const runId = db.generateRunId();
-    const job = await db.claimNextPostRunJob(workerId, runId, workerName);
+    const job = await db.claimNextPostRunJob(workerId, runId, workerName, capabilities);
     if (!job) return res.json({ ok: true, job: null });
     return res.json({ ok: true, job });
   } catch (e) {

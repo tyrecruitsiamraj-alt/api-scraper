@@ -1870,10 +1870,16 @@ export async function listFacebookAccounts(): Promise<FbAccount[]> {
 export async function enqueueFacebookPreflight(userId: string, requestedBy: string | null): Promise<string> {
   const id = autopostId();
   await q(`ALTER TABLE ${AP}.post_run_queue ADD COLUMN IF NOT EXISTS mode VARCHAR(30) NOT NULL DEFAULT 'post'`);
-  const rows = await q<{ id: string; preferred_worker: string | null; group_count: number; worker_online: boolean }>(
+  const rows = await q<{ id: string; preferred_worker: string | null; group_count: number; worker_online: boolean; preflight_ready: boolean }>(
     `SELECT u.id, u.preferred_worker,
             jsonb_array_length(CASE WHEN jsonb_typeof(u.group_ids::jsonb)='array' THEN u.group_ids::jsonb ELSE '[]'::jsonb END)::int AS group_count,
-            EXISTS (SELECT 1 FROM ${AP}.workers w WHERE w.name=u.preferred_worker AND w.last_seen > now() - interval '2 minutes') AS worker_online
+            EXISTS (SELECT 1 FROM ${AP}.workers w WHERE w.name=u.preferred_worker AND w.last_seen > now() - interval '2 minutes') AS worker_online,
+            EXISTS (
+              SELECT 1 FROM ${AP}.workers w
+               WHERE w.name=u.preferred_worker
+                 AND w.last_seen > now() - interval '2 minutes'
+                 AND COALESCE(w.meta->'capabilities', '[]'::jsonb) ? 'preflight'
+            ) AS preflight_ready
        FROM ${AP}.users u WHERE u.id=$1`,
     [userId],
   );
@@ -1881,6 +1887,7 @@ export async function enqueueFacebookPreflight(userId: string, requestedBy: stri
   if (!account) throw new Error('ไม่พบบัญชี Facebook');
   if (!account.preferred_worker) throw new Error('บัญชี Facebook ยังไม่ได้ผูกกับเครื่อง');
   if (!account.worker_online) throw new Error(`เครื่องที่ผูกไว้ (${account.preferred_worker}) ยังออฟไลน์`);
+  if (!account.preflight_ready) throw new Error(`เครื่องที่ผูกไว้ (${account.preferred_worker}) ยังเป็นรุ่นเดิม กรุณารีเฟรช Worker ให้รองรับการทดสอบแบบไม่โพสต์จริงก่อน`);
   if (Number(account.group_count) <= 0) throw new Error('บัญชี Facebook ยังไม่ได้เลือกกลุ่มปลายทาง');
   await q(
     `INSERT INTO ${AP}.post_run_queue (id, assignment_ids, user_id, status, requested_by, message, mode)
