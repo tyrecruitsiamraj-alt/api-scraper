@@ -40,6 +40,10 @@ terminate_tree() {
     terminate_tree "$child"
   done
   kill -TERM "$pid" 2>/dev/null || true
+  sleep 1
+  if kill -0 "$pid" 2>/dev/null; then
+    kill -KILL "$pid" 2>/dev/null || true
+  fi
 }
 for pattern in \
   'workers/scraper-pool.mjs' \

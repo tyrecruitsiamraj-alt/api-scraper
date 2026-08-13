@@ -39,7 +39,8 @@ export async function WorkerStatus() {
       </details>
       {workerNeedsRefresh && (
         <div className="mt-2 rounded-lg border border-red-200 bg-white/70 px-3 py-2 text-red-800">
-          ที่ Mac Worker: เปิด <code>so-control.command</code> แล้วกด <b>R</b> “รีเฟรช” 1 ครั้ง ระบบจะดึงโค้ดล่าสุดและไม่ยอมเปิด Worker เก่าถ้าดึงไม่สำเร็จ
+          ที่ Mac Worker: ปิดแผงควบคุมเดิมก่อน แล้วเปิดไฟล์ <code>so-control.command</code> ใหม่และกด <b>R</b> “รีเฟรช” 1 ครั้ง
+          ระบบจะดึงโค้ดล่าสุด ปิด process เก่าทุกชั้น และไม่ยอมเปิด Worker เก่าถ้าดึงไม่สำเร็จ
         </div>
       )}
       {workers.length > 0 && offline.length > 0 && (
