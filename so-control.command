@@ -11,6 +11,40 @@ G=$'\033[0;32m'; R=$'\033[0;31m'; Y=$'\033[0;33m'; B=$'\033[1m'; D=$'\033[2m'; C
 # ---------- worker (background) ----------
 running() { local f="$RUN/$1.pid"; [ -f "$f" ] && kill -0 "$(cat "$f" 2>/dev/null)" 2>/dev/null; }
 
+# หยุด process tree ทุกชั้น ไม่ใช่แค่ npm launcher. เดิม npm → pool/supervisor →
+# runner มีหลายชั้น ทำให้กด R แล้ว process รุ่นเก่าบางตัวยังรอดและ heartbeat ต่อ.
+terminate_tree() {
+  local pid="$1" child
+  [ -n "$pid" ] || return 0
+  # Worker อาจกำลังทำงานจริง: ขอให้ process ปิดแบบ graceful ก่อน เพื่อคืนสถานะ
+  # คิวตามปกติ. ค่อยไล่ลูกที่ยังค้างหลังหมดเวลารอด้านล่าง.
+  kill -TERM "$pid" 2>/dev/null || true
+  local waited=0
+  while kill -0 "$pid" 2>/dev/null && [ "$waited" -lt 10 ]; do
+    sleep 1
+    waited=$((waited+1))
+  done
+  for child in $(pgrep -P "$pid" 2>/dev/null || true); do
+    terminate_tree "$child"
+  done
+  kill -TERM "$pid" 2>/dev/null || true
+}
+
+cleanup_legacy_workers() {
+  local pattern pid
+  # จับชื่อไฟล์ executable จริง เพราะ `pkill -f worker:post` ไม่จับ
+  # post-remote-worker*.js และ `pkill -f scraper-pool` ไม่จับ runner.js.
+  for pattern in \
+    'workers/scraper-pool.mjs' \
+    'workers/runner.js' \
+    'scripts/post-remote-worker-supervisor.js' \
+    'scripts/post-remote-worker.js'; do
+    for pid in $(pgrep -f "$pattern" 2>/dev/null || true); do
+      [ "$pid" = "$$" ] || terminate_tree "$pid"
+    done
+  done
+}
+
 start_workers() {
   printf "\n${B}▶ ดึงโค้ดล่าสุด (git pull)...${N}\n"
   if ! git pull --ff-only 2>&1 | tail -n 3 | sed "s/^/  /"; then
@@ -25,6 +59,7 @@ start_workers() {
     return 1
   fi
   printf "  ${G}✓ ใช้โค้ด %s${N}\n" "$pulled_sha"
+  printf "  ${D}build ที่ Worker จะใช้: %s${N}\n" "$pulled_sha"
 
   if running scraper; then
     printf "  ${D}scraper ทำงานอยู่แล้ว (pid %s)${N}\n" "$(cat "$RUN/scraper.pid")"
@@ -59,22 +94,22 @@ stop_workers() {
     local f="$RUN/$name.pid"
     if [ -f "$f" ]; then
       local pid; pid=$(cat "$f" 2>/dev/null)
-      pkill -TERM -P "$pid" 2>/dev/null
-      kill -TERM "$pid" 2>/dev/null
+      terminate_tree "$pid"
       rm -f "$f"
       printf "  ${Y}หยุด %s${N}\n" "$name"
     fi
   done
-  # เก็บกวาด worker ที่หลุด track (เช่นจากรอบที่ pid ไม่ถูกบันทึก)
-  pkill -f "scraper-pool.mjs" 2>/dev/null && printf "  ${D}เก็บกวาด scraper ที่ค้าง${N}\n"
-  pkill -f "worker:post" 2>/dev/null && printf "  ${D}เก็บกวาด autopost ที่ค้าง${N}\n"
+  # เก็บกวาด worker ที่หลุด track (เช่น PID file เก่า/launcher ตายแต่ลูกยังอยู่).
+  cleanup_legacy_workers
+  # ให้ process ลูกปล่อย browser/DB lock ก่อนเปิดรุ่นใหม่.
+  sleep 2
+  printf "  ${D}เก็บกวาด process Worker รุ่นเก่าครบแล้ว${N}\n"
   return 0
 }
 
 refresh_workers() {
   printf "\n${B}↻ รีเฟรช worker (รับโค้ดใหม่)${N}\n"
   stop_workers
-  sleep 2
   start_workers
 }
 

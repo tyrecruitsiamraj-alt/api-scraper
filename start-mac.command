@@ -24,6 +24,35 @@ if [ -z "$PULLED_SHA" ] || [ -z "$REMOTE_SHA" ] || [ "$PULLED_SHA" != "$REMOTE_S
 fi
 echo "  ✓ ใช้โค้ด $PULLED_SHA"
 
+# start-mac รุ่นเดิมเปิด Terminal ใหม่ทุกครั้งโดยไม่หยุด process เก่า ทำให้
+# process รุ่นก่อนยัง heartbeat/รับงานต่อได้. เก็บกวาดเฉพาะ Worker ของโปรเจกต์นี้
+# ก่อนเปิดชุดใหม่ (งานที่ถูกตัดกลางจะถูก queue lease กู้คืน ไม่ถูกนับว่าสำเร็จ).
+terminate_tree() {
+  local pid="$1" child
+  [ -n "$pid" ] || return 0
+  kill -TERM "$pid" 2>/dev/null || true
+  local waited=0
+  while kill -0 "$pid" 2>/dev/null && [ "$waited" -lt 10 ]; do
+    sleep 1
+    waited=$((waited+1))
+  done
+  for child in $(pgrep -P "$pid" 2>/dev/null || true); do
+    terminate_tree "$child"
+  done
+  kill -TERM "$pid" 2>/dev/null || true
+}
+for pattern in \
+  'workers/scraper-pool.mjs' \
+  'workers/runner.js' \
+  'scripts/post-remote-worker-supervisor.js' \
+  'scripts/post-remote-worker.js'; do
+  for pid in $(pgrep -f "$pattern" 2>/dev/null || true); do
+    [ "$pid" = "$$" ] || terminate_tree "$pid"
+  done
+done
+sleep 2
+echo "  ✓ หยุด Worker รุ่นเก่าครบแล้ว"
+
 # --- ฟังก์ชันตั้งค่า .env แบบไม่ทับค่าอื่น (รันซ้ำได้ปลอดภัย) ---
 set_env() {
   local f="$1" k="$2" v="$3"
