@@ -1,7 +1,7 @@
 import { chromium } from 'playwright';
 
 /**
- * สร้างโปสเตอร์รับสมัครงาน SO WORK! (1080×1080) จากข้อมูล structured + รูปคน (AI, พื้นหลังใส)
+ * สร้างโปสเตอร์รับสมัครงาน SO WORK! (1080×1080) จากข้อมูล structured + รูปฉากงานจริงจาก AI
  * โดยเรนเดอร์ HTML → PNG ด้วย Playwright chromium (worker มี playwright อยู่แล้ว).
  * ตัวหนังสือไทยคมชัด 100% เพราะเป็น text จริงบน template ไม่ใช่ AI วาด.
  *
@@ -25,7 +25,7 @@ function buildHtml(f = {}, personDataUri = null) {
   const contactLine = esc(f.contactLine || '');
 
   const person = personDataUri
-    ? `<img src="${personDataUri}" style="position:absolute;right:0;bottom:0;height:104%;object-fit:contain;object-position:bottom right;" alt=""/>`
+    ? `<img src="${personDataUri}" style="position:absolute;right:0;bottom:0;width:58%;height:100%;object-fit:cover;object-position:center;mask-image:linear-gradient(to right,transparent 0%,#000 28%);-webkit-mask-image:linear-gradient(to right,transparent 0%,#000 28%);" alt=""/>`
     : '';
 
   const qualHtml = quals
@@ -79,7 +79,7 @@ function buildHtml(f = {}, personDataUri = null) {
 
 /**
  * @param {object} fields ข้อมูลโปสเตอร์ (title, salaryTotal, qualifications[], ...)
- * @param {string|null} personDataUri  data:image/png;base64,... (พื้นหลังใส) หรือ null
+ * @param {string|null} personDataUri  data:image/png;base64,... (พื้นหลังทึบหรือใสก็ได้) หรือ null
  * @returns {Promise<{bytes: Buffer, mime: string} | null>}
  */
 export async function renderPoster(fields, personDataUri = null) {

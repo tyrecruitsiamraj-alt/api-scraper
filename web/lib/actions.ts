@@ -48,6 +48,7 @@ import {
   deleteContentTrend,
   enqueueWorkflowSelfTest,
   getWorkflowSelfTest,
+  enqueueFacebookPreflight,
 } from './repo';
 
 /** ทดสอบ Web → Queue → Worker แบบไม่แตะงานจริงหรือ Facebook. */
@@ -69,6 +70,16 @@ export async function runWorkflowSelfTestAction() {
     if (result?.status === 'done' || result?.status === 'error') break;
     await new Promise((resolve) => setTimeout(resolve, 300));
   }
+  revalidatePath('/orchestrator');
+}
+
+export async function runFacebookPreflightAction(formData: FormData) {
+  const session = await getServerSession(authOptions);
+  if (!session) throw new Error('unauthorized');
+  const userId = String(formData.get('fbAccountId') ?? '').trim();
+  if (!userId) throw new Error('กรุณาเลือกบัญชี Facebook ก่อนทดสอบ');
+  await enqueueFacebookPreflight(userId, session.user?.email ?? session.user?.name ?? null);
+  revalidatePath('/autopost');
   revalidatePath('/orchestrator');
 }
 
@@ -386,6 +397,7 @@ export async function approveContentAction(formData: FormData) {
   const pm = String(formData.get('postMode') ?? 'both').trim();
   const postMode = pm === 'image' || pm === 'caption' ? pm : 'both';
   if (postMode === 'image' && !content.has_image) throw new Error('ร่างนี้ไม่มีรูป — เลือก “เฉพาะรูป” ไม่ได้');
+  if (!content.image_generation_ok) throw new Error('รูปของร่างนี้ยังไม่มีหลักฐานการสร้างตามตำแหน่ง กรุณาสั่ง AI สร้าง Content ใหม่ก่อนอนุมัติ');
   const reviewer = session.user?.email ?? session.user?.name ?? null;
   await enqueueApprovedPost({
     campaign,

@@ -13,6 +13,9 @@ function item(code, label, status, message) {
  *  facebookAccounts?: Array<{group_count?:number}>,
  *  queue?: {queued?:number, oldest_queued_minutes?:number|null, stale_running?:number, errors_24h?:number},
  *  postQueue?: {queued?:number, running?:number, failed_24h?:number},
+ *  contentOutput?: {passing_with_image?:number, verified_generation?:number, failed_quality?:number},
+ *  scrapeOutput?: {completed?:number, partial?:number, error?:number},
+ *  recentPostRuns?: Array<{status?:string}>,
  *  inconsistentCampaigns?: number,
  *  lastSelftest?: {status?:string, finished_at?:string|null, last_error?:string|null}|null
  * }} input
@@ -32,6 +35,18 @@ export function evaluateWorkflowReadiness(input = {}) {
   checks.push(contentWorker
     ? item('content_worker', 'เครื่องสร้างประกาศ', 'pass', 'พร้อมรับงานสร้างประกาศ')
     : item('content_worker', 'เครื่องสร้างประกาศ', 'fail', 'ยังไม่มีเครื่องออนไลน์ งานสร้างประกาศใหม่จะรอ'));
+  const contentCapability = workers.find((worker) => {
+    if (!worker.online) return false;
+    const types = Array.isArray(worker.meta?.types) ? worker.meta.types : [];
+    return types.includes('draft');
+  })?.meta?.image_generation;
+  if (contentCapability && !contentCapability.configured) {
+    checks.push(item('image_provider', 'สิทธิ์สร้างรูป AI', 'fail', 'เครื่องสร้าง Content ยังไม่มี OPENAI_API_KEY จึงสร้างรูปตามตำแหน่งไม่ได้'));
+  } else if (contentCapability?.configured) {
+    checks.push(item('image_provider', 'สิทธิ์สร้างรูป AI', 'pass', `พร้อมสร้างรูปด้วย ${contentCapability.model || contentCapability.provider}`));
+  } else {
+    checks.push(item('image_provider', 'สิทธิ์สร้างรูป AI', 'warning', 'Worker รุ่นเดิมยังไม่รายงานความพร้อมของผู้ให้บริการรูป กรุณา restart หลัง deploy'));
+  }
 
   const postWorker = workers.some((worker) => worker.online && worker.kind === 'autopost');
   checks.push(postWorker
@@ -42,6 +57,29 @@ export function evaluateWorkflowReadiness(input = {}) {
   checks.push(readyAccounts > 0
     ? item('facebook_account', 'บัญชีและกลุ่ม Facebook', 'pass', `พร้อมใช้งาน ${readyAccounts} บัญชี`)
     : item('facebook_account', 'บัญชีและกลุ่ม Facebook', 'fail', 'ยังไม่มีบัญชีที่ผูกกลุ่มสำหรับเผยแพร่'));
+
+  const contentOutput = input.contentOutput ?? {};
+  const passingWithImage = Number(contentOutput.passing_with_image || 0);
+  const verifiedGeneration = Number(contentOutput.verified_generation || 0);
+  if (verifiedGeneration > 0) {
+    checks.push(item('content_output', 'ผลลัพธ์ข้อความและรูป', 'pass', `มีร่างที่ผ่านข้อมูล มีรูปจริง และตรวจที่มาของรูปแล้ว ${verifiedGeneration} ร่าง`));
+  } else if (passingWithImage > 0) {
+    checks.push(item('content_output', 'ผลลัพธ์ข้อความและรูป', 'warning', 'มีร่างเก่าที่ผ่านและมีรูป แต่ยังไม่ได้บันทึกหลักฐานการสร้างรูปแบบใหม่ กรุณาทดสอบสร้าง Content ใหม่ 1 งาน'));
+  } else {
+    checks.push(item('content_output', 'ผลลัพธ์ข้อความและรูป', 'fail', 'ยังไม่มีร่างที่ผ่านด่านข้อเท็จจริงและมีรูปพร้อมใช้'));
+  }
+
+  const scrapeOutput = input.scrapeOutput ?? {};
+  const completedScrapes = Number(scrapeOutput.completed || 0);
+  const partialScrapes = Number(scrapeOutput.partial || 0);
+  const scrapeErrors = Number(scrapeOutput.error || 0);
+  if (completedScrapes <= 0) {
+    checks.push(item('scrape_output', 'ผลค้นหาผู้สมัคร', 'fail', 'ยังไม่มีงานล่าสุดที่ได้ Resume ผ่านเกณฑ์ครบจำนวนเป้าหมาย'));
+  } else if (partialScrapes > 0 || scrapeErrors > 0) {
+    checks.push(item('scrape_output', 'ผลค้นหาผู้สมัคร', 'warning', `มีงานได้ครบ ${completedScrapes} งาน · ยังไม่ครบตลาด ${partialScrapes} งาน · ระบบขัดข้อง ${scrapeErrors} งาน`));
+  } else {
+    checks.push(item('scrape_output', 'ผลค้นหาผู้สมัคร', 'pass', `งานค้นหาล่าสุดได้ Resume ครบเป้าหมาย ${completedScrapes} งาน`));
+  }
 
   const queued = Number(queue.queued || 0);
   const oldestMinutes = Number(queue.oldest_queued_minutes || 0);
@@ -57,8 +95,12 @@ export function evaluateWorkflowReadiness(input = {}) {
   }
 
   const failed = Number(queue.errors_24h || 0) + Number(postQueue.failed_24h || 0);
-  checks.push(failed > 0
-    ? item('recent_errors', 'งานผิดพลาดล่าสุด', 'warning', `มีงานผิดพลาดใน 24 ชั่วโมง ${failed} งาน`)
+  const recentPostRuns = input.recentPostRuns ?? [];
+  const postFailureStreak = recentPostRuns.length > 0 && recentPostRuns.every((run) => ['failed', 'cancelled'].includes(String(run.status || '')));
+  checks.push(postFailureStreak
+    ? item('recent_errors', 'งานผิดพลาดล่าสุด', 'fail', `การเผยแพร่ Facebook ล่าสุดล้มเหลวติดต่อกัน ${recentPostRuns.length} ครั้ง ห้ามรายงานว่าระบบพร้อม`)
+    : failed > 0
+      ? item('recent_errors', 'งานผิดพลาดล่าสุด', 'warning', `มีงานผิดพลาดใน 24 ชั่วโมง ${failed} งาน`)
     : item('recent_errors', 'งานผิดพลาดล่าสุด', 'pass', 'ไม่พบงานผิดพลาดใน 24 ชั่วโมง'));
 
   const inconsistent = Number(input.inconsistentCampaigns || 0);
@@ -68,7 +110,7 @@ export function evaluateWorkflowReadiness(input = {}) {
 
   const selftest = input.lastSelftest;
   checks.push(selftest?.status === 'done'
-    ? item('selftest', 'การทดสอบเส้นทางระบบ', 'pass', `ทดสอบล่าสุดสำเร็จ${selftest.finished_at ? ` ${new Date(selftest.finished_at).toLocaleString('th-TH')}` : ''}`)
+    ? item('selftest', 'การทดสอบ Web → คิว → Worker', 'pass', `ทดสอบระบบคิวล่าสุดสำเร็จ${selftest.finished_at ? ` ${new Date(selftest.finished_at).toLocaleString('th-TH')}` : ''} (ไม่ใช่การทดสอบ Facebook จริง)`)
     : selftest?.status === 'error'
       ? item('selftest', 'การทดสอบเส้นทางระบบ', 'fail', `ทดสอบล่าสุดไม่สำเร็จ: ${selftest.last_error || 'ไม่ทราบสาเหตุ'}`)
       : item('selftest', 'การทดสอบเส้นทางระบบ', 'warning', 'ยังไม่เคยทดสอบ Web → Queue → Worker'));

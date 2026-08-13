@@ -89,9 +89,11 @@ function runPlaywrightForJob(job) {
     const assignmentIds = Array.isArray(job.assignment_ids) ? job.assignment_ids.map(String).filter(Boolean) : [];
     const env = { ...process.env, FORCE_COLOR: '1', RUN_ID: String(job.run_id || ''), RUN_LOG_API_URL: API_BASE };
     if (assignmentIds.length > 0) env.ASSIGNMENT_IDS = assignmentIds.join(',');
+    if (String(job.mode || 'post') === 'preflight') env.PREFLIGHT_USER_ID = String(job.user_id || '');
     // งานที่คนกดเอง (ไม่ใช่รอบ 8:00 'auto-daily') = อนุญาต override cap/pause ถ้าบัญชีเกินโควต้า
     if (String(job.requested_by || '') !== 'auto-daily') env.IGNORE_DAILY_CAP = '1';
-    const args = ['playwright', 'test', 'postAll', '--headed', '--project=GoogleChrome'];
+    const testName = String(job.mode || 'post') === 'preflight' ? 'facebookPreflight' : 'postAll';
+    const args = ['playwright', 'test', testName, '--headed', '--project=GoogleChrome'];
     const isWin = process.platform === 'win32';
     const child = isWin
       ? spawn('cmd.exe', ['/d', '/c', 'npx', ...args], {
@@ -147,7 +149,7 @@ async function processJob(job) {
         job_id: job.id,
         run_id: job.run_id,
         ok: true,
-        message: 'Worker run completed',
+        message: String(job.mode || 'post') === 'preflight' ? 'Facebook preflight completed (no post)' : 'Worker run completed',
       });
       console.log(`[post-worker] job ${job.id} completed`);
     } catch (e) {

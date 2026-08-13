@@ -19,7 +19,7 @@ if (!key.startsWith('sk-')) {
   console.warn('⚠️  key ไม่ได้ขึ้นต้นด้วย sk- — อาจ copy มาผิด/มีอักขระเกินหน้า');
 }
 
-const model = envString('CONTENT_IMAGE_MODEL', 'gpt-image-1');
+const model = envString('CONTENT_IMAGE_MODEL', 'gpt-image-2');
 const size = envString('CONTENT_IMAGE_SIZE', '1024x1024');
 console.log(`โมเดล = ${model} · ขนาด = ${size}\nกำลังยิง OpenAI (รอสักครู่)...\n`);
 
@@ -40,7 +40,7 @@ if (res.ok) {
   console.error('\n❌ OpenAI ปฏิเสธ — ข้อความจริง:\n' + body.slice(0, 800));
   console.error('\n── สาเหตุที่พบบ่อย ──');
   console.error(' • 401         = key ผิด / ถูกยกเลิก → สร้าง key ใหม่');
-  console.error(' • 403 verify  = ต้อง verify องค์กรก่อนใช้ gpt-image-1:');
+  console.error(' • 403 verify  = ต้อง verify องค์กรก่อนใช้ GPT Image:');
   console.error('                 platform.openai.com/settings/organization/general → Verify Organization → รอ ~15 นาที');
   console.error('                 (หรือเลี่ยงด้วยการใช้ dall-e-3 — ดูด้านล่าง)');
   console.error(' • 400 model   = โมเดลใช้ไม่ได้ → ลองใส่ใน .env:  CONTENT_IMAGE_MODEL=dall-e-3');

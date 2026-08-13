@@ -6,6 +6,10 @@ import { humanClick, humanPause, humanType } from './humanBehavior';
 const FB_STATE_LOCK_WAIT_MS = Math.min(600_000, Math.max(60_000, Number(process.env.FB_STATE_LOCK_WAIT_MS) || 180_000));
 const FB_STATE_LOCK_POLL_MS = 500;
 
+function automaticCheckpointWaitMinutes(value?: number): number {
+  return Math.max(1, value ?? (Number(process.env.FB_LOGIN_WAIT_MINUTES) || 5));
+}
+
 /** ล็อกข้ามโปรเซส — กันหลาย Playwright แย่งอ่าน/เขียน facebook-*.json พร้อมกัน */
 async function acquireFacebookStateLock(statePath: string): Promise<() => Promise<void>> {
   const lockPath = `${statePath}.lock`;
@@ -60,6 +64,8 @@ export async function facebookLogin(
     interactiveCheckpoint?: boolean;
     /** หลังบันทึก session สำเร็จ — รอให้ผู้ใช้ปิดแท็บ/หน้าต่างเอง (กัน Playwright ปิด Chrome ทันที) */
     manualCloseAfterSuccess?: boolean;
+    /** เวลาสูงสุดที่รอหน้า OTP/checkpoint ในโหมดอัตโนมัติ */
+    checkpointWaitMinutes?: number;
   }
 ): Promise<Page> {
   const keyBase = String(options?.sessionKey || options?.userLabel || email || 'default')
@@ -138,7 +144,7 @@ export async function facebookLogin(
         'Facebook แจ้งว่าอีเมลหรือรหัสผ่านไม่ถูกต้อง — แก้ไขใน User แล้วลองใหม่'
       );
     } else {
-      const waitMin = options?.interactiveCheckpoint ? 40 : 28;
+      const waitMin = options?.interactiveCheckpoint ? 40 : automaticCheckpointWaitMinutes(options?.checkpointWaitMinutes);
       console.log(
         `⚠️${label} หลังล็อกอินยังไม่เข้าฟีด — อาจเป็นหน้ายืนยันตัวตน/ความปลอดภัย (ดูใน Chrome)\n` +
           `   รอสูงสุด ~${waitMin} นาที กรุณาทำขั้นตอนในเบราว์เซอร์ให้ครบ (อย่าปิดจนกว่าจะเห็นฟีดหรือระบบแจ้งให้ปิด)`
@@ -156,7 +162,7 @@ export async function facebookLogin(
     console.log(`✅${label} พบ session เดิมแล้ว ตรวจสอบสถานะก่อนโพสต์...`);
     let authState = await waitForAuthState(workingPage, 45_000);
     if (authState === 'checkpoint') {
-      const waitMin = options?.interactiveCheckpoint ? 40 : 25;
+      const waitMin = options?.interactiveCheckpoint ? 40 : automaticCheckpointWaitMinutes(options?.checkpointWaitMinutes);
       console.log(
         `⚠️${label} พบหน้า verify/checkpoint (session) — ทำใน Chrome ให้ครบ (รอสูงสุด ~${waitMin} นาที)`
       );
@@ -174,7 +180,7 @@ export async function facebookLogin(
       } else if (await hasFacebookLoginErrorVisible(workingPage)) {
         throw new Error('session หมดหรือบัญชีต้องล็อกอินใหม่ — ใช้ปุ่มล็อกอิน Facebook ใน Users');
       } else {
-        const waitMin = options?.interactiveCheckpoint ? 40 : 25;
+        const waitMin = options?.interactiveCheckpoint ? 40 : automaticCheckpointWaitMinutes(options?.checkpointWaitMinutes);
         console.log(
           `⚠️${label} session เดิมไม่พร้อม — อาจต้องยืนยันตัวตน (รอ ~${waitMin} นาที)`
         );
@@ -394,4 +400,3 @@ async function waitUntilLoggedIn(page: Page, timeoutMs: number): Promise<boolean
   }
   return false;
 }
-

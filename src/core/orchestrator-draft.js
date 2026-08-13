@@ -14,7 +14,7 @@ import { formatPerformanceInsight, patternDecision } from './content-second-brai
  * type='draft' module='orchestrator'). ขั้นตอน:
  *   1. โหลด campaign → ตั้งสถานะ 'drafting'
  *   2. Claude คิด caption + video_brief + image_prompt (content-gen.js)
- *   3. OpenAI สร้างรูปจาก image_prompt (ai-image.js) — ไม่มี key = ไม่มีรูป (ยังทำต่อ)
+ *   3. OpenAI สร้างรูปจาก image_prompt (ai-image.js) — ไม่มีรูป = งานล้มเหลวและลองใหม่
  *   4. insert campaign_contents (version ถัดไป, status='draft')
  *   5. ตั้ง campaign 'pending_approval' ให้คนอนุมัติในแดชบอร์ด
  *
@@ -167,10 +167,14 @@ export async function generateDraftForCampaign(campaignId) {
     throw new Error(note);
   }
 
-  const versions = [content, contentB].filter(Boolean);
+  const captionKey = (value) => String(value ?? '').toLowerCase().replace(/\s+/g, '').trim();
+  const versions = [content, contentB].filter((item, index, all) => item && all.findIndex(
+    (candidate) => candidate && captionKey(candidate.caption) === captionKey(item.caption),
+  ) === index);
+  if (versions.length < 2) console.warn('  [draft] AI คืนร่าง A/B ซ้ำกัน — เก็บเพียงร่างเดียวเพื่อไม่ให้หน้าอนุมัติรก');
 
   // รูป+โปสเตอร์ต่อเวอร์ชัน (A/B คนละสไตล์รูป) — โปสเตอร์ text-layout ใบเดียวกัน แต่รูปคน/โทนต่างกัน
-  // รูปเป็น optional — ไม่มี OPENAI_API_KEY ก็ยังบันทึก draft (caption/brief) ได้
+  // รูปเป็นผลลัพธ์บังคับ: ห้ามสร้างโปสเตอร์เปล่าแล้วรายงานว่าสำเร็จ
   let posterFields = await generatePosterFields({
     title: facts.position, positions: c.positions, province: facts.location,
     qty: c.qty, remaining_qty: c.remaining_qty, snapshot: c.request_snapshot ?? {},
@@ -189,18 +193,41 @@ export async function generateDraftForCampaign(campaignId) {
   if (posterFields) posterFields = applyTrustedPosterFacts(posterFields, c);
   const contactLine = process.env.CONTENT_CONTACT_LINE || '';
   const images = [];
+  const imageSources = [];
+  const imageErrors = [];
   for (const v of versions) {
-    const person = await generateImage({ prompt: v.imagePrompt, transparent: true }).catch(() => null);
-    let img = null;
-    if (posterFields) {
-      const personUri = person ? `data:${person.mime};base64,${person.bytes.toString('base64')}` : null;
-      img = await renderPoster({ ...posterFields, contactLine }, personUri).catch(() => null);
+    let person = null;
+    let imageError = null;
+    try {
+      // GPT Image 2 เป็นรุ่นคุณภาพสูงสุดและให้พื้นหลังทึบ จึงสร้างฉากงานจริงแล้ว
+      // ให้ poster.js ทำ soft-mask ด้านซ้ายแทนการบังคับพื้นหลังโปร่งใส.
+      person = await generateImage({ prompt: v.imagePrompt, transparent: false, strict: true });
+    } catch (error) {
+      imageError = error;
+      console.warn(`  [draft] สร้างภาพตามตำแหน่งไม่สำเร็จ: ${error.message}`);
     }
-    if (!img) img = person; // fallback: อย่างน้อยได้รูปคน (หรือ null = ไม่มีรูป)
+    let img = null;
+    if (posterFields && person) {
+      const personUri = `data:${person.mime};base64,${person.bytes.toString('base64')}`;
+      img = await renderPoster({ ...posterFields, contactLine }, personUri).catch((error) => {
+        imageError = error;
+        console.warn(`  [draft] ประกอบโปสเตอร์ไม่สำเร็จ: ${error.message}`);
+        return null;
+      });
+    }
+    if (!img && person) img = person;
     images.push(img);
+    imageSources.push(person);
+    imageErrors.push(imageError?.message ?? null);
   }
   const madeImages = images.filter(Boolean).length;
   if (madeImages) console.log(`  [draft] A/B รูป: ${madeImages}/${versions.length} ใบ (สไตล์ต่างกันตาม research/เทรนด์)`);
+  if (!madeImages) {
+    const reason = imageErrors.filter(Boolean)[0] || 'ไม่พบผลลัพธ์รูปภาพจากเครื่องสร้าง Content';
+    const note = `สร้างรูปประกาศไม่สำเร็จ: ${reason}`;
+    await query(`UPDATE recruit_campaigns SET status='draft_error', status_note=$2, updated_at=now() WHERE id=$1`, [campaignId, note]);
+    throw new Error(note);
+  }
 
   const [{ v: version }] = (
     await query(`SELECT COALESCE(MAX(version), 0) + 1 AS v FROM campaign_contents WHERE campaign_id = $1`, [campaignId])
@@ -214,10 +241,17 @@ export async function generateDraftForCampaign(campaignId) {
     research_keywords: marketResearch.keywords,
     research_warnings: marketResearch.warnings,
   };
+  let savedDrafts = 0;
+  let readyDrafts = 0;
   for (let i = 0; i < versions.length; i += 1) {
     const v = versions[i];
     const image = images[i];
-    const quality = evaluateContentQuality({ campaign: c, caption: v.caption, posterFields });
+    // รุ่นที่รูปเสียไม่ถูกบันทึกเป็นร่างให้คนเห็น ระบบเก็บสาเหตุไว้ใน log และ
+    // ยังส่งรุ่นที่สมบูรณ์ได้ถ้าอย่างน้อยหนึ่งรุ่นผ่าน.
+    if (!image || !imageSources[i]) continue;
+    const quality = evaluateContentQuality({ campaign: c, caption: v.caption, posterFields, imageReady: true });
+    savedDrafts += 1;
+    if (!quality.blocking) readyDrafts += 1;
     console.log(`  [draft] ด่านคุณภาพเวอร์ชัน ${version + i}: ${quality.status} ${quality.score}/100 — ${quality.summary}`);
     const genNotes = JSON.stringify({
       ...genNotesBase,
@@ -227,6 +261,12 @@ export async function generateDraftForCampaign(campaignId) {
       used_winning: winningExamples.length,
       used_feedback: preferredExamples.length,
       used_losing: losingExamples.length,
+      image_generation: {
+        ok: true,
+        provider: imageSources[i]?.provider ?? null,
+        model: imageSources[i]?.model ?? null,
+        prompt: v.imagePrompt,
+      },
     });
     try {
       await query(
@@ -249,9 +289,17 @@ export async function generateDraftForCampaign(campaignId) {
     }
   }
 
-  await query(`UPDATE recruit_campaigns SET status='pending_approval', status_note=NULL, updated_at=now() WHERE id=$1`, [campaignId]);
+  if (!readyDrafts) {
+    const note = 'ร่างที่สร้างได้ยังไม่ผ่านด่านตรวจข้อเท็จจริง กรุณาแก้ข้อมูลหรือสั่งสร้างใหม่';
+    await query(`UPDATE recruit_campaigns SET status='draft_error', status_note=$2, updated_at=now() WHERE id=$1`, [campaignId, note]);
+    throw new Error(note);
+  }
+  await query(`UPDATE recruit_campaigns SET status='pending_approval', status_note=$2, updated_at=now() WHERE id=$1`, [
+    campaignId,
+    savedDrafts > readyDrafts ? `พร้อมตรวจ ${readyDrafts} ร่าง · ระบบซ่อนร่างที่ไม่ผ่าน ${savedDrafts - readyDrafts} ร่าง` : null,
+  ]);
 
-  return { campaignId, version, versions: versions.length, hasImage: madeImages > 0, model: content.model };
+  return { campaignId, version, versions: savedDrafts, readyDrafts, hasImage: madeImages > 0, model: content.model };
 }
 
 /**

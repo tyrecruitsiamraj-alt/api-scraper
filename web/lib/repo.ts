@@ -1669,6 +1669,7 @@ export type ContentRow = {
   reject_reason: string | null;
   created_at: string;
   has_image: boolean;
+  image_generation_ok: boolean;
   quality_status: 'pending' | 'pass' | 'warning' | 'fail';
   quality_score: number | null;
   quality_checks: ContentQualityResult | null;
@@ -1683,6 +1684,7 @@ export type ContentRow = {
     used_feedback?: number;
     used_losing?: number;
     research_model?: string;
+    image_generation?: { ok?: boolean; provider?: string | null; model?: string | null; prompt?: string | null };
   } | null;
 };
 
@@ -1692,7 +1694,8 @@ export async function listCampaignContents(campaignId: string) {
     const [rows, campaign] = await Promise.all([
       q<ContentRow>(
       `SELECT id, campaign_id, version, platform, caption, video_brief, gen_model, status,
-              engagement_score, reject_reason, created_at, (image_bytes IS NOT NULL) AS has_image, gen_notes,
+              engagement_score, reject_reason, created_at, (image_bytes IS NOT NULL) AS has_image,
+              COALESCE((gen_notes->'image_generation'->>'ok')::boolean,false) AS image_generation_ok, gen_notes,
               quality_status, quality_score, quality_checks, quality_checked_at
          FROM campaign_contents WHERE campaign_id = $1 ORDER BY version DESC`,
       [campaignId],
@@ -1702,13 +1705,14 @@ export async function listCampaignContents(campaignId: string) {
     // ร่างเก่าก่อน schema-019 ยังเป็น pending: คำนวณเพื่อให้หน้าจอบอกปัญหาจริงได้ทันที
     // (ตอนอนุมัติจะตรวจซ้ำและบันทึกผลภายใน transaction อีกครั้งเสมอ).
     return rows.map((row) => {
-      if (row.quality_status !== 'pending' || !campaign) return row;
-      const quality = evaluateContentQuality({ campaign, caption: row.caption });
+      if (!campaign) return row;
+      if (row.quality_status !== 'pending' && row.image_generation_ok) return row;
+      const quality = evaluateContentQuality({ campaign, caption: row.caption, imageReady: row.has_image && row.image_generation_ok });
       return { ...row, quality_status: quality.status, quality_score: quality.score, quality_checks: quality };
     });
   } catch {
     // schema-015 (gen_notes) ยังไม่ migrate — query แบบไม่มีคอลัมน์นั้น
-    const rows = await q<Omit<ContentRow, 'gen_notes' | 'quality_status' | 'quality_score' | 'quality_checks' | 'quality_checked_at'>>(
+    const rows = await q<Omit<ContentRow, 'gen_notes' | 'image_generation_ok' | 'quality_status' | 'quality_score' | 'quality_checks' | 'quality_checked_at'>>(
       `SELECT id, campaign_id, version, platform, caption, video_brief, gen_model, status,
               engagement_score, reject_reason, created_at, (image_bytes IS NOT NULL) AS has_image
          FROM campaign_contents WHERE campaign_id = $1 ORDER BY version DESC`,
@@ -1717,6 +1721,7 @@ export async function listCampaignContents(campaignId: string) {
     return rows.map((r) => ({
       ...r,
       gen_notes: null,
+      image_generation_ok: false,
       quality_status: 'pending' as const,
       quality_score: null,
       quality_checks: null,
@@ -1779,8 +1784,9 @@ export async function updateContentCaption(id: string, caption: string) {
 
 /** ตรวจร่างล่าสุดกับใบขอจริง และเก็บผลไว้ให้ UI แสดงทันที. */
 export async function refreshContentQuality(id: string): Promise<ContentQualityResult> {
-  const rows = await q<{ caption: string | null; campaign: CampaignRow; quality_checks: ContentQualityResult | null }>(
-    `SELECT cc.caption, cc.quality_checks, to_jsonb(c.*) AS campaign
+  const rows = await q<{ caption: string | null; campaign: CampaignRow; quality_checks: ContentQualityResult | null; image_ready: boolean }>(
+    `SELECT cc.caption, cc.quality_checks, to_jsonb(c.*) AS campaign,
+            (cc.image_bytes IS NOT NULL AND COALESCE((cc.gen_notes->'image_generation'->>'ok')::boolean,false)) AS image_ready
        FROM campaign_contents cc
        JOIN recruit_campaigns c ON c.id=cc.campaign_id
       WHERE cc.id=$1`,
@@ -1791,6 +1797,7 @@ export async function refreshContentQuality(id: string): Promise<ContentQualityR
     campaign: rows[0].campaign,
     caption: rows[0].caption,
     posterFields: rows[0].quality_checks?.posterFields ?? null,
+    imageReady: rows[0].image_ready,
   });
   await q(
     `UPDATE campaign_contents
@@ -1828,8 +1835,9 @@ export async function getContentImageBytes(id: string) {
 
 /** ร่างคอนเทนต์ 1 แถว (caption + มีรูปไหม) สำหรับตอนอนุมัติ→โพสต์. */
 export async function getContentById(id: string) {
-  const rows = await q<{ id: string; campaign_id: string; caption: string | null; has_image: boolean }>(
-    `SELECT id, campaign_id, caption, (image_bytes IS NOT NULL) AS has_image
+  const rows = await q<{ id: string; campaign_id: string; caption: string | null; has_image: boolean; image_generation_ok: boolean }>(
+    `SELECT id, campaign_id, caption, (image_bytes IS NOT NULL) AS has_image,
+            COALESCE((gen_notes->'image_generation'->>'ok')::boolean,false) AS image_generation_ok
        FROM campaign_contents WHERE id = $1`,
     [id],
   );
@@ -1856,6 +1864,30 @@ export async function listFacebookAccounts(): Promise<FbAccount[]> {
   } catch {
     return [];
   }
+}
+
+/** ส่งงานตรวจ Facebook ไปยังเครื่องที่ผูกไว้ โดยเปิด browser ตรวจ session+group และไม่โพสต์จริง */
+export async function enqueueFacebookPreflight(userId: string, requestedBy: string | null): Promise<string> {
+  const id = autopostId();
+  await q(`ALTER TABLE ${AP}.post_run_queue ADD COLUMN IF NOT EXISTS mode VARCHAR(30) NOT NULL DEFAULT 'post'`);
+  const rows = await q<{ id: string; preferred_worker: string | null; group_count: number; worker_online: boolean }>(
+    `SELECT u.id, u.preferred_worker,
+            jsonb_array_length(CASE WHEN jsonb_typeof(u.group_ids::jsonb)='array' THEN u.group_ids::jsonb ELSE '[]'::jsonb END)::int AS group_count,
+            EXISTS (SELECT 1 FROM ${AP}.workers w WHERE w.name=u.preferred_worker AND w.last_seen > now() - interval '2 minutes') AS worker_online
+       FROM ${AP}.users u WHERE u.id=$1`,
+    [userId],
+  );
+  const account = rows[0];
+  if (!account) throw new Error('ไม่พบบัญชี Facebook');
+  if (!account.preferred_worker) throw new Error('บัญชี Facebook ยังไม่ได้ผูกกับเครื่อง');
+  if (!account.worker_online) throw new Error(`เครื่องที่ผูกไว้ (${account.preferred_worker}) ยังออฟไลน์`);
+  if (Number(account.group_count) <= 0) throw new Error('บัญชี Facebook ยังไม่ได้เลือกกลุ่มปลายทาง');
+  await q(
+    `INSERT INTO ${AP}.post_run_queue (id, assignment_ids, user_id, status, requested_by, message, mode)
+     VALUES ($1, '[]'::jsonb, $2, 'queued', $3, $4, 'preflight')`,
+    [id, userId, requestedBy || 'web-preflight', 'ตรวจ Facebook แบบไม่โพสต์จริง'],
+  );
+  return id;
 }
 
 function autopostId(): string {
@@ -1968,7 +2000,7 @@ export type PostMode = 'both' | 'image' | 'caption';
 
 export async function enqueueApprovedPost(opts: {
   campaign: CampaignRow;
-  content: { id: string; caption: string | null; has_image: boolean };
+  content: { id: string; caption: string | null; has_image: boolean; image_generation_ok: boolean };
   userId: string;
   requestedBy: string | null;
   /** โพสต์อะไร: ทั้งคู่ / เฉพาะรูป / เฉพาะแคปชัน (default both) */
@@ -1995,9 +2027,11 @@ export async function enqueueApprovedPost(opts: {
   try {
     await client.query('BEGIN');
     // ล็อก campaign ก่อนสร้างคิว กันกดอนุมัติซ้ำหรือชนกับ “ให้ AI คิดใหม่”.
-    const locked = await client.query<{ campaign_status: string; content_status: string; campaign: CampaignRow; caption: string | null; quality_checks: ContentQualityResult | null }>(
+    const locked = await client.query<{ campaign_status: string; content_status: string; campaign: CampaignRow; caption: string | null; quality_checks: ContentQualityResult | null; has_image: boolean; image_generation_ok: boolean }>(
       `SELECT c.status AS campaign_status, cc.status AS content_status,
-              to_jsonb(c.*) AS campaign, cc.caption, cc.quality_checks
+              to_jsonb(c.*) AS campaign, cc.caption, cc.quality_checks,
+              (cc.image_bytes IS NOT NULL) AS has_image,
+              COALESCE((cc.gen_notes->'image_generation'->>'ok')::boolean, false) AS image_generation_ok
          FROM recruit_campaigns c
          JOIN campaign_contents cc ON cc.id = $2 AND cc.campaign_id = c.id
         WHERE c.id = $1
@@ -2012,6 +2046,7 @@ export async function enqueueApprovedPost(opts: {
       campaign: locked.rows[0].campaign,
       caption: locked.rows[0].caption,
       posterFields: locked.rows[0].quality_checks?.posterFields ?? null,
+      imageReady: locked.rows[0].has_image && locked.rows[0].image_generation_ok,
     });
     await client.query(
       `UPDATE campaign_contents
@@ -2022,6 +2057,21 @@ export async function enqueueApprovedPost(opts: {
     if (quality.blocking) {
       throw new Error(`ยังอนุมัติไม่ได้ กรุณาแก้ข้อมูลเหล่านี้ก่อน: ${qualityFailureMessages(quality).join(' · ')}`);
     }
+    const accountReady = await client.query<{ id: string; group_count: number; paused_until: string | null; preferred_worker: string | null; worker_online: boolean }>(
+      `SELECT u.id,
+              jsonb_array_length(CASE WHEN jsonb_typeof(u.group_ids::jsonb)='array' THEN u.group_ids::jsonb ELSE '[]'::jsonb END)::int AS group_count,
+              u.paused_until, u.preferred_worker,
+              CASE WHEN NULLIF(TRIM(u.preferred_worker),'') IS NULL THEN true
+                   ELSE EXISTS (SELECT 1 FROM ${AP}.workers w WHERE w.name=u.preferred_worker AND w.last_seen > now() - interval '2 minutes')
+              END AS worker_online
+         FROM ${AP}.users u WHERE u.id=$1`,
+      [userId],
+    );
+    const account = accountReady.rows[0];
+    if (!account) throw new Error('ไม่พบบัญชี Facebook ที่เลือก');
+    if (Number(account.group_count) <= 0) throw new Error('บัญชี Facebook นี้ยังไม่ได้เลือกกลุ่มที่จะเผยแพร่');
+    if (account.paused_until && new Date(account.paused_until) > new Date()) throw new Error('บัญชี Facebook นี้ถูกพักชั่วคราว กรุณาแก้ Session หรือข้อจำกัดบัญชีก่อน');
+    if (!account.worker_online) throw new Error(`เครื่องที่ผูกกับบัญชี Facebook (${account.preferred_worker}) ยังออฟไลน์`);
     await client.query(
       `INSERT INTO ${AP}.jobs (id, title, owner, company, caption, status, image_ref)
        VALUES ($1, $2, 'SO Recruitment', 'SO Recruitment', $3, 'pending', $4)`,
@@ -2331,7 +2381,7 @@ export type WorkflowReadinessSnapshot = WorkflowReadiness & { workers: WorkerHea
 
 /** ตรวจความพร้อมครบเส้นแบบ read-only สำหรับศูนย์งาน. ทุกจุด fail-soft แต่รายงานว่าไม่พร้อมแทนการเงียบ. */
 export async function getWorkflowReadiness(): Promise<WorkflowReadinessSnapshot> {
-  const [workers, facebookAccounts, queue, postQueue, inconsistent, selftest] = await Promise.all([
+  const [workers, facebookAccounts, queue, postQueue, inconsistent, selftest, contentOutput, scrapeOutput, recentPostRuns] = await Promise.all([
     listWorkerHeartbeats(),
     listFacebookAccounts(),
     q<{ queued: number; oldest_queued_minutes: number | null; stale_running: number; errors_24h: number }>(
@@ -2361,9 +2411,28 @@ export async function getWorkflowReadiness(): Promise<WorkflowReadinessSnapshot>
          FROM work_queue WHERE type='selftest'
         ORDER BY created_at DESC LIMIT 1`,
     ).then((rows) => rows[0] ?? null).catch(() => null),
+    q<{ passing_with_image: number; verified_generation: number; failed_quality: number }>(
+      `SELECT
+         count(*) FILTER (WHERE quality_status='pass' AND image_bytes IS NOT NULL)::int AS passing_with_image,
+         count(*) FILTER (WHERE quality_status='pass' AND image_bytes IS NOT NULL AND COALESCE((gen_notes->'image_generation'->>'ok')::boolean,false))::int AS verified_generation,
+         count(*) FILTER (WHERE quality_status='fail')::int AS failed_quality
+       FROM campaign_contents
+       WHERE created_at > now() - interval '30 days'`,
+    ).then((rows) => rows[0] ?? {}).catch(() => ({})),
+    q<{ completed: number; partial: number; error: number }>(
+      `SELECT
+         count(*) FILTER (WHERE status='done')::int AS completed,
+         count(*) FILTER (WHERE status='partial')::int AS partial,
+         count(*) FILTER (WHERE status='error')::int AS error
+       FROM scrape_tasks
+       WHERE created_at > now() - interval '30 days'`,
+    ).then((rows) => rows[0] ?? {}).catch(() => ({})),
+    q<{ status: string }>(
+      `SELECT status FROM ${AP}.post_run_queue ORDER BY created_at DESC LIMIT 3`,
+    ).catch(() => []),
   ]);
   return {
-    ...evaluateWorkflowReadiness({ workers, facebookAccounts, queue, postQueue, inconsistentCampaigns: inconsistent, lastSelftest: selftest }),
+    ...evaluateWorkflowReadiness({ workers, facebookAccounts, queue, postQueue, inconsistentCampaigns: inconsistent, lastSelftest: selftest, contentOutput, scrapeOutput, recentPostRuns }),
     workers,
   };
 }

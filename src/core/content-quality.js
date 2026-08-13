@@ -43,11 +43,17 @@ function check(code, label, status, message, expected = null, actual = null) {
  * @param {{ campaign: Record<string, any>, caption?: string|null, posterFields?: Record<string, any>|null }} input
  * @returns {{status:'pass'|'warning'|'fail', score:number, blocking:boolean, summary:string, checks:Array<Record<string, any>>}}
  */
-export function evaluateContentQuality({ campaign = {}, caption = '', posterFields = null } = {}) {
+export function evaluateContentQuality({ campaign = {}, caption = '', posterFields = null, imageReady = null } = {}) {
   const facts = extractCampaignFacts(campaign);
   const text = clean(caption);
   const combined = clean([text, posterFields ? JSON.stringify(posterFields) : ''].join(' '));
   const checks = [];
+
+  if (imageReady === false) {
+    checks.push(check('visual', 'รูปประกาศตามตำแหน่ง', 'fail', 'AI ยังสร้างรูปที่ใช้ประกอบโปสเตอร์ไม่ได้ ห้ามส่งอนุมัติ'));
+  } else if (imageReady === true) {
+    checks.push(check('visual', 'รูปประกาศตามตำแหน่ง', 'pass', 'มีภาพต้นฉบับจาก Brief ตำแหน่งก่อนประกอบโปสเตอร์'));
+  }
 
   const ambiguous = !facts.position || AMBIGUOUS_TITLES.has(compact(facts.position)) || /^(opl|job|req)[-_]?\d+$/i.test(facts.position);
   checks.push(ambiguous

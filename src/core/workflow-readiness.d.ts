@@ -15,6 +15,9 @@ export function evaluateWorkflowReadiness(input?: {
   facebookAccounts?: Array<{ group_count?: number }>;
   queue?: { queued?: number; oldest_queued_minutes?: number | null; stale_running?: number; errors_24h?: number };
   postQueue?: { queued?: number; running?: number; failed_24h?: number };
+  contentOutput?: { passing_with_image?: number; verified_generation?: number; failed_quality?: number };
+  scrapeOutput?: { completed?: number; partial?: number; error?: number };
+  recentPostRuns?: Array<{ status?: string }>;
   inconsistentCampaigns?: number;
   lastSelftest?: { status?: string; finished_at?: string | null; last_error?: string | null } | null;
 }): WorkflowReadiness;

@@ -2,7 +2,7 @@ import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { contentGenIngredients, getCampaign, getCampaignPostQueueState, listCampaignContents, listCampaignPosts, listFacebookAccounts, soRecruitCheck } from '@/lib/repo';
 import type { CampaignPostRow } from '@/lib/repo';
-import { approveContentAction, rejectContentAction, editCaptionAction, measureCampaignAction, retryCampaignDraftAction } from '@/lib/actions';
+import { approveContentAction, rejectContentAction, editCaptionAction, measureCampaignAction, retryCampaignDraftAction, runFacebookPreflightAction } from '@/lib/actions';
 import { CaptionViewer } from '@/components/CaptionViewer';
 
 export const dynamic = 'force-dynamic';
@@ -130,6 +130,12 @@ export default async function CampaignDetail({ params }: { params: { id: string 
   if (!c) notFound();
   const snap = (c.request_snapshot ?? {}) as Record<string, any>;
   const contents = await listCampaignContents(params.id);
+  const readyContents = contents.filter((item) => item.status === 'draft' && item.has_image && item.image_generation_ok && item.quality_status !== 'fail');
+  const recommendedContentId = readyContents[0]?.id ?? null;
+  // หน้าอนุมัติควรมีตัวเลือกที่ตัดสินใจได้จริง ไม่ควรเอาร่างที่ระบบรู้อยู่แล้วว่า
+  // ไม่ผ่านมาวางแข่งกัน ผู้ใช้ยังเห็นจำนวนประวัติที่ถูกคัดออกได้ด้านบน.
+  const reviewContents = readyContents.length ? readyContents : contents.slice(0, 1);
+  const hiddenHistoryCount = Math.max(0, contents.length - reviewContents.length);
   const fbAccounts = await listFacebookAccounts();
   const posts = await listCampaignPosts(params.id);
   const postQueue = await getCampaignPostQueueState(params.id);
@@ -319,7 +325,13 @@ export default async function CampaignDetail({ params }: { params: { id: string 
           </div>
         ) : (
           <div className="space-y-4">
-            {contents.map((ct, idx) => {
+            {recommendedContentId && (
+              <div className="rounded-lg border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-800">
+                <span className="font-semibold">ร่างแนะนำ</span> ผ่านข้อเท็จจริงสำคัญและมีรูปพร้อมใช้แล้ว
+                {hiddenHistoryCount > 0 && <span className="ml-1 text-green-700/75">· เก็บร่างเก่าหรือไม่ผ่านไว้อีก {hiddenHistoryCount} ร่างโดยไม่รบกวนการตัดสินใจ</span>}
+              </div>
+            )}
+            {reviewContents.map((ct) => {
               const meta = CONTENT_STATUS[ct.status] ?? { label: ct.status, cls: 'bg-black/5 text-ink' };
               const eng = engByContent.get(ct.id);
               return (
@@ -327,7 +339,7 @@ export default async function CampaignDetail({ params }: { params: { id: string 
                   <div className="mb-3 flex items-center justify-between">
                     <div className="text-sm font-medium">
                       เวอร์ชัน {ct.version}
-                      {idx === 0 && contents.length > 1 && <span className="ml-1 text-subtle">(ล่าสุด)</span>}
+                      {ct.id === recommendedContentId && <span className="ml-1 text-green-700">(แนะนำ)</span>}
                       <span className="ml-2 text-xs text-subtle">· {ct.platform}</span>
                     </div>
                     <span className={`pill ${meta.cls}`}>{meta.label}</span>
@@ -440,6 +452,18 @@ export default async function CampaignDetail({ params }: { params: { id: string 
                   {ct.status === 'draft' && (
                     <div className="mt-4 space-y-3">
                       <div className="flex flex-wrap items-end gap-2">
+                        {fbAccounts.length > 0 && (
+                          <form action={runFacebookPreflightAction} className="flex flex-wrap items-end gap-2 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2">
+                            <label className="text-xs text-blue-800">
+                              <span className="mb-1 block font-medium">ทดสอบ Facebook ก่อน (ไม่โพสต์จริง)</span>
+                              <select name="fbAccountId" required defaultValue="" className="rounded-lg border border-blue-200 bg-white px-2 py-1.5 text-sm text-ink">
+                                <option value="" disabled>เลือกบัญชี…</option>
+                                {fbAccounts.map((a) => <option key={a.id} value={a.id}>{a.label}</option>)}
+                              </select>
+                            </label>
+                            <button className="btn-secondary btn-sm">ตรวจ Session + กลุ่ม</button>
+                          </form>
+                        )}
                         <form action={approveContentAction} className="flex flex-wrap items-end gap-2">
                           <input type="hidden" name="contentId" value={ct.id} />
                           <input type="hidden" name="campaignId" value={c.id} />
@@ -482,8 +506,8 @@ export default async function CampaignDetail({ params }: { params: { id: string 
                               <option value="good_visual">รูปเหมาะกับงาน</option>
                             </select>
                           </label>
-                          <button className="btn-primary btn-sm" disabled={fbAccounts.length === 0 || ct.quality_status === 'fail'}>
-                            {ct.quality_status === 'fail' ? 'แก้ข้อมูลก่อนอนุมัติ' : '✓ อนุมัติและโพสต์'}
+                          <button className="btn-primary btn-sm" disabled={fbAccounts.length === 0 || !ct.has_image || !ct.image_generation_ok || ct.quality_status === 'fail'}>
+                            {!ct.has_image || !ct.image_generation_ok || ct.quality_status === 'fail' ? 'ยังไม่ผ่านด่านอนุมัติ' : '✓ อนุมัติและโพสต์'}
                           </button>
                         </form>
                         <form action={rejectContentAction} className="flex flex-wrap items-end gap-2">

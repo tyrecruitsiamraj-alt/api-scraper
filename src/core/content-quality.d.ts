@@ -19,5 +19,6 @@ export function evaluateContentQuality(input?: {
   campaign?: Record<string, unknown>;
   caption?: string | null;
   posterFields?: Record<string, unknown> | null;
+  imageReady?: boolean | null;
 }): ContentQualityResult;
 export function qualityFailureMessages(result: ContentQualityResult): string[];

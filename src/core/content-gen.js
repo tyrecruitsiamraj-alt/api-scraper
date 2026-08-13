@@ -172,7 +172,8 @@ export async function generateContent(campaign = {}) {
     : '';
 
   // เทรนด์/มีมที่กำลังมา (คนเปิดไว้บนเว็บ) — เกาะกระแสในแคปชันแบบเนียน (เฉพาะ for_caption)
-  const trends = (campaign.trends ?? []).filter((t) => t && (t.for_caption ?? true) && String(t.label ?? '').trim());
+  // เทรนด์ต้องถูกเลือกใช้กับ Caption โดยตั้งใจ ห้ามนำรายการ global ทุกอย่างมาปนกับงาน
+  const trends = (campaign.trends ?? []).filter((t) => t && t.for_caption === true && String(t.label ?? '').trim());
   const trendsBlock = trends.length
     ? `\n\n🔥 เทรนด์ที่กำลังมาตอนนี้ — เกาะกระแสให้เนียน ถ้าเข้ากับงานได้ (อย่าฝืน/อย่าหยาบ):\n` +
       trends.map((t) => `- ${String(t.label).trim()}${t.note ? ` (${String(t.note).trim()})` : ''}`).join('\n')
@@ -215,7 +216,7 @@ export async function generateContent(campaign = {}) {
   const imageStyle = String(campaign.imageStyle ?? research?.imageStyle ?? '').trim();
   // เทรนด์ที่ติดธง for_image — เกาะกระแสในรูปด้วย (label ใช้เป็น hint สั้น ๆ)
   const imageTrends = (campaign.trends ?? [])
-    .filter((t) => t && (t.for_image ?? true) && String(t.label ?? '').trim())
+    .filter((t) => t && t.for_image === true && String(t.label ?? '').trim())
     .map((t) => String(t.label).trim());
   const basePrompt = String(out.image_prompt ?? '').trim();
   const trustedVisualDirection = String(campaign.visualBrief ?? '').trim();

@@ -24,7 +24,8 @@ import { runTask } from '../src/tasks-worker.js';
 import { generateDraftForCampaign } from '../src/core/orchestrator-draft.js';
 import { measureCampaign } from '../src/core/orchestrator-measure.js';
 import { sendAlert } from '../src/core/alert.js';
-import { requireSuccessfulScrapeTaskResult } from '../src/core/scrape-task-result.js';
+import { classifyScrapeTaskResult, requireSuccessfulScrapeTaskResult } from '../src/core/scrape-task-result.js';
+import { imageGenerationCapability } from '../src/core/ai-image.js';
 
 const WORKER_NAME = os.hostname();
 const WORKER_ID = `${WORKER_NAME}#${process.pid}`;
@@ -86,7 +87,7 @@ async function heartbeat() {
       `INSERT INTO workers (name, kind, last_seen, meta)
        VALUES ($1, 'scraper', now(), $2::jsonb)
        ON CONFLICT (name) DO UPDATE SET last_seen = now(), meta = EXCLUDED.meta`,
-      [os.hostname(), JSON.stringify({ pid: process.pid, types: SUPPORTED })],
+      [os.hostname(), JSON.stringify({ pid: process.pid, types: SUPPORTED, image_generation: imageGenerationCapability() })],
     );
   } catch (e) {
     console.warn(`  [heartbeat] เขียนไม่ได้: ${e.message}`);
@@ -284,7 +285,10 @@ async function runOne() {
         : '  ✗ measurement stopped after reaching its waiting limit');
       return true;
     }
-    await finish(job.id, 'done');
+    const outcome = job.type === 'scrape' ? classifyScrapeTaskResult(r) : 'completed';
+    // partial เป็นผลลัพธ์ terminal ที่ระบบทำงานจบแต่ตลาดให้คนไม่ครบ ไม่ใช่ done
+    // และไม่ใช่ infrastructure error ที่ควร retry แบบเดิมซ้ำ ๆ.
+    await finish(job.id, outcome === 'market_insufficient' ? 'partial' : 'done');
     console.log(`  ✓ done: ${JSON.stringify(r).slice(0, 200)}`);
   } catch (e) {
     const errMsg = String(e?.message ?? e).slice(0, 500);

@@ -24,8 +24,8 @@ test('Check Facebook session (บันทึก .auth)', async ({ page }) => {
     userLabel,
     sessionKey,
     interactiveCheckpoint: true,
-    /** รอให้ผู้ใช้ปิดแท็บเองหลังเห็นฟีด — กัน Chrome ถูกปิดทันทีระหว่าง/หลังยืนยันตัวตน */
-    manualCloseAfterSuccess: true,
+    /** จบอัตโนมัติทันทีที่เห็นฟีดและบันทึก session แล้ว ป้องกันงานค้างรอคนปิด Chrome */
+    manualCloseAfterSuccess: false,
   });
   console.log(`✅ [${userLabel}] จบการเช็ค session (key: ${sessionKey})`);
 });

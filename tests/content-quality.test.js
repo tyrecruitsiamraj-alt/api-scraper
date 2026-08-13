@@ -27,10 +27,16 @@ const goodCaption = `🚗 เปิดรับสมัคร พนักง�
 สนใจทักแชทได้เลย #สมัครงาน #งานขับรถ`;
 
 test('ประกาศที่ข้อมูลตรงใบขอผ่านด่านตรวจ', () => {
-  const result = evaluateContentQuality({ campaign, caption: goodCaption });
+  const result = evaluateContentQuality({ campaign, caption: goodCaption, imageReady: true });
   assert.equal(result.blocking, false);
   assert.ok(['pass', 'warning'].includes(result.status));
   assert.equal(result.checks.filter((item) => item.status === 'fail').length, 0);
+});
+
+test('ไม่มีภาพต้นฉบับจาก AI ถูกบล็อกแม้ข้อความถูกต้อง', () => {
+  const result = evaluateContentQuality({ campaign, caption: goodCaption, imageReady: false });
+  assert.equal(result.blocking, true);
+  assert.equal(result.checks.find((item) => item.code === 'visual')?.status, 'fail');
 });
 
 test('เงินเดือนผิดจากใบขอถูกบล็อก', () => {

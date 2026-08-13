@@ -44,6 +44,29 @@ const RESEARCH_SYSTEM = `คุณคือนักวางกลยุทธ�
 ให้วิเคราะห์จากตำแหน่ง+พื้นที่ที่ได้รับ ว่า "แนว/ฮุก/สไตล์รูป" ใดดึงผู้สมัครกลุ่มนี้ได้จริง
 ตอบสั้น กระชับ ใช้ได้จริง เป็นภาษาไทย ห้ามแต่งเงินเดือน/สวัสดิการที่ไม่ได้ให้มา`;
 
+const OCCUPATION_CONFLICTS = [
+  /พยาบาล|nurse|stethoscope|medical scrubs/i,
+  /ขับรถ|driver|truck|steering wheel|คนขับ/i,
+  /รปภ|security guard|รักษาความปลอดภัย/i,
+  /แม่บ้าน|cleaner|ทำความสะอาด/i,
+  /ช่าง|technician|electrician/i,
+  /พ่อครัว|แม่ครัว|chef|cook/i,
+];
+
+export function sanitizeResearchForRole(research, position) {
+  if (!research) return null;
+  const role = String(position ?? '').trim();
+  const conflicts = OCCUPATION_CONFLICTS.filter((pattern) => !pattern.test(role));
+  const safe = (value) => !conflicts.some((pattern) => pattern.test(String(value ?? '')));
+  const angles = (research.angles ?? []).filter(safe);
+  const hooks = (research.hooks ?? []).filter(safe);
+  const imageStyles = (research.imageStyles ?? []).filter(safe);
+  const imageStyle = imageStyles[0] ?? '';
+  const imageStyleB = imageStyles[1] ?? '';
+  if (!angles.length && !hooks.length && !imageStyle) return null;
+  return { ...research, angles, hooks, imageStyle, imageStyleB, imageStyles };
+}
+
 /**
  * @param {{ title?:string, province?:string, snapshot?:Record<string,any>,
  *   trendKeywords?:string[], winningExamples?:string[], marketEvidence?:Record<string,any>[] }} input
@@ -111,5 +134,5 @@ export async function researchContentAngles(input = {}) {
   const imageStyleB = String(out.image_style_b ?? '').trim();
   const imageStyles = [imageStyle, imageStyleB].filter(Boolean); // สำหรับ A/B รูป
   if (!angles.length && !hooks.length && !imageStyle) return null;
-  return { angles, hooks, imageStyle, imageStyleB, imageStyles, model };
+  return sanitizeResearchForRole({ angles, hooks, imageStyle, imageStyleB, imageStyles, model }, position);
 }

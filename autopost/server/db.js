@@ -1655,6 +1655,7 @@ async function ensurePostRunQueueTable() {
       updated_at TIMESTAMPTZ DEFAULT NOW()
     )
   `);
+  await query(`ALTER TABLE post_run_queue ADD COLUMN IF NOT EXISTS mode VARCHAR(30) NOT NULL DEFAULT 'post'`);
 }
 
 /** post_run_queue.user_id — 1 คิว = 1 บัญชี (ให้ lock ต่อบัญชี + ขนานข้ามบัญชีได้) */
@@ -2174,7 +2175,7 @@ async function completePostRunJob(id, data = {}) {
     [String(id || ''), status, data.run_id || null, data.message || null, data.error || null]
   );
   const completed = rows[0] || null;
-  if (ok && completed) {
+  if (ok && completed && String(completed.mode || 'post') === 'post') {
     // เมื่อเผยแพร่เสร็จ ให้ระบบเริ่มติดตามผลเอง ไม่ต้องรอผู้ใช้กดวัดผล.
     try {
       await query(
