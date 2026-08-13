@@ -4,6 +4,13 @@
  */
 const ROLE_PROFILES = [
   {
+    match: /หัวหน้า(?:ไซต์|ไซด์)|landscape|ภูมิทัศน์|สวน|grounds maintenance/i,
+    key: 'landscape-site-supervisor',
+    subject: 'a Thai landscape site supervisor wearing appropriate outdoor safety PPE and holding a clipboard or landscape work plan',
+    props: ['safety helmet', 'reflective safety vest', 'clipboard or landscape plan', 'outdoor grounds-maintenance work context'],
+    forbidden: ['driver uniform', 'steering wheel', 'truck-driving pose', 'medical scrubs', 'stethoscope', 'office desk'],
+  },
+  {
     match: /(?:พนักงาน)?ขับรถ|driver|chauffeur|valet/i,
     key: 'driver',
     subject: 'a Thai professional driver in a neat company uniform beside a clean passenger vehicle',

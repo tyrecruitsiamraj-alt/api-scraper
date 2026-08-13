@@ -3,6 +3,7 @@ import { notFound } from 'next/navigation';
 import { contentGenIngredients, getCampaign, getCampaignPostQueueState, listCampaignContents, listCampaignPosts, listFacebookAccounts, soRecruitCheck } from '@/lib/repo';
 import type { CampaignPostRow } from '@/lib/repo';
 import { approveContentAction, rejectContentAction, editCaptionAction, measureCampaignAction, retryCampaignDraftAction } from '@/lib/actions';
+import { CaptionViewer } from '@/components/CaptionViewer';
 
 export const dynamic = 'force-dynamic';
 
@@ -358,9 +359,7 @@ export default async function CampaignDetail({ params }: { params: { id: string 
                     )}
                     <div className="min-w-0">
                       <div className="mb-1 text-xs text-subtle">แคปชัน</div>
-                      <div className="whitespace-pre-line rounded-lg border border-hairline bg-black/[0.02] p-3 text-sm">
-                        {ct.caption || '—'}
-                      </div>
+                      <CaptionViewer caption={ct.caption} />
                       {ct.video_brief && (
                         <>
                           <div className="mb-1 mt-3 text-xs text-subtle">แนววิดีโอ (brief)</div>

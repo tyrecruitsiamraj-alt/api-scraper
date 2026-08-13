@@ -264,7 +264,8 @@ function fallbackPosterFields(c) {
   const title = String(c.title || s('request_name') || '').trim();
   if (!title) return null;
   const quals = [];
-  if (s('gender')) quals.push(`เพศ${s('gender')}`);
+  const gender = humanGender(s('gender'));
+  if (gender) quals.push(gender);
   if (snap.age_min || snap.age_max) quals.push(`อายุ ${snap.age_min ?? ''}–${snap.age_max ?? ''} ปี`);
   if (s('education')) quals.push(s('education').slice(0, 40));
   if (s('note')) quals.push(s('note').slice(0, 40));
@@ -280,4 +281,14 @@ function fallbackPosterFields(c) {
     qualifications: quals.slice(0, 6),
     benefits: [],
   };
+}
+
+function humanGender(value) {
+  const raw = String(value ?? '').trim();
+  if (!raw) return '';
+  const normalized = raw.toLowerCase();
+  if (['o', 'all', 'any', 'a', 'ไม่จำกัด', 'ไม่ระบุ'].includes(normalized)) return 'ไม่จำกัดเพศ';
+  if (['m', 'male', 'ชาย'].includes(normalized)) return 'เพศชาย';
+  if (['f', 'female', 'หญิง'].includes(normalized)) return 'เพศหญิง';
+  return `เพศ ${raw}`;
 }
