@@ -209,7 +209,12 @@ export default async function OrchestratorPage() {
         statusLabel: task.status === 'done' && task.review_status === 'pending' ? 'รอตรวจรับข้อมูล' : task.status === 'partial' ? 'ยังได้ Resume ไม่ครบ' : task.status === 'error' ? 'ค้นหาไม่สำเร็จ' : task.status === 'queued' ? 'รอเริ่มค้นหา' : task.status === 'running' ? 'กำลังค้นหาผู้สมัคร' : 'สำเร็จ',
         createdAt: task.created_at,
         href: '/scraping',
-        progress: { got: task.progress_got, target: task.progress_target || task.target_count || 0 },
+        progress: {
+          qualified: task.qualified_count,
+          assessed: task.assessed_total,
+          target: task.progress_target || task.target_count || 0,
+          running: task.status === 'running',
+        },
         taskId: task.id,
         steps: scrapeSteps(task.status, task.review_status),
       };

@@ -18,12 +18,16 @@ type Props = {
   taskName: string;
   status: string;
   phase: string;
+  /** จำนวน Resume ที่ผ่าน Hard Filter และนับเข้ากับเป้าหมายจริง */
+  qualified: number;
+  /** จำนวน Resume ที่ระบบเปิดอ่าน/ประเมินแล้วระหว่างการค้นหา */
+  assessed: number;
   got: number;
   target: number;
   updatedAt?: string | null;
 };
 
-export function ScrapingStatusBar({ taskName, status, phase, got, target, updatedAt }: Props) {
+export function ScrapingStatusBar({ taskName, status, phase, qualified, assessed, got, target, updatedAt }: Props) {
   const busy = status === 'running' || status === 'queued';
   if (!busy) return null;
 
@@ -31,7 +35,9 @@ export function ScrapingStatusBar({ taskName, status, phase, got, target, update
   const looksStuck = status === 'running' && staleSec > 180;
 
   const phaseIdx = PHASES.indexOf(phase as Phase);
-  const withinPct = target > 0 ? Math.min(1, got / target) : status === 'queued' ? 0 : 0.35;
+  // แถบความสำเร็จของงานต้องอิง Resume ที่ผ่านเกณฑ์ ไม่ใช่จำนวนโปรไฟล์ที่เปิดดู.
+  const successProgress = phase === 'scraping' ? qualified : got;
+  const withinPct = target > 0 ? Math.min(1, successProgress / target) : status === 'queued' ? 0 : 0.35;
   const overallPct =
     status === 'queued'
       ? 2
@@ -47,6 +53,12 @@ export function ScrapingStatusBar({ taskName, status, phase, got, target, update
         : phaseIdx >= 0
           ? PHASE_LABEL[PHASES[phaseIdx]]
           : 'กำลังเตรียมงาน…';
+  // progress_got ระหว่าง phase scraping คือจำนวนโปรไฟล์ที่เปิดตรวจ ไม่ใช่จำนวน
+  // Resume ที่ผ่านเกณฑ์ ห้ามนำไปแสดงเป็นผลลัพธ์ 4/15 เพราะทำให้คนเข้าใจว่าได้คนแล้ว.
+  const phaseProgress = phase === 'scraping' ? assessed : got;
+  const phaseProgressLabel = phase === 'scraping'
+    ? `ตรวจแล้ว ${phaseProgress} โปรไฟล์ · ผ่านเกณฑ์ ${qualified}/${target}`
+    : `${phaseProgress}/${target}`;
 
   return (
     <div className="card overflow-hidden border-accent/20 shadow-md">
@@ -65,7 +77,7 @@ export function ScrapingStatusBar({ taskName, status, phase, got, target, update
                 ขั้นตอนที่ {stepNum} จาก {PHASES.length} · {currentLabel}
                 {status === 'running' && target > 0 && (
                   <span className="ml-1 tabular-nums font-medium text-ink">
-                    ({got}/{target})
+                    ({phaseProgressLabel})
                   </span>
                 )}
                 {looksStuck && (

@@ -33,7 +33,7 @@ export type WorkCenterItem = {
   statusLabel: string;
   createdAt: string;
   href: string | null;
-  progress?: { got: number; target: number } | null;
+  progress?: { qualified: number; assessed: number; target: number; running: boolean } | null;
   content?: {
     id: string;
     campaignId: string;
@@ -554,14 +554,17 @@ function WorkItemCard({ item, connectors, facebookAccounts }: {
 
       {item.progress && item.progress.target > 0 && (
         <div className="mt-4">
-          <div className="mb-1.5 flex items-baseline justify-between text-[11px] uppercase tracking-[0.06em] text-subtle">
-            <span>ดึงผู้สมัคร</span>
-            <span className="tabular-nums text-ink">{item.progress.got} / {item.progress.target}</span>
+          <div className="mb-1.5 flex flex-wrap items-baseline justify-between gap-2 text-[11px] text-subtle">
+            <span className="uppercase tracking-[0.06em]">Resume ผ่านเกณฑ์</span>
+            <span className="tabular-nums text-ink">
+              {item.progress.qualified} / {item.progress.target}
+              {item.progress.running && ` · ตรวจแล้ว ${item.progress.assessed} โปรไฟล์`}
+            </span>
           </div>
           <div className="h-1.5 overflow-hidden rounded-full bg-black/[0.06]">
             <div
               className="h-full rounded-full bg-accent transition-[width] duration-500 ease-out"
-              style={{ width: `${Math.min(100, Math.round((item.progress.got / item.progress.target) * 100))}%` }}
+              style={{ width: `${Math.min(100, Math.round((item.progress.qualified / item.progress.target) * 100))}%` }}
             />
           </div>
         </div>

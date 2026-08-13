@@ -185,6 +185,8 @@ export function TaskList({ initialTasks }: { initialTasks: TaskRow[] }) {
             taskName={activeTask.name}
             status={activeLive?.status ?? activeTask.status}
             phase={activeLive?.phase ?? activeTask.phase ?? 'idle'}
+            qualified={activeLive?.qualified_count ?? activeTask.qualified_count ?? 0}
+            assessed={activeLive?.assessed_total ?? activeTask.assessed_total ?? 0}
             got={activeLive?.progress_got ?? activeTask.progress_got}
             target={activeLive?.progress_target ?? activeTask.progress_target}
             updatedAt={activeLive?.updated_at ?? null}
@@ -200,13 +202,14 @@ export function TaskList({ initialTasks }: { initialTasks: TaskRow[] }) {
         const target = s?.progress_target ?? t.progress_target;
         const error = s?.last_error ?? t.last_error;
         const meta = STATUS[status] ?? STATUS.idle;
-        const pct = target > 0 ? Math.min(100, Math.round((got / target) * 100)) : 0;
         const busy = status === 'running' || status === 'queued';
         const phase = s?.phase ?? t.phase ?? 'idle';
         const qualified = s?.qualified_count ?? t.qualified_count ?? got;
         const needsReview = s?.needs_review_count ?? t.needs_review_count ?? 0;
         const rejected = s?.rejected_count ?? t.rejected_count ?? 0;
         const assessed = s?.assessed_total ?? t.assessed_total ?? 0;
+        const pctBase = phase === 'scraping' ? qualified : got;
+        const pct = target > 0 ? Math.min(100, Math.round((pctBase / target) * 100)) : 0;
         const phaseIdx = PHASES.indexOf(phase as (typeof PHASES)[number]);
 
         return (
@@ -293,7 +296,11 @@ export function TaskList({ initialTasks }: { initialTasks: TaskRow[] }) {
                       </span>
                       <span className={state === 'active' ? 'font-medium text-ink' : state === 'pending' ? 'text-subtle/60' : 'text-subtle'}>
                         {state === 'done' ? PHASE_DONE_LABEL[p] : PHASE_LABEL[p]}
-                        {state === 'active' && (target > 0 ? <span className="ml-1 tabular-nums text-ink">{got}/{target}</span> : p === 'ocr' ? ' — ไม่มีเอกสารแนบ' : null)}
+                        {state === 'active' && (target > 0
+                          ? p === 'scraping'
+                            ? <span className="ml-1 tabular-nums text-ink">ตรวจแล้ว {assessed} โปรไฟล์ · ผ่านเกณฑ์ {qualified}/{target}</span>
+                            : <span className="ml-1 tabular-nums text-ink">{got}/{target}</span>
+                          : p === 'ocr' ? ' — ไม่มีเอกสารแนบ' : null)}
                       </span>
                     </div>
                   );
