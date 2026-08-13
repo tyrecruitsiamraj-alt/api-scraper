@@ -1,5 +1,6 @@
 import { getWorkflowReadiness } from '@/lib/repo';
 import { runWorkflowSelfTestAction } from '@/lib/actions';
+import { WorkflowSelfTestButton } from '@/components/WorkflowSelfTestButton';
 
 /**
  * แถบสถานะเครื่อง worker บนศูนย์งาน — แก้ปัญหา "worker ตายเงียบไม่มีใครรู้"
@@ -20,7 +21,7 @@ export async function WorkerStatus() {
           {readiness.summary}
         </span>
         <form action={runWorkflowSelfTestAction} className="ml-auto">
-          <button className="btn-secondary btn-sm">ทดสอบระบบแบบไม่โพสต์จริง</button>
+          <WorkflowSelfTestButton />
         </form>
       </div>
       <details className="mt-2">

@@ -4,7 +4,7 @@ import { revalidatePath } from 'next/cache';
 import { getServerSession } from 'next-auth';
 import { authOptions } from './auth';
 import { encryptSecret } from './crypto';
-import { kickWorker, runSafeWorkflowSelfTest } from './worker-kick';
+import { kickWorker } from './worker-kick';
 import {
   createAdjacentTask,
   createScrapeTaskFromSoRecruit,
@@ -56,10 +56,18 @@ export async function runWorkflowSelfTestAction() {
   if (!session) throw new Error('unauthorized');
   const owner = session.user?.email ?? session.user?.name ?? null;
   const id = await enqueueWorkflowSelfTest(owner);
-  await runSafeWorkflowSelfTest();
-  const result = await getWorkflowSelfTest(id);
-  if (result?.status !== 'done') {
-    throw new Error(`ระบบทดสอบไม่สำเร็จ: ${result?.last_error || 'Worker ไม่ได้ปิดงานทดสอบ'}`);
+
+  // The web app can run on a serverless host where spawning a local Node
+  // process is unsupported. The persistent worker (for example the pinned Mac)
+  // owns queue execution, so wait briefly for its result instead of trying to
+  // launch a second worker inside the Server Action. Never turn a slow/offline
+  // worker into a generic Next.js "Application error"; readiness shows the
+  // queued/error state in human language after revalidation.
+  const deadline = Date.now() + 8_000;
+  while (Date.now() < deadline) {
+    const result = await getWorkflowSelfTest(id);
+    if (result?.status === 'done' || result?.status === 'error') break;
+    await new Promise((resolve) => setTimeout(resolve, 300));
   }
   revalidatePath('/orchestrator');
 }
