@@ -1814,14 +1814,34 @@ export async function refreshContentQuality(id: string): Promise<ContentQualityR
  * 'orchestrator:<id>' ล็อกต่อ campaign กันคิดซ้ำซ้อน; ข้ามถ้ามี draft job ค้างอยู่แล้ว.
  */
 export async function enqueueDraftForCampaign(campaignId: string, ownerUser: string | null = null) {
+  const workers = await q<{ name: string }>(
+    `SELECT name FROM workers
+      WHERE last_seen > now() - interval '2 minutes'
+        AND COALESCE((meta->'image_generation'->>'configured')::boolean, false)
+        AND COALESCE(meta->'image_generation'->>'model', '') = 'gpt-image-2'
+        AND COALESCE(meta->'types', '[]'::jsonb) ? 'draft'
+      ORDER BY last_seen DESC LIMIT 1`,
+  );
+  if (!workers[0]) {
+    await q(
+      `UPDATE recruit_campaigns
+          SET status='needs_input',
+              status_note='เครื่องสร้าง Content ยังไม่ได้รีเฟรชเป็นรุ่นที่สร้างรูปตามตำแหน่งด้วย gpt-image-2 จึงยังไม่ส่งงานเพื่อป้องกันรูปผิด',
+              updated_at=now()
+        WHERE id=$1`,
+      [campaignId],
+    );
+    return false;
+  }
   await q(
-    `INSERT INTO work_queue (type, module, connector_key, ref_id, payload, owner_user)
-     SELECT 'draft', 'orchestrator', $1, $2, '{}'::jsonb, $3
+    `INSERT INTO work_queue (type, module, connector_key, ref_id, payload, owner_user, preferred_worker)
+     SELECT 'draft', 'orchestrator', $1, $2, '{}'::jsonb, $3, $4
       WHERE NOT EXISTS (
         SELECT 1 FROM work_queue w
          WHERE w.ref_id = $2 AND w.type = 'draft' AND w.status IN ('queued','running'))`,
-    [`orchestrator:${campaignId}`, campaignId, ownerUser],
+    [`orchestrator:${campaignId}`, campaignId, ownerUser, workers[0].name],
   );
+  return true;
 }
 
 /** image bytes ของร่างคอนเทนต์ (สตรีมผ่าน API route) — null ถ้าไม่มี. */
@@ -2208,14 +2228,34 @@ export async function beginCampaignDraftRetry(campaignId: string, ownerUser: str
       await client.query('ROLLBACK');
       return false;
     }
+    const workers = await client.query<{ name: string }>(
+      `SELECT name FROM workers
+        WHERE last_seen > now() - interval '2 minutes'
+          AND COALESCE((meta->'image_generation'->>'configured')::boolean, false)
+          AND COALESCE(meta->'image_generation'->>'model', '') = 'gpt-image-2'
+          AND COALESCE(meta->'types', '[]'::jsonb) ? 'draft'
+        ORDER BY last_seen DESC LIMIT 1`,
+    );
+    if (!workers.rows[0]) {
+      await client.query(
+        `UPDATE recruit_campaigns
+            SET status='needs_input',
+                status_note='เครื่องสร้าง Content ยังไม่ได้รีเฟรชเป็นรุ่นที่สร้างรูปตามตำแหน่งด้วย gpt-image-2 จึงยังไม่ส่งงานเพื่อป้องกันรูปผิด',
+                updated_at=now()
+          WHERE id=$1`,
+        [campaignId],
+      );
+      await client.query('COMMIT');
+      return false;
+    }
     await client.query(
       `UPDATE recruit_campaigns SET status = 'drafting', status_note = NULL, updated_at = now() WHERE id = $1`,
       [campaignId],
     );
     await client.query(
-      `INSERT INTO work_queue (type, module, connector_key, ref_id, payload, owner_user)
-       VALUES ('draft', 'orchestrator', $1, $2, '{}'::jsonb, $3)`,
-      [`orchestrator:${campaignId}`, campaignId, ownerUser],
+      `INSERT INTO work_queue (type, module, connector_key, ref_id, payload, owner_user, preferred_worker)
+       VALUES ('draft', 'orchestrator', $1, $2, '{}'::jsonb, $3, $4)`,
+      [`orchestrator:${campaignId}`, campaignId, ownerUser, workers.rows[0].name],
     );
     await client.query('COMMIT');
     return true;

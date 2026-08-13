@@ -320,8 +320,8 @@ export async function startCampaignAction(formData: FormData) {
     const campaignId = await createCampaignFromRequest(requestNo, owner, readIntakeOverrides(formData));
     if (campaignId) {
       await setCampaignStatus(campaignId, 'drafting');
-      await enqueueDraftForCampaign(campaignId, owner); // AI คิด content เบื้องหลัง
-      kickWorker(); // drain คิวทันที (บนเครื่องที่รัน worker)
+      const queued = await enqueueDraftForCampaign(campaignId, owner); // AI คิด content เบื้องหลัง
+      if (queued) kickWorker(); // drain คิวทันที (บนเครื่องที่รัน worker)
     }
   }
   revalidatePath('/orchestrator/imports');
@@ -423,8 +423,7 @@ export async function retryCampaignDraftAction(formData: FormData) {
   const campaignId = String(formData.get('campaignId') ?? '').trim();
   if (!campaignId) throw new Error('ไม่พบ campaign');
   const started = await beginCampaignDraftRetry(campaignId, session.user?.email ?? session.user?.name ?? null);
-  if (!started) throw new Error('ยังสร้าง Content ใหม่ไม่ได้ — รอให้งานเดิมโพสต์หรือวัดผลเสร็จก่อน');
-  kickWorker();
+  if (started) kickWorker();
   revalidatePath(`/orchestrator/${campaignId}`);
   revalidatePath('/orchestrator');
 }
@@ -490,8 +489,8 @@ export async function rejectContentAction(formData: FormData) {
     });
     await setContentStatus(contentId, 'rejected', reason);
     await setCampaignStatus(campaignId, 'drafting', reason);
-    await enqueueDraftForCampaign(campaignId, session.user?.email ?? session.user?.name ?? null); // คิด version ใหม่
-    kickWorker();
+    const queued = await enqueueDraftForCampaign(campaignId, session.user?.email ?? session.user?.name ?? null); // คิด version ใหม่
+    if (queued) kickWorker();
   }
   revalidatePath(`/orchestrator/${campaignId}`);
   revalidatePath('/orchestrator');
