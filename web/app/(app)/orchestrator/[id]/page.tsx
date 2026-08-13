@@ -137,6 +137,8 @@ export default async function CampaignDetail({ params }: { params: { id: string 
   const reviewContents = readyContents.length ? readyContents : contents.slice(0, 1);
   const hiddenHistoryCount = Math.max(0, contents.length - reviewContents.length);
   const fbAccounts = await listFacebookAccounts();
+  const preflightAccounts = fbAccounts.filter((account) => account.group_count > 0 && account.preflight_ready);
+  const publishAccounts = fbAccounts.filter((account) => account.group_count > 0 && account.preflight_verified && account.preflight_ready);
   const posts = await listCampaignPosts(params.id);
   const postQueue = await getCampaignPostQueueState(params.id);
   const engByContent = aggregateByContent(posts);
@@ -452,22 +454,26 @@ export default async function CampaignDetail({ params }: { params: { id: string 
                   {ct.status === 'draft' && (
                     <div className="mt-4 space-y-3">
                       <div className="flex flex-wrap items-end gap-2">
-                        {fbAccounts.length > 0 && (
+                        {preflightAccounts.length > 0 ? (
                           <form action={runFacebookPreflightAction} className="flex flex-wrap items-end gap-2 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2">
                             <label className="text-xs text-blue-800">
                               <span className="mb-1 block font-medium">ทดสอบ Facebook ก่อน (ไม่โพสต์จริง)</span>
                               <select name="fbAccountId" required defaultValue="" className="rounded-lg border border-blue-200 bg-white px-2 py-1.5 text-sm text-ink">
                                 <option value="" disabled>เลือกบัญชี…</option>
-                                {fbAccounts.map((a) => <option key={a.id} value={a.id}>{a.label}</option>)}
+                                {preflightAccounts.map((a) => <option key={a.id} value={a.id}>{a.label}</option>)}
                               </select>
                             </label>
                             <button className="btn-secondary btn-sm">ตรวจ Session + กลุ่ม</button>
                           </form>
+                        ) : (
+                          <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+                            เครื่อง Facebook ยังเป็นรุ่นเดิม จึงปิดการทดสอบและการโพสต์ไว้ก่อนเพื่อไม่ให้โพสต์จริงโดยไม่ตั้งใจ
+                          </div>
                         )}
                         <form action={approveContentAction} className="flex flex-wrap items-end gap-2">
                           <input type="hidden" name="contentId" value={ct.id} />
                           <input type="hidden" name="campaignId" value={c.id} />
-                          {fbAccounts.length > 0 ? (
+                          {publishAccounts.length > 0 ? (
                             <label className="text-xs text-subtle">
                               <span className="mb-1 block">โพสต์ด้วยบัญชี</span>
                               <select
@@ -477,7 +483,7 @@ export default async function CampaignDetail({ params }: { params: { id: string 
                                 className="rounded-lg border border-hairline bg-transparent px-2 py-1.5 text-sm text-ink"
                               >
                                 <option value="" disabled>เลือกบัญชี Facebook…</option>
-                                {fbAccounts.map((a) => (
+                                {publishAccounts.map((a) => (
                                   <option key={a.id} value={a.id}>
                                     {a.label} ({a.group_count} กลุ่ม)
                                   </option>
@@ -486,7 +492,7 @@ export default async function CampaignDetail({ params }: { params: { id: string 
                             </label>
                           ) : (
                             <Link href="/settings/connectors" className="text-xs text-accent hover:underline">
-                              เพิ่มและผูกบัญชี Facebook ก่อนอนุมัติ
+                              ต้องมีบัญชีที่ผูกเครื่องและผ่าน “ตรวจ Session + กลุ่ม” ภายใน 24 ชั่วโมงก่อนอนุมัติ
                             </Link>
                           )}
                           <label className="text-xs text-subtle">
@@ -506,7 +512,7 @@ export default async function CampaignDetail({ params }: { params: { id: string 
                               <option value="good_visual">รูปเหมาะกับงาน</option>
                             </select>
                           </label>
-                          <button className="btn-primary btn-sm" disabled={fbAccounts.length === 0 || !ct.has_image || !ct.image_generation_ok || ct.quality_status === 'fail'}>
+                          <button className="btn-primary btn-sm" disabled={publishAccounts.length === 0 || !ct.has_image || !ct.image_generation_ok || ct.quality_status === 'fail'}>
                             {!ct.has_image || !ct.image_generation_ok || ct.quality_status === 'fail' ? 'ยังไม่ผ่านด่านอนุมัติ' : '✓ อนุมัติและโพสต์'}
                           </button>
                         </form>

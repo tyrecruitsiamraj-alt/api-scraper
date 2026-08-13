@@ -1867,7 +1867,15 @@ export async function getContentById(id: string) {
 // ---------------------------------------------------------------------------
 // Orchestrator → Autopost bridge (cross-schema, DB เดียวกัน)
 // ---------------------------------------------------------------------------
-export type FbAccount = { id: string; label: string; group_count: number };
+export type FbAccount = {
+  id: string;
+  label: string;
+  group_count: number;
+  preferred_worker: string | null;
+  worker_online: boolean;
+  preflight_ready: boolean;
+  preflight_verified: boolean;
+};
 
 /** บัญชี Facebook ที่ตั้งไว้ในโมดูล autopost (ให้เลือกตอนอนุมัติ). guarded — [] ถ้า schema ไม่มี. */
 export async function listFacebookAccounts(): Promise<FbAccount[]> {
@@ -1877,8 +1885,24 @@ export async function listFacebookAccounts(): Promise<FbAccount[]> {
               COALESCE(NULLIF(TRIM(name), ''), env_key, id) AS label,
               COALESCE(jsonb_array_length(
                 CASE WHEN jsonb_typeof(group_ids::jsonb) = 'array' THEN group_ids::jsonb ELSE '[]'::jsonb END
-              ), 0) AS group_count
-         FROM ${AP}.users
+              ), 0) AS group_count,
+              preferred_worker,
+              EXISTS (
+                SELECT 1 FROM ${AP}.workers w
+                 WHERE w.name=users.preferred_worker AND w.last_seen > now() - interval '2 minutes'
+              ) AS worker_online,
+              EXISTS (
+                SELECT 1 FROM ${AP}.workers w
+                 WHERE w.name=users.preferred_worker
+                   AND w.last_seen > now() - interval '2 minutes'
+                   AND COALESCE(w.meta->'capabilities', '[]'::jsonb) ? 'preflight'
+              ) AS preflight_ready,
+              EXISTS (
+                SELECT 1 FROM ${AP}.post_run_queue q
+                 WHERE q.user_id=users.id AND q.mode='preflight' AND q.status='completed'
+                   AND q.finished_at > now() - interval '24 hours'
+              ) AS preflight_verified
+         FROM ${AP}.users users
         ORDER BY label`,
     );
   } catch {
@@ -2084,13 +2108,24 @@ export async function enqueueApprovedPost(opts: {
     if (quality.blocking) {
       throw new Error(`ยังอนุมัติไม่ได้ กรุณาแก้ข้อมูลเหล่านี้ก่อน: ${qualityFailureMessages(quality).join(' · ')}`);
     }
-    const accountReady = await client.query<{ id: string; group_count: number; paused_until: string | null; preferred_worker: string | null; worker_online: boolean }>(
+    const accountReady = await client.query<{ id: string; group_count: number; paused_until: string | null; preferred_worker: string | null; worker_online: boolean; preflight_ready: boolean; preflight_verified: boolean }>(
       `SELECT u.id,
               jsonb_array_length(CASE WHEN jsonb_typeof(u.group_ids::jsonb)='array' THEN u.group_ids::jsonb ELSE '[]'::jsonb END)::int AS group_count,
               u.paused_until, u.preferred_worker,
               CASE WHEN NULLIF(TRIM(u.preferred_worker),'') IS NULL THEN true
                    ELSE EXISTS (SELECT 1 FROM ${AP}.workers w WHERE w.name=u.preferred_worker AND w.last_seen > now() - interval '2 minutes')
-              END AS worker_online
+              END AS worker_online,
+              EXISTS (
+                SELECT 1 FROM ${AP}.workers w
+                 WHERE w.name=u.preferred_worker
+                   AND w.last_seen > now() - interval '2 minutes'
+                   AND COALESCE(w.meta->'capabilities', '[]'::jsonb) ? 'preflight'
+              ) AS preflight_ready,
+              EXISTS (
+                SELECT 1 FROM ${AP}.post_run_queue q
+                 WHERE q.user_id=u.id AND q.mode='preflight' AND q.status='completed'
+                   AND q.finished_at > now() - interval '24 hours'
+              ) AS preflight_verified
          FROM ${AP}.users u WHERE u.id=$1`,
       [userId],
     );
@@ -2099,6 +2134,8 @@ export async function enqueueApprovedPost(opts: {
     if (Number(account.group_count) <= 0) throw new Error('บัญชี Facebook นี้ยังไม่ได้เลือกกลุ่มที่จะเผยแพร่');
     if (account.paused_until && new Date(account.paused_until) > new Date()) throw new Error('บัญชี Facebook นี้ถูกพักชั่วคราว กรุณาแก้ Session หรือข้อจำกัดบัญชีก่อน');
     if (!account.worker_online) throw new Error(`เครื่องที่ผูกกับบัญชี Facebook (${account.preferred_worker}) ยังออฟไลน์`);
+    if (!account.preflight_ready) throw new Error(`เครื่องที่ผูกกับบัญชี Facebook (${account.preferred_worker}) ยังเป็นรุ่นเดิม กรุณารีเฟรช Worker ก่อน`);
+    if (!account.preflight_verified) throw new Error('บัญชี Facebook นี้ยังไม่ผ่านการทดสอบ Session + กลุ่มแบบไม่โพสต์จริงภายใน 24 ชั่วโมง');
     await client.query(
       `INSERT INTO ${AP}.jobs (id, title, owner, company, caption, status, image_ref)
        VALUES ($1, $2, 'SO Recruitment', 'SO Recruitment', $3, 'pending', $4)`,
