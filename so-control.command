@@ -15,18 +15,21 @@ running() { local f="$RUN/$1.pid"; [ -f "$f" ] && kill -0 "$(cat "$f" 2>/dev/nul
 # หยุด process tree ทุกชั้น ไม่ใช่แค่ npm launcher. เดิม npm → pool/supervisor →
 # runner มีหลายชั้น ทำให้กด R แล้ว process รุ่นเก่าบางตัวยังรอดและ heartbeat ต่อ.
 terminate_tree() {
-  local pid="$1" child
+  local pid="$1" child children
   [ -n "$pid" ] || return 0
   # Worker อาจกำลังทำงานจริง: ขอให้ process ปิดแบบ graceful ก่อน เพื่อคืนสถานะ
   # คิวตามปกติ. ค่อยไล่ลูกที่ยังค้างหลังหมดเวลารอด้านล่าง.
+  # Capture and stop children first. Killing the parent first orphans npm's
+  # runner/supervisor children, which is how old builds kept heartbeating.
+  children="$(pgrep -P "$pid" 2>/dev/null || true)"
+  for child in $children; do
+    terminate_tree "$child"
+  done
   kill -TERM "$pid" 2>/dev/null || true
   local waited=0
   while kill -0 "$pid" 2>/dev/null && [ "$waited" -lt 10 ]; do
     sleep 1
     waited=$((waited+1))
-  done
-  for child in $(pgrep -P "$pid" 2>/dev/null || true); do
-    terminate_tree "$child"
   done
   kill -TERM "$pid" 2>/dev/null || true
   sleep 1
@@ -48,6 +51,18 @@ cleanup_legacy_workers() {
       [ "$pid" = "$$" ] || terminate_tree "$pid"
     done
   done
+  # One verification pass catches children that re-parented while their npm
+  # launcher was shutting down. Scope is limited to the four worker scripts.
+  sleep 1
+  for pattern in \
+    'workers/scraper-pool.mjs' \
+    'workers/runner.js' \
+    'scripts/post-remote-worker-supervisor.js' \
+    'scripts/post-remote-worker.js'; do
+    for pid in $(pgrep -f "$pattern" 2>/dev/null || true); do
+      [ "$pid" = "$$" ] || kill -KILL "$pid" 2>/dev/null || true
+    done
+  done
 }
 
 start_workers() {
@@ -67,6 +82,9 @@ start_workers() {
   fi
   printf "  ${G}✓ ใช้โค้ด %s${N}\n" "$pulled_sha"
   printf "  ${D}build ที่ Worker จะใช้: %s${N}\n" "$pulled_sha"
+  # Worker release is deliberately independent from UI/server commits. Bump
+  # only after worker code changes have passed the Golden Flow verification.
+  export WORKER_BUILD_SHA="a602d66cd932c23de05541cae70bd3456a76f56e"
   script_sha_after="$pulled_sha"
   if [ -n "$script_sha_before" ] && [ "$script_sha_before" != "$script_sha_after" ] && [ "${SO_CONTROL_RELOADED:-0}" != "1" ]; then
     printf "  ${C}↻ แผงควบคุมมีรุ่นใหม่ — โหลดคำสั่งใหม่ก่อนเปิด Worker${N}\n"

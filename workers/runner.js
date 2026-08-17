@@ -45,7 +45,13 @@ const LEASE_HEARTBEAT_MS = Number.parseInt(process.env.WORKER_LEASE_HEARTBEAT_MS
 const RETRY_BASE_SECONDS = Number.parseInt(process.env.WORKER_RETRY_BASE_SECONDS ?? '30', 10);
 const MEASURE_RETRY_MINUTES = Number.parseInt(process.env.MEASURE_RETRY_MINUTES ?? '30', 10);
 const MEASURE_MAX_CHECKS = Number.parseInt(process.env.MEASURE_MAX_CHECKS ?? '96', 10);
-const PROCESS_LOCK_PATH = resolve(process.cwd(), 'output', 'runner.lock');
+// The pool intentionally starts multiple runner slots. A single global lock
+// made those slots kill/restart one another forever. Keep one lock per slot;
+// separate pool launchers still collide on the same slot names and fail safe.
+const PROCESS_SLOT = String(process.env.WORKER_NAME || 'standalone')
+  .replace(/[^A-Za-z0-9._-]+/g, '-')
+  .slice(0, 80) || 'standalone';
+const PROCESS_LOCK_PATH = resolve(process.cwd(), 'output', `runner-${PROCESS_SLOT}.lock`);
 const PROCESS_LOCK_STALE_MS = 60_000;
 let ownsProcessLock = false;
 
