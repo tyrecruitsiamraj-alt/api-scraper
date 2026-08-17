@@ -11,11 +11,11 @@ function item(code, label, status, message) {
  * @param {{
  *  workers?: Array<{kind?:string, online?:boolean, meta?:Record<string,any>|null}>,
  *  facebookAccounts?: Array<{group_count?:number}>,
- *  queue?: {queued?:number, oldest_queued_minutes?:number|null, stale_running?:number, errors_24h?:number},
+ *  queue?: {queued?:number, oldest_queued_minutes?:number|null, stale_running?:number, stalled_progress?:number, errors_24h?:number},
  *  postQueue?: {queued?:number, running?:number, failed_24h?:number},
  *  contentOutput?: {passing_with_image?:number, verified_generation?:number, failed_quality?:number},
  *  scrapeOutput?: {completed?:number, partial?:number, error?:number},
- *  recentPostRuns?: Array<{status?:string}>,
+ *  recentPostRuns?: Array<{status?:string, mode?:string}>,
  *  inconsistentCampaigns?: number,
  *  lastSelftest?: {status?:string, finished_at?:string|null, last_error?:string|null}|null
  * }} input
@@ -96,7 +96,10 @@ export function evaluateWorkflowReadiness(input = {}) {
   const queued = Number(queue.queued || 0);
   const oldestMinutes = Number(queue.oldest_queued_minutes || 0);
   const staleRunning = Number(queue.stale_running || 0);
-  if (staleRunning > 0) {
+  const stalledProgress = Number(queue.stalled_progress || 0);
+  if (stalledProgress > 0) {
+    checks.push(item('work_queue', 'คิวงานเบื้องหลัง', 'fail', `พบงานค้นหาที่ heartbeat ยังมา แต่ไม่มี Resume ใหม่เกิน 10 นาที ${stalledProgress} งาน`));
+  } else if (staleRunning > 0) {
     checks.push(item('work_queue', 'คิวงานเบื้องหลัง', 'fail', `พบงานกำลังทำที่ไม่มีการตอบสนอง ${staleRunning} งาน`));
   } else if (queued > 0 && oldestMinutes >= 10) {
     checks.push(item('work_queue', 'คิวงานเบื้องหลัง', 'fail', `มีงานรอนานเกิน 10 นาที ${queued} งาน (นานสุด ${Math.round(oldestMinutes)} นาที)`));
@@ -107,7 +110,9 @@ export function evaluateWorkflowReadiness(input = {}) {
   }
 
   const failed = Number(queue.errors_24h || 0) + Number(postQueue.failed_24h || 0);
-  const recentPostRuns = input.recentPostRuns ?? [];
+  // A successful preflight proves only session/group access and must never
+  // hide a streak of real publish failures.
+  const recentPostRuns = (input.recentPostRuns ?? []).filter((run) => String(run.mode || 'post') === 'post');
   const postFailureStreak = recentPostRuns.length > 0 && recentPostRuns.every((run) => ['failed', 'cancelled'].includes(String(run.status || '')));
   checks.push(postFailureStreak
     ? item('recent_errors', 'งานผิดพลาดล่าสุด', 'fail', `การเผยแพร่ Facebook ล่าสุดล้มเหลวติดต่อกัน ${recentPostRuns.length} ครั้ง ห้ามรายงานว่าระบบพร้อม`)

@@ -98,21 +98,36 @@ function runPlaywrightForJob(job) {
     const testName = String(job.mode || 'post') === 'preflight' ? 'facebookPreflight' : 'postAll';
     const args = ['playwright', 'test', testName, '--headed', '--project=GoogleChrome'];
     const isWin = process.platform === 'win32';
+    let outputTail = '';
+    const rememberOutput = (chunk, stream) => {
+      const text = String(chunk || '');
+      if (stream === 'stderr') process.stderr.write(text);
+      else process.stdout.write(text);
+      // Keep only a bounded, ANSI-free diagnostic tail. Playwright does not
+      // print stored passwords, but scrub common secret assignments before
+      // this text can be persisted in post_run_queue.error.
+      outputTail = `${outputTail}${text}`
+        .replace(/\u001b\[[0-9;]*m/g, '')
+        .replace(/((?:password|token|secret|api[_-]?key)\s*[=:]\s*)\S+/gi, '$1[redacted]')
+        .slice(-12000);
+    };
     const child = isWin
       ? spawn('cmd.exe', ['/d', '/c', 'npx', ...args], {
           cwd: PROJECT_ROOT,
-          stdio: 'inherit',
+          stdio: ['ignore', 'pipe', 'pipe'],
           env,
           shell: false,
           windowsHide: false,
         })
       : spawn('npx', args, {
           cwd: PROJECT_ROOT,
-          stdio: 'inherit',
+          stdio: ['ignore', 'pipe', 'pipe'],
           env,
           shell: false,
           windowsHide: false,
         });
+    child.stdout?.on('data', (chunk) => rememberOutput(chunk, 'stdout'));
+    child.stderr?.on('data', (chunk) => rememberOutput(chunk, 'stderr'));
 
     let settled = false;
     const timer = setTimeout(() => {
@@ -129,7 +144,10 @@ function runPlaywrightForJob(job) {
       settled = true;
       clearTimeout(timer);
       if (code === 0) resolve();
-      else reject(new Error(`post worker exit code ${code}`));
+      else {
+        const diagnostic = outputTail.trim().split(/\r?\n/).slice(-12).join('\n');
+        reject(new Error(`post worker exit code ${code}${diagnostic ? `\n${diagnostic}` : ' (ไม่มี diagnostic output)'}`));
+      }
     });
     child.on('error', (err) => {
       if (settled) return;

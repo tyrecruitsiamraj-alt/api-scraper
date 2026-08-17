@@ -62,6 +62,17 @@ test('ข้อความแต่งเพิ่มบนโปสเตอ�
   assert.equal(result.checks.find((item) => item.code === 'benefits')?.status, 'fail');
 });
 
+test('ตัวเลขรายได้ซ้ำบนโปสเตอร์ถูกบล็อกเป็นปัญหา layout', () => {
+  const result = evaluateContentQuality({
+    campaign,
+    caption: goodCaption,
+    imageReady: true,
+    posterFields: { salaryTotal: '18,000', salaryBreakdown: '18,000' },
+  });
+  assert.equal(result.blocking, true);
+  assert.equal(result.checks.find((item) => item.code === 'poster_salary_layout')?.status, 'fail');
+});
+
 test('ใบขอที่มีเพียงชื่อตำแหน่งกว้างเกินไปถูกบล็อก', () => {
   const result = evaluateContentQuality({
     campaign: {

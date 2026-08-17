@@ -32,7 +32,15 @@ test('ล็อกข้อมูลบนโปสเตอร์ให้ใ�
   assert.equal(poster.location, 'โรงพยาบาลกรุงเทพดุสิต ถนนเพชรบุรี');
   assert.equal(poster.worktime, 'ทำงาน 10 ชั่วโมง มี OT');
   assert.equal(poster.salaryTotal, '12,000');
-  assert.equal(poster.salaryBreakdown, '12000');
+  assert.equal(poster.salaryBreakdown, '');
+});
+
+test('แสดงรายละเอียดรายได้เพิ่มเฉพาะเมื่อมีองค์ประกอบจริง ไม่ทำตัวเลขรวมซ้ำ', () => {
+  const detailed = {
+    ...driverCampaign,
+    request_snapshot: { ...driverCampaign.request_snapshot, income: 'เงินเดือน 12,000 + ค่าเที่ยว 3,000 บาท' },
+  };
+  assert.equal(applyTrustedPosterFacts({}, detailed).salaryBreakdown, 'เงินเดือน 12,000 + ค่าเที่ยว 3,000 บาท');
 });
 
 test('หยุดงานก่อนสร้างเมื่อ ERP ขาดข้อมูลสำคัญ', () => {

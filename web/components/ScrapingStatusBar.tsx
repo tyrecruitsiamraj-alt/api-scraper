@@ -24,15 +24,16 @@ type Props = {
   assessed: number;
   got: number;
   target: number;
-  updatedAt?: string | null;
+  /** Latest candidate result or queue start; unlike updated_at this ignores heartbeats. */
+  lastProgressAt?: string | null;
 };
 
-export function ScrapingStatusBar({ taskName, status, phase, qualified, assessed, got, target, updatedAt }: Props) {
+export function ScrapingStatusBar({ taskName, status, phase, qualified, assessed, got, target, lastProgressAt }: Props) {
   const busy = status === 'running' || status === 'queued';
   if (!busy) return null;
 
-  const staleSec = updatedAt ? Math.round((Date.now() - new Date(updatedAt).getTime()) / 1000) : 0;
-  const looksStuck = status === 'running' && staleSec > 180;
+  const staleSec = lastProgressAt ? Math.round((Date.now() - new Date(lastProgressAt).getTime()) / 1000) : 0;
+  const looksStuck = status === 'running' && staleSec > 600;
 
   const phaseIdx = PHASES.indexOf(phase as Phase);
   // แถบความสำเร็จของงานต้องอิง Resume ที่ผ่านเกณฑ์ ไม่ใช่จำนวนโปรไฟล์ที่เปิดดู.
@@ -82,7 +83,7 @@ export function ScrapingStatusBar({ taskName, status, phase, qualified, assessed
                 )}
                 {looksStuck && (
                   <span className="ml-2 text-amber-700">
-                    — ค้างนานกว่าปกติ ({Math.floor(staleSec / 60)} นาที) ระบบจะข้ามหรือเริ่มใหม่อัตโนมัติ
+                    — ไม่มีผลลัพธ์ใหม่ {Math.floor(staleSec / 60)} นาที ระบบนี้ยังไม่ถือว่างานเดินหน้า
                   </span>
                 )}
               </p>

@@ -81,6 +81,21 @@ function salaryHighlight(income) {
   return /^\d+$/.test(digits) ? Number(digits).toLocaleString('en-US') : numeric;
 }
 
+function salaryBreakdown(income) {
+  const raw = clean(income);
+  if (!raw) return '';
+  // A single total such as "15000" or "รายได้รวม 15,000 บาท" is already
+  // rendered as the large salary value. Repeating it on the right-hand side
+  // makes the poster look broken. Keep the full text only when it contains a
+  // real component (OT, allowance, trip pay, etc.) or multiple amounts.
+  const amounts = raw.match(/\d[\d,]*/g) ?? [];
+  const remainder = raw
+    .replace(/\d[\d,]*/g, '')
+    .replace(/รายได้รวม|รายได้|เงินเดือน|ค่าจ้าง|บาท|ต่อเดือน|\/เดือน|เดือน|รวม/gi, '')
+    .replace(/[+\s:()\-–—]/g, '');
+  return amounts.length > 1 || remainder ? raw : '';
+}
+
 /** Force display fields that must never be invented or mutated by a model. */
 export function applyTrustedPosterFacts(fields = {}, campaign = {}) {
   const facts = extractCampaignFacts(campaign);
@@ -90,6 +105,6 @@ export function applyTrustedPosterFacts(fields = {}, campaign = {}) {
     location: facts.location || '',
     worktime: facts.workSchedule || '',
     salaryTotal: facts.income ? salaryHighlight(facts.income) : '',
-    salaryBreakdown: facts.income || '',
+    salaryBreakdown: salaryBreakdown(facts.income),
   };
 }

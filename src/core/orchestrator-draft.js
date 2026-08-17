@@ -268,25 +268,19 @@ export async function generateDraftForCampaign(campaignId) {
         prompt: v.imagePrompt,
       },
     });
-    try {
-      await query(
-        `INSERT INTO campaign_contents
-           (campaign_id, version, platform, caption, image_bytes, image_mime, video_brief, gen_model, status, gen_notes,
-            quality_status, quality_score, quality_checks, quality_checked_at)
-         VALUES ($1, $2, 'facebook', $3, $4, $5, $6, $7, 'draft', $8::jsonb,
-                 $9, $10, $11::jsonb, now())`,
-        [campaignId, version + i, v.caption, image?.bytes ?? null, image?.mime ?? null, v.videoBrief, v.model, genNotes,
-          quality.status, quality.score, JSON.stringify(quality)],
-      );
-    } catch {
-      // schema-015 (gen_notes) ยังไม่ migrate — บันทึกแบบไม่มีคอลัมน์นั้น
-      await query(
-        `INSERT INTO campaign_contents
-           (campaign_id, version, platform, caption, image_bytes, image_mime, video_brief, gen_model, status)
-         VALUES ($1, $2, 'facebook', $3, $4, $5, $6, $7, 'draft')`,
-        [campaignId, version + i, v.caption, image?.bytes ?? null, image?.mime ?? null, v.videoBrief, v.model],
-      );
-    }
+    // Fail closed: provenance and the quality result are part of a usable
+    // content artifact, not optional compatibility metadata. If this insert
+    // fails the queue must fail as well; never save a draft that merely has
+    // image bytes but cannot prove where the image came from or what was checked.
+    await query(
+      `INSERT INTO campaign_contents
+         (campaign_id, version, platform, caption, image_bytes, image_mime, video_brief, gen_model, status, gen_notes,
+          quality_status, quality_score, quality_checks, quality_checked_at)
+       VALUES ($1, $2, 'facebook', $3, $4, $5, $6, $7, 'draft', $8::jsonb,
+               $9, $10, $11::jsonb, now())`,
+      [campaignId, version + i, v.caption, image?.bytes ?? null, image?.mime ?? null, v.videoBrief, v.model, genNotes,
+        quality.status, quality.score, JSON.stringify(quality)],
+    );
   }
 
   if (!readyDrafts) {

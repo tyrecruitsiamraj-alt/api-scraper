@@ -116,6 +116,13 @@ export function evaluateContentQuality({ campaign = {}, caption = '', posterFiel
     ? check('benefits', 'สวัสดิการและจุดขาย', 'fail', `พบข้อความที่ไม่มีหลักฐานในใบขอ: ${invented.join(', ')}`, null, invented.join(', '))
     : check('benefits', 'สวัสดิการและจุดขาย', 'pass', 'ไม่พบสวัสดิการหรือจุดขายที่แต่งเพิ่ม'));
 
+  if (posterFields?.salaryTotal && posterFields?.salaryBreakdown
+      && compact(posterFields.salaryTotal) === compact(posterFields.salaryBreakdown)) {
+    checks.push(check('poster_salary_layout', 'การแสดงรายได้บนภาพ', 'fail', 'รายได้ถูกแสดงซ้ำสองตำแหน่งบนโปสเตอร์ กรุณาตัดข้อความซ้ำก่อนอนุมัติ'));
+  } else {
+    checks.push(check('poster_salary_layout', 'การแสดงรายได้บนภาพ', 'pass', 'ไม่แสดงตัวเลขรายได้ซ้ำบนโปสเตอร์'));
+  }
+
   const qualificationExpected = [facts.gender, facts.ageMin, facts.ageMax, facts.education].filter(Boolean);
   const qualificationPresent = qualificationExpected.some((value) => compact(combined).includes(compact(value)));
   checks.push(qualificationExpected.length === 0

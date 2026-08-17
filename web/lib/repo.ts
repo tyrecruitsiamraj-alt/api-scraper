@@ -1023,6 +1023,8 @@ export type TaskRow = {
   needs_review_count: number;
   rejected_count: number;
   assessed_total: number;
+  /** Latest real candidate result or queue start. Worker heartbeats do not advance this. */
+  last_progress_at: string | null;
 };
 
 export async function listTasks() {
@@ -1031,15 +1033,22 @@ export async function listTasks() {
             COALESCE(s.qualified_count,0)::int AS qualified_count,
             COALESCE(s.needs_review_count,0)::int AS needs_review_count,
             COALESCE(s.rejected_count,0)::int AS rejected_count,
-            COALESCE(s.assessed_total,0)::int AS assessed_total
+            COALESCE(s.assessed_total,0)::int AS assessed_total,
+            GREATEST(s.last_result_at, w.started_at) AS last_progress_at
        FROM scrape_tasks t JOIN connectors c ON c.id = t.connector_id
        LEFT JOIN LATERAL (
          SELECT count(*) FILTER (WHERE qualification_status='qualified') AS qualified_count,
                 count(*) FILTER (WHERE qualification_status='needs_review') AS needs_review_count,
                 count(*) FILTER (WHERE qualification_status='rejected') AS rejected_count,
-                count(*) AS assessed_total
+                count(*) AS assessed_total,
+                max(last_matched_at) AS last_result_at
            FROM scrape_task_candidates tc WHERE tc.task_id=t.id
        ) s ON true
+       LEFT JOIN LATERAL (
+         SELECT max(COALESCE(started_at, created_at)) AS started_at
+           FROM work_queue q
+          WHERE q.ref_id=t.id::text AND q.type='scrape' AND q.status IN ('queued','running')
+       ) w ON true
       ORDER BY t.created_at DESC`,
   );
 }
@@ -1172,12 +1181,18 @@ export async function deleteTask(id: string) {
 
 /** Compact live status for polling the progress counters. */
 export async function taskStatuses() {
-  return q<{ id: string; status: string; phase: string; progress_got: number; progress_target: number; last_error: string | null; last_run_at: string | null; updated_at: string; qualified_count: number; needs_review_count: number; rejected_count: number; assessed_total: number }>(
+  return q<{ id: string; status: string; phase: string; progress_got: number; progress_target: number; last_error: string | null; last_run_at: string | null; updated_at: string; qualified_count: number; needs_review_count: number; rejected_count: number; assessed_total: number; last_progress_at: string | null }>(
     `SELECT t.id, t.status, t.phase, t.progress_got, t.progress_target, t.last_error, t.last_run_at, t.updated_at,
             count(tc.candidate_id) FILTER (WHERE tc.qualification_status='qualified')::int AS qualified_count,
             count(tc.candidate_id) FILTER (WHERE tc.qualification_status='needs_review')::int AS needs_review_count,
             count(tc.candidate_id) FILTER (WHERE tc.qualification_status='rejected')::int AS rejected_count,
-            count(tc.candidate_id)::int AS assessed_total
+            count(tc.candidate_id)::int AS assessed_total,
+            GREATEST(
+              max(tc.last_matched_at),
+              (SELECT max(COALESCE(w.started_at, w.created_at))
+                 FROM work_queue w
+                WHERE w.ref_id=t.id::text AND w.type='scrape' AND w.status IN ('queued','running'))
+            ) AS last_progress_at
        FROM scrape_tasks t LEFT JOIN scrape_task_candidates tc ON tc.task_id=t.id
       GROUP BY t.id`,
   );
@@ -2487,11 +2502,20 @@ export async function getWorkflowReadiness(): Promise<WorkflowReadinessSnapshot>
   const [workers, facebookAccounts, queue, postQueue, inconsistent, selftest, contentOutput, scrapeOutput, recentPostRuns] = await Promise.all([
     listWorkerHeartbeats(),
     listFacebookAccounts(),
-    q<{ queued: number; oldest_queued_minutes: number | null; stale_running: number; errors_24h: number }>(
+    q<{ queued: number; oldest_queued_minutes: number | null; stale_running: number; stalled_progress: number; errors_24h: number }>(
       `SELECT
          count(*) FILTER (WHERE status='queued')::int AS queued,
          EXTRACT(EPOCH FROM (now() - min(created_at) FILTER (WHERE status='queued'))) / 60 AS oldest_queued_minutes,
          count(*) FILTER (WHERE status='running' AND locked_at < now() - interval '30 minutes')::int AS stale_running,
+         count(*) FILTER (
+           WHERE status='running' AND type='scrape'
+             AND GREATEST(
+               COALESCE(started_at, created_at),
+               (SELECT max(tc.last_matched_at)
+                  FROM scrape_task_candidates tc
+                 WHERE tc.task_id::text=work_queue.ref_id)
+             ) < now() - interval '10 minutes'
+         )::int AS stalled_progress,
          count(*) FILTER (WHERE status='error' AND finished_at > now() - interval '24 hours')::int AS errors_24h
        FROM work_queue`,
     ).then((rows) => rows[0] ?? {}).catch(() => ({})),
@@ -2530,8 +2554,11 @@ export async function getWorkflowReadiness(): Promise<WorkflowReadinessSnapshot>
        FROM scrape_tasks
        WHERE created_at > now() - interval '30 days'`,
     ).then((rows) => rows[0] ?? {}).catch(() => ({})),
-    q<{ status: string }>(
-      `SELECT status FROM ${AP}.post_run_queue ORDER BY created_at DESC LIMIT 3`,
+    q<{ status: string; mode: string }>(
+      `SELECT status, COALESCE(mode, 'post') AS mode
+         FROM ${AP}.post_run_queue
+        WHERE COALESCE(mode, 'post') = 'post'
+        ORDER BY created_at DESC LIMIT 3`,
     ).catch(() => []),
   ]);
   return {

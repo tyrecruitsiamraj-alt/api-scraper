@@ -52,6 +52,9 @@ const OCCUPATION_CONFLICTS = [
   /ช่าง|technician|electrician/i,
   /พ่อครัว|แม่ครัว|chef|cook/i,
 ];
+const IMAGE_STYLE_CONFLICTS = [
+  /ข้อความ|ตัวหนังสือ|คำว่า|เบอร์โทร|โทรศัพท์|ไลน์|line\b|logo|โลโก้|typography|headline|caption/i,
+];
 
 export function sanitizeResearchForRole(research, position) {
   if (!research) return null;
@@ -60,7 +63,9 @@ export function sanitizeResearchForRole(research, position) {
   const safe = (value) => !conflicts.some((pattern) => pattern.test(String(value ?? '')));
   const angles = (research.angles ?? []).filter(safe);
   const hooks = (research.hooks ?? []).filter(safe);
-  const imageStyles = (research.imageStyles ?? []).filter(safe);
+  const imageStyles = (research.imageStyles ?? []).filter((value) => (
+    safe(value) && !IMAGE_STYLE_CONFLICTS.some((pattern) => pattern.test(String(value ?? '')))
+  ));
   const imageStyle = imageStyles[0] ?? '';
   const imageStyleB = imageStyles[1] ?? '';
   if (!angles.length && !hooks.length && !imageStyle) return null;

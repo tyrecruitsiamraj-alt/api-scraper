@@ -18,6 +18,7 @@ type LiveStatus = {
   needs_review_count: number;
   rejected_count: number;
   assessed_total: number;
+  last_progress_at: string | null;
 };
 
 const PLATFORM_LABEL: Record<string, string> = { jobbkk: 'JobBKK', jobthai: 'JobThai' };
@@ -189,7 +190,7 @@ export function TaskList({ initialTasks }: { initialTasks: TaskRow[] }) {
             assessed={activeLive?.assessed_total ?? activeTask.assessed_total ?? 0}
             got={activeLive?.progress_got ?? activeTask.progress_got}
             target={activeLive?.progress_target ?? activeTask.progress_target}
-            updatedAt={activeLive?.updated_at ?? null}
+            lastProgressAt={activeLive?.last_progress_at ?? activeTask.last_progress_at ?? null}
           />
         </div>
       )}

@@ -32,6 +32,20 @@ test('Facebook ล้มเหลวติดต่อกันถูกบล�
   assert.equal(result.checks.find((x) => x.code === 'recent_errors')?.status, 'fail');
 });
 
+test('preflight ที่ผ่านห้ามล้างสถิติโพสต์จริงที่ล้มเหลวติดต่อกัน', () => {
+  const result = evaluateWorkflowReadiness({
+    ...readyInput,
+    recentPostRuns: [
+      { status: 'completed', mode: 'preflight' },
+      { status: 'failed', mode: 'post' },
+      { status: 'failed', mode: 'post' },
+      { status: 'failed', mode: 'post' },
+    ],
+  });
+  assert.equal(result.status, 'blocked');
+  assert.match(result.checks.find((x) => x.code === 'recent_errors')?.message ?? '', /3 ครั้ง/);
+});
+
 test('worker สร้างประกาศออฟไลน์ถูกบล็อก', () => {
   const result = evaluateWorkflowReadiness({ ...readyInput, workers: readyInput.workers.slice(1) });
   assert.equal(result.status, 'blocked');
@@ -54,6 +68,16 @@ test('คิวเกิน 10 นาทีถูกมองว่าเป็�
   const result = evaluateWorkflowReadiness({ ...readyInput, queue: { queued: 2, oldest_queued_minutes: 45 } });
   assert.equal(result.status, 'blocked');
   assert.equal(result.checks.find((x) => x.code === 'work_queue')?.status, 'fail');
+});
+
+test('heartbeat ที่เดินแต่ไม่มีผลค้นหาใหม่ถูกมองว่าเป็นงานค้าง', () => {
+  const result = evaluateWorkflowReadiness({
+    ...readyInput,
+    queue: { queued: 0, stale_running: 0, stalled_progress: 1, errors_24h: 0 },
+  });
+  assert.equal(result.status, 'blocked');
+  assert.equal(result.checks.find((x) => x.code === 'work_queue')?.status, 'fail');
+  assert.match(result.checks.find((x) => x.code === 'work_queue')?.message ?? '', /heartbeat/);
 });
 
 test('สถานะไม่ตรงกับระบบต้นทางถูกบล็อก', () => {
