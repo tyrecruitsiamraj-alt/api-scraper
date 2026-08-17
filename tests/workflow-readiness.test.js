@@ -64,6 +64,17 @@ test('worker รุ่นเก่าที่ไม่มี Golden Flow capabi
   assert.equal(result.checks.find((x) => x.code === 'image_provider')?.status, 'fail');
 });
 
+test('worker คนละ commit กับ Production ถูกบล็อกแม้ capability ครบ', () => {
+  const result = evaluateWorkflowReadiness({
+    ...readyInput,
+    requiredBuildSha: 'new-build',
+    workers: readyInput.workers.map((worker) => ({ ...worker, meta: { ...worker.meta, build_sha: 'old-build' } })),
+  });
+  assert.equal(result.status, 'blocked');
+  assert.equal(result.checks.find((x) => x.code === 'content_worker')?.status, 'fail');
+  assert.equal(result.checks.find((x) => x.code === 'post_worker')?.status, 'fail');
+});
+
 test('คิวเกิน 10 นาทีถูกมองว่าเป็นงานค้าง', () => {
   const result = evaluateWorkflowReadiness({ ...readyInput, queue: { queued: 2, oldest_queued_minutes: 45 } });
   assert.equal(result.status, 'blocked');

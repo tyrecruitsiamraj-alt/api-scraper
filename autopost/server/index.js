@@ -1505,8 +1505,13 @@ app.post('/api/worker/post/claim', async (req, res) => {
     const capabilities = Array.isArray(req.body?.capabilities)
       ? req.body.capabilities.map((item) => String(item).trim()).filter(Boolean)
       : [];
+    const buildSha = String(req.body?.build_sha || '').trim();
     // heartbeat: worker โพลทุก ~5 วิ → แตะ last_seen ให้เว็บเห็นว่าเครื่องยังมีชีวิต (fail-soft ใน db)
-    await db.touchWorkerHeartbeat(workerName || workerId, { worker_id: workerId, capabilities });
+    await db.touchWorkerHeartbeat(workerName || workerId, { worker_id: workerId, build_sha: buildSha, capabilities });
+    const requiredBuildSha = String(process.env.VERCEL_GIT_COMMIT_SHA || process.env.REQUIRED_WORKER_BUILD_SHA || '').trim();
+    if (requiredBuildSha && buildSha !== requiredBuildSha) {
+      return res.json({ ok: true, job: null, upgrade_required: true, required_build_sha: requiredBuildSha });
+    }
     const runId = db.generateRunId();
     const job = await db.claimNextPostRunJob(workerId, runId, workerName, capabilities);
     if (!job) return res.json({ ok: true, job: null });

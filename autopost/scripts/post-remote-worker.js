@@ -1,6 +1,6 @@
 /* eslint-disable no-console */
 require('dotenv').config();
-const { spawn } = require('child_process');
+const { execFileSync, spawn } = require('child_process');
 const os = require('os');
 const path = require('path');
 
@@ -54,6 +54,15 @@ if (!TOKEN) {
 const workerId = `${os.hostname()}-${process.pid}`;
 /** ชื่อเครื่องแบบนิ่ง (ไม่มี pid) สำหรับ pin บัญชี→เครื่อง — ตั้ง WORKER_NAME ใน .env ให้จำง่ายได้ */
 const workerName = String(process.env.WORKER_NAME || os.hostname()).trim();
+const workerBuildSha = (() => {
+  const configured = String(process.env.WORKER_BUILD_SHA || '').trim();
+  if (configured) return configured;
+  try {
+    return execFileSync('git', ['rev-parse', 'HEAD'], { cwd: PROJECT_ROOT, encoding: 'utf8' }).trim();
+  } catch {
+    return 'unknown';
+  }
+})();
 // Server ใช้รายการนี้เป็น compatibility gate: worker รุ่นเก่าที่ไม่ประกาศ
 // `preflight` จะไม่มีวันได้รับงานตรวจ Facebook แบบไม่โพสต์จริง
 const WORKER_CAPABILITIES = ['post', 'preflight'];
@@ -199,6 +208,7 @@ async function tick() {
       const claimed = await callApi('/api/worker/post/claim', {
         worker_id: workerId,
         worker_name: workerName,
+        build_sha: workerBuildSha,
         capabilities: WORKER_CAPABILITIES,
       });
       const job = claimed?.job || null;
@@ -217,6 +227,7 @@ async function tick() {
 console.log('[post-worker] started');
 console.log(`[post-worker] api=${API_BASE}`);
 console.log(`[post-worker] worker_id=${workerId} worker_name=${workerName} (pin บัญชีที่หน้า "บัญชี Facebook" ด้วยชื่อนี้)`);
+console.log(`[post-worker] build_sha=${workerBuildSha}`);
 console.log(`[post-worker] capabilities=${WORKER_CAPABILITIES.join(',')}`);
 console.log(`[post-worker] concurrency=${CONCURRENCY} (max cap ${CONCURRENCY_MAX})`);
 if (CONCURRENCY >= 20) {

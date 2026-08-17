@@ -13,6 +13,13 @@ if (!/^[A-Za-z_][A-Za-z0-9_-]*$/.test(AP_SCHEMA)) {
   throw new Error(`AUTOPOST_SCHEMA ไม่ถูกต้อง: ${AP_SCHEMA}`);
 }
 const AP = `"${AP_SCHEMA}"`;
+const REQUIRED_WORKER_BUILD_SHA = String(
+  process.env.VERCEL_GIT_COMMIT_SHA || process.env.REQUIRED_WORKER_BUILD_SHA || '',
+).trim();
+
+function workerBuildMatches(meta: Record<string, unknown> | null | undefined): boolean {
+  return !REQUIRED_WORKER_BUILD_SHA || String(meta?.build_sha || '') === REQUIRED_WORKER_BUILD_SHA;
+}
 
 export type CandidateRow = {
   id: string;
@@ -1116,7 +1123,7 @@ export async function enqueueScrapeForTask(taskId: string, ownerUser: string | n
     if (!worker.online || worker.kind !== 'scraper') return false;
     const types = Array.isArray(worker.meta?.types) ? worker.meta.types.map(String) : [];
     const image = worker.meta?.image_generation as { configured?: boolean } | undefined;
-    return types.includes('scrape') && types.includes('draft') && Boolean(image);
+    return types.includes('scrape') && types.includes('draft') && Boolean(image) && workerBuildMatches(worker.meta);
   });
   if (readyWorkers.length === 0) {
     await q(
@@ -1854,7 +1861,9 @@ export async function enqueueDraftForCampaign(campaignId: string, ownerUser: str
         AND COALESCE((meta->'image_generation'->>'configured')::boolean, false)
         AND COALESCE(meta->'image_generation'->>'model', '') = 'gpt-image-2'
         AND COALESCE(meta->'types', '[]'::jsonb) ? 'draft'
+        AND ($1 = '' OR COALESCE(meta->>'build_sha', '') = $1)
       ORDER BY last_seen DESC LIMIT 1`,
+    [REQUIRED_WORKER_BUILD_SHA],
   );
   if (!workers[0]) {
     await q(
@@ -1930,6 +1939,7 @@ export async function listFacebookAccounts(): Promise<FbAccount[]> {
                  WHERE w.name=users.preferred_worker
                    AND w.last_seen > now() - interval '2 minutes'
                    AND COALESCE(w.meta->'capabilities', '[]'::jsonb) ? 'preflight'
+                   AND ($1 = '' OR COALESCE(w.meta->>'build_sha', '') = $1)
               ) AS preflight_ready,
               EXISTS (
                 SELECT 1 FROM ${AP}.post_run_queue q
@@ -1938,6 +1948,7 @@ export async function listFacebookAccounts(): Promise<FbAccount[]> {
               ) AS preflight_verified
          FROM ${AP}.users users
         ORDER BY label`,
+      [REQUIRED_WORKER_BUILD_SHA],
     );
   } catch {
     return [];
@@ -1957,9 +1968,10 @@ export async function enqueueFacebookPreflight(userId: string, requestedBy: stri
                WHERE w.name=u.preferred_worker
                  AND w.last_seen > now() - interval '2 minutes'
                  AND COALESCE(w.meta->'capabilities', '[]'::jsonb) ? 'preflight'
+                 AND ($2 = '' OR COALESCE(w.meta->>'build_sha', '') = $2)
             ) AS preflight_ready
        FROM ${AP}.users u WHERE u.id=$1`,
-    [userId],
+    [userId, REQUIRED_WORKER_BUILD_SHA],
   );
   const account = rows[0];
   if (!account) throw new Error('ไม่พบบัญชี Facebook');
@@ -2154,6 +2166,7 @@ export async function enqueueApprovedPost(opts: {
                  WHERE w.name=u.preferred_worker
                    AND w.last_seen > now() - interval '2 minutes'
                    AND COALESCE(w.meta->'capabilities', '[]'::jsonb) ? 'preflight'
+                   AND ($2 = '' OR COALESCE(w.meta->>'build_sha', '') = $2)
               ) AS preflight_ready,
               EXISTS (
                 SELECT 1 FROM ${AP}.post_run_queue q
@@ -2161,7 +2174,7 @@ export async function enqueueApprovedPost(opts: {
                    AND q.finished_at > now() - interval '24 hours'
               ) AS preflight_verified
          FROM ${AP}.users u WHERE u.id=$1`,
-      [userId],
+      [userId, REQUIRED_WORKER_BUILD_SHA],
     );
     const account = accountReady.rows[0];
     if (!account) throw new Error('ไม่พบบัญชี Facebook ที่เลือก');
@@ -2305,7 +2318,9 @@ export async function beginCampaignDraftRetry(campaignId: string, ownerUser: str
           AND COALESCE((meta->'image_generation'->>'configured')::boolean, false)
           AND COALESCE(meta->'image_generation'->>'model', '') = 'gpt-image-2'
           AND COALESCE(meta->'types', '[]'::jsonb) ? 'draft'
+          AND ($1 = '' OR COALESCE(meta->>'build_sha', '') = $1)
         ORDER BY last_seen DESC LIMIT 1`,
+      [REQUIRED_WORKER_BUILD_SHA],
     );
     if (!workers.rows[0]) {
       await client.query(
@@ -2562,7 +2577,7 @@ export async function getWorkflowReadiness(): Promise<WorkflowReadinessSnapshot>
     ).catch(() => []),
   ]);
   return {
-    ...evaluateWorkflowReadiness({ workers, facebookAccounts, queue, postQueue, inconsistentCampaigns: inconsistent, lastSelftest: selftest, contentOutput, scrapeOutput, recentPostRuns }),
+    ...evaluateWorkflowReadiness({ requiredBuildSha: REQUIRED_WORKER_BUILD_SHA, workers, facebookAccounts, queue, postQueue, inconsistentCampaigns: inconsistent, lastSelftest: selftest, contentOutput, scrapeOutput, recentPostRuns }),
     workers,
   };
 }

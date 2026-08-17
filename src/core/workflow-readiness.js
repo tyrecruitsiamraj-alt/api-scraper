@@ -9,6 +9,7 @@ function item(code, label, status, message) {
 
 /**
  * @param {{
+ *  requiredBuildSha?: string,
  *  workers?: Array<{kind?:string, online?:boolean, meta?:Record<string,any>|null}>,
  *  facebookAccounts?: Array<{group_count?:number}>,
  *  queue?: {queued?:number, oldest_queued_minutes?:number|null, stale_running?:number, stalled_progress?:number, errors_24h?:number},
@@ -21,7 +22,10 @@ function item(code, label, status, message) {
  * }} input
  */
 export function evaluateWorkflowReadiness(input = {}) {
-  const workers = input.workers ?? [];
+  const requiredBuildSha = String(input.requiredBuildSha || '').trim();
+  const workers = (input.workers ?? []).filter((worker) => (
+    !requiredBuildSha || String(worker.meta?.build_sha || '') === requiredBuildSha
+  ));
   const accounts = input.facebookAccounts ?? [];
   const queue = input.queue ?? {};
   const postQueue = input.postQueue ?? {};
