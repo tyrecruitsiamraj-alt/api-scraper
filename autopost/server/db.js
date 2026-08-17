@@ -1656,6 +1656,7 @@ async function ensurePostRunQueueTable() {
     )
   `);
   await query(`ALTER TABLE post_run_queue ADD COLUMN IF NOT EXISTS mode VARCHAR(30) NOT NULL DEFAULT 'post'`);
+  await query(`ALTER TABLE post_run_queue ADD COLUMN IF NOT EXISTS worker_build_sha VARCHAR(64)`);
 }
 
 /** post_run_queue.user_id — 1 คิว = 1 บัญชี (ให้ lock ต่อบัญชี + ขนานข้ามบัญชีได้) */
@@ -1806,7 +1807,7 @@ async function touchWorkerHeartbeat(name, meta = {}) {
   }
 }
 
-async function claimNextPostRunJob(workerId, runId, workerName, capabilities = []) {
+async function claimNextPostRunJob(workerId, runId, workerName, capabilities = [], buildSha = null) {
   await ensurePostRunQueueUserColumn();
   await ensureUsersPostControlColumns();
   await ensureUsersPreferredWorkerColumn();
@@ -1817,6 +1818,7 @@ async function claimNextPostRunJob(workerId, runId, workerName, capabilities = [
   const workerCapabilities = Array.isArray(capabilities)
     ? [...new Set(capabilities.map((item) => String(item).trim()).filter(Boolean))]
     : [];
+  const workerBuildSha = String(buildSha || '').trim() || null;
   let rows;
   try {
     ({ rows } = await query(
@@ -1845,6 +1847,7 @@ async function claimNextPostRunJob(workerId, runId, workerName, capabilities = [
        UPDATE post_run_queue q
        SET status = 'running',
            worker_id = $1,
+           worker_build_sha = $5,
            run_id = COALESCE(q.run_id, $2),
            started_at = NOW(),
            updated_at = NOW(),
@@ -1852,7 +1855,7 @@ async function claimNextPostRunJob(workerId, runId, workerName, capabilities = [
        FROM next
        WHERE q.id = next.id
        RETURNING q.*`,
-      [wid, rid, wname, JSON.stringify(workerCapabilities)]
+      [wid, rid, wname, JSON.stringify(workerCapabilities), workerBuildSha]
     ));
   } catch (e) {
     /** unique index (one running per user) ชนตอนสอง claim แข่งกันพอดี — ถือว่ารอบนี้ไม่มีงาน */

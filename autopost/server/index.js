@@ -1513,7 +1513,7 @@ app.post('/api/worker/post/claim', async (req, res) => {
       return res.json({ ok: true, job: null, upgrade_required: true, required_build_sha: requiredBuildSha });
     }
     const runId = db.generateRunId();
-    const job = await db.claimNextPostRunJob(workerId, runId, workerName, capabilities);
+    const job = await db.claimNextPostRunJob(workerId, runId, workerName, capabilities, buildSha);
     if (!job) return res.json({ ok: true, job: null });
     return res.json({ ok: true, job });
   } catch (e) {

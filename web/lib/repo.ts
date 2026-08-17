@@ -1945,6 +1945,7 @@ export async function listFacebookAccounts(): Promise<FbAccount[]> {
                 SELECT 1 FROM ${AP}.post_run_queue q
                  WHERE q.user_id=users.id AND q.mode='preflight' AND q.status='completed'
                    AND q.finished_at > now() - interval '24 hours'
+                   AND ($1 = '' OR COALESCE(q.worker_build_sha, '') = $1)
               ) AS preflight_verified
          FROM ${AP}.users users
         ORDER BY label`,
@@ -2172,6 +2173,7 @@ export async function enqueueApprovedPost(opts: {
                 SELECT 1 FROM ${AP}.post_run_queue q
                  WHERE q.user_id=u.id AND q.mode='preflight' AND q.status='completed'
                    AND q.finished_at > now() - interval '24 hours'
+                   AND ($2 = '' OR COALESCE(q.worker_build_sha, '') = $2)
               ) AS preflight_verified
          FROM ${AP}.users u WHERE u.id=$1`,
       [userId, REQUIRED_WORKER_BUILD_SHA],
