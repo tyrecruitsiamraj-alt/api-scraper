@@ -251,6 +251,12 @@ export function buildGroundedCaption(campaign = {}) {
     facts.income ? `💰 รายได้: ${facts.income}` : '',
     facts.workSchedule ? `🕒 วันและเวลาทำงาน: ${facts.workSchedule}` : '',
   ].filter(Boolean);
+  const duties = String(facts.duties || '')
+    .split(/\r?\n|[•;]/)
+    .map((item) => item.replace(/^[-–—\d.)\s]+/, '').trim())
+    .filter((item) => item.length >= 4 && item.toLowerCase() !== '[object object]')
+    .slice(0, 3);
+  if (duties.length) lines.push('', 'หน้าที่หลัก', ...duties.map((item) => `• ${item.slice(0, 180)}`));
   const qualifications = [];
   const gender = String(facts.gender || '').trim().toLowerCase();
   if (gender && !['o', 'all', 'any', 'a', 'ไม่จำกัด', 'ไม่ระบุ'].includes(gender)) {

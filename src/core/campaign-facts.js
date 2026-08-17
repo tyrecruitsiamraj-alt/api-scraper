@@ -42,6 +42,7 @@ export function extractCampaignFacts(campaign = {}) {
     income: pick(snap.income),
     incomeDisclosure,
     workSchedule: pick(snap.work_schedule),
+    duties: pick(snap.job_description, snap.job_detail, snap.duties, snap.responsibilities, snap.detail),
     gender: pick(snap.gender),
     ageMin: Number(snap.age_min) || null,
     ageMax: Number(snap.age_max) || null,

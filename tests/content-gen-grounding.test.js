@@ -17,6 +17,7 @@ const campaign = {
     age_min: 20,
     age_max: 55,
     job_family: 'Landscape Management',
+    job_description: 'ควบคุมทีมดูแลสวนและพื้นที่สีเขียว\nตรวจสอบคุณภาพงานประจำวัน',
   },
 };
 
@@ -25,6 +26,8 @@ test('Caption สำรองใช้เฉพาะข้อเท็จจร
   assert.match(caption, /หัวหน้าไซด์/);
   assert.match(caption, /โรงงานคูโบต้า นวนคร/);
   assert.match(caption, /15000/);
+  assert.match(caption, /ควบคุมทีมดูแลสวนและพื้นที่สีเขียว/);
+  assert.match(caption, /ตรวจสอบคุณภาพงานประจำวัน/);
   assert.doesNotMatch(caption, /รายได้ดี|งานมั่นคง|สวัสดิการครบ|แอดไลน์|โทร/);
   const quality = evaluateContentQuality({
     campaign,
