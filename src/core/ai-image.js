@@ -1,4 +1,5 @@
 import { envString } from '../config.js';
+import { randomUUID } from 'node:crypto';
 
 /**
  * AI image generation — pluggable adapter. Default = OpenAI gpt-image
@@ -21,15 +22,38 @@ async function openaiAdapter({ prompt, apiKey, transparent }) {
   if (transparent && /^gpt-image-(?:1|1\.5)$/i.test(model)) payload.background = 'transparent';
   // dall-e-* คืน URL เป็น default → ต้องขอ b64_json ชัด ๆ; gpt-image-1 คืน b64 เสมอ (และไม่รับ param นี้)
   if (/^dall-e/i.test(model)) payload.response_format = 'b64_json';
-  const res = await fetch('https://api.openai.com/v1/images/generations', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
-    body: JSON.stringify(payload),
-  });
-  if (!res.ok) {
+  const idempotencyKey = randomUUID();
+  const timeoutMs = Math.max(60_000, Number(envString('CONTENT_IMAGE_TIMEOUT_MS', '360000')) || 360_000);
+  let res;
+  for (let attempt = 1; attempt <= 2; attempt += 1) {
+    try {
+      res = await fetch('https://api.openai.com/v1/images/generations', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${apiKey}`,
+          'Idempotency-Key': idempotencyKey,
+        },
+        body: JSON.stringify(payload),
+        signal: AbortSignal.timeout(timeoutMs),
+      });
+    } catch (error) {
+      const code = String(error?.cause?.code || error?.code || error?.name || 'NETWORK_ERROR');
+      if (attempt < 2) {
+        await new Promise((resolve) => setTimeout(resolve, 3000));
+        continue;
+      }
+      throw new Error(`OpenAI images network error (${code}): ${error?.message || error}`);
+    }
+    if (res.ok) break;
     const body = await res.text().catch(() => '');
+    if (attempt < 2 && (res.status === 429 || res.status >= 500)) {
+      await new Promise((resolve) => setTimeout(resolve, 3000));
+      continue;
+    }
     throw new Error(`OpenAI images ${res.status}: ${body.slice(0, 200)}`);
   }
+  if (!res?.ok) throw new Error('OpenAI images: request did not complete');
   const json = await res.json();
   const b64 = json?.data?.[0]?.b64_json;
   if (!b64) throw new Error('OpenAI images: no b64_json in response');
