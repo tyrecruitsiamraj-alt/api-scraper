@@ -66,16 +66,22 @@ cleanup_legacy_workers() {
 }
 
 start_workers() {
-  local script_sha_before script_sha_after
+  local script_sha_before script_sha_after active_branch
   script_sha_before="$(git rev-parse HEAD 2>/dev/null || true)"
+  active_branch="$(git branch --show-current 2>/dev/null || true)"
+  if [ "$active_branch" != "main" ]; then
+    printf "  ${R}✗ Worker ต้องรันจาก branch main เท่านั้น (ตอนนี้: %s)${N}\n" "${active_branch:-detached}"
+    printf "  ${Y}เปิด Terminal ที่โฟลเดอร์นี้ แล้วรัน: git switch main${N}\n"
+    return 1
+  fi
   printf "\n${B}▶ ดึงโค้ดล่าสุด (git pull)...${N}\n"
-  if ! git pull --ff-only 2>&1 | tail -n 3 | sed "s/^/  /"; then
+  if ! git pull --ff-only origin main 2>&1 | tail -n 3 | sed "s/^/  /"; then
     printf "  ${R}✗ ดึงโค้ดไม่สำเร็จ — จะไม่เปิด Worker เก่า${N}\n"
     return 1
   fi
   local pulled_sha remote_sha
   pulled_sha="$(git rev-parse HEAD 2>/dev/null || true)"
-  remote_sha="$(git rev-parse '@{u}' 2>/dev/null || true)"
+  remote_sha="$(git rev-parse 'origin/main' 2>/dev/null || true)"
   if [ -z "$pulled_sha" ] || [ -z "$remote_sha" ] || [ "$pulled_sha" != "$remote_sha" ]; then
     printf "  ${R}✗ branch ยังไม่ตรง origin — จะไม่เปิด Worker เก่า${N}\n"
     return 1
