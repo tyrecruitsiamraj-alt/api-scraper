@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from 'react';
 import Link from 'next/link';
+import { CaptionViewer } from '@/components/CaptionViewer';
 import {
   approveContentAction,
   approveScrapeResultAction,
@@ -54,7 +55,24 @@ export type WorkCenterItem = {
 };
 
 type Option = { id: string; label: string };
-export type FbAccountOption = { id: string; label: string; groupCount: number };
+export type FbAccountOption = {
+  id: string;
+  label: string;
+  groupCount: number;
+  preferredWorker: string | null;
+  workerOnline: boolean;
+  preflightReady: boolean;
+  preflightVerified: boolean;
+};
+
+function facebookAccountProblem(account: FbAccountOption): string | null {
+  if (account.groupCount <= 0) return 'ยังไม่มีกลุ่ม';
+  if (!account.preferredWorker) return 'ยังไม่ผูกเครื่อง';
+  if (!account.workerOnline) return 'เครื่องออฟไลน์';
+  if (!account.preflightReady) return 'Worker ยังเป็นรุ่นเดิม';
+  if (!account.preflightVerified) return 'ยังไม่ผ่านการทดสอบ';
+  return null;
+}
 
 // เรียงตาม "ใครต้องขยับ" — งานพัง/ต้องแก้ ขึ้นบนสุดเสมอ, งานเสร็จจมล่างสุด
 const STAGE_PRIORITY: Record<WorkCenterStage, number> = {
@@ -341,7 +359,7 @@ function WorkAction({ item, connectors, facebookAccounts }: {
   }
 
   if (item.stage === 'review' && item.kind === 'content' && item.content) {
-    const readyAccounts = facebookAccounts.filter((a) => a.groupCount > 0);
+    const readyAccounts = facebookAccounts.filter((account) => !facebookAccountProblem(account));
     const noAccount = facebookAccounts.length === 0;
     const noReady = readyAccounts.length === 0;
     // เลือกบัญชีที่พร้อม (มีกลุ่ม) เป็นค่าเริ่มต้น — บัญชีที่ไม่มีกลุ่มเลือกไม่ได้ (กันโพสต์ไปตายทีหลัง)
@@ -368,8 +386,8 @@ function WorkAction({ item, connectors, facebookAccounts }: {
             <select id={`facebook-${item.id}`} name="fbAccountId" required defaultValue="" className="field">
               <option value="" disabled>เลือกบัญชี Facebook…</option>
               {facebookAccounts.map((account) => (
-                <option key={account.id} value={account.id} disabled={account.groupCount === 0}>
-                  {account.label}{account.groupCount === 0 ? ' (ยังไม่มีกลุ่ม)' : ` · ${account.groupCount} กลุ่ม`}
+                <option key={account.id} value={account.id} disabled={!!facebookAccountProblem(account)}>
+                  {account.label}{facebookAccountProblem(account) ? ` (${facebookAccountProblem(account)})` : ` · พร้อมเผยแพร่ ${account.groupCount} กลุ่ม`}
                 </option>
               ))}
             </select>
@@ -392,11 +410,11 @@ function WorkAction({ item, connectors, facebookAccounts }: {
             </select>
           </div>
           <button className="btn-primary" disabled={noReady || item.content.qualityStatus === 'fail'}>
-            {item.content.qualityStatus === 'fail' ? 'แก้ข้อมูลก่อนอนุมัติ' : noAccount ? 'ยังไม่มีบัญชี' : noReady ? 'ทุกบัญชียังไม่มีกลุ่ม' : 'อนุมัติและโพสต์'}
+            {item.content.qualityStatus === 'fail' ? 'แก้ข้อมูลก่อนอนุมัติ' : noAccount ? 'ยังไม่มีบัญชี' : noReady ? 'ยังไม่มีบัญชีที่ผ่านการทดสอบ' : 'อนุมัติและโพสต์'}
           </button>
           {noReady && (
-            <Link href="/settings/posting" className="text-xs text-accent hover:underline">
-              {noAccount ? 'เพิ่มบัญชี Facebook ก่อน' : 'เลือกกลุ่มให้บัญชีก่อน'}
+            <Link href="/settings/connectors" className="text-xs text-accent hover:underline">
+              {noAccount ? 'เพิ่มบัญชี Facebook ก่อน' : 'เตรียมและทดสอบบัญชีก่อน'}
             </Link>
           )}
         </form>
@@ -456,13 +474,13 @@ function Readiness({ facebookAccounts }: { facebookAccounts: FbAccountOption[] }
       btn: 'เพิ่มบัญชี',
     });
   } else {
-    const noGroup = facebookAccounts.filter((a) => a.groupCount === 0);
-    if (noGroup.length > 0) {
-      const names = noGroup.map((a) => a.label).join(', ');
+    const notReady = facebookAccounts.filter((account) => !!facebookAccountProblem(account));
+    if (notReady.length > 0) {
+      const names = notReady.map((account) => `${account.label} (${facebookAccountProblem(account)})`).join(', ');
       problems.push({
-        text: `บัญชี ${names} ยังไม่ได้เลือกกลุ่ม Facebook — งานจะค้างอยู่ที่ขั้นตรวจงาน`,
-        href: '/settings/posting',
-        btn: 'เลือกกลุ่มตอนนี้',
+        text: `บัญชี ${names} ยังไม่พร้อมเผยแพร่ — ผูกเครื่อง เลือกกลุ่ม และกดทดสอบแบบไม่โพสต์จริงให้ผ่านก่อน`,
+        href: '/settings/connectors',
+        btn: 'เตรียมบัญชีให้พร้อม',
       });
     }
   }
@@ -545,9 +563,11 @@ function WorkItemCard({ item, connectors, facebookAccounts }: {
             </a>
           )}
           {item.detail && (
-            <p className={`min-w-0 flex-1 whitespace-pre-wrap text-[13px] leading-relaxed ${item.stage === 'attention' ? 'rounded-xl border-l-2 border-accent bg-red-50 px-3.5 py-2.5 text-red-700' : 'text-ink/70'}`}>
-              {item.detail.length > 240 ? `${item.detail.slice(0, 240)}…` : item.detail}
-            </p>
+            <div className={`min-w-0 flex-1 whitespace-pre-wrap text-[13px] leading-relaxed ${item.stage === 'attention' ? 'rounded-xl border-l-2 border-accent bg-red-50 px-3.5 py-2.5 text-red-700' : 'text-ink/70'}`}>
+              {item.stage === 'review' && item.kind === 'content'
+                ? <CaptionViewer caption={item.content?.caption ?? item.detail} />
+                : (item.detail.length > 240 ? `${item.detail.slice(0, 240)}…` : item.detail)}
+            </div>
           )}
         </div>
       )}
