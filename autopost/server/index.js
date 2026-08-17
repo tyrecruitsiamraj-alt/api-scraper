@@ -1506,8 +1506,9 @@ app.post('/api/worker/post/claim', async (req, res) => {
       ? req.body.capabilities.map((item) => String(item).trim()).filter(Boolean)
       : [];
     const buildSha = String(req.body?.build_sha || '').trim();
+    const sourceSha = String(req.body?.source_sha || '').trim();
     // heartbeat: worker โพลทุก ~5 วิ → แตะ last_seen ให้เว็บเห็นว่าเครื่องยังมีชีวิต (fail-soft ใน db)
-    await db.touchWorkerHeartbeat(workerName || workerId, { worker_id: workerId, build_sha: buildSha, capabilities });
+    await db.touchWorkerHeartbeat(workerName || workerId, { worker_id: workerId, build_sha: buildSha, source_sha: sourceSha, capabilities });
     // A web/server-only deploy must not invalidate a compatible Mac worker.
     // Bump the fallback only when worker code itself changes and that release
     // has been verified. Vercel's commit SHA changes on every UI edit.

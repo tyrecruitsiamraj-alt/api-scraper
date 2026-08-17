@@ -54,15 +54,14 @@ if (!TOKEN) {
 const workerId = `${os.hostname()}-${process.pid}`;
 /** ชื่อเครื่องแบบนิ่ง (ไม่มี pid) สำหรับ pin บัญชี→เครื่อง — ตั้ง WORKER_NAME ใน .env ให้จำง่ายได้ */
 const workerName = String(process.env.WORKER_NAME || os.hostname()).trim();
-const workerBuildSha = (() => {
-  const configured = String(process.env.WORKER_BUILD_SHA || '').trim();
-  if (configured) return configured;
+const workerSourceSha = (() => {
   try {
     return execFileSync('git', ['rev-parse', 'HEAD'], { cwd: PROJECT_ROOT, encoding: 'utf8' }).trim();
   } catch {
     return 'unknown';
   }
 })();
+const workerBuildSha = String(process.env.WORKER_BUILD_SHA || '').trim() || workerSourceSha;
 // Server ใช้รายการนี้เป็น compatibility gate: worker รุ่นเก่าที่ไม่ประกาศ
 // `preflight` จะไม่มีวันได้รับงานตรวจ Facebook แบบไม่โพสต์จริง
 const WORKER_CAPABILITIES = ['post', 'preflight'];
@@ -209,6 +208,7 @@ async function tick() {
         worker_id: workerId,
         worker_name: workerName,
         build_sha: workerBuildSha,
+        source_sha: workerSourceSha,
         capabilities: WORKER_CAPABILITIES,
       });
       const job = claimed?.job || null;
