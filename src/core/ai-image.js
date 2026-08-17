@@ -24,8 +24,9 @@ async function openaiAdapter({ prompt, apiKey, transparent }) {
   if (/^dall-e/i.test(model)) payload.response_format = 'b64_json';
   const idempotencyKey = randomUUID();
   const timeoutMs = Math.max(60_000, Number(envString('CONTENT_IMAGE_TIMEOUT_MS', '360000')) || 360_000);
+  const retryMs = Math.max(0, Number(envString('CONTENT_IMAGE_RETRY_MS', '3000')) || 0);
   let res;
-  for (let attempt = 1; attempt <= 2; attempt += 1) {
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
     try {
       res = await fetch('https://api.openai.com/v1/images/generations', {
         method: 'POST',
@@ -39,16 +40,16 @@ async function openaiAdapter({ prompt, apiKey, transparent }) {
       });
     } catch (error) {
       const code = String(error?.cause?.code || error?.code || error?.name || 'NETWORK_ERROR');
-      if (attempt < 2) {
-        await new Promise((resolve) => setTimeout(resolve, 3000));
+      if (attempt < 3) {
+        await new Promise((resolve) => setTimeout(resolve, retryMs * attempt));
         continue;
       }
       throw new Error(`OpenAI images network error (${code}): ${error?.message || error}`);
     }
     if (res.ok) break;
     const body = await res.text().catch(() => '');
-    if (attempt < 2 && (res.status === 429 || res.status >= 500)) {
-      await new Promise((resolve) => setTimeout(resolve, 3000));
+    if (attempt < 3 && (res.status === 429 || res.status >= 500)) {
+      await new Promise((resolve) => setTimeout(resolve, retryMs * attempt));
       continue;
     }
     throw new Error(`OpenAI images ${res.status}: ${body.slice(0, 200)}`);

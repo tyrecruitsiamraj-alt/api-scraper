@@ -19,9 +19,11 @@ const AP = `"${AP_SCHEMA}"`;
 const REQUIRED_WORKER_BUILD_SHA = String(
   process.env.REQUIRED_WORKER_BUILD_SHA || 'a602d66cd932c23de05541cae70bd3456a76f56e',
 ).trim();
+const REQUIRED_CONTENT_PIPELINE = 'evidence-v1';
 
 function workerBuildMatches(meta: Record<string, unknown> | null | undefined): boolean {
-  return !REQUIRED_WORKER_BUILD_SHA || String(meta?.build_sha || '') === REQUIRED_WORKER_BUILD_SHA;
+  return (!REQUIRED_WORKER_BUILD_SHA || String(meta?.build_sha || '') === REQUIRED_WORKER_BUILD_SHA)
+    && String(meta?.content_pipeline || '') === REQUIRED_CONTENT_PIPELINE;
 }
 
 export type CandidateRow = {
@@ -1828,8 +1830,8 @@ export async function updateContentCaption(id: string, caption: string) {
 
 /** ตรวจร่างล่าสุดกับใบขอจริง และเก็บผลไว้ให้ UI แสดงทันที. */
 export async function refreshContentQuality(id: string): Promise<ContentQualityResult> {
-  const rows = await q<{ caption: string | null; campaign: CampaignRow; quality_checks: ContentQualityResult | null; image_ready: boolean }>(
-    `SELECT cc.caption, cc.quality_checks, to_jsonb(c.*) AS campaign,
+  const rows = await q<{ caption: string | null; campaign: CampaignRow; quality_checks: ContentQualityResult | null; image_ready: boolean; gen_notes: Record<string, any> | null }>(
+    `SELECT cc.caption, cc.quality_checks, cc.gen_notes, to_jsonb(c.*) AS campaign,
             (cc.image_bytes IS NOT NULL AND COALESCE((cc.gen_notes->'image_generation'->>'ok')::boolean,false)) AS image_ready
        FROM campaign_contents cc
        JOIN recruit_campaigns c ON c.id=cc.campaign_id
@@ -1842,6 +1844,7 @@ export async function refreshContentQuality(id: string): Promise<ContentQualityR
     caption: rows[0].caption,
     posterFields: rows[0].quality_checks?.posterFields ?? null,
     imageReady: rows[0].image_ready,
+    researchGate: rows[0].gen_notes?.research_gate ?? { ready: false, issues: ['ร่างนี้ไม่มีหลักฐานสำรวจตลาดก่อนสร้าง'] },
   });
   await q(
     `UPDATE campaign_contents
@@ -1865,8 +1868,9 @@ export async function enqueueDraftForCampaign(campaignId: string, ownerUser: str
         AND COALESCE(meta->'image_generation'->>'model', '') = 'gpt-image-2'
         AND COALESCE(meta->'types', '[]'::jsonb) ? 'draft'
         AND ($1 = '' OR COALESCE(meta->>'build_sha', '') = $1)
+        AND COALESCE(meta->>'content_pipeline', '') = $2
       ORDER BY last_seen DESC LIMIT 1`,
-    [REQUIRED_WORKER_BUILD_SHA],
+    [REQUIRED_WORKER_BUILD_SHA, REQUIRED_CONTENT_PIPELINE],
   );
   if (!workers[0]) {
     await q(
@@ -2128,9 +2132,9 @@ export async function enqueueApprovedPost(opts: {
   try {
     await client.query('BEGIN');
     // ล็อก campaign ก่อนสร้างคิว กันกดอนุมัติซ้ำหรือชนกับ “ให้ AI คิดใหม่”.
-    const locked = await client.query<{ campaign_status: string; content_status: string; campaign: CampaignRow; caption: string | null; quality_checks: ContentQualityResult | null; has_image: boolean; image_generation_ok: boolean }>(
+    const locked = await client.query<{ campaign_status: string; content_status: string; campaign: CampaignRow; caption: string | null; quality_checks: ContentQualityResult | null; gen_notes: Record<string, any> | null; has_image: boolean; image_generation_ok: boolean }>(
       `SELECT c.status AS campaign_status, cc.status AS content_status,
-              to_jsonb(c.*) AS campaign, cc.caption, cc.quality_checks,
+              to_jsonb(c.*) AS campaign, cc.caption, cc.quality_checks, cc.gen_notes,
               (cc.image_bytes IS NOT NULL) AS has_image,
               COALESCE((cc.gen_notes->'image_generation'->>'ok')::boolean, false) AS image_generation_ok
          FROM recruit_campaigns c
@@ -2148,6 +2152,7 @@ export async function enqueueApprovedPost(opts: {
       caption: locked.rows[0].caption,
       posterFields: locked.rows[0].quality_checks?.posterFields ?? null,
       imageReady: locked.rows[0].has_image && locked.rows[0].image_generation_ok,
+      researchGate: locked.rows[0].gen_notes?.research_gate ?? { ready: false, issues: ['ร่างนี้ไม่มีหลักฐานสำรวจตลาดก่อนสร้าง'] },
     });
     await client.query(
       `UPDATE campaign_contents
@@ -2324,8 +2329,9 @@ export async function beginCampaignDraftRetry(campaignId: string, ownerUser: str
           AND COALESCE(meta->'image_generation'->>'model', '') = 'gpt-image-2'
           AND COALESCE(meta->'types', '[]'::jsonb) ? 'draft'
           AND ($1 = '' OR COALESCE(meta->>'build_sha', '') = $1)
+          AND COALESCE(meta->>'content_pipeline', '') = $2
         ORDER BY last_seen DESC LIMIT 1`,
-      [REQUIRED_WORKER_BUILD_SHA],
+      [REQUIRED_WORKER_BUILD_SHA, REQUIRED_CONTENT_PIPELINE],
     );
     if (!workers.rows[0]) {
       await client.query(

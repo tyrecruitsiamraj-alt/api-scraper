@@ -40,9 +40,10 @@ const RESEARCH_TOOL = {
 };
 
 const RESEARCH_SYSTEM = `คุณคือนักวางกลยุทธ์คอนเทนต์สรรหาบุคลากรบนกลุ่มหางาน Facebook ในไทย
-มีประสบการณ์ว่าโพสต์รับสมัครงานแบบไหนคนแห่ทัก แบบไหนคนเลื่อนผ่าน
-ให้วิเคราะห์จากตำแหน่ง+พื้นที่ที่ได้รับ ว่า "แนว/ฮุก/สไตล์รูป" ใดดึงผู้สมัครกลุ่มนี้ได้จริง
-ตอบสั้น กระชับ ใช้ได้จริง เป็นภาษาไทย ห้ามแต่งเงินเดือน/สวัสดิการที่ไม่ได้ให้มา`;
+ให้วิเคราะห์จากหลักฐานคำค้นและโพสต์ที่แนบมาเท่านั้น ว่า "แนว/ฮุก/สไตล์รูป" ใดเหมาะกับตำแหน่งนี้
+ห้ามนำตัวเลข ช่องทางติดต่อ สวัสดิการ เชื้อชาติ หรือเงื่อนไขจากโพสต์ตัวอย่างมาใช้กับงาน
+ห้ามอ้างว่ามุมใดชนะถ้ายังไม่มีผลจริงหลายแคมเปญ
+ตอบสั้น กระชับ ใช้ได้จริง เป็นภาษาไทย และห้ามแต่งข้อเท็จจริงที่ไม่ได้ให้มา`;
 
 const OCCUPATION_CONFLICTS = [
   /พยาบาล|nurse|stethoscope|medical scrubs/i,
@@ -55,16 +56,23 @@ const OCCUPATION_CONFLICTS = [
 const IMAGE_STYLE_CONFLICTS = [
   /ข้อความ|ตัวหนังสือ|คำว่า|เบอร์โทร|โทรศัพท์|ไลน์|line\b|logo|โลโก้|typography|headline|caption/i,
 ];
+const UNSUPPORTED_COPY = [
+  /\b\d{2,}(?:[-\s]\d+)*\b/i,
+  /เงินเดือน|รายได้|โอที|\bOT\b|โบนัส|เบี้ยขยัน|ค่าอาหาร|ค่าเดินทาง|รถรับส่ง|ที่พัก/i,
+  /แอดไลน์|ไลน์|line\b|โทร|ทิ้งเบอร์|inbox|รู้ผลทันที|เริ่มงานทันที/i,
+  /ญี่ปุ่น|อินเดีย|พม่า|กัมพูชา|ลาว|สัญชาติ/i,
+];
 
 export function sanitizeResearchForRole(research, position) {
   if (!research) return null;
   const role = String(position ?? '').trim();
   const conflicts = OCCUPATION_CONFLICTS.filter((pattern) => !pattern.test(role));
-  const safe = (value) => !conflicts.some((pattern) => pattern.test(String(value ?? '')));
-  const angles = (research.angles ?? []).filter(safe);
-  const hooks = (research.hooks ?? []).filter(safe);
+  const safeRole = (value) => !conflicts.some((pattern) => pattern.test(String(value ?? '')));
+  const safeCopy = (value) => safeRole(value) && !UNSUPPORTED_COPY.some((pattern) => pattern.test(String(value ?? '')));
+  const angles = (research.angles ?? []).filter(safeCopy);
+  const hooks = (research.hooks ?? []).filter(safeCopy);
   const imageStyles = (research.imageStyles ?? []).filter((value) => (
-    safe(value) && !IMAGE_STYLE_CONFLICTS.some((pattern) => pattern.test(String(value ?? '')))
+    safeRole(value) && !IMAGE_STYLE_CONFLICTS.some((pattern) => pattern.test(String(value ?? '')))
   ));
   const imageStyle = imageStyles[0] ?? '';
   const imageStyleB = imageStyles[1] ?? '';

@@ -1,6 +1,7 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { envString } from '../config.js';
 import { buildVisualBrief, composeVisualPrompt } from './visual-brief.js';
+import { extractCampaignFacts } from './campaign-facts.js';
 
 /**
  * Content generation (text) — Claude คิด "โพสต์สรรหา" ให้ 1 ใบขอที่หาคนไม่ได้:
@@ -21,7 +22,7 @@ const SYSTEM = `คุณคือนักการตลาดสรรหา�
 - ขึ้นต้นด้วยหัวเรื่องสะดุดตา (เปิดรับสมัคร + ตำแหน่ง) ใช้ emoji พองาม
 - ระบุ: ตำแหน่ง, สถานที่/จังหวัดทำงาน, จำนวนที่รับ, รายได้ และวันเวลาทำงาน เมื่อมีข้อมูลในใบขอ
 - ปิดท้ายด้วย call-to-action ชัดเจน ("สนใจทักแชทได้เลย" / "สมัครด่วน") + hashtag 3–6 อันที่เกี่ยวข้อง
-- ห้ามแต่งเงินเดือน/สวัสดิการที่ไม่มีในข้อมูล ถ้าไม่รู้ให้ใช้คำกลาง ๆ ("สวัสดิการตามโครงสร้างบริษัท")
+- ห้ามแต่งเงินเดือน สวัสดิการ ความก้าวหน้า ความมั่นคง ช่องทางติดต่อ หรือคำรับรองที่ไม่มีในข้อมูล; ถ้าไม่รู้ให้เว้น ไม่ใช้คำกลาง ๆ แทน
 - ความยาวพอเหมาะกับโพสต์ FB (ไม่ยาวเกินไป)
 
 ## video_brief
@@ -236,6 +237,36 @@ export async function generateContent(campaign = {}) {
   };
 }
 
+/**
+ * Caption สำรองที่ประกอบจาก ERP แบบ deterministic เมื่อโมเดลแต่งข้อเท็จจริง
+ * หรือส่งร่างที่ไม่ผ่านด่านตรวจ ห้ามนำข้อความสร้างสรรค์เดิมกลับมาปน.
+ */
+export function buildGroundedCaption(campaign = {}) {
+  const facts = extractCampaignFacts(campaign);
+  if (!facts.position) return '';
+  const lines = [
+    `📣 เปิดรับสมัคร ${facts.position}`,
+    facts.location ? `📍 สถานที่ทำงาน: ${facts.location}` : '',
+    facts.qty ? `👥 จำนวนที่รับ: ${facts.qty} คน` : '',
+    facts.income ? `💰 รายได้: ${facts.income}` : '',
+    facts.workSchedule ? `🕒 วันและเวลาทำงาน: ${facts.workSchedule}` : '',
+  ].filter(Boolean);
+  const qualifications = [];
+  const gender = String(facts.gender || '').trim().toLowerCase();
+  if (gender && !['o', 'all', 'any', 'a', 'ไม่จำกัด', 'ไม่ระบุ'].includes(gender)) {
+    qualifications.push(`เพศ ${facts.gender}`);
+  } else if (gender) {
+    qualifications.push('ไม่จำกัดเพศ');
+  }
+  if (facts.ageMin || facts.ageMax) qualifications.push(`อายุ ${facts.ageMin || ''}–${facts.ageMax || ''} ปี`);
+  if (facts.education) qualifications.push(`วุฒิการศึกษา ${facts.education}`);
+  if (qualifications.length) lines.push('', 'คุณสมบัติ', ...qualifications.map((item) => `• ${item}`));
+  const tags = [...new Set(['สมัครงาน', 'หางาน', facts.position.replace(/\s+/g, '')])]
+    .filter(Boolean).map((item) => `#${item}`).join(' ');
+  lines.push('', 'สนใจสมัคร ส่งข้อความผ่านโพสต์นี้ได้เลย', tags);
+  return lines.join('\n');
+}
+
 /** สร้าง context ใบขอ (แชร์ระหว่าง caption กับ poster) */
 function campaignContext(campaign = {}) {
   const snap = campaign.snapshot ?? {};
@@ -248,6 +279,11 @@ function campaignContext(campaign = {}) {
     snap.detail ? `รายละเอียดใบขอ: ${snap.detail}` : '',
     campaign.qty ? `จำนวนที่รับ: ${campaign.qty}` : '',
     campaign.remaining_qty ? `ยังขาดอีก: ${campaign.remaining_qty} คน` : '',
+    snap.income ? `รายได้ที่ยืนยันจากใบขอ: ${snap.income}` : '',
+    snap.work_schedule ? `วันและเวลาทำงานที่ยืนยัน: ${snap.work_schedule}` : '',
+    snap.gender ? `เพศตามใบขอ: ${snap.gender}` : '',
+    snap.age_min || snap.age_max ? `ช่วงอายุ: ${snap.age_min ?? ''}-${snap.age_max ?? ''} ปี` : '',
+    snap.education ? `วุฒิการศึกษา: ${snap.education}` : '',
     snap.department_code ? `แผนก: ${snap.department_code}` : '',
   ].filter(Boolean).join('\n');
 }

@@ -62,6 +62,24 @@ test('ข้อความแต่งเพิ่มบนโปสเตอ�
   assert.equal(result.checks.find((item) => item.code === 'benefits')?.status, 'fail');
 });
 
+test('จุดขายเชิงโฆษณาที่ ERP ไม่ได้ยืนยันถูกบล็อก', () => {
+  const result = evaluateContentQuality({ campaign, caption: `${goodCaption}\nโอกาสเติบโตและสภาพแวดล้อมที่ดี` });
+  assert.equal(result.blocking, true);
+  assert.equal(result.checks.find((item) => item.code === 'benefits')?.status, 'fail');
+});
+
+test('เบอร์โทรหรือ LINE ที่ไม่ได้มาจาก ERP ถูกบล็อก', () => {
+  const result = evaluateContentQuality({ campaign, caption: `${goodCaption}\nติดต่อโทร 099-999-9999 หรือ LINE: fakejob` });
+  assert.equal(result.blocking, true);
+  assert.equal(result.checks.find((item) => item.code === 'contact')?.status, 'fail');
+});
+
+test('มีรายได้ถูกหนึ่งตัวแต่แอบเพิ่มตัวเลขอื่นยังถูกบล็อก', () => {
+  const result = evaluateContentQuality({ campaign, caption: goodCaption.replace('18,000 บาท', '18,000–25,000 บาท') });
+  assert.equal(result.blocking, true);
+  assert.equal(result.checks.find((item) => item.code === 'income')?.status, 'fail');
+});
+
 test('ตัวเลขรายได้ซ้ำบนโปสเตอร์ถูกบล็อกเป็นปัญหา layout', () => {
   const result = evaluateContentQuality({
     campaign,
@@ -93,4 +111,25 @@ test('ใบขอไม่มีสถานที่ทำงานถูก�
     caption: goodCaption,
   });
   assert.equal(result.checks.find((item) => item.code === 'location')?.status, 'fail');
+});
+
+test('ร่างที่ไม่มีหลักฐานสำรวจตลาดถูกบล็อก', () => {
+  const result = evaluateContentQuality({
+    campaign,
+    caption: goodCaption,
+    imageReady: true,
+    researchGate: { ready: false, issues: ['ยังไม่พบโพสต์ Facebook'] },
+  });
+  assert.equal(result.blocking, true);
+  assert.equal(result.checks.find((item) => item.code === 'market_research')?.status, 'fail');
+});
+
+test('ร่างที่มีหลักฐาน Google และ Facebook ผ่านด่านวิจัย', () => {
+  const result = evaluateContentQuality({
+    campaign,
+    caption: goodCaption,
+    imageReady: true,
+    researchGate: { ready: true, googleEvidence: 3, facebookEvidence: 2, issues: [] },
+  });
+  assert.equal(result.checks.find((item) => item.code === 'market_research')?.status, 'pass');
 });

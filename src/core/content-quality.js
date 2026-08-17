@@ -11,7 +11,8 @@ const AMBIGUOUS_TITLES = new Set(['งาน', 'พนักงาน', 'เจ�
 const BENEFIT_CLAIMS = [
   'โบนัส', 'เบี้ยขยัน', 'ค่าอาหาร', 'ค่าเดินทาง', 'ค่าครองชีพ', 'ประกันชีวิต',
   'ประกันสุขภาพ', 'กองทุนสำรองเลี้ยงชีพ', 'ยูนิฟอร์ม', 'ที่พัก', 'รถรับส่ง',
-  'งานมั่นคง', 'สวัสดิการครบ', 'รายได้ดี',
+  'งานมั่นคง', 'สวัสดิการครบ', 'รายได้ดี', 'โอกาสเติบโต', 'ความก้าวหน้า',
+  'เติบโตในสายงาน', 'สภาพแวดล้อมที่ดี', 'ประสบการณ์ที่ดี',
 ];
 
 const clean = (value) => String(value ?? '').replace(/\s+/g, ' ').trim();
@@ -29,10 +30,23 @@ function overlap(actual, expected) {
 }
 
 function numberNear(text, keywords) {
-  return clean(text)
+  return String(text ?? '')
     .split(/\n|[|•]/)
-    .filter((line) => keywords.some((keyword) => line.includes(keyword)))
+    .map(clean)
+    .filter((line) => keywords.some((keyword) => line.toLowerCase().includes(keyword.toLowerCase())))
     .flatMap(digits);
+}
+
+function unsupportedContacts(text, sourceText) {
+  const source = compact(sourceText);
+  return String(text ?? '').split(/\n|[|•]/).map(clean).filter(Boolean).filter((line) => {
+    if (!/โทร|ติดต่อ|เบอร์|ไลน์|line\b/i.test(line)) return false;
+    const normalized = line.replace(/[\s()-]/g, '');
+    const phones = normalized.match(/(?:\+?66|0)\d{8,9}/g) ?? [];
+    const hasLineId = /(?:ไลน์|line)\s*(?:id)?\s*[:@]/i.test(line);
+    return phones.some((phone) => !source.includes(compact(phone)))
+      || (hasLineId && !source.includes(compact(line)));
+  });
 }
 
 function check(code, label, status, message, expected = null, actual = null) {
@@ -40,14 +54,22 @@ function check(code, label, status, message, expected = null, actual = null) {
 }
 
 /**
- * @param {{ campaign: Record<string, any>, caption?: string|null, posterFields?: Record<string, any>|null }} input
+ * @param {{ campaign: Record<string, any>, caption?: string|null, posterFields?: Record<string, any>|null,
+ *   researchGate?: {ready?:boolean,issues?:string[],googleEvidence?:number,facebookEvidence?:number}|null }} input
  * @returns {{status:'pass'|'warning'|'fail', score:number, blocking:boolean, summary:string, checks:Array<Record<string, any>>}}
  */
-export function evaluateContentQuality({ campaign = {}, caption = '', posterFields = null, imageReady = null } = {}) {
+export function evaluateContentQuality({ campaign = {}, caption = '', posterFields = null, imageReady = null, researchGate = null } = {}) {
   const facts = extractCampaignFacts(campaign);
+  const combinedRaw = [caption, posterFields ? JSON.stringify(posterFields, null, 2) : ''].join('\n');
   const text = clean(caption);
-  const combined = clean([text, posterFields ? JSON.stringify(posterFields) : ''].join(' '));
+  const combined = clean(combinedRaw);
   const checks = [];
+
+  if (researchGate) {
+    checks.push(researchGate.ready
+      ? check('market_research', 'หลักฐานสำรวจตลาด', 'pass', `สำรวจ Google ${Number(researchGate.googleEvidence) || 0} รายการ และ Facebook ${Number(researchGate.facebookEvidence) || 0} โพสต์ก่อนสร้างแล้ว`)
+      : check('market_research', 'หลักฐานสำรวจตลาด', 'fail', `ยังสำรวจตลาดไม่ครบ: ${(researchGate.issues || []).join(' · ') || 'ไม่พบหลักฐานที่ตรวจย้อนกลับได้'}`));
+  }
 
   if (imageReady === false) {
     checks.push(check('visual', 'รูปประกาศตามตำแหน่ง', 'fail', 'AI ยังสร้างรูปที่ใช้ประกอบโปสเตอร์ไม่ได้ ห้ามส่งอนุมัติ'));
@@ -79,31 +101,32 @@ export function evaluateContentQuality({ campaign = {}, caption = '', posterFiel
   if (!facts.qty) {
     checks.push(check('quantity', 'จำนวนที่รับ', 'warning', 'ใบขอไม่ได้ระบุจำนวนที่รับ'));
   } else {
-    const found = numberNear(combined, ['อัตรา', 'จำนวน', 'รับ ', 'คน', 'ตำแหน่ง']);
+    const found = numberNear(combinedRaw, ['อัตรา', 'จำนวน', 'รับ ', 'คน', 'ตำแหน่ง', 'quantity']);
     checks.push(found.includes(String(facts.qty))
       ? check('quantity', 'จำนวนที่รับ', 'pass', 'จำนวนที่รับตรงกับใบขอ', String(facts.qty))
       : check('quantity', 'จำนวนที่รับ', 'fail', 'ประกาศไม่พบจำนวนที่รับตามใบขอ', String(facts.qty), unique(found).join(', ') || 'ไม่พบ'));
   }
 
   if (!facts.income) {
-    const claimed = numberNear(combined, ['เงินเดือน', 'รายได้', 'บาท']);
+    const claimed = numberNear(combinedRaw, ['เงินเดือน', 'รายได้', 'บาท', 'salary']);
     checks.push(claimed.length
       ? check('income', 'รายได้', 'fail', 'ประกาศระบุตัวเลขรายได้ แต่ใบขอไม่มีข้อมูลยืนยัน', 'ไม่ระบุ', unique(claimed).join(', '))
       : check('income', 'รายได้', 'warning', 'ใบขอไม่ได้ระบุรายได้ จึงไม่แสดงตัวเลข'));
   } else {
     const expected = digits(facts.income);
-    const found = numberNear(combined, ['เงินเดือน', 'รายได้', 'บาท']);
+    const found = numberNear(combinedRaw, ['เงินเดือน', 'รายได้', 'บาท', 'salary']);
     const matches = expected.length > 0 && expected.some((n) => found.includes(n));
-    checks.push(matches
+    const unexpected = found.filter((n) => !expected.includes(n));
+    checks.push(matches && unexpected.length === 0
       ? check('income', 'รายได้', 'pass', 'ตัวเลขรายได้ตรงกับใบขอ', facts.income)
-      : check('income', 'รายได้', 'fail', 'ประกาศไม่มีตัวเลขรายได้ตามใบขอ หรือใช้ตัวเลขไม่ตรง', facts.income, unique(found).join(', ') || 'ไม่พบ'));
+      : check('income', 'รายได้', 'fail', 'ประกาศไม่มีตัวเลขรายได้ตามใบขอ หรือมีตัวเลขรายได้ที่ใบขอไม่ได้ยืนยัน', facts.income, unique(found).join(', ') || 'ไม่พบ'));
   }
 
   if (!facts.workSchedule) {
     checks.push(check('work_schedule', 'วันและเวลาทำงาน', 'warning', 'ใบขอไม่ได้ระบุวันและเวลาทำงาน'));
   } else {
     const expectedNumbers = digits(facts.workSchedule);
-    const foundNumbers = numberNear(combined, ['เวลา', 'ทำงาน', 'วัน', 'จันทร์', 'อาทิตย์', 'ชม']);
+    const foundNumbers = numberNear(combinedRaw, ['เวลา', 'ทำงาน', 'วัน', 'จันทร์', 'อาทิตย์', 'ชม', 'schedule']);
     const numberMatch = expectedNumbers.length === 0 || expectedNumbers.some((n) => foundNumbers.includes(n));
     const textMatch = overlap(combined, facts.workSchedule) || numberMatch;
     checks.push(textMatch
@@ -115,6 +138,11 @@ export function evaluateContentQuality({ campaign = {}, caption = '', posterFiel
   checks.push(invented.length
     ? check('benefits', 'สวัสดิการและจุดขาย', 'fail', `พบข้อความที่ไม่มีหลักฐานในใบขอ: ${invented.join(', ')}`, null, invented.join(', '))
     : check('benefits', 'สวัสดิการและจุดขาย', 'pass', 'ไม่พบสวัสดิการหรือจุดขายที่แต่งเพิ่ม'));
+
+  const inventedContacts = unsupportedContacts(combinedRaw, facts.sourceText);
+  checks.push(inventedContacts.length
+    ? check('contact', 'ช่องทางติดต่อ', 'fail', 'พบเบอร์โทรหรือ LINE ที่ไม่มีในใบขอ', null, inventedContacts.join(' · '))
+    : check('contact', 'ช่องทางติดต่อ', 'pass', 'ไม่พบช่องทางติดต่อที่แต่งเพิ่ม'));
 
   if (posterFields?.salaryTotal && posterFields?.salaryBreakdown
       && compact(posterFields.salaryTotal) === compact(posterFields.salaryBreakdown)) {

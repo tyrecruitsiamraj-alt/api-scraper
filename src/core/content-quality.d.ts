@@ -20,5 +20,11 @@ export function evaluateContentQuality(input?: {
   caption?: string | null;
   posterFields?: Record<string, unknown> | null;
   imageReady?: boolean | null;
+  researchGate?: {
+    ready?: boolean;
+    issues?: string[];
+    googleEvidence?: number;
+    facebookEvidence?: number;
+  } | null;
 }): ContentQualityResult;
 export function qualityFailureMessages(result: ContentQualityResult): string[];

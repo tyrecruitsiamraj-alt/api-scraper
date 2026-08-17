@@ -8,6 +8,46 @@ const clean = (value) => String(value ?? '').replace(/\s+/g, ' ').trim();
 const clamp = (value, max = 2_147_483_647) => Math.max(0, Math.min(max, Number(value) || 0));
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
+const FAMILY_ALIASES = [
+  { match: /landscape|ภูมิทัศน์|สวน|grounds maintenance/i, terms: ['ภูมิทัศน์', 'งานดูแลสวน', 'หัวหน้าคนสวน', 'landscape'] },
+  { match: /driver|ขับรถ|chauffeur|valet/i, terms: ['พนักงานขับรถ', 'คนขับรถ'] },
+  { match: /security|รปภ|รักษาความปลอดภัย/i, terms: ['พนักงานรักษาความปลอดภัย', 'รปภ'] },
+  { match: /cleaner|แม่บ้าน|ทำความสะอาด/i, terms: ['พนักงานทำความสะอาด', 'แม่บ้าน'] },
+  { match: /warehouse|คลังสินค้า|สโตร์/i, terms: ['พนักงานคลังสินค้า', 'งานคลังสินค้า'] },
+  { match: /technician|ช่าง|maintenance/i, terms: ['ช่างเทคนิค', 'งานช่างซ่อมบำรุง'] },
+];
+
+export function buildResearchSeeds(facts = {}) {
+  const position = clean(facts.position);
+  const context = clean([position, facts.roleEvidence].filter(Boolean).join(' '));
+  const familyTerms = FAMILY_ALIASES.filter((item) => item.match.test(context)).flatMap((item) => item.terms);
+  const base = [...new Set([position, ...familyTerms].filter(Boolean))];
+  return [...new Set(base.flatMap((term) => [term, `หางาน${term}`, `สมัครงาน${term}`, `งาน ${term}`]))]
+    .filter((term) => term.length >= 4)
+    .slice(0, 20);
+}
+
+export function assessMarketResearch(result = {}, { requireFacebook = true } = {}) {
+  const evidence = Array.isArray(result.evidence) ? result.evidence : [];
+  const google = evidence.filter((item) => item?.source_type === 'google_trends');
+  const facebook = evidence.filter((item) => item?.source_type === 'facebook_post');
+  const issues = [];
+  if (!google.length) issues.push('ยังไม่พบคำค้นจาก Google สำหรับตำแหน่งนี้');
+  if (requireFacebook && !facebook.length) issues.push('ยังไม่พบโพสต์ Facebook ที่เกี่ยวข้องพร้อมยอด Reaction/Comment/Share');
+  return {
+    ready: issues.length === 0,
+    issues,
+    googleEvidence: google.length,
+    facebookEvidence: facebook.length,
+  };
+}
+
+export function isJobSearchQuery(value) {
+  const text = clean(value);
+  return /หางาน|หา\s+งาน|สมัครงาน|สมัคร\s+งาน|รับสมัคร|ตำแหน่งงาน|career|\bjob\b/i.test(text)
+    || /(?:^|\s)งาน\s+.*(?:หัวหน้า|พนักงาน|คนสวน|ช่าง|driver|supervisor|foreman|architect)/i.test(text);
+}
+
 export function parseGoogleSuggestResponse(raw) {
   const text = String(raw ?? '').replace(/^\)\]\}',?\s*/, '').trim();
   try {
@@ -70,33 +110,42 @@ async function saveEvidence(campaignId, evidence) {
   );
 }
 
-async function collectGoogleSuggestions(campaignId, position) {
-  const endpoint = new URL('https://suggestqueries.google.com/complete/search');
-  endpoint.searchParams.set('client', 'firefox');
-  endpoint.searchParams.set('hl', 'th');
-  endpoint.searchParams.set('gl', 'th');
-  endpoint.searchParams.set('q', position);
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 12_000);
-  try {
-    const response = await fetch(endpoint, { signal: controller.signal, headers: { 'User-Agent': 'Mozilla/5.0' } });
-    if (!response.ok) throw new Error(`Google suggestions HTTP ${response.status}`);
-    const suggestions = parseGoogleSuggestResponse(await response.text()).filter((item) => item !== position).slice(0, 6);
-    for (const suggestion of suggestions) {
-      await saveEvidence(campaignId, {
-        key: evidenceKey('google', position, suggestion), sourceType: 'google_trends',
-        url: `https://trends.google.co.th/explore?geo=TH&q=${encodeURIComponent(suggestion)}`,
-        queryTerm: suggestion, sourceName: 'Google search suggestions (TH)',
-        findings: { seed: position, suggested_query: suggestion },
-      });
+async function collectGoogleSuggestions(campaignId, facts) {
+  const found = [];
+  for (const seed of buildResearchSeeds(facts)) {
+    const endpoint = new URL('https://suggestqueries.google.com/complete/search');
+    endpoint.searchParams.set('client', 'firefox');
+    endpoint.searchParams.set('hl', 'th');
+    endpoint.searchParams.set('gl', 'th');
+    endpoint.searchParams.set('q', seed);
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 12_000);
+    try {
+      const response = await fetch(endpoint, { signal: controller.signal, headers: { 'User-Agent': 'Mozilla/5.0' } });
+      if (!response.ok) throw new Error(`Google suggestions HTTP ${response.status}`);
+      const suggestions = parseGoogleSuggestResponse(await response.text())
+        .filter((item) => clean(item).toLowerCase() !== seed.toLowerCase())
+        .filter(isJobSearchQuery);
+      for (const suggestion of suggestions) {
+        if (found.includes(suggestion)) continue;
+        found.push(suggestion);
+        await saveEvidence(campaignId, {
+          key: evidenceKey('google', seed, suggestion), sourceType: 'google_trends',
+          url: `https://trends.google.co.th/explore?geo=TH&q=${encodeURIComponent(suggestion)}`,
+          queryTerm: suggestion, sourceName: 'Google แนะนำข้อความค้นหา (TH)',
+          findings: { seed, suggested_query: suggestion, evidence_kind: 'google_suggestion' },
+        });
+        if (found.length >= 8) return found;
+      }
+    } finally {
+      clearTimeout(timer);
     }
-    return suggestions;
-  } finally {
-    clearTimeout(timer);
   }
+  return found;
 }
 
-async function collectFacebookPosts(campaignId, position) {
+async function collectFacebookPosts(campaignId, facts) {
+  const position = clean(facts?.position);
   const sessionFile = findFacebookSession();
   if (!sessionFile) return { posts: [], reason: 'ไม่พบ Facebook session' };
   const { rows: groups } = await query(
@@ -112,7 +161,9 @@ async function collectFacebookPosts(campaignId, position) {
   const context = await browser.newContext({ storageState: sessionFile, locale: 'th-TH', viewport: { width: 1280, height: 900 } });
   const page = await context.newPage();
   const posts = [];
-  const roleTerms = [...new Set([position, ...position.split(/\s+/)])].filter((term) => term.length >= 3);
+  const roleTerms = buildResearchSeeds(facts)
+    .map((term) => term.replace(/^(?:หางาน|สมัครงาน|งาน)\s*/i, '').trim())
+    .filter((term) => term.length >= 4);
   try {
     for (const group of groups) {
       try {
@@ -192,7 +243,7 @@ export async function loadCampaignMarketResearch(campaignId) {
                collected_at DESC LIMIT 20`,
     [campaignId],
   );
-  return rows;
+  return rows.filter((item) => item.source_type !== 'google_trends' || isJobSearchQuery(item.query_term));
 }
 
 export async function collectCampaignMarketResearch({ campaignId, facts }) {
@@ -201,14 +252,18 @@ export async function collectCampaignMarketResearch({ campaignId, facts }) {
   const warnings = [];
   if (process.env.RESEARCH_LIVE_ENABLED === '0') {
     const evidence = await loadCampaignMarketResearch(campaignId).catch(() => []);
-    return { keywords: evidence.filter((item) => item.source_type === 'google_trends').map((item) => item.query_term).filter(Boolean), facebookPosts: [], evidence, warnings: ['ปิดการสำรวจสดด้วย RESEARCH_LIVE_ENABLED=0'] };
+    const result = { keywords: evidence.filter((item) => item.source_type === 'google_trends').map((item) => item.query_term).filter(Boolean), facebookPosts: [], evidence, warnings: ['ปิดการสำรวจสดด้วย RESEARCH_LIVE_ENABLED=0'] };
+    result.gate = assessMarketResearch(result, { requireFacebook: process.env.RESEARCH_REQUIRE_FACEBOOK !== '0' });
+    return result;
   }
-  const keywords = await collectGoogleSuggestions(campaignId, position).catch((error) => {
+  const keywords = await collectGoogleSuggestions(campaignId, facts).catch((error) => {
     warnings.push(`Google: ${error.message}`); return [];
   });
   const ownedPosts = await collectOwnedFacebookHistory(campaignId, position).catch(() => []);
-  const facebook = await collectFacebookPosts(campaignId, position).catch((error) => ({ posts: [], reason: error.message }));
+  const facebook = await collectFacebookPosts(campaignId, facts).catch((error) => ({ posts: [], reason: error.message }));
   if (facebook.reason) warnings.push(`Facebook: ${facebook.reason}`);
   const evidence = await loadCampaignMarketResearch(campaignId).catch(() => []);
-  return { keywords, facebookPosts: [...ownedPosts, ...facebook.posts], evidence, warnings };
+  const result = { keywords, facebookPosts: [...ownedPosts, ...facebook.posts], evidence, warnings };
+  result.gate = assessMarketResearch(result, { requireFacebook: process.env.RESEARCH_REQUIRE_FACEBOOK !== '0' });
+  return result;
 }

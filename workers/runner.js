@@ -38,6 +38,7 @@ const WORKER_SOURCE_SHA = (() => {
   }
 })();
 const WORKER_BUILD_SHA = String(process.env.WORKER_BUILD_SHA || '').trim() || WORKER_SOURCE_SHA;
+const CONTENT_PIPELINE_RELEASE = 'evidence-v1';
 const POLL_MS = Number.parseInt(process.env.WORKER_POLL_MS ?? '3000', 10);
 const STALE_SECONDS = Number.parseInt(process.env.WORKER_STALE_SECONDS ?? '1800', 10); // 30 min
 const LEASE_HEARTBEAT_MS = Number.parseInt(process.env.WORKER_LEASE_HEARTBEAT_MS ?? '30000', 10);
@@ -102,7 +103,7 @@ async function heartbeat() {
       `INSERT INTO workers (name, kind, last_seen, meta)
        VALUES ($1, 'scraper', now(), $2::jsonb)
        ON CONFLICT (name) DO UPDATE SET last_seen = now(), meta = EXCLUDED.meta`,
-      [os.hostname(), JSON.stringify({ pid: process.pid, build_sha: WORKER_BUILD_SHA, source_sha: WORKER_SOURCE_SHA, types: SUPPORTED, image_generation: imageGenerationCapability() })],
+      [os.hostname(), JSON.stringify({ pid: process.pid, build_sha: WORKER_BUILD_SHA, source_sha: WORKER_SOURCE_SHA, content_pipeline: CONTENT_PIPELINE_RELEASE, types: SUPPORTED, image_generation: imageGenerationCapability() })],
     );
   } catch (e) {
     console.warn(`  [heartbeat] เขียนไม่ได้: ${e.message}`);

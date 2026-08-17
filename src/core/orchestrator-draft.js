@@ -1,12 +1,12 @@
 import { query } from '../db/pool.js';
 import { activeContentTrends } from '../db/repositories.js';
-import { generateContent, generatePosterFields } from './content-gen.js';
+import { buildGroundedCaption, generateContent, generatePosterFields } from './content-gen.js';
 import { researchContentAngles } from './content-research.js';
 import { generateImage } from './ai-image.js';
 import { renderPoster } from './poster.js';
 import { evaluateContentQuality } from './content-quality.js';
 import { applyTrustedPosterFacts, preflightCampaign, visualBriefFromFacts } from './campaign-facts.js';
-import { collectCampaignMarketResearch } from './market-research.js';
+import { assessMarketResearch, collectCampaignMarketResearch } from './market-research.js';
 import { formatPerformanceInsight, patternDecision } from './content-second-brain.js';
 
 /**
@@ -44,8 +44,22 @@ export async function generateDraftForCampaign(campaignId) {
   }));
   console.log(`  [research] Google ${marketResearch.keywords.length} คำ · Facebook ${marketResearch.facebookPosts.length} โพสต์ · หลักฐาน ${marketResearch.evidence.length}`);
   if (marketResearch.warnings.length) console.warn(`  [research] ${marketResearch.warnings.join(' · ')}`);
+  const researchGate = marketResearch.gate ?? assessMarketResearch(marketResearch, {
+    requireFacebook: process.env.RESEARCH_REQUIRE_FACEBOOK !== '0',
+  });
+  if (!researchGate.ready) {
+    const detail = [...researchGate.issues, ...marketResearch.warnings].filter(Boolean).join(' · ');
+    const note = `ยังไม่สร้าง Content เพราะหลักฐานสำรวจตลาดไม่ครบ: ${detail}`;
+    await query(`UPDATE recruit_campaigns SET status='needs_input', status_note=$2, updated_at=now() WHERE id=$1`, [campaignId, note]);
+    return { campaignId, status: 'needs_input', issues: researchGate.issues, researchGate };
+  }
 
   await query(`UPDATE recruit_campaigns SET status='drafting', status_note=NULL, updated_at=now() WHERE id=$1`, [campaignId]);
+
+  // Second Brain must stay inside the same role. Sorting unrelated examples
+  // last was not enough: on a cold start they still reached the model.
+  const roleKey = String(facts.position || '').toLowerCase().replace(/\s+/g, '');
+  const sameRole = (caption) => roleKey && String(caption || '').toLowerCase().replace(/\s+/g, '').includes(roleKey);
 
   // แนวที่เคยเวิร์ค: เอาแคปชันจริงของ content ที่ engagement สูงสุด มาเป็นแรงบันดาลใจ
   // (เรียงให้ตำแหน่งใกล้เคียงมาก่อน แล้วค่อยตามคะแนน; ตารางว่าง = [] ไม่กระทบ gen)
@@ -58,7 +72,7 @@ export async function generateDraftForCampaign(campaignId) {
                wp.engagement_score DESC NULLS LAST
       LIMIT 2`,
     [String(c.title ?? '').trim()],
-  ).then((r) => r.rows.map((x) => x.caption)).catch(() => []);
+  ).then((r) => r.rows.map((x) => x.caption).filter(sameRole)).catch(() => []);
 
   // งานที่คนอนุมัติคือสัญญาณด้านคุณภาพก่อนโพสต์ แยกจาก "ผู้ชนะ" ที่ต้องมีผลลัพธ์จริง.
   const preferredExamples = await query(
@@ -74,7 +88,7 @@ export async function generateDraftForCampaign(campaignId) {
   ).then((r) => r.rows.map((x) => {
     const why = [...(x.reason_codes || []), x.note].filter(Boolean).join(', ');
     return `${x.caption}${why ? `\n[เหตุผลที่อนุมัติ: ${why}]` : ''}`;
-  })).catch(() => []);
+  }).filter(sameRole)).catch(() => []);
 
   // แนวที่ "ไม่เวิร์ค" (คนสนใจน้อย): เอาแคปชันที่คะแนนต่ำสุดมาเตือน AI ให้เลี่ยง
   // (ตำแหน่งใกล้เคียงก่อน แล้วคะแนนต่ำก่อน; ตาราง schema-014 ยังไม่ migrate = [] ไม่กระทบ gen)
@@ -87,7 +101,9 @@ export async function generateDraftForCampaign(campaignId) {
                (lp.source = 'human_feedback') DESC, lp.engagement_score ASC NULLS LAST, lp.created_at DESC
       LIMIT 2`,
     [String(c.title ?? '').trim()],
-  ).then((r) => r.rows.map((x) => `${x.caption}${x.reason ? `\n[เหตุผลที่ไม่ผ่าน: ${x.reason}]` : ''}`)).catch(() => []);
+  ).then((r) => r.rows
+    .filter((x) => sameRole(x.caption))
+    .map((x) => `${x.caption}${x.reason ? `\n[เหตุผลที่ไม่ผ่าน: ${x.reason}]` : ''}`)).catch(() => []);
 
   // Proven outcome patterns are separate from human approval. A pattern is
   // usable only after content_pattern_stats sees it in at least 3 campaigns.
@@ -150,7 +166,7 @@ export async function generateDraftForCampaign(campaignId) {
   // A/B: 2 เวอร์ชันคนละแนว — คนอนุมัติเลือกอันที่ชอบ (ผลชนะถูกเก็บเข้า winning patterns ต่อ)
   const AB_STYLES = [
     'A — ตรงไปตรงมา: พาดหัวเปิดรับสมัครชัด ๆ ข้อมูลครบ กระชับ',
-    'B — เน้นจุดขาย: นำด้วยรายได้/สวัสดิการ/ความมั่นคง โทนชวนคุย',
+    'B — เน้นข้อมูลตัดสินใจที่ ERP ยืนยันแล้ว เช่น รายได้ พื้นที่ และเวลา โทนชวนคุย ห้ามแต่งจุดขายเพิ่ม',
   ];
   // A/B รูป: 2 สไตล์รูปคนละแบบ (จาก research — เปลี่ยนตามเทรนด์ ไม่ล็อกตายตัว) เวอร์ชัน A ใช้สไตล์ 1, B ใช้สไตล์ 2
   const researchStyles = research?.imageStyles?.length ? research.imageStyles : (research?.imageStyle ? [research.imageStyle] : []);
@@ -168,7 +184,7 @@ export async function generateDraftForCampaign(campaignId) {
   }
 
   const captionKey = (value) => String(value ?? '').toLowerCase().replace(/\s+/g, '').trim();
-  const versions = [content, contentB].filter((item, index, all) => item && all.findIndex(
+  let versions = [content, contentB].filter((item, index, all) => item && all.findIndex(
     (candidate) => candidate && captionKey(candidate.caption) === captionKey(item.caption),
   ) === index);
   if (versions.length < 2) console.warn('  [draft] AI คืนร่าง A/B ซ้ำกัน — เก็บเพียงร่างเดียวเพื่อไม่ให้หน้าอนุมัติรก');
@@ -191,6 +207,25 @@ export async function generateDraftForCampaign(campaignId) {
   // The model may summarize presentation text, but the fields below are facts
   // and always come from ERP.  In particular it cannot turn 12,000 into 120.
   if (posterFields) posterFields = applyTrustedPosterFacts(posterFields, c);
+  // Repair factual failures before paying for image generation. Creative copy
+  // is kept only when it passes; otherwise a deterministic ERP-only caption
+  // replaces it, so the user never has to discover invented claims by eye.
+  versions = versions.map((draft) => {
+    const before = evaluateContentQuality({
+      campaign: c, caption: draft.caption, posterFields, researchGate,
+    });
+    if (!before.blocking) return draft;
+    console.warn(`  [draft] Caption AI ไม่ผ่าน (${before.summary}) — ซ่อมจาก ERP อัตโนมัติ`);
+    return { ...draft, caption: buildGroundedCaption(c), captionRepaired: true };
+  });
+  for (const draft of versions) {
+    const repaired = evaluateContentQuality({ campaign: c, caption: draft.caption, posterFields, researchGate });
+    if (repaired.blocking) {
+      const note = `สร้าง Caption ที่ยืนยันข้อเท็จจริงไม่ได้: ${repaired.summary}`;
+      await query(`UPDATE recruit_campaigns SET status='draft_error', status_note=$2, updated_at=now() WHERE id=$1`, [campaignId, note]);
+      throw new Error(note);
+    }
+  }
   const contactLine = process.env.CONTENT_CONTACT_LINE || '';
   const images = [];
   const imageSources = [];
@@ -240,6 +275,15 @@ export async function generateDraftForCampaign(campaignId) {
     research_evidence: marketResearch.evidence.length,
     research_keywords: marketResearch.keywords,
     research_warnings: marketResearch.warnings,
+    research_gate: researchGate,
+    research_sources: marketResearch.evidence.slice(0, 12).map((item) => ({
+      type: item.source_type,
+      url: item.source_url,
+      query: item.query_term,
+      reactions: Number(item.reactions) || 0,
+      comments: Number(item.comments) || 0,
+      shares: Number(item.shares) || 0,
+    })),
   };
   let savedDrafts = 0;
   let readyDrafts = 0;
@@ -249,7 +293,7 @@ export async function generateDraftForCampaign(campaignId) {
     // รุ่นที่รูปเสียไม่ถูกบันทึกเป็นร่างให้คนเห็น ระบบเก็บสาเหตุไว้ใน log และ
     // ยังส่งรุ่นที่สมบูรณ์ได้ถ้าอย่างน้อยหนึ่งรุ่นผ่าน.
     if (!image || !imageSources[i]) continue;
-    const quality = evaluateContentQuality({ campaign: c, caption: v.caption, posterFields, imageReady: true });
+    const quality = evaluateContentQuality({ campaign: c, caption: v.caption, posterFields, imageReady: true, researchGate });
     savedDrafts += 1;
     if (!quality.blocking) readyDrafts += 1;
     console.log(`  [draft] ด่านคุณภาพเวอร์ชัน ${version + i}: ${quality.status} ${quality.score}/100 — ${quality.summary}`);
@@ -261,6 +305,7 @@ export async function generateDraftForCampaign(campaignId) {
       used_winning: winningExamples.length,
       used_feedback: preferredExamples.length,
       used_losing: losingExamples.length,
+      caption_repaired: Boolean(v.captionRepaired),
       image_generation: {
         ok: true,
         provider: imageSources[i]?.provider ?? null,

@@ -5,8 +5,10 @@ test('image generation retries one network failure with the same idempotency key
   const oldFetch = globalThis.fetch;
   const oldKey = process.env.OPENAI_API_KEY;
   const oldModel = process.env.CONTENT_IMAGE_MODEL;
+  const oldRetry = process.env.CONTENT_IMAGE_RETRY_MS;
   process.env.OPENAI_API_KEY = 'test-key';
   process.env.CONTENT_IMAGE_MODEL = 'gpt-image-2';
+  process.env.CONTENT_IMAGE_RETRY_MS = '0';
   const keys = [];
   let calls = 0;
   globalThis.fetch = async (_url, options) => {
@@ -32,5 +34,6 @@ test('image generation retries one network failure with the same idempotency key
     globalThis.fetch = oldFetch;
     if (oldKey === undefined) delete process.env.OPENAI_API_KEY; else process.env.OPENAI_API_KEY = oldKey;
     if (oldModel === undefined) delete process.env.CONTENT_IMAGE_MODEL; else process.env.CONTENT_IMAGE_MODEL = oldModel;
+    if (oldRetry === undefined) delete process.env.CONTENT_IMAGE_RETRY_MS; else process.env.CONTENT_IMAGE_RETRY_MS = oldRetry;
   }
 });
