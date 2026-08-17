@@ -13,8 +13,11 @@ if (!/^[A-Za-z_][A-Za-z0-9_-]*$/.test(AP_SCHEMA)) {
   throw new Error(`AUTOPOST_SCHEMA ไม่ถูกต้อง: ${AP_SCHEMA}`);
 }
 const AP = `"${AP_SCHEMA}"`;
+// Worker compatibility is a release contract, not the current web commit.
+// UI-only deploys must not take both Mac workers offline. Bump this SHA only
+// after worker code changes have been deployed and verified on the Mac.
 const REQUIRED_WORKER_BUILD_SHA = String(
-  process.env.VERCEL_GIT_COMMIT_SHA || process.env.REQUIRED_WORKER_BUILD_SHA || '',
+  process.env.REQUIRED_WORKER_BUILD_SHA || 'a602d66cd932c23de05541cae70bd3456a76f56e',
 ).trim();
 
 function workerBuildMatches(meta: Record<string, unknown> | null | undefined): boolean {
