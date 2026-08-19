@@ -196,7 +196,20 @@ export async function runConnector(connector, criteria, runtime, opts = {}) {
       search = await runSearch();
     }
     found = search.ids.length;
-    console.log(`  [${connector.label}] found ${found} ids (target ${target}, site ~${search.totalAvailable ?? '?'})`);
+    // A retry may need to page past many Resume IDs already linked to this
+    // task. Do not then open hundreds of profiles in one round: remove known
+    // IDs before the detail loop and cap fresh profiles to a bounded sample.
+    // This keeps a strict filter from looking stuck while still allowing the
+    // adjacent-position loop to continue searching when the sample is too
+    // small.
+    const freshLimit = Math.max(target * 3, target);
+    const freshIds = search.ids
+      .filter((id) => !priorExternalIds.has(String(id)))
+      .slice(0, freshLimit);
+    if (freshIds.length < search.ids.length) {
+      console.log(`  [${connector.label}] ตรวจรอบนี้ ${freshIds.length} รายการใหม่ (ตัดรายการเดิม/เกินขอบเขตออก ${search.ids.length - freshIds.length})`);
+    }
+    search = { ...search, ids: freshIds };
 
     // Login + search done — now scraping candidates. Flip the phase to 'scraping'
     // and re-assert the target (setTaskPhase resets progress_target to 0) so the
