@@ -148,7 +148,7 @@ export default async function CandidatesPage({
         <table className="w-full text-sm">
           <thead>
             <tr className="border-b border-hairline text-left text-subtle">
-              <th className="px-5 py-3 font-medium">ชื่อ</th>
+              <th className="px-5 py-3 font-medium">รูป / ชื่อ</th>
               <th className="px-5 py-3 font-medium">ตำแหน่งที่ต้องการ</th>
               <th className="px-5 py-3 font-medium">จังหวัด</th>
               <th className="px-5 py-3 font-medium">ติดต่อ</th>
@@ -168,9 +168,19 @@ export default async function CandidatesPage({
             {rows.map((c) => (
               <tr key={c.id} className="border-b border-hairline/60 last:border-0 hover:bg-black/[0.02]">
                 <td className="px-5 py-3.5">
-                  <Link href={`/candidates/${c.id}`} className="font-medium text-ink hover:text-accent">
-                    {c.full_name || '(ไม่มีชื่อ)'}
-                  </Link>
+                  <div className="flex items-center gap-3">
+                    {c.profile_asset_id ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img src={`/api/assets/${c.profile_asset_id}`} alt="" className="h-10 w-10 shrink-0 rounded-xl border border-hairline object-cover" />
+                    ) : (
+                      <div className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-ink text-sm text-white">
+                        {(c.full_name || '?').trim().charAt(0)}
+                      </div>
+                    )}
+                    <Link href={`/candidates/${c.id}`} className="font-medium text-ink hover:text-accent">
+                      {c.full_name || '(ไม่มีชื่อ)'}
+                    </Link>
+                  </div>
                 </td>
                 <td className="px-5 py-3.5 text-subtle max-w-[240px] truncate">{c.desired_positions || '—'}</td>
                 <td className="px-5 py-3.5 text-subtle">{c.province || '—'}</td>

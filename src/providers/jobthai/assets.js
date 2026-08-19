@@ -17,7 +17,7 @@ function imageExt(buffer, contentType) {
  * JobThai profile image via resume_image.php (no separate attachments on this
  * platform's resume view — profile photo only). Returns bytea asset records.
  */
-export async function collectAssetsForDb(request, record) {
+export async function collectAssetsForDb(request, record, _options = {}) {
   const id = externalId(record.source_url);
   if (!id) return [];
   const gender = /หญิง/.test(record.gender || '') ? 'f' : 'm';

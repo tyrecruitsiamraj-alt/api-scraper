@@ -281,8 +281,13 @@ export async function runConnector(connector, criteria, runtime, opts = {}) {
         if (qualification.status === 'qualified' && provider.enrichContacts) {
           await provider.enrichContacts(sess.request, id, parsed, runtime);
         }
-        const assets = qualification.status === 'qualified'
-          ? await provider.collectAssetsForDb(sess.request, parsed)
+        // รูปโปรไฟล์เป็นข้อมูลหลักที่ผู้สรรหาต้องเห็น แม้ Resume จะยังไม่ผ่าน
+        // เกณฑ์งานนี้ ส่วนเอกสารแนบยังเก็บเฉพาะคนที่ผ่านเพื่อลดการเก็บข้อมูล
+        // ส่วนบุคคลเกินจำเป็นและไม่เสียเวลาโหลดไฟล์ใหญ่ของคนที่ถูกคัดออก
+        const assets = provider.collectAssetsForDb
+          ? await provider.collectAssetsForDb(sess.request, parsed, {
+            profileOnly: qualification.status !== 'qualified',
+          })
           : [];
 
         const { isNew, taskLink } = await withTransaction(async (client) => {

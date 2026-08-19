@@ -14,7 +14,8 @@ const MIME = { pdf: 'application/pdf', docx: 'application/vnd.openxmlformats-off
  *
  * Returns Array<{ kind, title, source_url, file_type, mime, byte_size, sha256, content, download_status }>.
  */
-export async function collectAssetsForDb(request, record) {
+export async function collectAssetsForDb(request, record, options = {}) {
+  const profileOnly = options?.profileOnly === true;
   const assets = [];
 
   if (record.profile_image_url) {
@@ -32,6 +33,8 @@ export async function collectAssetsForDb(request, record) {
       assets.push({ kind: 'profile', title: 'profile', source_url: record.profile_image_url, download_status: `error:${e.message}` });
     }
   }
+
+  if (profileOnly) return assets;
 
   for (const att of Array.isArray(record.attachments) ? record.attachments : []) {
     try {

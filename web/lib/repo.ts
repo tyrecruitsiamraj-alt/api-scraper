@@ -39,6 +39,7 @@ export type CandidateRow = {
   last_updated_at: string;
   platforms: string[];
   asset_count: number;
+  profile_asset_id: string | null;
   viewed_at: string | null;
   viewed_by: string | null;
   called_at: string | null;
@@ -102,6 +103,10 @@ export async function listCandidates(opts: CandidateFilter = {}) {
             c.desired_positions, c.last_updated_at,
             ARRAY(SELECT DISTINCT s.platform FROM candidate_sources s WHERE s.candidate_id = c.id) AS platforms,
             (SELECT count(*)::int FROM candidate_assets a WHERE a.candidate_id = c.id) AS asset_count,
+            (SELECT a.id FROM candidate_assets a
+              WHERE a.candidate_id = c.id AND a.kind = 'profile'
+                AND a.download_status = 'success' AND a.content IS NOT NULL
+              ORDER BY a.last_seen_at DESC NULLS LAST, a.id DESC LIMIT 1) AS profile_asset_id,
             (SELECT av.occurred_at FROM candidate_activity av
               WHERE av.candidate_id = c.id AND av.activity_type = 'viewed'
               ORDER BY av.occurred_at DESC LIMIT 1) AS viewed_at,
