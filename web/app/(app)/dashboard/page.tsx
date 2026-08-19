@@ -1,4 +1,5 @@
 import { dashboardStats, listProviderLimits, recentRuns } from '@/lib/repo';
+import { WorkerStatus } from '@/components/WorkerStatus';
 
 export const dynamic = 'force-dynamic';
 
@@ -59,6 +60,9 @@ export default async function DashboardPage() {
         <h1 className="text-2xl font-semibold tracking-tight">ภาพรวม</h1>
         <p className="mt-1 text-sm text-subtle">สถานะคลังผู้สมัครและการดึงข้อมูล (Scraping)</p>
       </div>
+
+      {/* ให้ผู้ใช้เห็นก่อนกดงานว่าเครื่อง/สิทธิ์/คิวพร้อมจริงหรือไม่ */}
+      <WorkerStatus />
 
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <Stat label="ผู้สมัครทั้งหมด" value={totals.candidates.toLocaleString()} />

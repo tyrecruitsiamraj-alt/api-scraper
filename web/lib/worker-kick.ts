@@ -1,13 +1,28 @@
 import 'server-only';
 import { spawn } from 'node:child_process';
-import { existsSync, mkdirSync, openSync, statSync, unlinkSync } from 'node:fs';
+import { existsSync, mkdirSync, openSync, readdirSync, statSync, unlinkSync } from 'node:fs';
 import path from 'node:path';
 
 let busy = false;
 let rerun = false;
 
 function workerLockPath(root: string) {
-  return path.join(root, 'output', 'runner.lock');
+  const output = path.join(root, 'output');
+  // runner.js uses runner-${WORKER_NAME}.lock. Keep compatibility with the
+  // old runner.lock so queued work is not kicked twice after an upgrade.
+  const candidates = ['runner-standalone.lock', 'runner.lock'];
+  try {
+    const discovered = readdirSync(output).filter((name) => /^runner-.+\.lock$/i.test(name));
+    candidates.push(...discovered);
+  } catch {
+    // output may not exist on a fresh install; the caller creates it below.
+  }
+  const fresh = candidates
+    .map((name) => path.join(output, name))
+    .filter((file, index, all) => all.indexOf(file) === index)
+    .filter((file) => existsSync(file))
+    .sort((a, b) => statSync(b).mtimeMs - statSync(a).mtimeMs)[0];
+  return fresh ?? path.join(output, 'runner-standalone.lock');
 }
 
 // A worker is "alive" only if its lock file is fresh. Judging by mtime (not by

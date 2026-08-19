@@ -1,5 +1,6 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { envString } from '../config.js';
+import { fetchGoogleTrendsSuggestions } from './google-trends-suggest.js';
 
 /**
  * AI Job-Family classifier + adjacent-position suggester + เนื้องาน→ตำแหน่ง.
@@ -106,13 +107,95 @@ const FAMILIES = new Set(['A', 'B', 'C', 'D', 'E', 'F']);
 
 const KNOWN_DESCRIPTION_PLANS = [
   {
-    match: /(?:ฝ่าย)?ขาย|เซลล์|เสนอขาย|ปิดการขาย|ดูแลลูกค้า/u,
+    match: /ขับรถ|คนขับ|พนักงานขับ|รถรับส่ง|รถผู้บริหาร|พนักงานขับรถ/u,
+    family: 'C',
+    familyLabel: '🚗 Transport/Driver',
+    positions: ['พนักงานขับรถ', 'คนขับรถ', 'พนักงานขับรถผู้บริหาร', 'พนักงานขับรถส่วนกลาง', 'พนักงานขับรถส่งของ', 'พนักงานขับรถตู้'],
+    jobDna: 'ขับรถรับส่งคนหรือสินค้าอย่างปลอดภัย ตรงเวลา และดูแลรถตามกติกา',
+    trendAnchors: ['ขับรถ', 'คนขับรถ'],
+  },
+  {
+    match: /ทดสอบระบบ|ทดสอบซอฟต์แวร์|ตรวจสอบซอฟต์แวร์|qa|quality assurance|tester/iu,
+    family: 'B',
+    familyLabel: '🔧 Technical-Skilled',
+    positions: ['เจ้าหน้าที่ทดสอบระบบ', 'นักทดสอบซอฟต์แวร์', 'เจ้าหน้าที่ควบคุมคุณภาพ', 'เจ้าหน้าที่ประกันคุณภาพ', 'ผู้ทดสอบระบบ', 'เจ้าหน้าที่ตรวจสอบระบบ'],
+    jobDna: 'ทดสอบระบบตามกรณีทดสอบ บันทึกข้อผิดพลาด และตรวจผลให้ถูกต้องก่อนใช้งาน',
+    trendAnchors: ['ทดสอบระบบ', 'ทดสอบซอฟต์แวร์', 'ควบคุมคุณภาพ'],
+  },
+  {
+    match: /ธุรการ|เอกสาร|คีย์ข้อมูล|ประสานงานสำนักงาน|แอดมินสำนักงาน/u,
+    family: 'D',
+    familyLabel: '📋 Service-Operational',
+    positions: ['ธุรการ', 'เจ้าหน้าที่ธุรการ', 'แอดมิน', 'คีย์ข้อมูล', 'ประสานงาน', 'เจ้าหน้าที่สำนักงาน'],
+    jobDna: 'จัดการเอกสารและข้อมูล ประสานงาน และทำงานตามขั้นตอนอย่างถูกต้อง',
+    trendAnchors: ['ธุรการ', 'แอดมิน', 'คีย์ข้อมูล'],
+  },
+  {
+    match: /คลังสินค้า|สโตร์|แพ็คสินค้า|จัดส่งสินค้า|หยิบสินค้า/u,
+    family: 'D',
+    familyLabel: '📋 Service-Operational',
+    positions: ['พนักงานคลังสินค้า', 'พนักงานสโตร์', 'เจ้าหน้าที่คลังสินค้า', 'พนักงานแพ็คสินค้า', 'พนักงานจัดส่ง', 'เจ้าหน้าที่จัดส่ง'],
+    jobDna: 'รับจ่ายและจัดเก็บสินค้า ตรวจนับ และทำงานตามระบบคลังให้ถูกต้อง',
+    trendAnchors: ['คลังสินค้า', 'พนักงานสโตร์', 'แพ็คสินค้า'],
+  },
+  {
+    match: /รักษาความปลอดภัย|รปภ|ยาม|ตรวจตราอาคาร/u,
+    family: 'E',
+    familyLabel: '🛡️ Security/Control',
+    positions: ['พนักงานรักษาความปลอดภัย', 'รปภ', 'เจ้าหน้าที่รักษาความปลอดภัย', 'ยาม', 'หัวหน้ารักษาความปลอดภัย'],
+    jobDna: 'ตรวจตราพื้นที่ ควบคุมการเข้าออก และรับมือเหตุผิดปกติตามระเบียบ',
+    trendAnchors: ['รักษาความปลอดภัย', 'รปภ'],
+  },
+  {
+    match: /แม่บ้าน|ทำความสะอาด|ดูแลความสะอาด/u,
+    family: 'D',
+    familyLabel: '📋 Service-Operational',
+    positions: ['พนักงานทำความสะอาด', 'แม่บ้าน', 'พนักงานแม่บ้าน', 'เจ้าหน้าที่ทำความสะอาด'],
+    jobDna: 'ดูแลความสะอาดพื้นที่ตามมาตรฐานและตารางงาน',
+    trendAnchors: ['แม่บ้าน', 'ทำความสะอาด'],
+  },
+  {
+    match: /ช่างไฟ|ช่างซ่อม|ซ่อมบำรุง|ช่างเทคนิค|ช่างอาคาร/u,
+    family: 'B',
+    familyLabel: '🔧 Technical-Skilled',
+    positions: ['ช่างเทคนิค', 'ช่างซ่อมบำรุง', 'ช่างไฟฟ้า', 'ช่างอาคาร', 'เจ้าหน้าที่ซ่อมบำรุง'],
+    jobDna: 'ตรวจซ่อมและบำรุงรักษาอุปกรณ์หรือระบบตามขั้นตอนความปลอดภัย',
+    trendAnchors: ['ช่างเทคนิค', 'ช่างซ่อมบำรุง', 'ช่างไฟฟ้า'],
+  },
+  {
+    match: /(?:ฝ่าย)?ขาย|เซลล์|เสนอขาย|ปิดการขาย|พัฒนาธุรกิจ|ดูแลลูกค้า/u,
     family: 'A',
-    familyLabel: 'Customer-facing',
+    familyLabel: '🎭 Presentation-Forward',
     positions: ['พนักงานขาย', 'เซลล์', 'เจ้าหน้าที่ฝ่ายขาย', 'ที่ปรึกษาการขาย', 'นักพัฒนาธุรกิจ', 'ฝ่ายขาย'],
     jobDna: 'ค้นหาลูกค้า นำเสนอสินค้า ดูแลความสัมพันธ์ และปิดการขาย',
+    trendAnchors: ['พนักงานขาย', 'เซลล์', 'ฝ่ายขาย'],
   },
 ];
+
+function cleanTrendTerm(value) {
+  return String(value ?? '').replace(/\s+/g, ' ').replace(/^(?:หางาน|สมัครงาน|รับสมัคร|งาน)\s*/u, '').trim();
+}
+
+/**
+ * Google แนะนำข้อความค้นหาเป็นเพียงสัญญาณคำที่คนใช้ ไม่ใช่จำนวนค้นหา.
+ * ใช้ได้เฉพาะคำที่ยังมี anchor ของ Family เดิม เพื่อไม่ให้เทรนด์พาไปคนละสายงาน.
+ */
+async function addSafeTrendPositions(plan) {
+  if (envString('JOB_SEARCH_TRENDS_ENABLED', '1') === '0') return plan;
+  const anchors = plan.trendAnchors ?? plan.positions.slice(0, 2);
+  try {
+    const suggestions = await fetchGoogleTrendsSuggestions(anchors[0], { timeoutMs: 8_000 });
+    const extra = suggestions
+      .map((item) => cleanTrendTerm(item.keyword))
+      .filter((term) => term && term.length <= 36 && !/[A-Za-z]/.test(term))
+      .filter((term) => anchors.some((anchor) => term.includes(anchor) || anchor.includes(term)))
+      .filter((term) => !plan.positions.includes(term));
+    return { ...plan, positions: [...plan.positions, ...extra.slice(0, 3)], trendTerms: extra.slice(0, 3) };
+  } catch (error) {
+    console.warn(`  [job-family] Google Trends แนะนำคำค้นใช้ไม่ได้ — ใช้พจนานุกรมเดิม (${error.message})`);
+    return plan;
+  }
+}
 
 /**
  * Fast, deterministic safety net for common Thai job descriptions.  A known
@@ -297,7 +380,7 @@ export async function positionsFromDescription({ description, province, platform
   const knownPlan = knownPositionsFromDescription(desc);
   // A short phrase is already a recognizable job title, not a detailed job
   // description. Prefer the stable dictionary and start sourcing immediately.
-  if (knownPlan && desc.length <= 40) return knownPlan;
+  if (knownPlan && desc.length <= 40) return addSafeTrendPositions(knownPlan);
 
   const ctx = [
     `เนื้องาน/ภาระงานที่ต้องการหาคนมาทำ:\n"${desc}"`,
@@ -335,7 +418,7 @@ export async function positionsFromDescription({ description, province, platform
     return null;
   }
 
-  return {
+  const generatedPlan = {
     family: FAMILIES.has(String(out.family)) ? out.family : '',
     familyLabel: String(out.family_label || out.family || ''),
     positions,
@@ -350,4 +433,5 @@ export async function positionsFromDescription({ description, province, platform
     reason: String(out.reason || '').trim(),
     model: res.modelUsed,
   };
+  return addSafeTrendPositions(generatedPlan);
 }

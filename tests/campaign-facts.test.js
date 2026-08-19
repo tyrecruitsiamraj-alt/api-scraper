@@ -58,3 +58,22 @@ test('งานที่ยืนยันว่าไม่เปิดเผ�
   assert.equal(preflightCampaign(campaign).ready, true);
   assert.equal(applyTrustedPosterFacts({ salaryTotal: '20000' }, campaign).salaryTotal, '');
 });
+
+test('แก้คำสะกดสถานที่ที่ผิดชัดเจนก่อนนำไปแสดงผล', () => {
+  const campaign = {
+    ...driverCampaign,
+    request_snapshot: { ...driverCampaign.request_snapshot, location: 'โรงงารคูโบต้า นวนคร' },
+  };
+  assert.equal(extractCampaignFacts(campaign).location, 'โรงงานคูโบต้า นวนคร');
+});
+
+test('โปสเตอร์ดึงจำนวนรับและเบอร์จาก ERP โดยไม่เดาเอง', () => {
+  const campaign = {
+    ...driverCampaign,
+    qty: 2,
+    request_snapshot: { ...driverCampaign.request_snapshot, qty: 2, contact_phone: '081-234-5678' },
+  };
+  const poster = applyTrustedPosterFacts({ contactLine: 'เบอร์ที่โมเดลแต่ง' }, campaign);
+  assert.equal(poster.quantity, '2 อัตรา');
+  assert.equal(poster.contactLine, '081-234-5678');
+});

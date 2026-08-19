@@ -14,6 +14,7 @@
     "scraper:pool": "node workers/scraper-pool.mjs",
     "extract": "node src/extract-worker.js",
     "trends:google": "node scripts/google-trends-suggest.mjs",
+    "test:jobthai": "node scripts/diagnose-jobthai.js \"พนักงานขับรถ\" 3",
     "api": "node src/api/server.js",
     "connector": "node src/cli/connector.js",
     "erp:sync": "node src/erp/sync.js"

@@ -2,10 +2,12 @@ import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { contentGenIngredients, getCampaign, getCampaignPostQueueState, listCampaignContents, listCampaignPosts, listFacebookAccounts, soRecruitCheck } from '@/lib/repo';
 import type { CampaignPostRow } from '@/lib/repo';
-import { approveContentAction, rejectContentAction, editCaptionAction, measureCampaignAction, retryCampaignDraftAction, runFacebookPreflightAction } from '@/lib/actions';
+import { approveContentAction, rejectContentAction, editCaptionAction, editPosterAction, measureCampaignAction, retryCampaignDraftAction, runFacebookPreflightAction } from '@/lib/actions';
 import { CaptionViewer } from '@/components/CaptionViewer';
 
 export const dynamic = 'force-dynamic';
+
+const humanText = (value: unknown) => String(value ?? '').replace(/โรงงาร/g, 'โรงงาน');
 
 const CONTENT_STATUS: Record<string, { label: string; cls: string }> = {
   draft: { label: 'ร่าง (รออนุมัติ)', cls: 'bg-amber-50 text-amber-700' },
@@ -170,7 +172,7 @@ export default async function CampaignDetail({ params }: { params: { id: string 
             <h1 className="text-2xl font-semibold tracking-tight">{c.title || c.request_no || 'งานรับสมัคร'}</h1>
             <p className="mt-1 text-sm text-subtle">
               ใบขอ {c.request_no || '—'}
-              {c.province && ` · ${c.province}`}
+              {c.province && ` · ${humanText(c.province)}`}
               {c.remaining_qty != null && ` · ยังขาด ${c.remaining_qty} อัตรา`}
             </p>
           </div>
@@ -244,7 +246,7 @@ export default async function CampaignDetail({ params }: { params: { id: string 
           </h2>
           <dl className="grid grid-cols-2 gap-4 sm:grid-cols-3">
             <Field label="ตำแหน่ง" value={snap.position || snap.request_name} />
-            <Field label="พื้นที่/สถานที่" value={snap.location || snap.work_addr} />
+            <Field label="พื้นที่/สถานที่" value={humanText(snap.location || snap.work_addr)} />
             <Field label="รายได้" value={snap.income} />
             <Field label="จำนวนที่รับ" value={snap.qty} />
             <Field label="เวลางาน" value={snap.work_schedule} />
@@ -271,7 +273,7 @@ export default async function CampaignDetail({ params }: { params: { id: string 
             <Field label="แผนก" value={snap.department_code} />
             <Field label="ประเภทใบขอ" value={snap.request_name} />
             <Field label="ผู้ขอ" value={snap.requester_name} />
-            <Field label="สถานที่ทำงาน" value={snap.work_addr} />
+            <Field label="สถานที่ทำงาน" value={humanText(snap.work_addr)} />
           </dl>
         </div>
       )}
@@ -336,6 +338,24 @@ export default async function CampaignDetail({ params }: { params: { id: string 
             {reviewContents.map((ct) => {
               const meta = CONTENT_STATUS[ct.status] ?? { label: ct.status, cls: 'bg-black/5 text-ink' };
               const eng = engByContent.get(ct.id);
+              const isPreview = ct.gen_notes?.generation_mode === 'preview';
+              const posterFields = ct.poster_fields ?? {
+                title: String(c.title || snap.position || snap.request_name || ''),
+                badge: 'เปิดรับสมัครด่วน',
+                location: humanText(snap.location || snap.work_addr || c.province || ''),
+                worktime: String(snap.work_schedule || ''),
+                salaryTotal: String(snap.income || ''),
+                salaryBreakdown: '',
+                quantity: c.qty ? `${c.qty} อัตรา` : '',
+                qualifications: [
+                  snap.gender ? (['o', 'all', 'any', 'a', 'ไม่จำกัด'].includes(String(snap.gender).toLowerCase()) ? 'ไม่จำกัดเพศ' : `เพศ ${snap.gender}`) : '',
+                  snap.age_min || snap.age_max ? `อายุ ${snap.age_min || ''}–${snap.age_max || ''} ปี` : '',
+                  snap.education ? `วุฒิการศึกษา ${snap.education}` : '',
+                ].filter(Boolean),
+                benefits: [],
+                contactLine: String(snap.contact_phone || snap.phone || snap.tel || snap.mobile || snap.contact_tel || ''),
+                imageSide: isPreview ? 'left' as const : 'right' as const,
+              };
               return (
                 <div key={ct.id} className="card p-5">
                   <div className="mb-3 flex items-center justify-between">
@@ -346,6 +366,11 @@ export default async function CampaignDetail({ params }: { params: { id: string 
                     </div>
                     <span className={`pill ${meta.cls}`}>{meta.label}</span>
                   </div>
+                  {isPreview && (
+                    <div className="mb-3 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-xs text-blue-900">
+                      Preview ชั่วคราวจาก Codex — ใช้ตรวจรูปและแคปชันได้ แต่ระบบปิดการโพสต์ไว้จนกว่า Worker จะสร้างร่าง Production ใหม่
+                    </div>
+                  )}
                   <div className="grid gap-4 sm:grid-cols-[180px_1fr]">
                     {ct.has_image ? (
                       // คลิกเปิดรูปเต็ม (แท็บใหม่ — ซูม/เซฟได้)
@@ -423,11 +448,85 @@ export default async function CampaignDetail({ params }: { params: { id: string 
                               <div><span className="text-subtle">ฮุกที่แนะ:</span> {ct.gen_notes.hooks.join(' | ')}</div>
                             )}
                             {ct.gen_notes.imageStyle && <div><span className="text-subtle">สไตล์รูป:</span> {ct.gen_notes.imageStyle}</div>}
+                            {ct.gen_notes.trends?.length ? <div><span className="text-subtle">คำแนะนำจาก Google Trends:</span> {ct.gen_notes.trends.join(' · ')}</div> : null}
+                            {ct.gen_notes.research_keywords?.length ? <div><span className="text-subtle">คำค้นที่ Google แนะนำ:</span> {ct.gen_notes.research_keywords.join(' · ')}</div> : null}
                             <div className="text-subtle/70">
                               อ้างอิงแนวที่ได้ผล {ct.gen_notes.used_winning ?? 0} · เรียนรู้จากงานที่เคยอนุมัติ {ct.gen_notes.used_feedback ?? 0} · เลี่ยงแนวที่ไม่ผ่าน {ct.gen_notes.used_losing ?? 0}
                               {ct.gen_notes.research_model ? ` · วิเคราะห์ด้วย ${ct.gen_notes.research_model}` : ''}
                             </div>
                           </div>
+                        </details>
+                      )}
+
+                      {ct.status === 'draft' && (
+                        <details open className="mt-4 overflow-hidden rounded-xl border-2 border-blue-300 bg-blue-50/70">
+                          <summary className="flex cursor-pointer select-none items-center justify-between gap-3 bg-blue-600 px-4 py-3 text-sm font-semibold text-white hover:bg-blue-700">
+                            <span>✏️ แก้รูปและรายละเอียด</span>
+                            <span className="text-xs font-normal text-blue-100">กดเพื่อเปิด/ปิดฟอร์ม</span>
+                          </summary>
+                          <form action={editPosterAction} className="grid gap-3 p-4 sm:grid-cols-2">
+                            <input type="hidden" name="contentId" value={ct.id} />
+                            <input type="hidden" name="campaignId" value={c.id} />
+                            <label className="text-xs text-subtle">
+                              <span className="mb-1 block">ตำแหน่ง</span>
+                              <input className="field" name="posterTitle" required defaultValue={posterFields.title} />
+                            </label>
+                            <label className="text-xs text-subtle">
+                              <span className="mb-1 block">ป้ายด้านบน</span>
+                              <input className="field" name="posterBadge" defaultValue={posterFields.badge} />
+                            </label>
+                            <label className="text-xs text-subtle sm:col-span-2">
+                              <span className="mb-1 block">สถานที่ทำงาน</span>
+                              <input className="field" name="posterLocation" defaultValue={posterFields.location} />
+                            </label>
+                            <label className="text-xs text-subtle sm:col-span-2">
+                              <span className="mb-1 block">วันและเวลาทำงาน</span>
+                              <input className="field" name="posterWorktime" defaultValue={posterFields.worktime} />
+                            </label>
+                            <label className="text-xs text-subtle">
+                              <span className="mb-1 block">รายได้หลัก</span>
+                              <input className="field" name="posterSalaryTotal" defaultValue={posterFields.salaryTotal} />
+                            </label>
+                            <label className="text-xs text-subtle">
+                              <span className="mb-1 block">รายละเอียดรายได้เพิ่มเติม</span>
+                              <input className="field" name="posterSalaryBreakdown" defaultValue={posterFields.salaryBreakdown} />
+                            </label>
+                            <label className="text-xs text-subtle">
+                              <span className="mb-1 block">จำนวนที่รับ</span>
+                              <input className="field" name="posterQuantity" defaultValue={posterFields.quantity} />
+                            </label>
+                            <label className="text-xs text-subtle">
+                              <span className="mb-1 block">คุณสมบัติ — 1 ข้อต่อบรรทัด</span>
+                              <textarea className="field min-h-24" name="posterQualifications" defaultValue={posterFields.qualifications.join('\n')} />
+                            </label>
+                            <label className="text-xs text-subtle">
+                              <span className="mb-1 block">สวัสดิการ — 1 ข้อต่อบรรทัด</span>
+                              <textarea className="field min-h-24" name="posterBenefits" defaultValue={posterFields.benefits.join('\n')} />
+                            </label>
+                            <label className="text-xs text-subtle">
+                              <span className="mb-1 block">เบอร์โทรที่ยืนยันแล้ว</span>
+                              <input className="field" name="posterContactLine" inputMode="tel" placeholder="กรอกเมื่อพร้อม เช่น 081-234-5678" defaultValue={posterFields.contactLine} />
+                              <span className="mt-1 block text-[11px]">เมื่อกรอก ระบบจะบันทึกเป็นข้อมูลของงานและเติมใน Caption ให้อัตโนมัติ</span>
+                            </label>
+                            <label className="text-xs text-subtle">
+                              <span className="mb-1 block">คนอยู่ฝั่งไหนของภาพ</span>
+                              <select className="field" name="posterImageSide" defaultValue={posterFields.imageSide}>
+                                <option value="right">ขวา — ข้อความอยู่ซ้าย</option>
+                                <option value="left">ซ้าย — ข้อความอยู่ขวา</option>
+                              </select>
+                            </label>
+                            <div className="sm:col-span-2 flex flex-wrap items-center gap-2">
+                              <button className="btn-secondary btn-sm" disabled={!ct.has_source_image}>บันทึกและประกอบรูปใหม่</button>
+                              {ct.has_source_image ? (
+                                <span className="text-xs text-emerald-800">✓ มีภาพต้นฉบับแยกเก็บแล้ว แก้ข้อความ/ตำแหน่งคนแล้วประกอบ PNG ใหม่ได้ทันที</span>
+                              ) : (
+                                <>
+                                  <span className="text-xs text-amber-800">ร่างนี้ยังไม่มีภาพต้นฉบับ จึงแก้บนรูปเดิมไม่ได้</span>
+                                  <button formAction={retryCampaignDraftAction} className="btn-secondary btn-sm">ให้ AI สร้างรูปและแคปชันใหม่</button>
+                                </>
+                              )}
+                            </div>
+                          </form>
                         </details>
                       )}
                     </div>
@@ -512,8 +611,8 @@ export default async function CampaignDetail({ params }: { params: { id: string 
                               <option value="good_visual">รูปเหมาะกับงาน</option>
                             </select>
                           </label>
-                          <button className="btn-primary btn-sm" disabled={publishAccounts.length === 0 || !ct.has_image || !ct.image_generation_ok || ct.quality_status === 'fail'}>
-                            {!ct.has_image || !ct.image_generation_ok || ct.quality_status === 'fail' ? 'ยังไม่ผ่านด่านอนุมัติ' : '✓ อนุมัติและโพสต์'}
+                          <button className="btn-primary btn-sm" disabled={isPreview || publishAccounts.length === 0 || !ct.has_image || !ct.image_generation_ok || ct.quality_status === 'fail'}>
+                            {isPreview ? 'Preview — ยังโพสต์ไม่ได้' : !ct.has_image || !ct.image_generation_ok || ct.quality_status === 'fail' ? 'ยังไม่ผ่านด่านอนุมัติ' : '✓ อนุมัติและโพสต์'}
                           </button>
                         </form>
                         <form action={rejectContentAction} className="flex flex-wrap items-end gap-2">

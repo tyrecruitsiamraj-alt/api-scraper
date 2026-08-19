@@ -360,7 +360,7 @@ Text provider:
 - `CONTENT_TEXT_PROVIDER=ollama` ใช้ `OLLAMA_BASE_URL`
 - ถ้าเว้นว่าง ระบบเลือกอัตโนมัติตามลำดับ: Anthropic → OpenAI → Ollama
 
-Image provider ปัจจุบันรองรับ `openai` ผ่าน `OPENAI_API_KEY`; ถ้าไม่มี key draft ยังสำเร็จแต่ไม่มีรูป
+Image provider ปัจจุบันรองรับ `openai` ผ่าน `OPENAI_API_KEY`; ถ้าไม่มี key ระบบยังรับคิวได้ แต่จะหยุดเป็น `draft_error` พร้อมบอกสาเหตุ (ไม่สร้างร่างที่ไม่มีรูปและไม่ปล่อยให้ดูเหมือนสำเร็จ)
 
 ### 8.3 Approval และ Auto‑Post bridge
 

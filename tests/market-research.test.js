@@ -33,6 +33,12 @@ test('ไม่มีหลักฐาน Facebook ต้องหยุดก�
   assert.equal(gate.facebookEvidence, 0);
 });
 
+test('โหมด Preview ใช้หลักฐาน Google อย่างเดียวได้โดยไม่ผ่อนกฎ Production', () => {
+  const evidence = [{ source_type: 'google_trends' }];
+  assert.equal(assessMarketResearch({ evidence }, { requireFacebook: false }).ready, true);
+  assert.equal(assessMarketResearch({ evidence }, { requireFacebook: true }).ready, false);
+});
+
 test('ผ่าน Research Gate เมื่อมี Google และ Facebook ที่ตรวจย้อนกลับได้', () => {
   const gate = assessMarketResearch({ evidence: [
     { source_type: 'google_trends' },

@@ -41,6 +41,12 @@ async function collectIds(page, seen, ids) {
   for (const id of pageIds) if (!seen.has(id)) { seen.add(id); ids.push(id); }
 }
 
+async function visibleCardIds(page) {
+  return page.locator(CARD_SELECTOR).evaluateAll((els) => els
+    .map((el) => el.getAttribute('data-id'))
+    .filter(Boolean)).catch(() => []);
+}
+
 /**
  * Run the filtered browser search and paginate until we have enough resume ids.
  * Runs on the SAME page that logged in (session.page) — the premium UI depends on
@@ -64,8 +70,9 @@ export async function browserSearchResumeIds(session, criteria, runtime = {}) {
     console.log(`  [JobBKK] after goto /premium → url=${page.url()} #autoComplete-position=${hasUI}`);
   }
   await applyJobBkkFilters(page, criteria, SEARCH_URL); // fills position autocomplete etc.
+  const beforeSearchIds = await visibleCardIds(page);
   await clickSearchButton(page);
-  await waitForSearchResults(page);
+  await waitForSearchResults(page, 45_000, beforeSearchIds);
   await collectIds(page, seen, ids);
   if (runtime.debug) console.log(`  [JobBKK] search page 1: ${ids.length} ids`);
 

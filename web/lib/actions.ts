@@ -20,6 +20,9 @@ import {
   setContentStatus,
   recordContentFeedback,
   updateContentCaption,
+  updateContentPoster,
+  confirmCampaignContactPhone,
+  syncContentContactPhone,
   refreshContentQuality,
   deleteConnector,
   updateScraperConnector,
@@ -452,6 +455,36 @@ export async function editCaptionAction(formData: FormData) {
     await updateContentCaption(contentId, caption);
     await refreshContentQuality(contentId);
   }
+  revalidatePath(`/orchestrator/${campaignId}`);
+}
+
+/** แก้ข้อความบนโปสเตอร์ แล้วประกอบ PNG ใหม่จากภาพต้นฉบับเดิม. */
+export async function editPosterAction(formData: FormData) {
+  const session = await getServerSession(authOptions);
+  if (!session) throw new Error('unauthorized');
+  const contentId = String(formData.get('contentId') ?? '').trim();
+  const campaignId = String(formData.get('campaignId') ?? '').trim();
+  if (!contentId || !campaignId) throw new Error('ข้อมูล Content ไม่ครบ');
+  const contactLine = String(formData.get('posterContactLine') ?? '').trim();
+  if (contactLine) {
+    const confirmedPhone = await confirmCampaignContactPhone(campaignId, contactLine);
+    await syncContentContactPhone(contentId, confirmedPhone);
+  }
+  const list = (name: string) => String(formData.get(name) ?? '')
+    .split(/\r?\n/).map((value) => value.trim()).filter(Boolean);
+  await updateContentPoster(contentId, {
+    title: String(formData.get('posterTitle') ?? ''),
+    badge: String(formData.get('posterBadge') ?? ''),
+    location: String(formData.get('posterLocation') ?? ''),
+    worktime: String(formData.get('posterWorktime') ?? ''),
+    salaryTotal: String(formData.get('posterSalaryTotal') ?? ''),
+    salaryBreakdown: String(formData.get('posterSalaryBreakdown') ?? ''),
+    quantity: String(formData.get('posterQuantity') ?? ''),
+    qualifications: list('posterQualifications'),
+    benefits: list('posterBenefits'),
+    contactLine,
+    imageSide: String(formData.get('posterImageSide') ?? '') === 'left' ? 'left' : 'right',
+  }, session.user?.email ?? session.user?.name ?? null);
   revalidatePath(`/orchestrator/${campaignId}`);
 }
 

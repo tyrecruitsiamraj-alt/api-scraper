@@ -326,6 +326,7 @@ async function fillAutocompleteInput(page, selector, values, label) {
     ? '#autoComplete-position-list'
     : '#autoComplete-keyword-list';
 
+  let allApplied = true;
   for (const value of items.slice(0, 3)) {
     const tagsBefore = await page.locator(`${tagListSelector} li`).count();
 
@@ -365,12 +366,16 @@ async function fillAutocompleteInput(page, selector, values, label) {
     const tagsAfter = await page.locator(`${tagListSelector} li`).count();
     if (tagsAfter <= tagsBefore) {
       console.warn(`  [warn] ${label}: tag not added for "${value}"`);
+      allApplied = false;
     } else {
       console.log(`  [filled] ${label}: ${value}`);
     }
   }
 
-  return true;
+  // A field is successful only when the UI actually added at least one tag.
+  // Returning true after a failed autocomplete silently ran an unfiltered
+  // search and produced unrelated resumes.
+  return allApplied && await page.locator(`${tagListSelector} li`).count() > 0;
 }
 
 const AVAILABLE_START_MAP = {

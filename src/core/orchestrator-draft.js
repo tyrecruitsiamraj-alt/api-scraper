@@ -21,8 +21,10 @@ import { formatPerformanceInsight, patternDecision } from './content-second-brai
  * ไม่มี ANTHROPIC_API_KEY/สร้างผลไม่ได้ = campaign เป็น draft_error พร้อมเหตุผล
  * และโยน error ให้ work_queue บันทึกว่าไม่สำเร็จ (ผู้ใช้กด Retry ได้จาก Work Center).
  */
-export async function generateDraftForCampaign(campaignId) {
+export async function generateDraftForCampaign(campaignId, { researchMode = 'production' } = {}) {
   if (!campaignId) throw new Error('generateDraftForCampaign: missing campaignId');
+  const previewMode = researchMode === 'preview';
+  const requireFacebook = !previewMode && process.env.RESEARCH_REQUIRE_FACEBOOK !== '0';
 
   const { rows } = await query(`SELECT * FROM recruit_campaigns WHERE id = $1`, [campaignId]);
   const c = rows[0];
@@ -39,14 +41,12 @@ export async function generateDraftForCampaign(campaignId) {
   const facts = preflight.facts;
 
   await query(`UPDATE recruit_campaigns SET status='researching', status_note='กำลังสำรวจคำค้นและโพสต์ Facebook ที่เกี่ยวข้อง', updated_at=now() WHERE id=$1`, [campaignId]);
-  const marketResearch = await collectCampaignMarketResearch({ campaignId, facts }).catch((error) => ({
+  const marketResearch = await collectCampaignMarketResearch({ campaignId, facts, requireFacebook }).catch((error) => ({
     keywords: [], facebookPosts: [], evidence: [], warnings: [error.message],
   }));
   console.log(`  [research] Google ${marketResearch.keywords.length} คำ · Facebook ${marketResearch.facebookPosts.length} โพสต์ · หลักฐาน ${marketResearch.evidence.length}`);
   if (marketResearch.warnings.length) console.warn(`  [research] ${marketResearch.warnings.join(' · ')}`);
-  const researchGate = marketResearch.gate ?? assessMarketResearch(marketResearch, {
-    requireFacebook: process.env.RESEARCH_REQUIRE_FACEBOOK !== '0',
-  });
+  const researchGate = assessMarketResearch(marketResearch, { requireFacebook });
   if (!researchGate.ready) {
     const detail = [...researchGate.issues, ...marketResearch.warnings].filter(Boolean).join(' · ');
     const note = `ยังไม่สร้าง Content เพราะหลักฐานสำรวจตลาดไม่ครบ: ${detail}`;
@@ -226,7 +226,7 @@ export async function generateDraftForCampaign(campaignId) {
       throw new Error(note);
     }
   }
-  const contactLine = process.env.CONTENT_CONTACT_LINE || '';
+  const contactLine = facts.contactPhone || process.env.CONTENT_CONTACT_LINE || '';
   const images = [];
   const imageSources = [];
   const imageErrors = [];
@@ -270,6 +270,7 @@ export async function generateDraftForCampaign(campaignId) {
 
   // gen_notes = provenance ว่าแต่ละร่างคิดจากอะไร (โชว์บนหน้า campaign; schema-015 ยังไม่มี = ข้าม)
   const genNotesBase = {
+    generation_mode: previewMode ? 'preview' : 'production',
     ...(research ? { angles: research.angles, hooks: research.hooks, research_model: research.model } : {}),
     ...(trends.length ? { trends: trends.map((t) => t.label) } : {}),
     research_evidence: marketResearch.evidence.length,
@@ -319,12 +320,15 @@ export async function generateDraftForCampaign(campaignId) {
     // image bytes but cannot prove where the image came from or what was checked.
     await query(
       `INSERT INTO campaign_contents
-         (campaign_id, version, platform, caption, image_bytes, image_mime, video_brief, gen_model, status, gen_notes,
+         (campaign_id, version, platform, caption, image_bytes, image_mime,
+          source_image_bytes, source_image_mime, poster_fields,
+          video_brief, gen_model, status, gen_notes,
           quality_status, quality_score, quality_checks, quality_checked_at)
-       VALUES ($1, $2, 'facebook', $3, $4, $5, $6, $7, 'draft', $8::jsonb,
-               $9, $10, $11::jsonb, now())`,
-      [campaignId, version + i, v.caption, image?.bytes ?? null, image?.mime ?? null, v.videoBrief, v.model, genNotes,
-        quality.status, quality.score, JSON.stringify(quality)],
+       VALUES ($1, $2, 'facebook', $3, $4, $5, $6, $7, $8::jsonb, $9, $10, 'draft', $11::jsonb,
+               $12, $13, $14::jsonb, now())`,
+      [campaignId, version + i, v.caption, image?.bytes ?? null, image?.mime ?? null,
+        imageSources[i]?.bytes ?? null, imageSources[i]?.mime ?? null, JSON.stringify({ ...posterFields, contactLine }),
+        v.videoBrief, v.model, genNotes, quality.status, quality.score, JSON.stringify(quality)],
     );
   }
 

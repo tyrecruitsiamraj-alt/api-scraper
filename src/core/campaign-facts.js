@@ -8,6 +8,11 @@ const compact = (value) => clean(value).toLowerCase().replace(/[\s,._\-–—/()
 const pick = (...values) => values.map(clean).find(Boolean) ?? '';
 const BROAD_TITLES = new Set(['งาน', 'พนักงาน', 'เจ้าหน้าที่', 'ช่าง', 'พนักงานทั่วไป', 'รับสมัครงาน', 'ไม่ระบุ']);
 
+function normalizeKnownThaiTypos(value) {
+  return clean(value)
+    .replace(/โรงงาร/g, 'โรงงาน');
+}
+
 function specificRoleFromEvidence(evidence) {
   const text = clean(evidence).toLowerCase();
   const rules = [
@@ -37,7 +42,7 @@ export function extractCampaignFacts(campaign = {}) {
     position,
     roleEvidence,
     positionWasInferred: Boolean(inferredRole),
-    location: pick(snap.location, snap.work_addr, campaign.province, snap.site_name),
+    location: normalizeKnownThaiTypos(pick(snap.location, snap.work_addr, campaign.province, snap.site_name)),
     qty: Number(snap.qty ?? campaign.qty) || null,
     income: pick(snap.income),
     incomeDisclosure,
@@ -47,6 +52,7 @@ export function extractCampaignFacts(campaign = {}) {
     ageMin: Number(snap.age_min) || null,
     ageMax: Number(snap.age_max) || null,
     education: pick(snap.education),
+    contactPhone: pick(snap.contact_phone, snap.phone, snap.tel, snap.mobile, snap.contact_tel),
     sourceText: clean([campaign.title, campaign.province, campaign.qty, campaign.positions, ...Object.values(snap)]
       .filter((value) => typeof value !== 'object').join(' · ')),
   };
@@ -107,5 +113,7 @@ export function applyTrustedPosterFacts(fields = {}, campaign = {}) {
     worktime: facts.workSchedule || '',
     salaryTotal: facts.income ? salaryHighlight(facts.income) : '',
     salaryBreakdown: salaryBreakdown(facts.income),
+    quantity: facts.qty ? `${facts.qty} อัตรา` : clean(fields.quantity),
+    contactLine: facts.contactPhone || clean(fields.contactLine),
   };
 }

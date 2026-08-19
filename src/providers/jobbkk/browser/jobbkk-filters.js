@@ -165,19 +165,22 @@ export async function clickSearchButton(page) {
   return 'Enter';
 }
 
-export async function waitForSearchResults(page, timeoutMs = 45_000) {
+export async function waitForSearchResults(page, timeoutMs = 45_000, previousIds = []) {
+  const previous = new Set((previousIds ?? []).map(String));
   const start = Date.now();
   while (Date.now() - start < timeoutMs) {
-    const cards = await page.locator(
+    const ids = await page.locator(
       'article.bg-resume a.read-profile[data-id], article.bg-resume a.clickShowDetail[data-id]',
-    ).count();
-    if (cards > 0) {
-      console.log(`Search results ready: ${cards} resume cards visible`);
-      return cards;
+    ).evaluateAll((els) => els.map((el) => el.getAttribute('data-id')).filter(Boolean)).catch(() => []);
+    const changed = previous.size === 0 || ids.some((id) => !previous.has(String(id)));
+    if (ids.length > 0 && changed) {
+      console.log(`Search results ready: ${ids.length} resume cards visible`);
+      return ids.length;
     }
     await sleep(800);
   }
 
+  if (previous.size > 0) throw new Error('JobBKK search results did not change after applying filters; refusing unfiltered results');
   const count = await waitForPremiumSearchResults(page, 5000);
   return count ?? 0;
 }

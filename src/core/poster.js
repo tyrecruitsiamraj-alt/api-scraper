@@ -17,15 +17,27 @@ const esc = (s) =>
 function buildHtml(f = {}, personDataUri = null) {
   const title = esc(f.title || 'เปิดรับสมัครงาน');
   const badge = esc(f.badge || 'เปิดรับสมัครด่วน');
-  const meta = [f.location, f.worktime].filter(Boolean).map(esc).join(' &nbsp;|&nbsp; ');
+  const location = esc(f.location || '');
+  const worktime = esc(f.worktime || '');
+  const quantity = esc(f.quantity || '');
   const salaryTotal = esc(f.salaryTotal || '');
   const salaryBreakdown = esc(f.salaryBreakdown || '');
   const quals = (Array.isArray(f.qualifications) ? f.qualifications : []).slice(0, 6);
   const benefits = (Array.isArray(f.benefits) ? f.benefits : []).slice(0, 4);
   const contactLine = esc(f.contactLine || '');
+  const imageSide = f.imageSide === 'left' ? 'left' : 'right';
+  const personMask = imageSide === 'left'
+    ? 'linear-gradient(to right,#000 0%,#000 55%,transparent 100%)'
+    : 'linear-gradient(to right,transparent 0%,#000 45%,#000 100%)';
+  const textPosition = imageSide === 'left'
+    ? 'margin-left:430px;max-width:610px;'
+    : 'max-width:660px;';
+  const contactBadge = /(?:^|\D)(?:0\d{8,9}|66\d{8,9})(?:\D|$)/.test(String(f.contactLine || '').replace(/[\s()+-]/g, ''))
+    ? 'โทร'
+    : 'ติดต่อ';
 
   const person = personDataUri
-    ? `<img src="${personDataUri}" style="position:absolute;right:0;bottom:0;width:58%;height:100%;object-fit:cover;object-position:center;mask-image:linear-gradient(to right,transparent 0%,#000 28%);-webkit-mask-image:linear-gradient(to right,transparent 0%,#000 28%);" alt=""/>`
+    ? `<img src="${personDataUri}" style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover;object-position:${imageSide} top;mask-image:${personMask};-webkit-mask-image:${personMask};" alt=""/>`
     : '';
 
   const qualHtml = quals
@@ -43,13 +55,14 @@ function buildHtml(f = {}, personDataUri = null) {
   <div id="poster">
     <div style="position:relative;height:500px;background:linear-gradient(120deg,#b0140f 0%,#e41c24 55%,#ff3b30 100%);overflow:hidden;">
       ${person}
-      <div style="position:relative;padding:52px 56px 0;color:#fff;max-width:660px;">
+      <div style="position:relative;padding:52px 56px 0;color:#fff;${textPosition}">
         <div style="display:flex;align-items:center;gap:16px;font-weight:700;font-size:50px;letter-spacing:-1px;">
           <span style="background:#fff;color:#e41c24;padding:2px 20px;border-radius:16px;">SO</span> WORK!
         </div>
         <div style="margin-top:24px;display:inline-block;background:#1d1d1f;color:#fff;font-size:25px;font-weight:500;padding:9px 28px;border-radius:999px;">${badge}</div>
         <div style="margin-top:20px;font-size:66px;font-weight:700;line-height:1.03;text-shadow:0 2px 12px rgba(0,0,0,.15);">${title}</div>
-        <div style="margin-top:18px;font-size:26px;opacity:.96;">📍 ${meta}</div>
+        ${location ? `<div style="margin-top:18px;font-size:25px;line-height:1.25;opacity:.96;">📍 ${location}</div>` : ''}
+        ${worktime ? `<div style="margin-top:8px;font-size:23px;line-height:1.25;opacity:.92;">🕒 ${worktime}</div>` : ''}
       </div>
     </div>
 
@@ -59,7 +72,9 @@ function buildHtml(f = {}, personDataUri = null) {
           <div style="font-size:22px;opacity:.7;">รายได้รวม</div>
           <div style="font-size:66px;font-weight:700;line-height:1;color:#ff6b64;">${salaryTotal}</div>
         </div>
-        <div style="text-align:right;font-size:22px;line-height:1.45;opacity:.92;max-width:520px;">${salaryBreakdown}</div>
+        <div style="text-align:right;font-size:22px;line-height:1.35;opacity:.92;max-width:520px;">
+          ${salaryBreakdown || (quantity ? `<div style="font-size:19px;opacity:.72;">จำนวนที่รับ</div><div style="font-size:36px;font-weight:700;">${quantity}</div>` : '')}
+        </div>
       </div>
     </div>
 
@@ -72,7 +87,7 @@ function buildHtml(f = {}, personDataUri = null) {
     <div style="position:absolute;left:56px;right:56px;bottom:40px;background:#f7f7f8;border:1px solid #e6e6eb;border-radius:22px;padding:22px 38px;display:flex;align-items:center;justify-content:space-between;">
       <div style="font-size:25px;color:#6e6e73;">สนใจสมัคร ทักเลย</div>
       ${contactLine
-        ? `<div style="display:flex;align-items:center;gap:14px;font-weight:600;font-size:32px;color:#1d1d1f;"><span style="background:#06c755;color:#fff;font-size:21px;padding:6px 15px;border-radius:10px;">LINE</span> ${contactLine}</div>`
+        ? `<div style="display:flex;align-items:center;gap:14px;font-weight:600;font-size:32px;color:#1d1d1f;"><span style="background:#06c755;color:#fff;font-size:21px;padding:6px 15px;border-radius:10px;">${contactBadge}</span> ${contactLine}</div>`
         : '<div style="font-weight:600;font-size:28px;color:#1d1d1f;">ส่งข้อความผ่านโพสต์นี้ได้เลย</div>'}
     </div>
   </div>

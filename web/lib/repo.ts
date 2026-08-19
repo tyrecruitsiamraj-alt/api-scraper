@@ -5,6 +5,7 @@ import { evaluateContentQuality, qualityFailureMessages } from '../../src/core/c
 import type { ContentQualityResult } from '../../src/core/content-quality.js';
 import { evaluateWorkflowReadiness } from '../../src/core/workflow-readiness.js';
 import type { WorkflowReadiness } from '../../src/core/workflow-readiness.js';
+import { renderPoster } from '../../src/core/poster.js';
 
 // schema ของ autopost — แยกต่อ project ได้ผ่าน env (ไม่ตั้ง = so_autopost_jobs เดิม)
 // ใช้กับทุก query ข้าม schema ไปฝั่ง autopost. ค่าจาก env เราคุมเอง (ไม่ใช่ input ผู้ใช้)
@@ -1127,15 +1128,18 @@ export async function enqueueScrapeForTask(taskId: string, ownerUser: string | n
   const readyWorkers = (await listWorkerHeartbeats()).filter((worker) => {
     if (!worker.online || worker.kind !== 'scraper') return false;
     const types = Array.isArray(worker.meta?.types) ? worker.meta.types.map(String) : [];
-    const image = worker.meta?.image_generation as { configured?: boolean } | undefined;
-    return types.includes('scrape') && types.includes('draft') && Boolean(image) && workerBuildMatches(worker.meta);
+    // A resume scrape must not depend on the content/image-generation setup.
+    // Temporary or dedicated scraper machines commonly have no OpenAI image key,
+    // but are still fully capable of running the evidence-v1 sourcing pipeline.
+    return types.includes('scrape')
+      && String(worker.meta?.content_pipeline || '') === REQUIRED_CONTENT_PIPELINE;
   });
   if (readyWorkers.length === 0) {
     await q(
       `UPDATE scrape_tasks
           SET status='idle', phase='idle', last_error=$2, updated_at=now()
         WHERE id=$1 AND status <> 'running'`,
-      [taskId, 'ยังไม่เริ่มค้นหา: Worker บน Mac ยังเป็นรุ่นเดิม กรุณาปิดแผงเดิม เปิด so-control.command ใหม่ แล้วกด R รีเฟรช'],
+      [taskId, 'ยังไม่เริ่มค้นหา: ยังไม่มีเครื่องค้นหาผู้สมัครที่พร้อมรับงาน กรุณาเปิด Worker แล้วลองอีกครั้ง'],
     );
     return false;
   }
@@ -1702,6 +1706,20 @@ export async function contentGenIngredients(title: string | null): Promise<GenIn
   return { winning, losing };
 }
 
+export type PosterFields = {
+  title: string;
+  badge: string;
+  location: string;
+  worktime: string;
+  salaryTotal: string;
+  salaryBreakdown: string;
+  quantity: string;
+  qualifications: string[];
+  benefits: string[];
+  contactLine: string;
+  imageSide: 'left' | 'right';
+};
+
 export type ContentRow = {
   id: string;
   campaign_id: string;
@@ -1715,21 +1733,27 @@ export type ContentRow = {
   reject_reason: string | null;
   created_at: string;
   has_image: boolean;
+  has_source_image: boolean;
   image_generation_ok: boolean;
   quality_status: 'pending' | 'pass' | 'warning' | 'fail';
   quality_score: number | null;
   quality_checks: ContentQualityResult | null;
   quality_checked_at: string | null;
+  poster_fields: PosterFields | null;
   /** provenance ว่าร่างนี้ AI คิดจากอะไร (schema-015) — {angles,hooks,imageStyle,style,used_winning,used_losing} */
   gen_notes: {
+    generation_mode?: 'preview' | 'production';
     angles?: string[];
     hooks?: string[];
     imageStyle?: string;
+    trends?: string[];
+    research_keywords?: string[];
     style?: string | null;
     used_winning?: number;
     used_feedback?: number;
     used_losing?: number;
     research_model?: string;
+    research_gate?: { ready?: boolean; issues?: string[]; googleEvidence?: number; facebookEvidence?: number };
     image_generation?: { ok?: boolean; provider?: string | null; model?: string | null; prompt?: string | null };
   } | null;
 };
@@ -1741,6 +1765,7 @@ export async function listCampaignContents(campaignId: string) {
       q<ContentRow>(
       `SELECT id, campaign_id, version, platform, caption, video_brief, gen_model, status,
               engagement_score, reject_reason, created_at, (image_bytes IS NOT NULL) AS has_image,
+              (source_image_bytes IS NOT NULL) AS has_source_image, poster_fields,
               COALESCE((gen_notes->'image_generation'->>'ok')::boolean,false) AS image_generation_ok, gen_notes,
               quality_status, quality_score, quality_checks, quality_checked_at
          FROM campaign_contents WHERE campaign_id = $1 ORDER BY version DESC`,
@@ -1748,17 +1773,22 @@ export async function listCampaignContents(campaignId: string) {
       ),
       getCampaign(campaignId),
     ]);
-    // ร่างเก่าก่อน schema-019 ยังเป็น pending: คำนวณเพื่อให้หน้าจอบอกปัญหาจริงได้ทันที
-    // (ตอนอนุมัติจะตรวจซ้ำและบันทึกผลภายใน transaction อีกครั้งเสมอ).
+    // ตรวจทุก version ด้วยกฎปัจจุบันทุกครั้ง ไม่เชื่อคะแนนเก่าที่อาจสร้างก่อนเพิ่ม
+    // factual gate รุ่นใหม่ มิฉะนั้นร่างเก่าที่แต่งสวัสดิการ/LINE อาจยังโชว์ 100/100.
     return rows.map((row) => {
       if (!campaign) return row;
-      if (row.quality_status !== 'pending' && row.image_generation_ok) return row;
-      const quality = evaluateContentQuality({ campaign, caption: row.caption, imageReady: row.has_image && row.image_generation_ok });
+      const quality = evaluateContentQuality({
+        campaign,
+        caption: row.caption,
+        posterFields: row.poster_fields ?? row.quality_checks?.posterFields ?? null,
+        imageReady: row.has_image && row.image_generation_ok,
+        researchGate: row.gen_notes?.research_gate ?? { ready: false, issues: ['ร่างนี้ไม่มีหลักฐานสำรวจตลาดก่อนสร้าง'] },
+      });
       return { ...row, quality_status: quality.status, quality_score: quality.score, quality_checks: quality };
     });
   } catch {
     // schema-015 (gen_notes) ยังไม่ migrate — query แบบไม่มีคอลัมน์นั้น
-    const rows = await q<Omit<ContentRow, 'gen_notes' | 'image_generation_ok' | 'quality_status' | 'quality_score' | 'quality_checks' | 'quality_checked_at'>>(
+    const rows = await q<Omit<ContentRow, 'gen_notes' | 'image_generation_ok' | 'quality_status' | 'quality_score' | 'quality_checks' | 'quality_checked_at' | 'has_source_image' | 'poster_fields'>>(
       `SELECT id, campaign_id, version, platform, caption, video_brief, gen_model, status,
               engagement_score, reject_reason, created_at, (image_bytes IS NOT NULL) AS has_image
          FROM campaign_contents WHERE campaign_id = $1 ORDER BY version DESC`,
@@ -1767,6 +1797,8 @@ export async function listCampaignContents(campaignId: string) {
     return rows.map((r) => ({
       ...r,
       gen_notes: null,
+      has_source_image: false,
+      poster_fields: null,
       image_generation_ok: false,
       quality_status: 'pending' as const,
       quality_score: null,
@@ -1828,6 +1860,108 @@ export async function updateContentCaption(id: string, caption: string) {
   await q(`UPDATE campaign_contents SET caption = $2 WHERE id = $1 AND status = 'draft'`, [id, caption]);
 }
 
+/** เบอร์ที่ผู้ตรวจกรอกถือเป็นข้อมูลยืนยันล่าสุดของงาน และถูกเก็บกลับเข้า source snapshot. */
+export async function confirmCampaignContactPhone(campaignId: string, value: string) {
+  const phone = String(value ?? '').trim();
+  const digits = phone.replace(/[^\d]/g, '');
+  if (!/^0\d{8,9}$/.test(digits)) throw new Error('กรุณากรอกเบอร์โทรไทย 9–10 หลัก เช่น 02-123-4567 หรือ 081-234-5678');
+  await q(
+    `UPDATE recruit_campaigns
+        SET request_snapshot=jsonb_set(COALESCE(request_snapshot,'{}'::jsonb), '{contact_phone}', to_jsonb($2::text), true),
+            updated_at=now()
+      WHERE id=$1`,
+    [campaignId, phone],
+  );
+  return phone;
+}
+
+/** เติม/แทนบรรทัดเบอร์ใน Caption เดิม โดยเก็บข้อความสร้างสรรค์ส่วนอื่นไว้. */
+export async function syncContentContactPhone(contentId: string, phone: string) {
+  const rows = await q<{ caption: string | null }>(`SELECT caption FROM campaign_contents WHERE id=$1 AND status='draft'`, [contentId]);
+  if (!rows[0]) throw new Error('ไม่พบร่างที่แก้ไขได้');
+  const lines = String(rows[0].caption || '').split(/\r?\n/).filter((line) => !/^\s*📞\s*ติดต่อ\s*:/i.test(line));
+  let index = lines.findIndex((line) => /^\s*#/.test(line));
+  if (index < 0) index = lines.length;
+  if (index > 0 && lines[index - 1]?.trim()) lines.splice(index, 0, '');
+  lines.splice(index, 0, `📞 ติดต่อ: ${phone}`);
+  await updateContentCaption(contentId, lines.join('\n').trim());
+}
+
+const cleanPosterText = (value: unknown, max: number) => String(value ?? '').replace(/\s+/g, ' ').trim().slice(0, max);
+
+/** แก้ structured text แล้วประกอบ PNG ใหม่จากภาพต้นฉบับเดิม โดยตรวจ ERP ซ้ำทุกครั้ง. */
+export async function updateContentPoster(id: string, input: Partial<PosterFields>, editor: string | null = null) {
+  const client = await pool().connect();
+  try {
+    await client.query('BEGIN');
+    const selected = await client.query<{
+      status: string;
+      caption: string | null;
+      source_image_bytes: Buffer | null;
+      source_image_mime: string | null;
+      campaign: CampaignRow;
+      gen_notes: Record<string, any> | null;
+    }>(
+      `SELECT cc.status, cc.caption, cc.source_image_bytes, cc.source_image_mime, cc.gen_notes,
+              to_jsonb(c.*) AS campaign
+         FROM campaign_contents cc
+         JOIN recruit_campaigns c ON c.id=cc.campaign_id
+        WHERE cc.id=$1 FOR UPDATE OF cc`,
+      [id],
+    );
+    const row = selected.rows[0];
+    if (!row) throw new Error('ไม่พบร่างประกาศนี้');
+    if (row.status !== 'draft') throw new Error('แก้รูปได้เฉพาะร่างที่ยังไม่อนุมัติ');
+    if (!row.source_image_bytes || !row.source_image_mime) {
+      throw new Error('ร่างเก่านี้ไม่มีภาพต้นฉบับ กรุณาสั่งสร้างรูปใหม่หนึ่งครั้งก่อนแก้ข้อความบนรูป');
+    }
+
+    const fields: PosterFields = {
+      title: cleanPosterText(input.title, 80),
+      badge: cleanPosterText(input.badge || 'เปิดรับสมัครด่วน', 40),
+      location: cleanPosterText(input.location, 140),
+      worktime: cleanPosterText(input.worktime, 140),
+      salaryTotal: cleanPosterText(input.salaryTotal, 40),
+      salaryBreakdown: cleanPosterText(input.salaryBreakdown, 160),
+      quantity: cleanPosterText(input.quantity, 40),
+      qualifications: (input.qualifications ?? []).map((value) => cleanPosterText(value, 90)).filter(Boolean).slice(0, 6),
+      benefits: (input.benefits ?? []).map((value) => cleanPosterText(value, 70)).filter(Boolean).slice(0, 4),
+      contactLine: cleanPosterText(input.contactLine, 80),
+      imageSide: input.imageSide === 'left' ? 'left' : 'right',
+    };
+    if (!fields.title) throw new Error('กรุณาระบุตำแหน่งบนรูป');
+
+    const sourceUri = `data:${row.source_image_mime};base64,${row.source_image_bytes.toString('base64')}`;
+    const rendered = await renderPoster(fields, sourceUri);
+    if (!rendered) throw new Error('ประกอบโปสเตอร์ไม่สำเร็จ กรุณาลองใหม่');
+    const researchGate = row.gen_notes?.research_gate ?? { ready: false, issues: ['ร่างนี้ไม่มีหลักฐานสำรวจตลาดก่อนสร้าง'] };
+    const quality = evaluateContentQuality({
+      campaign: row.campaign,
+      caption: row.caption,
+      posterFields: fields,
+      imageReady: true,
+      researchGate,
+    });
+    const editedAt = new Date().toISOString();
+    await client.query(
+      `UPDATE campaign_contents
+          SET image_bytes=$2, image_mime=$3, poster_fields=$4::jsonb,
+              quality_status=$5, quality_score=$6, quality_checks=$7::jsonb, quality_checked_at=now(),
+              gen_notes=COALESCE(gen_notes,'{}'::jsonb) || $8::jsonb
+        WHERE id=$1`,
+      [id, rendered.bytes, rendered.mime, JSON.stringify(fields), quality.status, quality.score,
+        JSON.stringify(quality), JSON.stringify({ poster_edited_at: editedAt, poster_edited_by: editor })],
+    );
+    await client.query('COMMIT');
+    return quality;
+  } catch (error) {
+    await client.query('ROLLBACK').catch(() => {});
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
 /** ตรวจร่างล่าสุดกับใบขอจริง และเก็บผลไว้ให้ UI แสดงทันที. */
 export async function refreshContentQuality(id: string): Promise<ContentQualityResult> {
   const rows = await q<{ caption: string | null; campaign: CampaignRow; quality_checks: ContentQualityResult | null; image_ready: boolean; gen_notes: Record<string, any> | null }>(
@@ -1864,8 +1998,6 @@ export async function enqueueDraftForCampaign(campaignId: string, ownerUser: str
   const workers = await q<{ name: string }>(
     `SELECT name FROM workers
       WHERE last_seen > now() - interval '2 minutes'
-        AND COALESCE((meta->'image_generation'->>'configured')::boolean, false)
-        AND COALESCE(meta->'image_generation'->>'model', '') = 'gpt-image-2'
         AND COALESCE(meta->'types', '[]'::jsonb) ? 'draft'
         AND ($1 = '' OR COALESCE(meta->>'build_sha', '') = $1)
         AND COALESCE(meta->>'content_pipeline', '') = $2
@@ -1876,7 +2008,7 @@ export async function enqueueDraftForCampaign(campaignId: string, ownerUser: str
     await q(
       `UPDATE recruit_campaigns
           SET status='needs_input',
-              status_note='เครื่องสร้าง Content ยังไม่ได้รีเฟรชเป็นรุ่นที่สร้างรูปตามตำแหน่งด้วย gpt-image-2 จึงยังไม่ส่งงานเพื่อป้องกันรูปผิด',
+              status_note='ยังไม่มี Worker สำหรับสร้าง Content ออนไลน์ งานจะเริ่มเองเมื่อเปิดเครื่อง Worker',
               updated_at=now()
         WHERE id=$1`,
       [campaignId],
@@ -2145,6 +2277,9 @@ export async function enqueueApprovedPost(opts: {
     );
     if (locked.rows[0]?.campaign_status !== 'pending_approval' || locked.rows[0]?.content_status !== 'draft') {
       throw new Error('Content นี้ถูกดำเนินการไปแล้ว กรุณารีเฟรชหน้า');
+    }
+    if (locked.rows[0].gen_notes?.generation_mode === 'preview') {
+      throw new Error('ร่างนี้เป็น Preview ชั่วคราว ใช้ตรวจรูปและแคปชันเท่านั้น กรุณาให้ Worker สร้างร่าง Production ก่อนโพสต์');
     }
     // ตรวจซ้ำภายใน transaction หลังล็อกแถว เพื่อกันทั้งการกดซ้ำและการแก้ caption แข่งกับการอนุมัติ.
     const quality = evaluateContentQuality({

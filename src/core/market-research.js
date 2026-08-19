@@ -246,24 +246,30 @@ export async function loadCampaignMarketResearch(campaignId) {
   return rows.filter((item) => item.source_type !== 'google_trends' || isJobSearchQuery(item.query_term));
 }
 
-export async function collectCampaignMarketResearch({ campaignId, facts }) {
+export async function collectCampaignMarketResearch({
+  campaignId,
+  facts,
+  requireFacebook = process.env.RESEARCH_REQUIRE_FACEBOOK !== '0',
+}) {
   const position = clean(facts?.position);
   if (!campaignId || !position) return { keywords: [], facebookPosts: [], evidence: [], warnings: ['ไม่มีตำแหน่งสำหรับสำรวจ'] };
   const warnings = [];
   if (process.env.RESEARCH_LIVE_ENABLED === '0') {
     const evidence = await loadCampaignMarketResearch(campaignId).catch(() => []);
     const result = { keywords: evidence.filter((item) => item.source_type === 'google_trends').map((item) => item.query_term).filter(Boolean), facebookPosts: [], evidence, warnings: ['ปิดการสำรวจสดด้วย RESEARCH_LIVE_ENABLED=0'] };
-    result.gate = assessMarketResearch(result, { requireFacebook: process.env.RESEARCH_REQUIRE_FACEBOOK !== '0' });
+    result.gate = assessMarketResearch(result, { requireFacebook });
     return result;
   }
   const keywords = await collectGoogleSuggestions(campaignId, facts).catch((error) => {
     warnings.push(`Google: ${error.message}`); return [];
   });
   const ownedPosts = await collectOwnedFacebookHistory(campaignId, position).catch(() => []);
-  const facebook = await collectFacebookPosts(campaignId, facts).catch((error) => ({ posts: [], reason: error.message }));
-  if (facebook.reason) warnings.push(`Facebook: ${facebook.reason}`);
+  const facebook = requireFacebook
+    ? await collectFacebookPosts(campaignId, facts).catch((error) => ({ posts: [], reason: error.message }))
+    : { posts: [], reason: '' };
+  if (requireFacebook && facebook.reason) warnings.push(`Facebook: ${facebook.reason}`);
   const evidence = await loadCampaignMarketResearch(campaignId).catch(() => []);
   const result = { keywords, facebookPosts: [...ownedPosts, ...facebook.posts], evidence, warnings };
-  result.gate = assessMarketResearch(result, { requireFacebook: process.env.RESEARCH_REQUIRE_FACEBOOK !== '0' });
+  result.gate = assessMarketResearch(result, { requireFacebook });
   return result;
 }

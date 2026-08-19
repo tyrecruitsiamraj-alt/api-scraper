@@ -244,17 +244,22 @@ export async function generateContent(campaign = {}) {
 export function buildGroundedCaption(campaign = {}) {
   const facts = extractCampaignFacts(campaign);
   if (!facts.position) return '';
+  const displayedIncome = /^\d+$/.test(String(facts.income || '').trim())
+    ? `${Number(facts.income).toLocaleString('th-TH')} บาท`
+    : facts.income;
   const lines = [
     `📣 เปิดรับสมัคร ${facts.position}`,
     facts.location ? `📍 สถานที่ทำงาน: ${facts.location}` : '',
     facts.qty ? `👥 จำนวนที่รับ: ${facts.qty} คน` : '',
-    facts.income ? `💰 รายได้: ${facts.income}` : '',
+    displayedIncome ? `💰 รายได้: ${displayedIncome}` : '',
     facts.workSchedule ? `🕒 วันและเวลาทำงาน: ${facts.workSchedule}` : '',
+    facts.contactPhone ? `📞 ติดต่อ: ${facts.contactPhone}` : '',
   ].filter(Boolean);
   const duties = String(facts.duties || '')
-    .split(/\r?\n|[•;]/)
+    .split(/\r?\n|[•;·]/)
     .map((item) => item.replace(/^[-–—\d.)\s]+/, '').trim())
     .filter((item) => item.length >= 4 && item.toLowerCase() !== '[object object]')
+    .filter((item) => !/^(?:รายได้|เงินเดือน|ค่าจ้าง|เวลา(?:งาน)?|วัน(?:และเวลา)?ทำงาน|เพศ|อายุ|หน่วยงาน|บริษัท|สถานที่|จำนวน(?:ที่รับ)?|วุฒิ(?:การศึกษา)?|น\.?$)/i.test(item))
     .slice(0, 3);
   if (duties.length) lines.push('', 'หน้าที่หลัก', ...duties.map((item) => `• ${item.slice(0, 180)}`));
   const qualifications = [];

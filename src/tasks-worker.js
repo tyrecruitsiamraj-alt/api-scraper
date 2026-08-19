@@ -25,7 +25,6 @@ import {
   setTaskPhase,
   setTaskProgressTarget,
   taskCandidateStats,
-  topTrendKeywords,
   touchTask,
 } from './db/repositories.js';
 import { envInt, loadRuntime } from './config.js';
@@ -103,9 +102,28 @@ export async function runTask(t, runtime) {
     if (dp?.positions?.length) {
       descPositions = dp.positions;
       jobFamily = dp.family || '';
+      const normalizedDescription = jobDesc.toLocaleLowerCase('th-TH');
+      const aiFilters = (dp.hardFilters || []).map((filter) => {
+        const evidenceTerms = Array.isArray(filter?.evidence_terms) ? filter.evidence_terms : [];
+        const value = String(filter?.value || '').toLocaleLowerCase('th-TH');
+        const valueIsGrounded = Boolean(value) && normalizedDescription.includes(value);
+        const explicitMandatory = /ต้องมี|จำเป็นต้อง|หากไม่มี|ไม่รับ|ไม่พิจารณา/u.test(normalizedDescription);
+        const groundedCredential = valueIsGrounded && /ใบขับขี่|ใบอนุญาต|ใบรับรอง|license|certificate/iu.test(value);
+        const everyTermIsExplicit = evidenceTerms.length > 1
+          && evidenceTerms.every((term) => normalizedDescription.includes(String(term).toLocaleLowerCase('th-TH')));
+        return {
+          ...filter,
+          match_mode: everyTermIsExplicit ? 'all' : 'any',
+          is_hard: groundedCredential || explicitMandatory,
+        };
+      });
       qualificationSpec = {
         job_dna: dp.jobDna || '',
-        hard_filters: dp.hardFilters || [],
+        // A recruiter does not reject a relevant resume merely because it omits
+        // a skill/experience phrase. Only explicitly mandatory or grounded
+        // licence requirements are hard gates; the rest rank the shortlist.
+        hard_filters: aiFilters.filter((filter) => filter.is_hard),
+        soft_scores: aiFilters.filter((filter) => !filter.is_hard),
         accepted_positions: dp.positions,
       };
       try {
@@ -118,21 +136,10 @@ export async function runTask(t, runtime) {
           console.log(`  🧠 Second Brain เพิ่มคำค้นที่มี Qualified Yield ดี: ${learnedTerms.join(', ')}`);
         }
       } catch { /* fail-soft */ }
-      // การันตี volume: เติม "คำมาแรง" ของ Family นี้จาก job_trends (seo-update รายสัปดาห์)
-      // ต่อท้ายเสมอ — ต่อให้ AI ออกคำเฉพาะเกินไป ก็ยังมีคำสามัญที่พิสูจน์แล้วว่าค้นเจอ
-      // A broad family can contain roles that share a service gate but are not
-      // substitutes (for example sales and receptionist). A deterministic plan
-      // already has role-safe terms, so do not dilute it with family-wide trends.
-      if (!String(dp.model || '').startsWith('deterministic:')) {
-        try {
-          const trends = await topTrendKeywords(dp.family, 4);
-          const merged = [...descPositions, ...trends.filter((k) => !descPositions.includes(k))];
-          if (merged.length > descPositions.length) {
-            console.log(`  📈 เติมคำมาแรงจาก job_trends (${dp.family}): ${merged.slice(descPositions.length).join(', ')}`);
-            descPositions = merged;
-          }
-        } catch { /* fail-soft */ }
-      }
+      // Do not append family-wide trend terms automatically. A broad family can
+      // contain roles that share a technical/service gate but are not valid
+      // substitutes (for example Data Tester and aircraft technician). Trends
+      // may inform wording, but sourcing expansion must remain role-safe.
       criteria.position = descPositions[0]; // ตำแหน่งแรก (ตรงสุด) = base scrape
       console.log(`  🧭 ${dp.familyLabel || ''} → [${descPositions.join(', ')}]`);
       try {
