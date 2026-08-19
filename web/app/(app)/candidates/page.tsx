@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { countCandidates, listCandidates, listCandidateProvinces } from '@/lib/repo';
 import { ScrapingNav } from '@/components/ScrapingNav';
+import { markCandidateCalledAction, markCandidateViewedAction } from '@/lib/actions';
 
 export const dynamic = 'force-dynamic';
 
@@ -10,6 +11,13 @@ const UPDATED_OPTS: { value: string; label: string }[] = [
   { value: '7', label: 'ใน 7 วัน' },
   { value: '30', label: 'ใน 30 วัน' },
   { value: '90', label: 'ใน 90 วัน' },
+];
+const ACTIVITY_OPTS: { value: string; label: string }[] = [
+  { value: '', label: 'ทุกสถานะการติดตาม' },
+  { value: 'unviewed', label: 'ยังไม่เปิดอ่าน' },
+  { value: 'viewed', label: 'เปิดอ่านแล้ว' },
+  { value: 'uncalled', label: 'ยังไม่โทร' },
+  { value: 'called', label: 'โทรแล้ว' },
 ];
 
 const PLATFORM_LABEL: Record<string, string> = { jobbkk: 'JobBKK', jobthai: 'JobThai' };
@@ -39,19 +47,27 @@ function relTime(s: string | null) {
   return d.toLocaleDateString('th-TH', { day: 'numeric', month: 'short', year: '2-digit' });
 }
 
+function activityTime(s: string | null, by: string | null) {
+  if (!s) return '';
+  return `${relTime(s)}${by ? ` · ${by}` : ''}`;
+}
+
 export default async function CandidatesPage({
   searchParams,
 }: {
-  searchParams: { q?: string; platform?: string; position?: string; province?: string; updated?: string; page?: string };
+  searchParams: { q?: string; platform?: string; position?: string; province?: string; updated?: string; activity?: string; page?: string };
 }) {
   const search = searchParams.q?.trim() || undefined;
   const platform = searchParams.platform || undefined;
   const position = searchParams.position?.trim() || undefined;
   const province = searchParams.province?.trim() || undefined;
   const updatedDays = Number.parseInt(searchParams.updated ?? '', 10) || undefined;
+  const activity = (['viewed', 'unviewed', 'called', 'uncalled'] as const).includes(searchParams.activity as any)
+    ? searchParams.activity as 'viewed' | 'unviewed' | 'called' | 'uncalled'
+    : undefined;
   const pageNo = Math.max(1, Number.parseInt(searchParams.page ?? '1', 10) || 1);
   const limit = 40;
-  const filter = { search, platform, position, province, updatedDays };
+  const filter = { search, platform, position, province, updatedDays, activity };
   const [rows, total, provinces] = await Promise.all([
     listCandidates({ ...filter, limit, offset: (pageNo - 1) * limit }),
     countCandidates(filter),
@@ -66,6 +82,7 @@ export default async function CandidatesPage({
     if (position) p.set('position', position);
     if (province) p.set('province', province);
     if (updatedDays) p.set('updated', String(updatedDays));
+    if (activity) p.set('activity', activity);
     if (platform) p.set('platform', platform);
     for (const [k, v] of Object.entries(extra)) v ? p.set(k, v) : p.delete(k);
     return p;
@@ -85,7 +102,7 @@ export default async function CandidatesPage({
     );
   };
 
-  const activeFilters = [position, province, updatedDays].filter(Boolean).length;
+  const activeFilters = [position, province, updatedDays, activity].filter(Boolean).length;
 
   return (
     <div>
@@ -99,7 +116,7 @@ export default async function CandidatesPage({
       </div>
 
       {/* ฟิลเตอร์: ค้นหา · ตำแหน่ง · จังหวัด · วันที่อัปเดต */}
-      <form className="mb-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-5" action="/candidates" method="get">
+      <form className="mb-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-6" action="/candidates" method="get">
         {platform && <input type="hidden" name="platform" value={platform} />}
         <input name="q" defaultValue={search} placeholder="ค้นหาชื่อ / เบอร์" className="field" />
         <input name="position" defaultValue={position} placeholder="ตำแหน่งที่ต้องการ" className="field" />
@@ -109,6 +126,9 @@ export default async function CandidatesPage({
         </select>
         <select name="updated" defaultValue={searchParams.updated ?? ''} className="field">
           {UPDATED_OPTS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+        </select>
+        <select name="activity" defaultValue={searchParams.activity ?? ''} className="field">
+          {ACTIVITY_OPTS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
         </select>
         <div className="flex gap-2">
           <button className="btn-primary flex-1" type="submit">กรอง</button>
@@ -134,13 +154,15 @@ export default async function CandidatesPage({
               <th className="px-5 py-3 font-medium">ติดต่อ</th>
               <th className="px-5 py-3 font-medium">แหล่งที่มา</th>
               <th className="px-5 py-3 font-medium">อัปเดตล่าสุด</th>
+              <th className="px-5 py-3 font-medium">ติดตาม</th>
+              <th className="px-5 py-3 font-medium text-right">การทำงาน</th>
               <th className="px-5 py-3 font-medium text-right">ไฟล์</th>
             </tr>
           </thead>
           <tbody>
             {rows.length === 0 && (
               <tr>
-                <td colSpan={7} className="px-5 py-16 text-center text-subtle">ยังไม่มีข้อมูลผู้สมัคร</td>
+                <td colSpan={9} className="px-5 py-16 text-center text-subtle">ยังไม่มีข้อมูลผู้สมัคร</td>
               </tr>
             )}
             {rows.map((c) => (
@@ -162,6 +184,35 @@ export default async function CandidatesPage({
                 </td>
                 <td className="px-5 py-3.5 text-subtle whitespace-nowrap" title={fmtFull(c.last_updated_at)}>
                   {relTime(c.last_updated_at)}
+                </td>
+                <td className="px-5 py-3.5 text-xs whitespace-nowrap">
+                  <div className="space-y-1.5">
+                    <span className={`pill ${c.viewed_at ? 'bg-green-50 text-green-700' : 'bg-black/5 text-subtle'}`}>
+                      {c.viewed_at ? 'เปิดอ่านแล้ว' : 'ยังไม่เปิดอ่าน'}
+                    </span>
+                    {c.viewed_at && <div className="text-[11px] text-subtle" title={fmtFull(c.viewed_at)}>{activityTime(c.viewed_at, c.viewed_by)}</div>}
+                    <span className={`pill ${c.called_at ? 'bg-blue-50 text-blue-700' : 'bg-black/5 text-subtle'}`}>
+                      {c.called_at ? 'โทรแล้ว' : 'ยังไม่โทร'}
+                    </span>
+                    {c.called_at && <div className="text-[11px] text-subtle" title={fmtFull(c.called_at)}>{activityTime(c.called_at, c.called_by)}</div>}
+                  </div>
+                </td>
+                <td className="px-5 py-3.5 text-right">
+                  <div className="flex flex-col items-end gap-1.5">
+                    {!c.viewed_at && (
+                      <form action={markCandidateViewedAction}>
+                        <input type="hidden" name="candidateId" value={c.id} />
+                        <button className="btn-ghost text-xs" type="submit">ทำเครื่องหมายว่าเปิดอ่านแล้ว</button>
+                      </form>
+                    )}
+                    {!c.called_at && (
+                      <form action={markCandidateCalledAction}>
+                        <input type="hidden" name="candidateId" value={c.id} />
+                        <button className="btn-ghost text-xs" type="submit">ทำเครื่องหมายว่าโทรแล้ว</button>
+                      </form>
+                    )}
+                    {(c.viewed_at && c.called_at) && <span className="text-xs text-subtle">ติดตามครบแล้ว</span>}
+                  </div>
                 </td>
                 <td className="px-5 py-3.5 text-right text-subtle">{c.asset_count || 0}</td>
               </tr>

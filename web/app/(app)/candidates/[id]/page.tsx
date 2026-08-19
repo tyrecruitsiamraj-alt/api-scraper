@@ -1,7 +1,10 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
-import { getCandidate } from '@/lib/repo';
+import { getCandidate, recordCandidateActivity } from '@/lib/repo';
 import { AttachmentViewer } from '@/components/AttachmentViewer';
+import { markCandidateCalledAction, markCandidateViewedAction } from '@/lib/actions';
+import { getServerSession } from 'next-auth';
+import { authOptions } from '@/lib/auth';
 
 export const dynamic = 'force-dynamic';
 
@@ -25,9 +28,25 @@ function Section({ title, children }: { title: string; children: React.ReactNode
   );
 }
 
+function fmtActivity(s: string | null) {
+  return s ? new Date(s).toLocaleString('th-TH', { dateStyle: 'medium', timeStyle: 'short' }) : '';
+}
+
 export default async function CandidateDetail({ params }: { params: { id: string } }) {
   const c = await getCandidate(params.id);
   if (!c) notFound();
+
+  // Opening the profile is itself the meaningful "อ่านแล้ว" event. Keep the
+  // explicit button below for corrections or a second review.
+  const session = await getServerSession(authOptions);
+  const actor = session?.user?.email ?? session?.user?.name ?? null;
+  let viewedAt = c.viewed_at as string | null;
+  let viewedBy = c.viewed_by as string | null;
+  if (!viewedAt) {
+    await recordCandidateActivity({ candidateId: c.id, activityType: 'viewed', actor });
+    viewedAt = new Date().toISOString();
+    viewedBy = actor;
+  }
 
   const profile = (c.assets ?? []).find((a: any) => a.kind === 'profile');
 
@@ -81,6 +100,35 @@ export default async function CandidateDetail({ params }: { params: { id: string
           {c.line_id && <p className="text-subtle">LINE: {c.line_id}</p>}
         </div>
       </div>
+
+      <section className="card mb-6 p-5">
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div>
+            <h2 className="text-sm font-semibold">สถานะการติดตาม</h2>
+            <p className="mt-1 text-xs text-subtle">ใช้บันทึกว่าทีมเปิดอ่าน Resume แล้วหรือโทรหาผู้สมัครแล้ว</p>
+          </div>
+          <div className="flex flex-wrap gap-2 text-xs">
+            <span className={`pill ${viewedAt ? 'bg-green-50 text-green-700' : 'bg-black/5 text-subtle'}`}>
+              {viewedAt ? `เปิดอ่านแล้ว · ${fmtActivity(viewedAt)}${viewedBy ? ` · ${viewedBy}` : ''}` : 'ยังไม่เปิดอ่าน'}
+            </span>
+            <span className={`pill ${c.called_at ? 'bg-blue-50 text-blue-700' : 'bg-black/5 text-subtle'}`}>
+              {c.called_at ? `โทรแล้ว · ${fmtActivity(c.called_at)}${c.called_by ? ` · ${c.called_by}` : ''}` : 'ยังไม่โทร'}
+            </span>
+          </div>
+        </div>
+        <div className="mt-4 flex flex-wrap items-end gap-2 border-t border-hairline/60 pt-4">
+          <form action={markCandidateViewedAction}>
+            <input type="hidden" name="candidateId" value={c.id} />
+            <button className="btn-secondary" type="submit">{viewedAt ? 'บันทึกว่าเปิดอ่านอีกครั้ง' : 'ทำเครื่องหมายว่าเปิดอ่านแล้ว'}</button>
+          </form>
+          <form action={markCandidateCalledAction} className="flex flex-wrap items-end gap-2">
+            <input type="hidden" name="candidateId" value={c.id} />
+            <input name="note" className="field min-w-56" placeholder="ผลการโทร (ถ้ามี)" />
+            <button className="btn-primary" type="submit">{c.called_at ? 'บันทึกการโทรอีกครั้ง' : 'ทำเครื่องหมายว่าโทรแล้ว'}</button>
+          </form>
+        </div>
+        {c.latest_call_note && <p className="mt-3 text-xs text-subtle">บันทึกการโทรล่าสุด: {c.latest_call_note}</p>}
+      </section>
 
       <div className="grid gap-5 lg:grid-cols-3">
         <div className="lg:col-span-2 space-y-5">

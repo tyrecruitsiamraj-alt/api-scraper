@@ -39,6 +39,10 @@ export type CandidateRow = {
   last_updated_at: string;
   platforms: string[];
   asset_count: number;
+  viewed_at: string | null;
+  viewed_by: string | null;
+  called_at: string | null;
+  called_by: string | null;
 };
 
 export type CandidateFilter = {
@@ -47,6 +51,7 @@ export type CandidateFilter = {
   position?: string;
   province?: string;
   updatedDays?: number; // อัปเดตภายใน N วันล่าสุด
+  activity?: 'viewed' | 'unviewed' | 'called' | 'uncalled';
   limit?: number;
   offset?: number;
 };
@@ -74,6 +79,15 @@ function buildCandidateWhere(opts: CandidateFilter, params: unknown[]): string {
     params.push(opts.updatedDays);
     where.push(`c.last_updated_at >= now() - ($${params.length} || ' days')::interval`);
   }
+  if (opts.activity === 'viewed') {
+    where.push(`EXISTS (SELECT 1 FROM candidate_activity av WHERE av.candidate_id = c.id AND av.activity_type = 'viewed')`);
+  } else if (opts.activity === 'unviewed') {
+    where.push(`NOT EXISTS (SELECT 1 FROM candidate_activity av WHERE av.candidate_id = c.id AND av.activity_type = 'viewed')`);
+  } else if (opts.activity === 'called') {
+    where.push(`EXISTS (SELECT 1 FROM candidate_activity ac WHERE ac.candidate_id = c.id AND ac.activity_type = 'called')`);
+  } else if (opts.activity === 'uncalled') {
+    where.push(`NOT EXISTS (SELECT 1 FROM candidate_activity ac WHERE ac.candidate_id = c.id AND ac.activity_type = 'called')`);
+  }
   return where.length ? 'WHERE ' + where.join(' AND ') : '';
 }
 
@@ -87,7 +101,19 @@ export async function listCandidates(opts: CandidateFilter = {}) {
     `SELECT c.id, c.full_name, c.prefix, c.phone, c.email, c.province, c.expected_salary,
             c.desired_positions, c.last_updated_at,
             ARRAY(SELECT DISTINCT s.platform FROM candidate_sources s WHERE s.candidate_id = c.id) AS platforms,
-            (SELECT count(*)::int FROM candidate_assets a WHERE a.candidate_id = c.id) AS asset_count
+            (SELECT count(*)::int FROM candidate_assets a WHERE a.candidate_id = c.id) AS asset_count,
+            (SELECT av.occurred_at FROM candidate_activity av
+              WHERE av.candidate_id = c.id AND av.activity_type = 'viewed'
+              ORDER BY av.occurred_at DESC LIMIT 1) AS viewed_at,
+            (SELECT av.actor FROM candidate_activity av
+              WHERE av.candidate_id = c.id AND av.activity_type = 'viewed'
+              ORDER BY av.occurred_at DESC LIMIT 1) AS viewed_by,
+            (SELECT ac.occurred_at FROM candidate_activity ac
+              WHERE ac.candidate_id = c.id AND ac.activity_type = 'called'
+              ORDER BY ac.occurred_at DESC LIMIT 1) AS called_at,
+            (SELECT ac.actor FROM candidate_activity ac
+              WHERE ac.candidate_id = c.id AND ac.activity_type = 'called'
+              ORDER BY ac.occurred_at DESC LIMIT 1) AS called_by
        FROM candidates c
       ${whereSql}
       ORDER BY c.last_updated_at DESC
@@ -131,7 +157,41 @@ export async function getCandidate(id: string) {
        FROM candidate_assets WHERE candidate_id = $1 ORDER BY kind, title`,
     [id],
   );
-  return { ...rows[0], sources, assets };
+  const activity = await q<any>(
+    `SELECT id, activity_type, actor, note, occurred_at
+       FROM candidate_activity WHERE candidate_id = $1 ORDER BY occurred_at DESC`,
+    [id],
+  );
+  const viewed = activity.find((a) => a.activity_type === 'viewed');
+  const called = activity.find((a) => a.activity_type === 'called');
+  return {
+    ...rows[0],
+    sources,
+    assets,
+    activity,
+    viewed_at: viewed?.occurred_at ?? null,
+    viewed_by: viewed?.actor ?? null,
+    called_at: called?.occurred_at ?? null,
+    called_by: called?.actor ?? null,
+    latest_call_note: called?.note ?? null,
+  };
+}
+
+export async function recordCandidateActivity(input: {
+  candidateId: string;
+  activityType: 'viewed' | 'called';
+  actor: string | null;
+  note?: string | null;
+}) {
+  const rows = await q<{ id: string }>(
+    `INSERT INTO candidate_activity (candidate_id, activity_type, actor, note)
+     SELECT $1, $2, $3, $4
+      WHERE EXISTS (SELECT 1 FROM candidates WHERE id = $1)
+     RETURNING id`,
+    [input.candidateId, input.activityType, input.actor, input.note ?? null],
+  );
+  if (!rows[0]) throw new Error('ไม่พบผู้สมัครที่ต้องการบันทึกกิจกรรม');
+  return rows[0].id;
 }
 
 export async function getAssetBytes(id: string) {

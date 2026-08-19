@@ -52,6 +52,7 @@ import {
   enqueueWorkflowSelfTest,
   getWorkflowSelfTest,
   enqueueFacebookPreflight,
+  recordCandidateActivity,
 } from './repo';
 
 /** ทดสอบ Web → Queue → Worker แบบไม่แตะงานจริงหรือ Facebook. */
@@ -89,6 +90,36 @@ export async function runFacebookPreflightAction(formData: FormData) {
 async function requireSession() {
   const session = await getServerSession(authOptions);
   if (!session) throw new Error('unauthorized');
+}
+
+export async function markCandidateViewedAction(formData: FormData) {
+  const session = await getServerSession(authOptions);
+  if (!session) throw new Error('unauthorized');
+  const candidateId = String(formData.get('candidateId') ?? '').trim();
+  if (!candidateId) throw new Error('ไม่พบผู้สมัคร');
+  await recordCandidateActivity({
+    candidateId,
+    activityType: 'viewed',
+    actor: session.user?.email ?? session.user?.name ?? null,
+  });
+  revalidatePath('/candidates');
+  revalidatePath(`/candidates/${candidateId}`);
+}
+
+export async function markCandidateCalledAction(formData: FormData) {
+  const session = await getServerSession(authOptions);
+  if (!session) throw new Error('unauthorized');
+  const candidateId = String(formData.get('candidateId') ?? '').trim();
+  if (!candidateId) throw new Error('ไม่พบผู้สมัคร');
+  const note = String(formData.get('note') ?? '').trim() || null;
+  await recordCandidateActivity({
+    candidateId,
+    activityType: 'called',
+    actor: session.user?.email ?? session.user?.name ?? null,
+    note,
+  });
+  revalidatePath('/candidates');
+  revalidatePath(`/candidates/${candidateId}`);
 }
 
 // ---- เทรนด์คอนเทนต์ (schema-016) — คนกรอกเทรนด์ที่อยากให้คอนเทนต์เกาะ ----
