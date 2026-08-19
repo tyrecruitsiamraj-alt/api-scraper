@@ -106,7 +106,7 @@ export async function listCandidates(opts: CandidateFilter = {}) {
             (SELECT a.id FROM candidate_assets a
               WHERE a.candidate_id = c.id AND a.kind = 'profile'
                 AND a.download_status = 'success' AND a.content IS NOT NULL
-              ORDER BY a.last_seen_at DESC NULLS LAST, a.id DESC LIMIT 1) AS profile_asset_id,
+              ORDER BY a.created_at DESC NULLS LAST, a.id DESC LIMIT 1) AS profile_asset_id,
             (SELECT av.occurred_at FROM candidate_activity av
               WHERE av.candidate_id = c.id AND av.activity_type = 'viewed'
               ORDER BY av.occurred_at DESC LIMIT 1) AS viewed_at,
