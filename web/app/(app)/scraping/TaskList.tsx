@@ -212,6 +212,7 @@ export function TaskList({ initialTasks }: { initialTasks: TaskRow[] }) {
         const pctBase = phase === 'scraping' ? qualified : got;
         const pct = target > 0 ? Math.min(100, Math.round((pctBase / target) * 100)) : 0;
         const phaseIdx = PHASES.indexOf(phase as (typeof PHASES)[number]);
+        const alreadyComplete = status === 'done' && target > 0 && qualified >= target;
 
         return (
           <div key={t.id} className="card p-4">
@@ -248,8 +249,8 @@ export function TaskList({ initialTasks }: { initialTasks: TaskRow[] }) {
               <div className="flex items-center gap-2">
                 <form action={queueTaskAction}>
                   <input type="hidden" name="id" value={t.id} />
-                  <button className="btn-ghost px-4 py-2 text-sm disabled:opacity-40" disabled={busy || !t.enabled}>
-                    ▶ รันตอนนี้
+                  <button className="btn-ghost px-4 py-2 text-sm disabled:opacity-40" disabled={busy || !t.enabled || alreadyComplete}>
+                    {alreadyComplete ? '✓ ครบเป้าแล้ว' : '▶ รันตอนนี้'}
                   </button>
                 </form>
                 <form action={toggleTaskAction}>
@@ -263,6 +264,10 @@ export function TaskList({ initialTasks }: { initialTasks: TaskRow[] }) {
                 </form>
               </div>
             </div>
+
+            {alreadyComplete && (
+              <p className="mt-2 text-xs text-subtle">งานนี้มีผู้สมัครผ่านครบ {qualified}/{target} แล้ว หากต้องการค้นเพิ่มให้สร้างงานใหม่หรือเพิ่มจำนวนเป้าหมาย</p>
+            )}
 
             {/* phase checklist — narrates scrape → ocr → enrich → เสร็จสิ้น */}
             {(status !== 'idle' || got > 0) && (
