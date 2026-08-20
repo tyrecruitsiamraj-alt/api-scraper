@@ -1208,9 +1208,22 @@ export async function enqueueScrapeForTask(taskId: string, ownerUser: string | n
     );
     return false;
   }
-  // Pin to a capability-verified machine. Old processes can remain online but
-  // cannot claim new work after this point.
-  const preferredWorker = readyWorkers[0].name;
+  // During a controlled rollout, resume scraping may be deliberately assigned
+  // to one known-good machine.  Without this, an older Mac that happens to come
+  // back online can win the alphabetical worker list and receive the next job.
+  const configuredWorker = String(process.env.SCRAPE_PREFERRED_WORKER ?? '').trim();
+  const preferredWorker = configuredWorker
+    ? readyWorkers.find((worker) => worker.name === configuredWorker)?.name
+    : readyWorkers[0].name;
+  if (!preferredWorker) {
+    await q(
+      `UPDATE scrape_tasks
+          SET status='idle', phase='idle', last_error=$2, updated_at=now()
+        WHERE id=$1 AND status <> 'running'`,
+      [taskId, `ยังไม่เริ่มค้นหา: เครื่อง ${configuredWorker} ที่ตั้งไว้ยังไม่พร้อมรับงาน`],
+    );
+    return false;
+  }
   await q(
     `INSERT INTO work_queue (type, module, connector_key, ref_id, payload, owner_user, preferred_worker)
      SELECT 'scrape', 'scraper', $1, $2, $3::jsonb, $4, $5
