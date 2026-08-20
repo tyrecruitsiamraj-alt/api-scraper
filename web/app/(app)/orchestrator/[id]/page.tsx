@@ -371,7 +371,7 @@ export default async function CampaignDetail({ params }: { params: { id: string 
                       Preview ชั่วคราวจาก Codex — ใช้ตรวจรูปและแคปชันได้ แต่ระบบปิดการโพสต์ไว้จนกว่า Worker จะสร้างร่าง Production ใหม่
                     </div>
                   )}
-                  <div className="grid gap-4 sm:grid-cols-[180px_1fr]">
+                  <div className={`grid items-start gap-5 ${ct.status === 'draft' ? 'xl:grid-cols-[minmax(300px,0.78fr)_minmax(0,1.22fr)]' : 'sm:grid-cols-[180px_1fr]'}`}>
                     {ct.has_image ? (
                       // คลิกเปิดรูปเต็ม (แท็บใหม่ — ซูม/เซฟได้)
                       <a
@@ -382,11 +382,12 @@ export default async function CampaignDetail({ params }: { params: { id: string 
                         title="คลิกดูรูปเต็ม"
                       >
                         {/* eslint-disable-next-line @next/next/no-img-element */}
-                        <img
-                          src={`/api/campaign-content/${ct.id}/image`}
-                          alt="รูปคอนเทนต์ที่ AI สร้าง"
-                          className="aspect-square w-full rounded-lg border border-hairline object-cover transition group-hover:opacity-90"
-                        />
+                         <img
+                           src={`/api/campaign-content/${ct.id}/image`}
+                           alt="รูปคอนเทนต์ที่ AI สร้าง"
+                           className="aspect-square w-full rounded-lg border border-hairline object-cover transition group-hover:opacity-90"
+                         />
+                         <span className="pointer-events-none absolute inset-0 rounded-lg bg-gradient-to-r from-white/20 via-white/5 to-transparent" />
                         <span className="absolute bottom-1.5 right-1.5 rounded-full bg-black/55 px-2 py-0.5 text-[10px] text-white opacity-0 transition group-hover:opacity-100">
                           🔍 ดูเต็ม
                         </span>
@@ -396,9 +397,36 @@ export default async function CampaignDetail({ params }: { params: { id: string 
                         ยังไม่มีรูป
                       </div>
                     )}
-                    <div className="min-w-0">
-                      <div className="mb-1 text-xs text-subtle">แคปชัน</div>
-                      <CaptionViewer caption={ct.caption} />
+                      <div className="min-w-0">
+                        {ct.status === 'draft' ? (
+                          <form action={editCaptionAction} className="rounded-xl border border-hairline bg-black/[0.015] p-4">
+                            <input type="hidden" name="contentId" value={ct.id} />
+                            <input type="hidden" name="campaignId" value={c.id} />
+                            <div className="flex items-start justify-between gap-3">
+                              <div>
+                                <p className="eyebrow">แก้บนหน้า Web</p>
+                                <h3 className="mt-1 text-base font-semibold">แคปชัน</h3>
+                              </div>
+                              <button type="reset" className="btn-ghost btn-sm shrink-0">คืนค่าเดิม</button>
+                            </div>
+                            <p className="mt-2 text-xs leading-5 text-subtle">ปรับข้อความที่คนเห็นใต้โพสต์ได้ทันที บันทึกแล้วระบบจะตรวจข้อมูลสำคัญของร่างนี้ใหม่</p>
+                            <textarea
+                              name="caption"
+                              defaultValue={ct.caption ?? ''}
+                              rows={9}
+                              className="field mt-4 min-h-48 w-full resize-y"
+                            />
+                            <div className="mt-3 flex flex-wrap items-center gap-2">
+                              <button className="btn-secondary btn-sm">บันทึกแคปชัน</button>
+                              <span className="text-[11px] text-subtle">ยังไม่โพสต์จริงจนกดอนุมัติ</span>
+                            </div>
+                          </form>
+                        ) : (
+                          <>
+                            <div className="mb-1 text-xs text-subtle">แคปชัน</div>
+                            <CaptionViewer caption={ct.caption} />
+                          </>
+                        )}
                       {ct.video_brief && (
                         <>
                           <div className="mb-1 mt-3 text-xs text-subtle">แนววิดีโอ (brief)</div>
@@ -459,14 +487,19 @@ export default async function CampaignDetail({ params }: { params: { id: string 
                       )}
 
                       {ct.status === 'draft' && (
-                        <details open className="mt-4 overflow-hidden rounded-xl border-2 border-blue-300 bg-blue-50/70">
-                          <summary className="flex cursor-pointer select-none items-center justify-between gap-3 bg-blue-600 px-4 py-3 text-sm font-semibold text-white hover:bg-blue-700">
-                            <span>✏️ แก้รูปและรายละเอียด</span>
-                            <span className="text-xs font-normal text-blue-100">กดเพื่อเปิด/ปิดฟอร์ม</span>
-                          </summary>
-                          <form action={editPosterAction} className="grid gap-3 p-4 sm:grid-cols-2">
+                        <section className="mt-4 overflow-hidden rounded-xl border-2 border-blue-300 bg-blue-50/70">
+                          <form action={editPosterAction}>
                             <input type="hidden" name="contentId" value={ct.id} />
                             <input type="hidden" name="campaignId" value={c.id} />
+                            <div className="flex items-start justify-between gap-4 bg-blue-600 px-4 py-3 text-white">
+                              <div>
+                                <p className="text-[11px] font-medium uppercase tracking-wide text-blue-100">แก้ข้อความบนหน้า Web</p>
+                                <h3 className="mt-1 text-base font-semibold">ข้อความบนภาพ</h3>
+                              </div>
+                              <button type="reset" className="btn-ghost btn-sm shrink-0 border-white/30 bg-white/10 text-white hover:bg-white/20">คืนค่าเดิม</button>
+                            </div>
+                            <p className="px-4 pt-3 text-xs leading-5 text-blue-950/75">แก้รายละเอียดแล้วกดบันทึก ระบบจะประกอบ PNG ใหม่จากภาพต้นฉบับเดิมทางซ้าย โดยยังไม่ส่งโพสต์จริง</p>
+                            <div className="grid gap-3 p-4 sm:grid-cols-2">
                             <label className="text-xs text-subtle">
                               <span className="mb-1 block">ตำแหน่ง</span>
                               <input className="field" name="posterTitle" required defaultValue={posterFields.title} />
@@ -477,11 +510,11 @@ export default async function CampaignDetail({ params }: { params: { id: string 
                             </label>
                             <label className="text-xs text-subtle sm:col-span-2">
                               <span className="mb-1 block">สถานที่ทำงาน</span>
-                              <input className="field" name="posterLocation" defaultValue={posterFields.location} />
+                              <textarea className="field min-h-20 resize-y" name="posterLocation" defaultValue={posterFields.location} />
                             </label>
                             <label className="text-xs text-subtle sm:col-span-2">
                               <span className="mb-1 block">วันและเวลาทำงาน</span>
-                              <input className="field" name="posterWorktime" defaultValue={posterFields.worktime} />
+                              <textarea className="field min-h-20 resize-y" name="posterWorktime" defaultValue={posterFields.worktime} />
                             </label>
                             <label className="text-xs text-subtle">
                               <span className="mb-1 block">รายได้หลัก</span>
@@ -496,7 +529,7 @@ export default async function CampaignDetail({ params }: { params: { id: string 
                               <input className="field" name="posterQuantity" defaultValue={posterFields.quantity} />
                             </label>
                             <label className="text-xs text-subtle">
-                              <span className="mb-1 block">คุณสมบัติ — 1 ข้อต่อบรรทัด</span>
+                              <span className="mb-1 block">เพศ / อายุ / คุณสมบัติ — 1 ข้อต่อบรรทัด</span>
                               <textarea className="field min-h-24" name="posterQualifications" defaultValue={posterFields.qualifications.join('\n')} />
                             </label>
                             <label className="text-xs text-subtle">
@@ -526,8 +559,9 @@ export default async function CampaignDetail({ params }: { params: { id: string 
                                 </>
                               )}
                             </div>
+                            </div>
                           </form>
-                        </details>
+                        </section>
                       )}
                     </div>
                   </div>
