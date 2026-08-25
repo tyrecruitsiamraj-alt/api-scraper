@@ -204,6 +204,7 @@
 - ก่อนลบ บันทึกลง `operational_failure_lessons` 2 บทเรียน: Session ต้องผ่าน Preflight และ Auto Daily ต้องใช้ Worker ที่ Pin/มี Build Contract; เก็บเฉพาะหมวดสาเหตุและวิธีป้องกัน ไม่มี credential หรือข้อมูลผู้สมัคร
 - ลบเฉพาะ `post_run_queue` 7 แถวและ `run_logs` ทดสอบ 1 แถวหลังตรวจหลักฐานแล้ว; ไม่ลบ Assignment, Job, Candidate หรือผลโพสต์จริง
 - เพิ่ม Skill ไทย `.agents/skills/autopost-failure-learning` และให้ `completePostRunJob` บันทึก Failure ใหม่อัตโนมัติก่อนจบงาน
+- บังคับที่ Server: Worker จะ claim งาน `post` ไม่ได้จนกว่าบัญชีเดียวกันจะมี `preflight=completed` ภายใน 24 ชั่วโมง
 
 ## Recommendation หากเลือกเพียงทางเดียว
 
