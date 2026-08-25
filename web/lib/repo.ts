@@ -34,9 +34,12 @@ export type CandidateRow = {
   phone: string | null;
   email: string | null;
   province: string | null;
+  age: string | null;
   expected_salary: string | null;
   desired_positions: string | null;
   last_updated_at: string;
+  latest_source_seen_at: string | null;
+  latest_search_rank: number | null;
   platforms: string[];
   asset_count: number;
   profile_asset_id: string | null;
@@ -78,7 +81,7 @@ function buildCandidateWhere(opts: CandidateFilter, params: unknown[]): string {
   }
   if (opts.updatedDays && opts.updatedDays > 0) {
     params.push(opts.updatedDays);
-    where.push(`c.last_updated_at >= now() - ($${params.length} || ' days')::interval`);
+    where.push(`EXISTS (SELECT 1 FROM candidate_sources su WHERE su.candidate_id=c.id AND su.last_seen_at >= now() - ($${params.length} || ' days')::interval)`);
   }
   if (opts.activity === 'viewed') {
     where.push(`EXISTS (SELECT 1 FROM candidate_activity av WHERE av.candidate_id = c.id AND av.activity_type = 'viewed')`);
@@ -99,8 +102,18 @@ export async function listCandidates(opts: CandidateFilter = {}) {
   params.push(limit);
   params.push(offset);
   const rows = await q<CandidateRow>(
-    `SELECT c.id, c.full_name, c.prefix, c.phone, c.email, c.province, c.expected_salary,
+    `SELECT c.id, c.full_name, c.prefix, c.phone, c.email, c.province, c.age, c.expected_salary,
             c.desired_positions, c.last_updated_at,
+            (SELECT COALESCE(r.started_at, s.last_seen_at)
+               FROM candidate_sources s LEFT JOIN scrape_runs r ON r.id=s.run_id
+              WHERE s.candidate_id=c.id
+              ORDER BY COALESCE(r.started_at, s.last_seen_at) DESC, s.search_rank ASC NULLS LAST
+              LIMIT 1) AS latest_source_seen_at,
+            (SELECT s.search_rank
+               FROM candidate_sources s LEFT JOIN scrape_runs r ON r.id=s.run_id
+              WHERE s.candidate_id=c.id
+              ORDER BY COALESCE(r.started_at, s.last_seen_at) DESC, s.search_rank ASC NULLS LAST
+              LIMIT 1) AS latest_search_rank,
             ARRAY(SELECT DISTINCT s.platform FROM candidate_sources s WHERE s.candidate_id = c.id) AS platforms,
             (SELECT count(*)::int FROM candidate_assets a WHERE a.candidate_id = c.id) AS asset_count,
             (SELECT a.id FROM candidate_assets a
@@ -121,7 +134,7 @@ export async function listCandidates(opts: CandidateFilter = {}) {
               ORDER BY ac.occurred_at DESC LIMIT 1) AS called_by
        FROM candidates c
       ${whereSql}
-      ORDER BY c.last_updated_at DESC
+      ORDER BY latest_source_seen_at DESC NULLS LAST, latest_search_rank ASC NULLS LAST, c.last_updated_at DESC
       LIMIT $${params.length - 1} OFFSET $${params.length}`,
     params,
   );
@@ -1423,7 +1436,7 @@ function cleanOverrides(ov?: IntakeOverrides): Record<string, string> {
 export async function createScrapeTaskFromSoRecruit(
   requestNo: string,
   connectorId: string,
-  overrides?: { position?: string; province?: string; target?: number },
+  overrides?: { position?: string; province?: string; target?: number; ageMin?: string; ageMax?: string },
 ): Promise<string> {
   const existing = await q<{ id: string }>(
     `SELECT id FROM scrape_tasks WHERE source_request_no = $1 LIMIT 1`,
@@ -1438,9 +1451,11 @@ export async function createScrapeTaskFromSoRecruit(
     erp_province: string | null;
     erp_qty: number | null;
     erp_remaining: number | null;
+    job_snapshot: Record<string, unknown> | null;
   }>(
     `SELECT COALESCE(NULLIF(to_jsonb(r)->>'request_type', ''), 'content') AS request_type,
             r.reason,
+            (to_jsonb(r)->'job_snapshot') AS job_snapshot,
             COALESCE(e.title, NULLIF(to_jsonb(j)->>'job_description_code_1', ''),
                      NULLIF(to_jsonb(j)->>'staff_title_name', ''), j.job_type, j.unit_name) AS erp_title,
             COALESCE(e.province, j.location_address) AS erp_province,
@@ -1464,9 +1479,31 @@ export async function createScrapeTaskFromSoRecruit(
   // คนแก้บนการ์ดก่อนกด = ใช้ค่าที่แก้; ไม่แก้ = ใช้ตามใบขอ
   const position = (overrides?.position ?? '').trim() || req[0].erp_title || '';
   const province = (overrides?.province ?? '').trim() || req[0].erp_province || '';
+  const snapshot = req[0].job_snapshot ?? {};
+  const snapshotText = (...keys: string[]) => {
+    for (const key of keys) {
+      const value = String(snapshot[key] ?? '').trim();
+      if (value) return value;
+    }
+    return '';
+  };
+  const ageMin = (overrides?.ageMin ?? '').trim() || snapshotText('age_min', 'min_age', 'ageMin');
+  const ageMax = (overrides?.ageMax ?? '').trim() || snapshotText('age_max', 'max_age', 'ageMax');
+  const ageNumber = (value: string) => Number.parseInt(value.replace(/[^\d]/g, ''), 10);
+  const minAge = ageMin ? ageNumber(ageMin) : NaN;
+  const maxAge = ageMax ? ageNumber(ageMax) : NaN;
+  if ((ageMin && (!Number.isFinite(minAge) || minAge < 15 || minAge > 80))
+      || (ageMax && (!Number.isFinite(maxAge) || maxAge < 15 || maxAge > 80))) {
+    throw new Error('ช่วงอายุต้องอยู่ระหว่าง 15–80 ปี');
+  }
+  if (Number.isFinite(minAge) && Number.isFinite(maxAge) && minAge > maxAge) {
+    throw new Error('อายุต่ำสุดต้องไม่มากกว่าอายุสูงสุด');
+  }
   const criteria: Record<string, string> = {};
   if (position) criteria.position = position;
   if (province) criteria.province = province;
+  if (Number.isFinite(minAge)) criteria.ageMin = String(minAge);
+  if (Number.isFinite(maxAge)) criteria.ageMax = String(maxAge);
   const target = Math.max(1, overrides?.target || req[0].erp_remaining || req[0].erp_qty || 20);
 
   const inserted = await q<{ id: string }>(
@@ -1938,6 +1975,85 @@ export async function updateContentCaption(id: string, caption: string) {
   await q(`UPDATE campaign_contents SET caption = $2 WHERE id = $1 AND status = 'draft'`, [id, caption]);
 }
 
+/**
+ * คนตรวจรับ Content ก่อน — ขั้นนี้ยังไม่สร้างคิว Facebook.
+ * แยก "อนุมัติสื่อ" ออกจาก "กด Auto-post" เพื่อให้มีหน้าสรุป
+ * จำนวนกลุ่มและบัญชีที่ใช้ก่อนมีการโพสต์จริงเสมอ.
+ */
+export async function approveContentForSummary(opts: {
+  campaignId: string;
+  contentId: string;
+  reviewer: string | null;
+  feedbackCode?: string;
+  feedbackNote?: string | null;
+}) {
+  const client = await pool().connect();
+  try {
+    await client.query('BEGIN');
+    const locked = await client.query<{
+      campaign_status: string;
+      content_status: string;
+      campaign: CampaignRow;
+      caption: string | null;
+      quality_checks: ContentQualityResult | null;
+      gen_notes: Record<string, any> | null;
+      has_image: boolean;
+      image_generation_ok: boolean;
+    }>(
+      `SELECT c.status AS campaign_status, cc.status AS content_status,
+              to_jsonb(c.*) AS campaign, cc.caption, cc.quality_checks, cc.gen_notes,
+              (cc.image_bytes IS NOT NULL) AS has_image,
+              COALESCE((cc.gen_notes->'image_generation'->>'ok')::boolean, false) AS image_generation_ok
+         FROM recruit_campaigns c
+         JOIN campaign_contents cc ON cc.id = $2 AND cc.campaign_id = c.id
+        WHERE c.id = $1
+        FOR UPDATE OF c, cc`,
+      [opts.campaignId, opts.contentId],
+    );
+    const row = locked.rows[0];
+    if (!row || row.campaign_status !== 'pending_approval' || row.content_status !== 'draft') {
+      throw new Error('Content นี้ถูกดำเนินการไปแล้ว กรุณารีเฟรชหน้า');
+    }
+    if (row.gen_notes?.generation_mode === 'preview') {
+      throw new Error('ร่างนี้เป็น Preview ชั่วคราว ใช้ตรวจรูปและแคปชันเท่านั้น กรุณาให้ Worker สร้างร่าง Production ก่อนอนุมัติ');
+    }
+    const quality = evaluateContentQuality({
+      campaign: row.campaign,
+      caption: row.caption,
+      posterFields: row.quality_checks?.posterFields ?? null,
+      imageReady: row.has_image && row.image_generation_ok,
+      researchGate: row.gen_notes?.research_gate ?? { ready: false, issues: ['ร่างนี้ไม่มีหลักฐานสำรวจตลาดก่อนสร้าง'] },
+    });
+    await client.query(
+      `UPDATE campaign_contents
+          SET quality_status=$2, quality_score=$3, quality_checks=$4::jsonb, quality_checked_at=now()
+        WHERE id=$1`,
+      [opts.contentId, quality.status, quality.score, JSON.stringify(quality)],
+    );
+    if (quality.blocking) {
+      throw new Error(`ยังอนุมัติไม่ได้ กรุณาแก้ข้อมูลเหล่านี้ก่อน: ${qualityFailureMessages(quality).join(' · ')}`);
+    }
+    const feedbackCode = FEEDBACK_CODES.has(String(opts.feedbackCode || '')) ? String(opts.feedbackCode) : 'ready';
+    await client.query(`UPDATE campaign_contents SET status='approved', reject_reason=NULL WHERE id=$1`, [opts.contentId]);
+    await client.query(
+      `INSERT INTO content_feedback
+         (campaign_id, content_id, decision, reason_codes, note, reviewer)
+       VALUES ($1, $2, 'approved', ARRAY[$3]::text[], $4, $5)
+       ON CONFLICT (content_id, decision) DO UPDATE SET
+         reason_codes=EXCLUDED.reason_codes, note=EXCLUDED.note,
+         reviewer=EXCLUDED.reviewer, created_at=now()`,
+      [opts.campaignId, opts.contentId, feedbackCode, opts.feedbackNote || null, opts.reviewer],
+    );
+    await client.query(`UPDATE recruit_campaigns SET status='approved', status_note=NULL, updated_at=now() WHERE id=$1`, [opts.campaignId]);
+    await client.query('COMMIT');
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
 /** เบอร์ที่ผู้ตรวจกรอกถือเป็นข้อมูลยืนยันล่าสุดของงาน และถูกเก็บกลับเข้า source snapshot. */
 export async function confirmCampaignContactPhone(campaignId: string, value: string) {
   const phone = String(value ?? '').trim();
@@ -2353,8 +2469,8 @@ export async function enqueueApprovedPost(opts: {
         FOR UPDATE OF c, cc`,
       [campaign.id, content.id],
     );
-    if (locked.rows[0]?.campaign_status !== 'pending_approval' || locked.rows[0]?.content_status !== 'draft') {
-      throw new Error('Content นี้ถูกดำเนินการไปแล้ว กรุณารีเฟรชหน้า');
+    if (locked.rows[0]?.campaign_status !== 'approved' || locked.rows[0]?.content_status !== 'approved') {
+      throw new Error('กรุณาอนุมัติ Content และตรวจหน้าสรุปก่อนเริ่ม Auto-post');
     }
     if (locked.rows[0].gen_notes?.generation_mode === 'preview') {
       throw new Error('ร่างนี้เป็น Preview ชั่วคราว ใช้ตรวจรูปและแคปชันเท่านั้น กรุณาให้ Worker สร้างร่าง Production ก่อนโพสต์');
@@ -2376,9 +2492,10 @@ export async function enqueueApprovedPost(opts: {
     if (quality.blocking) {
       throw new Error(`ยังอนุมัติไม่ได้ กรุณาแก้ข้อมูลเหล่านี้ก่อน: ${qualityFailureMessages(quality).join(' · ')}`);
     }
-    const accountReady = await client.query<{ id: string; group_count: number; paused_until: string | null; preferred_worker: string | null; worker_online: boolean; preflight_ready: boolean; preflight_verified: boolean }>(
+    const accountReady = await client.query<{ id: string; group_count: number; group_ids: unknown; paused_until: string | null; preferred_worker: string | null; worker_online: boolean; preflight_ready: boolean; preflight_verified: boolean }>(
       `SELECT u.id,
               jsonb_array_length(CASE WHEN jsonb_typeof(u.group_ids::jsonb)='array' THEN u.group_ids::jsonb ELSE '[]'::jsonb END)::int AS group_count,
+              CASE WHEN jsonb_typeof(u.group_ids::jsonb)='array' THEN u.group_ids::jsonb ELSE '[]'::jsonb END AS group_ids,
               u.paused_until, u.preferred_worker,
               CASE WHEN NULLIF(TRIM(u.preferred_worker),'') IS NULL THEN true
                    ELSE EXISTS (SELECT 1 FROM ${AP}.workers w WHERE w.name=u.preferred_worker AND w.last_seen > now() - interval '2 minutes')
@@ -2406,6 +2523,8 @@ export async function enqueueApprovedPost(opts: {
     if (!account.worker_online) throw new Error(`เครื่องที่ผูกกับบัญชี Facebook (${account.preferred_worker}) ยังออฟไลน์`);
     if (!account.preflight_ready) throw new Error(`เครื่องที่ผูกกับบัญชี Facebook (${account.preferred_worker}) ยังเป็นรุ่นเดิม กรุณารีเฟรช Worker ก่อน`);
     if (!account.preflight_verified) throw new Error('บัญชี Facebook นี้ยังไม่ผ่านการทดสอบ Session + กลุ่มแบบไม่โพสต์จริงภายใน 24 ชั่วโมง');
+    // snapshot กลุ่ม ณ วันที่กด Auto-post: ภายหลังแก้กลุ่มในบัญชีแล้ว งานนี้ยังนับ/โพสต์ตามชุดที่คนยืนยันไว้
+    const selectedGroupIds = Array.isArray(account.group_ids) ? account.group_ids.map(String) : [];
     await client.query(
       `INSERT INTO ${AP}.jobs (id, title, owner, company, caption, status, image_ref)
        VALUES ($1, $2, 'SO Recruitment', 'SO Recruitment', $3, 'pending', $4)`,
@@ -2413,8 +2532,8 @@ export async function enqueueApprovedPost(opts: {
     );
     await client.query(
       `INSERT INTO ${AP}.assignments (id, job_ids, group_ids, user_id)
-       VALUES ($1, $2::jsonb, '[]'::jsonb, $3)`,
-      [assignmentId, JSON.stringify([jobId]), userId],
+       VALUES ($1, $2::jsonb, $3::jsonb, $4)`,
+      [assignmentId, JSON.stringify([jobId]), JSON.stringify(selectedGroupIds), userId],
     );
     // requested_by ≠ 'auto-daily' → worker ตั้ง IGNORE_DAILY_CAP=1 (โพสต์แบบสั่งเองข้าม cap ได้)
     await client.query(
@@ -2495,6 +2614,35 @@ export async function getCampaignPostQueueState(campaignId: string): Promise<Cam
         WHERE cp.campaign_id = $1
         ORDER BY q.created_at DESC
         LIMIT 1`,
+      [campaignId],
+    );
+    return rows[0] ?? null;
+  } catch {
+    return null;
+  }
+}
+
+export type CampaignAutopostProgress = {
+  selected_groups: number;
+  posted_groups: number;
+  attempted_groups: number;
+};
+
+/** ความคืบหน้าจริงต่อกลุ่ม — ใช้ชุดกลุ่มที่ snapshot ไว้ตอนกด Auto-post. */
+export async function getCampaignAutopostProgress(campaignId: string): Promise<CampaignAutopostProgress | null> {
+  try {
+    const rows = await q<CampaignAutopostProgress>(
+      `SELECT
+          COALESCE(jsonb_array_length(CASE WHEN jsonb_typeof(a.group_ids::jsonb)='array' THEN a.group_ids::jsonb ELSE '[]'::jsonb END), 0)::int AS selected_groups,
+          count(DISTINCT NULLIF(TRIM(pl.group_id), '')) FILTER (WHERE NULLIF(TRIM(pl.post_link), '') IS NOT NULL)::int AS posted_groups,
+          count(DISTINCT NULLIF(TRIM(pl.group_id), ''))::int AS attempted_groups
+       FROM campaign_posts cp
+       JOIN ${AP}.assignments a ON a.job_ids ? cp.job_ref
+       LEFT JOIN ${AP}.post_logs pl ON pl.job_id = cp.job_ref
+      WHERE cp.campaign_id = $1
+      GROUP BY a.id, a.group_ids
+      ORDER BY max(cp.created_at) DESC
+      LIMIT 1`,
       [campaignId],
     );
     return rows[0] ?? null;

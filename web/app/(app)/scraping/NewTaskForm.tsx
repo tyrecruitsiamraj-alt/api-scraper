@@ -163,7 +163,7 @@ export function NewTaskForm({ connectors }: { connectors: ConnectorOption[] }) {
           </div>
         </div>
         <p className="mt-3 text-xs text-subtle">
-          ตัวกรองเหล่านี้ใช้ได้กับทั้ง JobBKK และ JobThai (เงินเดือน/อายุจับเป็นช่วงตามที่แต่ละเว็บกำหนด) · ยิ่งกรองแคบยิ่งได้คนน้อย
+          ตัวกรองเหล่านี้ใช้ได้กับทั้ง JobBKK และ JobThai · ระบบเริ่มจาก Resume ที่เพิ่งอัปเดตและอยู่ลำดับต้นของแพลตฟอร์มก่อน · อายุจะตรวจซ้ำจาก Resume จริงก่อนนับเข้ายอด
         </p>
       </div>
 

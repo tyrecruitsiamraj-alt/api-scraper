@@ -10,6 +10,7 @@ import {
   createScrapeTaskFromSoRecruit,
   createCampaignFromRequest,
   enqueueDraftForCampaign,
+  approveContentForSummary,
   enqueueApprovedPost,
   beginCampaignDraftRetry,
   retryCampaignPost,
@@ -239,6 +240,15 @@ export async function createTaskAction(formData: FormData) {
   const salaryMax = filterVal('salaryMax');
   const ageMin = filterVal('ageMin');
   const ageMax = filterVal('ageMax');
+  const ageMinNumber = ageMin ? Number.parseInt(ageMin, 10) : NaN;
+  const ageMaxNumber = ageMax ? Number.parseInt(ageMax, 10) : NaN;
+  if ((Number.isFinite(ageMinNumber) && (ageMinNumber < 15 || ageMinNumber > 80))
+      || (Number.isFinite(ageMaxNumber) && (ageMaxNumber < 15 || ageMaxNumber > 80))) {
+    throw new Error('ช่วงอายุต้องอยู่ระหว่าง 15–80 ปี');
+  }
+  if (Number.isFinite(ageMinNumber) && Number.isFinite(ageMaxNumber) && ageMinNumber > ageMaxNumber) {
+    throw new Error('อายุต่ำสุดต้องไม่มากกว่าอายุสูงสุด');
+  }
   if (gender) criteria.gender = gender;
   if (province) criteria.province = province;
   if (education) criteria.education = education;
@@ -391,6 +401,8 @@ export async function startSoRecruitScrapeAction(formData: FormData) {
     position: String(formData.get('scrapePosition') ?? '').trim() || undefined,
     province: String(formData.get('scrapeProvince') ?? '').trim() || undefined,
     target: Number(formData.get('scrapeTarget')) || undefined,
+    ageMin: String(formData.get('scrapeAgeMin') ?? '').trim() || undefined,
+    ageMax: String(formData.get('scrapeAgeMax') ?? '').trim() || undefined,
   });
   const queued = await enqueueScrapeForTask(taskId, owner);
   if (queued) kickWorker();
@@ -411,27 +423,41 @@ export async function approveScrapeResultAction(formData: FormData) {
   revalidatePath('/scraping');
 }
 
-/**
- * อนุมัติร่างคอนเทนต์ → ถ้าเลือกบัญชี Facebook: สร้าง job+assignment+คิวโพสต์ใน autopost
- * (worker บน PC โพสต์จริงพร้อมรูป) แล้วตั้ง campaign 'posting'. ไม่เลือกบัญชี = อนุมัติเฉย ๆ.
- */
+/** อนุมัติ "สื่อ" เท่านั้น แล้วพาไปหน้าสรุปก่อนกด Auto-post จริง. */
 export async function approveContentAction(formData: FormData) {
   const session = await getServerSession(authOptions);
   if (!session) throw new Error('unauthorized');
   const contentId = String(formData.get('contentId') ?? '');
   const campaignId = String(formData.get('campaignId') ?? '');
-  const fbAccountId = String(formData.get('fbAccountId') ?? '').trim();
   const feedbackCode = String(formData.get('feedbackCode') ?? 'ready').trim();
   const feedbackNote = String(formData.get('feedbackNote') ?? '').trim() || null;
   if (!contentId || !campaignId) throw new Error('ข้อมูล Content ไม่ครบ');
-  if (!fbAccountId) throw new Error('กรุณาเลือกบัญชี Facebook ก่อนอนุมัติ');
+  const reviewer = session.user?.email ?? session.user?.name ?? null;
+  await approveContentForSummary({
+    campaignId,
+    contentId,
+    reviewer,
+    feedbackCode,
+    feedbackNote,
+  });
+  revalidatePath(`/orchestrator/${campaignId}`);
+  revalidatePath('/orchestrator');
+}
+
+/** หน้าสรุปยืนยันบัญชี/จำนวนกลุ่มแล้วจึงสร้างคิวโพสต์จริง. */
+export async function startCampaignAutopostAction(formData: FormData) {
+  const session = await getServerSession(authOptions);
+  if (!session) throw new Error('unauthorized');
+  const contentId = String(formData.get('contentId') ?? '').trim();
+  const campaignId = String(formData.get('campaignId') ?? '').trim();
+  const fbAccountId = String(formData.get('fbAccountId') ?? '').trim();
+  if (!contentId || !campaignId || !fbAccountId) throw new Error('กรุณาเลือกบัญชี Facebook ก่อนเริ่ม Auto-post');
   const [campaign, content] = await Promise.all([getCampaign(campaignId), getContentById(contentId)]);
   if (!campaign || !content || content.campaign_id !== campaignId) throw new Error('ไม่พบ Content ของ campaign นี้');
-  // โพสต์อะไร: both/image/caption (default both) — เฉพาะรูปต้องมีรูปจริง
   const pm = String(formData.get('postMode') ?? 'both').trim();
   const postMode = pm === 'image' || pm === 'caption' ? pm : 'both';
   if (postMode === 'image' && !content.has_image) throw new Error('ร่างนี้ไม่มีรูป — เลือก “เฉพาะรูป” ไม่ได้');
-  if (!content.image_generation_ok) throw new Error('รูปของร่างนี้ยังไม่มีหลักฐานการสร้างตามตำแหน่ง กรุณาสั่ง AI สร้าง Content ใหม่ก่อนอนุมัติ');
+  if (!content.image_generation_ok) throw new Error('รูปของร่างนี้ยังไม่มีหลักฐานการสร้างตามตำแหน่ง กรุณาสั่ง AI สร้าง Content ใหม่ก่อน Auto-post');
   const reviewer = session.user?.email ?? session.user?.name ?? null;
   await enqueueApprovedPost({
     campaign,
@@ -439,8 +465,6 @@ export async function approveContentAction(formData: FormData) {
     userId: fbAccountId,
     requestedBy: reviewer,
     postMode,
-    feedbackCode,
-    feedbackNote,
   });
   await setSoRecruitRequestStatus(campaign.request_no, 'posted');
   kickWorker(); // เปิดระบบกลางค้างไว้ เพื่อรับงานติดตามผลอัตโนมัติหลัง Facebook โพสต์เสร็จ

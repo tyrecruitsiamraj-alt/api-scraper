@@ -23,7 +23,7 @@ const STATUS_TH: Record<string, string> = {
   draft_error: 'สร้างประกาศไม่สำเร็จ',
   low_engagement: 'คนสนใจน้อย — คิดใหม่',
   pending_approval: 'รอตรวจ',
-  approved: 'อนุมัติแล้ว',
+  approved: 'รอสรุปก่อน Auto-post',
   posting: 'กำลังโพสต์',
   measuring: 'วัดผล',
   done: 'เสร็จ',
@@ -37,7 +37,7 @@ const mkSteps = (states: [S, S, S, S, S, S]): Step[] =>
 
 function campaignStage(status: string, postStatus?: string): WorkCenterStage {
   if (postStatus === 'failed' || postStatus === 'cancelled') return 'attention';
-  if (status === 'pending_approval') return 'review';
+  if (status === 'pending_approval' || status === 'approved') return 'review';
   if (status === 'done') return 'completed';
   if (status === 'low_engagement' || status === 'draft_error' || status === 'needs_input') return 'attention';
   return 'working';
@@ -50,8 +50,8 @@ function contentSteps(status: string, postStatus?: string): Step[] {
   else if (status === 'draft_error' || status === 'needs_input') draft = 'failed';
 
   let approve: S = 'todo';
-  if (status === 'pending_approval') approve = 'active';
-  else if (['approved', 'posting', 'measuring', 'done'].includes(status)) approve = 'done';
+  if (status === 'pending_approval' || status === 'approved') approve = 'active';
+  else if (['posting', 'measuring', 'done'].includes(status)) approve = 'done';
 
   let post: S = 'todo';
   if (postStatus === 'failed' || postStatus === 'cancelled') post = 'failed';

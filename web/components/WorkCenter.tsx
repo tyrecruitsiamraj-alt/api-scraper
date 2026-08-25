@@ -324,7 +324,7 @@ function WorkAction({ item, connectors, facebookAccounts }: {
               🔎 แผนการค้น
               <span className="ml-1 font-normal text-subtle">— ระบบจะค้นหาตามนี้ แก้ได้ก่อนกด</span>
             </div>
-            <div className="mt-2 grid gap-x-3 gap-y-2 sm:grid-cols-3">
+            <div className="mt-2 grid gap-x-3 gap-y-2 sm:grid-cols-5">
               <div>
                 <label className="label" htmlFor={`sp-pos-${item.id}`}>ตำแหน่งที่ค้น</label>
                 <input id={`sp-pos-${item.id}`} name="scrapePosition" defaultValue={f.position ?? ''} placeholder="เช่น พนักงานขับรถ" className="field w-full" />
@@ -337,7 +337,16 @@ function WorkAction({ item, connectors, facebookAccounts }: {
                 <label className="label" htmlFor={`sp-target-${item.id}`}>เป้า (คน)</label>
                 <input id={`sp-target-${item.id}`} name="scrapeTarget" type="number" min={1} defaultValue={f.qty || ''} placeholder="20" className="field w-full" />
               </div>
+              <div>
+                <label className="label" htmlFor={`sp-age-min-${item.id}`}>อายุต่ำสุด</label>
+                <input id={`sp-age-min-${item.id}`} name="scrapeAgeMin" type="number" min={15} max={80} defaultValue={f.age_min ?? ''} placeholder="เช่น 25" className="field w-full" />
+              </div>
+              <div>
+                <label className="label" htmlFor={`sp-age-max-${item.id}`}>อายุสูงสุด</label>
+                <input id={`sp-age-max-${item.id}`} name="scrapeAgeMax" type="number" min={15} max={80} defaultValue={f.age_max ?? ''} placeholder="เช่น 45" className="field w-full" />
+              </div>
             </div>
+            <p className="mt-2 text-xs text-subtle">ระบบเริ่มตรวจจาก Resume ลำดับบนสุดของ JobBKK/JobThai ก่อน และนับเฉพาะคนที่มีหลักฐานว่าอายุอยู่ในช่วงนี้</p>
           </div>
           <div className="flex flex-wrap items-end gap-2">
             <div>

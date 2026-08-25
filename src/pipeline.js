@@ -196,6 +196,9 @@ export async function runConnector(connector, criteria, runtime, opts = {}) {
       search = await runSearch();
     }
     found = search.ids.length;
+    // ทั้ง JobBKK และ JobThai ดัน Resume ที่เพิ่งอัปเดตไว้ต้นผลค้นหา.
+    // เก็บอันดับเดิมก่อนตัดรายการซ้ำ เพื่อให้คลังไม่เรียงกลับด้านตามเวลาเขียน DB.
+    const sourceRankById = new Map(search.ids.map((id, index) => [String(id), index + 1]));
     // A retry may need to page past many Resume IDs already linked to this
     // task. Do not then open hundreds of profiles in one round: remove known
     // IDs before the detail loop and cap fresh profiles to a bounded sample.
@@ -300,6 +303,7 @@ export async function runConnector(connector, criteria, runtime, opts = {}) {
             runId,
             parseStatus: parsed.parse_status,
             rawText: parsed.raw_text,
+            searchRank: sourceRankById.get(String(id)) ?? i + 1,
           });
           const taskLink = await linkCandidateToTask(client, {
             taskId: opts.taskId ?? null,

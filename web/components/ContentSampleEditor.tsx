@@ -1,7 +1,7 @@
 'use client';
 
 import Image from 'next/image';
-import { useMemo, useState } from 'react';
+import { ChangeEvent, useMemo, useState } from 'react';
 
 type SampleFields = {
   position: string;
@@ -13,6 +13,10 @@ type SampleFields = {
   schedule: string;
   cta: string;
 };
+
+const LOGOS = [
+  { id: 'so', label: 'SO Recruitment', src: '/logo-SO.webp' },
+] as const;
 
 const INITIAL: SampleFields = {
   position: 'พนักงานขับรถ',
@@ -36,7 +40,7 @@ const FIELD_LABELS: { key: keyof SampleFields; label: string; multiline?: boolea
   { key: 'cta', label: 'ข้อความชวนสมัคร', multiline: true },
 ];
 
-function Poster({ fields }: { fields: SampleFields }) {
+function Poster({ fields, logoSrc, logoLabel }: { fields: SampleFields; logoSrc: string; logoLabel: string }) {
   return (
     <div
       className="relative aspect-square w-full overflow-hidden rounded-[28px] bg-[#e9f3fb] shadow-[0_24px_70px_rgba(11,42,85,0.2)]"
@@ -80,7 +84,9 @@ function Poster({ fields }: { fields: SampleFields }) {
 
       <div className="absolute bottom-[4.8cqw] left-[5.8cqw] flex items-center gap-[1.8cqw]">
         <span className="relative h-[5.4cqw] w-[10.8cqw] overflow-hidden rounded-[0.8cqw] bg-white/90 px-[1cqw] shadow-sm">
-          <Image src="/logo-SO.webp" alt="SO" fill sizes="11vw" className="object-contain p-[0.8cqw]" />
+          {/* ใช้ img เพื่อรองรับโลโก้ที่ผู้ใช้เลือกจากไฟล์บนเครื่องในหน้า Preview */}
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src={logoSrc} alt={logoLabel} className="h-full w-full object-contain p-[0.8cqw]" />
         </span>
         <span className="text-[1.65cqw] font-medium leading-tight text-[#2f4961]">ร่างแก้ไขได้ · DEMO-001<br />ยังไม่โพสต์จริง</span>
       </div>
@@ -90,8 +96,12 @@ function Poster({ fields }: { fields: SampleFields }) {
 
 export function ContentSampleEditor() {
   const [fields, setFields] = useState<SampleFields>(INITIAL);
+  const [logoId, setLogoId] = useState<string>('so');
+  const [customLogoSrc, setCustomLogoSrc] = useState<string | null>(null);
+  const [customLogoName, setCustomLogoName] = useState<string>('');
+  const [captionOverride, setCaptionOverride] = useState<string | null>(null);
 
-  const caption = useMemo(() => [
+  const generatedCaption = useMemo(() => [
     `🚗 เปิดรับสมัคร ${fields.position}`,
     '',
     `💰 รายได้ ${fields.income} | รับ ${fields.quantity}`,
@@ -102,15 +112,32 @@ export function ContentSampleEditor() {
     fields.cta,
     '#งานขับรถ #หางานกรุงเทพ #สมัครงาน #SOPEOPLE',
   ].join('\n'), [fields]);
+  const caption = captionOverride ?? generatedCaption;
+  const selectedLogo = LOGOS.find((logo) => logo.id === logoId) ?? LOGOS[0];
+  const logoSrc = customLogoSrc ?? selectedLogo.src;
+  const logoLabel = customLogoSrc ? customLogoName || 'โลโก้ที่เลือก' : selectedLogo.label;
 
   const update = (key: keyof SampleFields, value: string) => {
     setFields((current) => ({ ...current, [key]: value }));
   };
 
+  const chooseLogoFile = (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      if (typeof reader.result === 'string') {
+        setCustomLogoSrc(reader.result);
+        setCustomLogoName(file.name);
+      }
+    };
+    reader.readAsDataURL(file);
+  };
+
   return (
     <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,1.12fr)_minmax(360px,0.88fr)]">
       <div className="space-y-4">
-        <Poster fields={fields} />
+        <Poster fields={fields} logoSrc={logoSrc} logoLabel={logoLabel} />
         <div className="flex flex-wrap gap-2">
           <a className="btn-secondary btn-sm" href="/content-samples/driver-recruitment-poster-v1.svg" download>
             ดาวน์โหลดไฟล์แก้ไข SVG
@@ -149,11 +176,50 @@ export function ContentSampleEditor() {
               </label>
             ))}
           </div>
+
+          <div className="mt-5 border-t border-hairline pt-4">
+            <span className="label">โลโก้บนภาพ</span>
+            <div className="mt-2 grid gap-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
+              <label>
+                <span className="sr-only">เลือกโลโก้ที่ตั้งค่าแล้ว</span>
+                <select
+                  className="field w-full"
+                  value={customLogoSrc ? 'custom' : logoId}
+                  onChange={(event) => {
+                    if (event.target.value !== 'custom') {
+                      setLogoId(event.target.value);
+                      setCustomLogoSrc(null);
+                      setCustomLogoName('');
+                    }
+                  }}
+                >
+                  {LOGOS.map((logo) => <option key={logo.id} value={logo.id}>{logo.label}</option>)}
+                  {customLogoSrc && <option value="custom">{customLogoName || 'โลโก้ที่เลือกจากไฟล์'}</option>}
+                </select>
+              </label>
+              <label className="btn-secondary btn-sm inline-flex cursor-pointer items-center justify-center">
+                เลือกไฟล์โลโก้…
+                <input type="file" accept="image/png,image/webp,image/svg+xml" className="sr-only" onChange={chooseLogoFile} />
+              </label>
+            </div>
+            <p className="mt-2 text-xs leading-5 text-subtle">รองรับ SVG, PNG และ WebP · เลือกแล้วเห็นตำแหน่งโลโก้บนภาพทันที ไฟล์นี้ใช้ดูตัวอย่างเท่านั้น ยังไม่อัปโหลดเข้าคลัง Material</p>
+          </div>
         </section>
 
         <section className="card p-5">
-          <p className="eyebrow">Caption ตัวอย่าง</p>
-          <pre className="mt-3 whitespace-pre-wrap font-sans text-sm leading-6 text-ink">{caption}</pre>
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <p className="eyebrow">Caption ตัวอย่าง</p>
+              <h2 className="mt-1 text-lg font-semibold">แก้ข้อความใต้โพสต์</h2>
+            </div>
+            <button type="button" className="btn-ghost btn-sm shrink-0" onClick={() => setCaptionOverride(null)}>คืนค่า AI</button>
+          </div>
+          <p className="mt-2 text-xs leading-5 text-subtle">เพิ่ม ลบ หรือปรับคำชวนสมัครได้เอง ข้อความบนภาพยังแก้จากฟอร์มด้านบน</p>
+          <textarea
+            className="field mt-4 min-h-64 w-full resize-y whitespace-pre-wrap leading-6"
+            value={caption}
+            onChange={(event) => setCaptionOverride(event.target.value)}
+          />
         </section>
 
         <section className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">

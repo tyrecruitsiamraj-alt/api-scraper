@@ -112,6 +112,7 @@ export default async function CandidatesPage({
         <div>
           <h1 className="text-[28px] font-medium tracking-tight">คลังผู้สมัคร</h1>
           <p className="text-sm text-subtle mt-1">{total.toLocaleString()} โปรไฟล์{activeFilters > 0 ? ' (กรองแล้ว)' : 'พร้อมใช้งาน'}</p>
+          <p className="mt-1 text-xs text-subtle">คลังเก็บทุกคนที่พบเพื่อไม่เสียโควตาเปิดซ้ำ แต่งานจะนับเฉพาะผู้สมัครที่ผ่านช่วงอายุและ Hard Filter เท่านั้น</p>
         </div>
       </div>
 
@@ -151,9 +152,10 @@ export default async function CandidatesPage({
               <th className="px-5 py-3 font-medium">รูป / ชื่อ</th>
               <th className="px-5 py-3 font-medium">ตำแหน่งที่ต้องการ</th>
               <th className="px-5 py-3 font-medium">จังหวัด</th>
+              <th className="px-5 py-3 font-medium">อายุ</th>
               <th className="px-5 py-3 font-medium">ติดต่อ</th>
               <th className="px-5 py-3 font-medium">แหล่งที่มา</th>
-              <th className="px-5 py-3 font-medium">อัปเดตล่าสุด</th>
+              <th className="px-5 py-3 font-medium">พบจากเว็บล่าสุด</th>
               <th className="px-5 py-3 font-medium">ติดตาม</th>
               <th className="px-5 py-3 font-medium text-right">การทำงาน</th>
               <th className="px-5 py-3 font-medium text-right">ไฟล์</th>
@@ -162,7 +164,7 @@ export default async function CandidatesPage({
           <tbody>
             {rows.length === 0 && (
               <tr>
-                <td colSpan={9} className="px-5 py-16 text-center text-subtle">ยังไม่มีข้อมูลผู้สมัคร</td>
+                <td colSpan={10} className="px-5 py-16 text-center text-subtle">ยังไม่มีข้อมูลผู้สมัคร</td>
               </tr>
             )}
             {rows.map((c) => (
@@ -184,6 +186,7 @@ export default async function CandidatesPage({
                 </td>
                 <td className="px-5 py-3.5 text-subtle max-w-[240px] truncate">{c.desired_positions || '—'}</td>
                 <td className="px-5 py-3.5 text-subtle">{c.province || '—'}</td>
+                <td className="px-5 py-3.5 text-subtle whitespace-nowrap">{c.age ? `${c.age} ปี` : 'ไม่ระบุ'}</td>
                 <td className="px-5 py-3.5 text-subtle">{c.phone || c.email || '—'}</td>
                 <td className="px-5 py-3.5">
                   <div className="flex flex-wrap gap-1">
@@ -192,8 +195,9 @@ export default async function CandidatesPage({
                     ))}
                   </div>
                 </td>
-                <td className="px-5 py-3.5 text-subtle whitespace-nowrap" title={fmtFull(c.last_updated_at)}>
-                  {relTime(c.last_updated_at)}
+                <td className="px-5 py-3.5 text-subtle whitespace-nowrap" title={fmtFull(c.latest_source_seen_at)}>
+                  <div>{relTime(c.latest_source_seen_at)}</div>
+                  {c.latest_search_rank && <div className="text-[11px]">อันดับ {c.latest_search_rank} ในผลค้น</div>}
                 </td>
                 <td className="px-5 py-3.5 text-xs whitespace-nowrap">
                   <div className="space-y-1.5">

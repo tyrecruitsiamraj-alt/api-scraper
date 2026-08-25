@@ -87,8 +87,8 @@ function normalizeHardFilters(criteria = {}, sourcingSpec = {}) {
   add('province', criteria.province);
   add('education', criteria.education);
   add('gender', criteria.gender && criteria.gender !== 'ไม่ระบุ' ? criteria.gender : '');
-  add('age_min', criteria.ageMin);
-  add('age_max', criteria.ageMax);
+  add('age_min', criteria.ageMin ?? criteria.age_min);
+  add('age_max', criteria.ageMax ?? criteria.age_max);
   add('salary_max', criteria.salaryMax);
   add('driving_license', criteria.drivingLicense && criteria.drivingLicense !== 'ไม่ระบุ' ? criteria.drivingLicense : '');
   for (const item of sourcingSpec.hard_filters || []) {

@@ -11,7 +11,10 @@ export default function AutopostExamplePage() {
           <h1 className="mt-1 text-2xl font-semibold tracking-tight">ตัวอย่าง Content รับสมัครงาน</h1>
           <p className="mt-1 max-w-3xl text-sm text-subtle">ตัวอย่างจากโครงสร้างใบขอ พร้อมข้อความบนภาพ Caption และไฟล์ต้นฉบับที่แก้ต่อได้ โดยไม่เปิดเผยข้อมูลงานจริง</p>
         </div>
-        <Link href="/autopost" className="btn-secondary btn-sm">กลับภาพรวมการโพสต์</Link>
+        <div className="flex flex-wrap gap-2">
+          <Link href="/workflow" className="btn-secondary btn-sm">ดูการไหลทั้งระบบ</Link>
+          <Link href="/autopost" className="btn-secondary btn-sm">กลับภาพรวมการโพสต์</Link>
+        </div>
       </div>
 
       <AutopostNav />

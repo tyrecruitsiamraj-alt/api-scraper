@@ -1,9 +1,10 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
-import { contentGenIngredients, getCampaign, getCampaignPostQueueState, listCampaignContents, listCampaignPosts, listFacebookAccounts, soRecruitCheck } from '@/lib/repo';
+import { contentGenIngredients, getCampaign, getCampaignAutopostProgress, getCampaignPostQueueState, listCampaignContents, listCampaignPosts, listFacebookAccounts, soRecruitCheck } from '@/lib/repo';
 import type { CampaignPostRow } from '@/lib/repo';
 import { approveContentAction, rejectContentAction, editCaptionAction, editPosterAction, measureCampaignAction, retryCampaignDraftAction, runFacebookPreflightAction } from '@/lib/actions';
 import { CaptionViewer } from '@/components/CaptionViewer';
+import { AutopostSummaryForm } from '@/components/AutopostSummaryForm';
 
 export const dynamic = 'force-dynamic';
 
@@ -28,8 +29,8 @@ const STAGE_LABEL: Record<string, string> = {
   researching: 'กำลังหาแนวทางที่เหมาะกับงานนี้',
   drafting: 'กำลังทำ content',
   pending_approval: 'รออนุมัติ',
-  approved: 'อนุมัติแล้ว',
-  posting: 'กำลังโพสต์',
+  approved: 'พร้อมสรุปก่อน Auto-post',
+  posting: 'กำลัง Auto-post',
   measuring: 'วัดผล',
   done: 'เสร็จ',
   low_engagement: 'คนสนใจน้อย (คิดใหม่)',
@@ -37,25 +38,24 @@ const STAGE_LABEL: Record<string, string> = {
 
 // แถบสเตจบนหน้า detail — ไฮไลต์ว่างานนี้อยู่ช่วงไหน
 const STRIP = [
-  { label: 'งานใหม่' },
-  { label: 'สำรวจแนว' },
-  { label: 'ทำคอนเทนต์' },
-  { label: 'รออนุมัติ' },
-  { label: 'โพสต์' },
-  { label: 'วัดผล' },
-  { label: 'เสร็จ' },
+  { label: 'รับงาน' },
+  { label: 'ตรวจข้อมูล' },
+  { label: 'ทำ Content' },
+  { label: 'สรุป / อนุมัติ' },
+  { label: 'Auto-post' },
+  { label: 'เสร็จสิ้น' },
 ];
 const STATUS_TO_STEP: Record<string, number> = {
-  new: 0,
-  needs_input: 0,
-  researching: 1,
+  new: 1,
+  needs_input: 1,
+  researching: 2,
   drafting: 2,
   low_engagement: 2,
   pending_approval: 3,
-  approved: 4,
+  approved: 3,
   posting: 4,
-  measuring: 5,
-  done: 6,
+  measuring: 4,
+  done: 5,
 };
 
 function StageStrip({ status }: { status: string }) {
@@ -132,6 +132,7 @@ export default async function CampaignDetail({ params }: { params: { id: string 
   if (!c) notFound();
   const snap = (c.request_snapshot ?? {}) as Record<string, any>;
   const contents = await listCampaignContents(params.id);
+  const approvedContent = contents.find((item) => item.status === 'approved') ?? null;
   const readyContents = contents.filter((item) => item.status === 'draft' && item.has_image && item.image_generation_ok && item.quality_status !== 'fail');
   const recommendedContentId = readyContents[0]?.id ?? null;
   // หน้าอนุมัติควรมีตัวเลือกที่ตัดสินใจได้จริง ไม่ควรเอาร่างที่ระบบรู้อยู่แล้วว่า
@@ -143,6 +144,7 @@ export default async function CampaignDetail({ params }: { params: { id: string 
   const publishAccounts = fbAccounts.filter((account) => account.group_count > 0 && account.preflight_verified && account.preflight_ready);
   const posts = await listCampaignPosts(params.id);
   const postQueue = await getCampaignPostQueueState(params.id);
+  const autopostProgress = await getCampaignAutopostProgress(params.id);
   const engByContent = aggregateByContent(posts);
   const canMeasure = ['posting', 'measuring', 'low_engagement'].includes(c.status);
   const activePostQueue = postQueue?.status === 'queued' || postQueue?.status === 'running';
@@ -276,6 +278,51 @@ export default async function CampaignDetail({ params }: { params: { id: string 
             <Field label="สถานที่ทำงาน" value={humanText(snap.work_addr)} />
           </dl>
         </div>
+      )}
+
+      {c.status === 'approved' && approvedContent && (
+        <section className="overflow-hidden rounded-2xl border-2 border-violet-300 bg-violet-50/60">
+          <div className="bg-violet-700 px-5 py-4 text-white">
+            <p className="text-xs font-medium uppercase tracking-wide text-violet-100">ขั้นสุดท้ายก่อนโพสต์จริง</p>
+            <h2 className="mt-1 text-lg font-semibold">สรุปงานและเริ่ม Auto-post</h2>
+            <p className="mt-1 text-sm text-violet-100">Content อนุมัติแล้ว แต่ยังไม่มีโพสต์ใดถูกส่งออกจนกดปุ่มด้านล่าง</p>
+          </div>
+          <div className="p-5">
+            <div className="grid gap-3 text-sm sm:grid-cols-3">
+              <div className="rounded-xl border border-violet-100 bg-white px-4 py-3"><span className="block text-xs text-subtle">ตำแหน่ง</span><b>{c.title || c.request_no}</b></div>
+              <div className="rounded-xl border border-violet-100 bg-white px-4 py-3"><span className="block text-xs text-subtle">สื่อที่อนุมัติ</span><b>รูป + แคปชัน เวอร์ชัน {approvedContent.version}</b></div>
+              <div className="rounded-xl border border-violet-100 bg-white px-4 py-3"><span className="block text-xs text-subtle">สถานะ</span><b>รอเลือกบัญชีและกลุ่ม</b></div>
+            </div>
+            {publishAccounts.length > 0 ? (
+              <AutopostSummaryForm
+                campaignId={c.id}
+                contentId={approvedContent.id}
+                accounts={publishAccounts.map((account) => ({ id: account.id, label: account.label, groupCount: account.group_count }))}
+              />
+            ) : (
+              <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+                ยังไม่มีบัญชีที่พร้อม Auto-post — ต้องผูกเครื่อง เลือกกลุ่ม และผ่านการทดสอบแบบไม่โพสต์จริงก่อน
+                <Link href="/settings/connectors" className="ml-2 font-medium text-accent underline">ไปตั้งค่า Connector</Link>
+              </div>
+            )}
+          </div>
+        </section>
+      )}
+
+      {autopostProgress && ['posting', 'measuring', 'done'].includes(c.status) && (
+        <section className="card p-5">
+          <div className="flex flex-wrap items-end justify-between gap-3">
+            <div>
+              <p className="eyebrow">Auto-post</p>
+              <h2 className="mt-1 text-lg font-semibold">ความคืบหน้าการโพสต์ตามกลุ่มที่เลือก</h2>
+            </div>
+            <span className="pill bg-blue-50 text-blue-700">โพสต์สำเร็จ {autopostProgress.posted_groups} / {autopostProgress.selected_groups} กลุ่ม</span>
+          </div>
+          <div className="mt-4 h-2 overflow-hidden rounded-full bg-black/[0.06]">
+            <div className="h-full rounded-full bg-accent transition-all" style={{ width: `${autopostProgress.selected_groups ? Math.min(100, Math.round((autopostProgress.posted_groups / autopostProgress.selected_groups) * 100)) : 0}%` }} />
+          </div>
+          <p className="mt-2 text-xs text-subtle">ระบบเริ่มบันทึกผลแล้ว {autopostProgress.attempted_groups} กลุ่ม · จำนวนเป้าหมายล็อกจากชุดกลุ่มที่คุณเลือกตอนกด Auto-post</p>
+        </section>
       )}
 
       {/* โปร่งใส: บอกคนตรวจว่า AI เอาอะไรมาประกอบตอนคิดร่าง — จะได้รู้ว่าต้องเช็คอะไร */}
@@ -606,36 +653,6 @@ export default async function CampaignDetail({ params }: { params: { id: string 
                         <form action={approveContentAction} className="flex flex-wrap items-end gap-2">
                           <input type="hidden" name="contentId" value={ct.id} />
                           <input type="hidden" name="campaignId" value={c.id} />
-                          {publishAccounts.length > 0 ? (
-                            <label className="text-xs text-subtle">
-                              <span className="mb-1 block">โพสต์ด้วยบัญชี</span>
-                              <select
-                                name="fbAccountId"
-                                required
-                                defaultValue=""
-                                className="rounded-lg border border-hairline bg-transparent px-2 py-1.5 text-sm text-ink"
-                              >
-                                <option value="" disabled>เลือกบัญชี Facebook…</option>
-                                {publishAccounts.map((a) => (
-                                  <option key={a.id} value={a.id}>
-                                    {a.label} ({a.group_count} กลุ่ม)
-                                  </option>
-                                ))}
-                              </select>
-                            </label>
-                          ) : (
-                            <Link href="/settings/connectors" className="text-xs text-accent hover:underline">
-                              ต้องมีบัญชีที่ผูกเครื่องและผ่าน “ตรวจ Session + กลุ่ม” ภายใน 24 ชั่วโมงก่อนอนุมัติ
-                            </Link>
-                          )}
-                          <label className="text-xs text-subtle">
-                            <span className="mb-1 block">โพสต์อะไร</span>
-                            <select name="postMode" defaultValue="both" className="rounded-lg border border-hairline bg-transparent px-2 py-1.5 text-sm text-ink">
-                              <option value="both">รูป + แคปชัน</option>
-                              <option value="image" disabled={!ct.has_image}>เฉพาะรูป{ct.has_image ? '' : ' (ไม่มีรูป)'}</option>
-                              <option value="caption">เฉพาะแคปชัน</option>
-                            </select>
-                          </label>
                           <label className="text-xs text-subtle">
                             <span className="mb-1 block">จุดที่ทำได้ดี</span>
                             <select name="feedbackCode" defaultValue="ready" className="rounded-lg border border-hairline bg-transparent px-2 py-1.5 text-sm text-ink">
@@ -645,8 +662,8 @@ export default async function CampaignDetail({ params }: { params: { id: string 
                               <option value="good_visual">รูปเหมาะกับงาน</option>
                             </select>
                           </label>
-                          <button className="btn-primary btn-sm" disabled={isPreview || publishAccounts.length === 0 || !ct.has_image || !ct.image_generation_ok || ct.quality_status === 'fail'}>
-                            {isPreview ? 'Preview — ยังโพสต์ไม่ได้' : !ct.has_image || !ct.image_generation_ok || ct.quality_status === 'fail' ? 'ยังไม่ผ่านด่านอนุมัติ' : '✓ อนุมัติและโพสต์'}
+                          <button className="btn-primary btn-sm" disabled={isPreview || !ct.has_image || !ct.image_generation_ok || ct.quality_status === 'fail'}>
+                            {isPreview ? 'Preview — ยังอนุมัติไม่ได้' : !ct.has_image || !ct.image_generation_ok || ct.quality_status === 'fail' ? 'ยังไม่ผ่านด่านอนุมัติ' : '✓ อนุมัติ ไปหน้าสรุป'}
                           </button>
                         </form>
                         <form action={rejectContentAction} className="flex flex-wrap items-end gap-2">

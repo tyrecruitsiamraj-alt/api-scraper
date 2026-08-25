@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { evaluateResumeQualification } from '../src/core/resume-qualification.js';
+import { splitCriteria } from '../src/core/candidate-match.js';
 
 test('ผ่านเมื่อหลักฐาน Hard Filter ครบ', () => {
   const result = evaluateResumeQualification(
@@ -107,4 +108,38 @@ test('อ่านช่วงเงินเดือนและพื้น�
   });
   assert.equal(result.status, 'qualified');
   assert.deepEqual(result.evidence.passed.sort(), ['province', 'salary_max']);
+});
+
+test('อายุนอกช่วงต้องไม่ถูกนับผ่าน', () => {
+  const result = evaluateResumeQualification(
+    { name: 'ผู้สมัครทดสอบ', age: '48' },
+    { criteria: { ageMin: '25', ageMax: '45' } },
+  );
+  assert.equal(result.status, 'rejected');
+  assert.deepEqual(result.reasons, ['age_out_of_range']);
+});
+
+test('ไม่ระบุอายุเมื่อใบงานกำหนดช่วง ต้องส่งให้ตรวจเพิ่ม', () => {
+  const result = evaluateResumeQualification(
+    { name: 'ผู้สมัครทดสอบ' },
+    { criteria: { ageMin: '25', ageMax: '45' } },
+  );
+  assert.equal(result.status, 'needs_review');
+  assert.deepEqual(result.reasons, ['insufficient_evidence:age']);
+});
+
+test('ช่วงอายุ snake_case จากใบงานเก่าต้องถูกใช้จริง', () => {
+  const criteria = { position: 'พนักงานขับรถ', age_min: '25', age_max: '45' };
+  const { siteCriteria } = splitCriteria(criteria);
+  assert.equal(siteCriteria.ageMin, '25');
+  assert.equal(siteCriteria.ageMax, '45');
+  assert.equal('age_min' in siteCriteria, false);
+  assert.equal('age_max' in siteCriteria, false);
+
+  const result = evaluateResumeQualification(
+    { name: 'ผู้สมัครทดสอบ', age: '50' },
+    { criteria },
+  );
+  assert.equal(result.status, 'rejected');
+  assert.deepEqual(result.reasons, ['age_out_of_range']);
 });

@@ -628,16 +628,17 @@ export async function upsertCandidate(client, parsed) {
 }
 
 /** Upsert the provenance "tag" for where this candidate was found. */
-export async function upsertSource(client, candidateId, { platform, connectorId, externalId, sourceUrl, runId, parseStatus, rawText }) {
+export async function upsertSource(client, candidateId, { platform, connectorId, externalId, sourceUrl, runId, parseStatus, rawText, searchRank }) {
   const { rows } = await client.query(
-    `INSERT INTO candidate_sources (candidate_id, platform, connector_id, external_id, source_url, run_id, parse_status, raw_text)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+    `INSERT INTO candidate_sources (candidate_id, platform, connector_id, external_id, source_url, run_id, parse_status, raw_text, search_rank)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
      ON CONFLICT (platform, external_id) DO UPDATE
        SET candidate_id = EXCLUDED.candidate_id, connector_id = EXCLUDED.connector_id,
            source_url = EXCLUDED.source_url, run_id = EXCLUDED.run_id,
-           parse_status = EXCLUDED.parse_status, raw_text = EXCLUDED.raw_text, last_seen_at = now()
+           parse_status = EXCLUDED.parse_status, raw_text = EXCLUDED.raw_text,
+           search_rank = EXCLUDED.search_rank, last_seen_at = now()
      RETURNING id`,
-    [candidateId, platform, connectorId ?? null, externalId ?? null, sourceUrl ?? null, runId ?? null, parseStatus ?? null, rawText ?? null],
+    [candidateId, platform, connectorId ?? null, externalId ?? null, sourceUrl ?? null, runId ?? null, parseStatus ?? null, rawText ?? null, Number(searchRank) || null],
   );
   return rows[0].id;
 }
