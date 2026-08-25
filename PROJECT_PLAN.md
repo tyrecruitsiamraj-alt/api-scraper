@@ -381,6 +381,54 @@
 - การเผยแพร่จริงช่วง POC ต้องให้คนยืนยันบัญชีและกลุ่มทุกครั้ง
 - ทุกหน้าต้องแสดง `ระบบกำลังทำอะไร`, `ได้อะไรแล้ว`, `ติดอะไร`, `คุณต้องทำอะไรต่อ`
 
+### แผนแก้จากการรัน DEMO Content 4 ตำแหน่ง — ห้ามปิดจน UI ตรงภาพเป้าหมาย
+
+หลักฐานจากการรัน `พนักงานขับรถ`, `ประชาสัมพันธ์`, `ช่างอาคาร` และ `คนสวน` วันที่ 25 ส.ค. 2026 พบว่าระบบเบื้องหลังกับหน้าจอยังสื่อสารสถานะไม่ตรงกัน: งานพนักงานขับรถหยุดที่ Research Gate แต่ Queue รายงาน `done`, ส่วนหน้าใบงานไม่แสดงเหตุผลและปุ่มแก้ไขที่ผู้ใช้ต้องทำต่อ นอกจากนี้หน้า Content Workspace ที่ใช้งานจริงยังไม่ตรง `docs/ui-targets/unified-content-workspace-target.png`
+
+#### A. แก้สถานะและการทำงานเบื้องหลัง
+
+- [x] เพิ่มแหล่งสำรองของ Google Research เมื่อ Suggestion ไม่คืนคำค้น โดยยังต้องเก็บหลักฐานจริงและห้ามลด Research Gate เพื่อให้ผ่านหลอก ๆ
+- [x] เมื่อ Draft จบด้วย `needs_input` ให้ Queue จบด้วยสถานะที่สื่อว่า `ต้องให้คนช่วย` ห้ามรายงาน `done`
+- [x] แยก `กำลังทำตามปกติ`, `รอคิว`, `ต้องให้คนช่วย` และ `ระบบขัดข้อง` ให้ชัดเจนจาก DB เดียวกัน
+- [x] ป้องกัน Worker หลาย Process ใช้ชื่อเดียวกันแล้วทับ Heartbeat จนวินิจฉัยงานค้างผิดตัว
+- [ ] เพิ่ม Timeout/Heartbeat รายขั้นสำหรับ Research, Caption และ Image พร้อม Retry ที่ปลอดภัยและไม่สร้างร่างซ้ำ
+
+#### B. แก้ UI ให้ผู้ใช้ไม่ต้องเดา
+
+- [x] แสดง `status_note` ทุกครั้งที่งานหยุดหรือรอ พร้อมข้อความภาษาไทยที่บอกสาเหตุจริง
+- [x] ทุกสถานะต้องมี Action Center สี่บรรทัด: `ระบบกำลังทำอะไร`, `ได้อะไรแล้ว`, `ติดอะไร`, `คุณต้องทำอะไรต่อ`
+- [x] สถานะ `needs_input` ต้องมีปุ่มหลักหนึ่งปุ่มที่ตรงสาเหตุ เช่น `แก้ข้อมูลใบขอ` หรือ `ลองสำรวจใหม่` และห้ามแสดงเหมือนงานเสร็จ
+- [x] สถานะ `queued`, `researching`, `drafting` ต้องอัปเดตบนหน้า Web โดยไม่ต้องถามในแชต และแสดงเวลาที่เริ่ม/เวลาล่าสุดที่ยังทำงาน
+- [x] ระหว่างที่ยังไม่มี `campaign_contents` ให้แสดง Step ปัจจุบันและความคืบหน้าจริง ห้ามแสดงเพียงข้อความกว้าง ๆ ว่า “ยังไม่มีร่างประกาศ”
+- [x] เมื่อเกิด Error ต้องแสดงสาเหตุที่คนเข้าใจได้ ปุ่มลองใหม่ และยืนยันว่าข้อมูลเดิมยังอยู่ครบ
+
+#### C. UI Acceptance Contract — ต้องตรงภาพที่ผู้ใช้สั่ง
+
+- [x] หน้า `/orchestrator/[id]` ต้องใช้ Layout, Shell, Header, Stepper, สัดส่วน Preview 45% / Editor 55%, ลำดับ Field และตำแหน่งปุ่มตาม `docs/ui-targets/unified-content-workspace-target.png`
+- [x] Preview รูปและ Editor ของข้อความบนภาพกับ Caption ต้องอยู่หน้าเดียวกัน เห็นพร้อมกัน และแก้แล้ว Preview เปลี่ยนทันที
+- [x] ต้องมีปุ่มใช้งานจริงตามภาพ: `คืนค่าเดิม`, `ให้ AI คิดภาพใหม่`, `บันทึกร่าง`, `อนุมัติสื่อ`
+- [x] Header ต้องแสดงสถานะภาษาคนและคะแนน Quality ที่คำนวณจริง ไม่ใช้ค่าตัวอย่าง
+- [ ] ห้ามถือว่างาน UI เสร็จด้วยคำว่า “ใกล้เคียง”; ต้องผ่าน Screenshot Comparison ที่ 1440×900, 1024px และ 390px
+- [ ] ผู้ใช้ต้องตรวจรับภาพ Desktop จริงก่อนปิดงาน UI และก่อนเชื่อมการเผยแพร่จริง
+
+#### D. Golden Flow สำหรับตรวจรับรอบแก้ไข
+
+- [x] รันใบขอ DEMO 4 ตำแหน่งเดิมใหม่จาก Web → Queue → Worker โดยไม่สั่งงานผ่านแชตระหว่างทาง
+- [x] ทั้ง 4 งานต้องสร้าง Caption และภาพที่ตรงตำแหน่ง ผ่าน Fact/Research/Image/Quality Gate และเปิดใน Editor ตามภาพเป้าหมาย
+- [x] หน้า Web ต้องแสดงความคืบหน้าและจุดติดขัดเองตลอดการรัน
+- [ ] หลังคนกด `อนุมัติสื่อ` งานต้องหยุดที่ `พร้อมตรวจสรุป/รอโพสต์` และต้องไม่มี Facebook Post ถูกส่งออก
+- [ ] เก็บ Screenshot, Queue ID, Campaign ID, Content ID, Quality Score และผล Test เป็นหลักฐานในแผนก่อนเช็กผ่าน
+
+#### หลักฐานรอบแก้ไข A–D (25 ส.ค. 2026, ยังไม่โพสต์ Facebook)
+
+- Root cause ที่ยืนยันแล้ว: Web ฝัง Worker SHA เก่า `daa49…` จึงกรอง Worker ที่ capability ถูกต้องออก; แก้ให้ Version Contract ยึด `content_pipeline=evidence-v1` + capability และ pin SHA เฉพาะเมื่อ deployment ตั้งค่า env. อีกจุดคือ Worker ที่ถูกหยุดทิ้ง lease `running` ไว้ 30 นาที; ลด stale lease default เหลือ 120 วินาที (lease ต่ออายุทุก 30 วินาที) และทดสอบกู้คิวจริงแล้ว.
+- Golden Flow จาก Web → Queue → Worker: `DEMO-CONTENT-20260825-DRIVER` campaign `c92c2c96-889c-4f8f-98d4-b46a94827418`, queue `6fa820ca-a599-4d6a-b4fb-52a89391994a`, Content ผ่าน `bad23d07-e134-4f10-b005-9ce22b7d5221`, Quality 100, รูป `gpt-image-2`. อีกเวอร์ชัน `21f35f87-242f-4a4d-b29a-187de9abba63` ถูกเก็บไว้แต่ Quality เปลี่ยนเป็น fail 93 หลัง Gate ใหม่พบข้อความใบขับขี่/LINE ที่ ERP ไม่ยืนยัน.
+- `DEMO-CONTENT-20260825-BUILDINGTECH` campaign `d1c60ccd-f788-4595-ba4a-1e998d727013`, queue `1ee745e6-5d1a-420d-9de7-e842f466c65c`: 2 ร่างผ่าน Quality 100 พร้อมรูปจริง.
+- `DEMO-CONTENT-20260825-GARDENER` campaign `fca74653-dd18-425b-ab06-b91cb3a74b78`, queue `2b0f6efe-1ddd-4eb8-acdd-4f8b5c748318`: 2 ร่างผ่าน Quality 100 พร้อมรูปจริง.
+- `DEMO-CONTENT-20260825-RECEPTION` campaign `919b98c6-6cb7-4559-9b93-9c4b4e229676`, queue `0097c5ff-0c90-4dad-9d6f-4b5e2cb10689`: Worker กู้ stale lease จริงแล้วจบด้วย 2 ร่างผ่าน Quality 100 พร้อมรูปจริง.
+- UI ตรวจที่ 1440×900, 1024×900 และ 390×844: Desktop/Tablet แสดง Shell, Stepper, Fact Snapshot; Mobile ใช้ drawer และ Stepper เลื่อนแนวนอนได้. Research หน้า Web แสดงตัวอย่างจริง `กำลังสำรวจโพสต์ Facebook กลุ่ม 2/36` พร้อมเวลาเริ่มและ Next Action.
+- Tests: `node --test tests/*.test.js tests/*.test.mjs` = 101/101 ผ่าน; `npm run build` ผ่าน. ยังไม่มีการกดอนุมัติสื่อหรือสร้าง Facebook post; ต้องให้ผู้ใช้ตรวจรับ UI และกดอนุมัติด้วยตนเองก่อนจึงจะทดสอบ Summary/Autopost.
+
 ### งาน Implementation ที่ต้องลงมือภายหลัง
 
 - [x] รวม Content Preview, Poster Editor และ Caption Editor ใน `/orchestrator/[id]` หน้าเดียว โดย Preview ใช้ภาพต้นฉบับและเปลี่ยนตามฟอร์มทันที; บันทึกผ่าน Action/Quality Gate เดิม (Web production build และ Node test 100/100 ผ่าน 25 ส.ค. 2026)
@@ -411,8 +459,7 @@
 
 ### Gate A — จัด Version Contract
 
-- [x] เลือก Worker Release SHA ที่จะใช้จริง
-- [x] กำหนด `REQUIRED_WORKER_BUILD_SHA` ให้ตรงกันทั้ง Web และ Autopost Production
+- [x] กำหนด Version Contract เป็น `content_pipeline=evidence-v1` + capability ที่ต้องมี; ใช้ `REQUIRED_WORKER_BUILD_SHA` เฉพาะเมื่อ deployment pin ผ่าน env
 - [x] ตรวจว่า Worker รายงาน `build_sha`, `content_pipeline=evidence-v1`, `image_generation` และ `preflight`
 - [x] Deploy Web และ Autopost ก่อนเปิด Worker รุ่นใหม่
 
@@ -424,9 +471,8 @@
 
 หลักฐาน (25 ส.ค. 2026) — ผ่าน:
 
-- แก้ fallback ของ Web, AutoPost และ launcher ให้ใช้ Compatibility Release `daa49f9d6c8ae7be99f33baebbf9c09d77b9c34e`
-- Commit `a6f44ed` ถูก Push แล้ว; Production AutoPost รับ Worker claim ที่ส่ง build SHA นี้ได้ (ไม่ตอบ `upgrade_required`)
-- Heartbeat ของ Scraper/Content และ AutoPost รายงาน build SHA เดียวกัน พร้อม metadata ที่จำเป็น
+- 25 ส.ค. 2026 ตรวจพบ fallback SHA `daa49…` ไม่ตรง Worker ที่ทำงานจริง `943180…`; แก้แล้วให้ Web ไม่ reject Worker ที่ผ่าน semantic contract เพียงเพราะ UI build คนละ commit
+- Heartbeat ของ Scraper/Content รายงาน `build_sha` เพื่อวินิจฉัย, `content_pipeline=evidence-v1`, `types` และ `image_generation` ครบ; สามารถตั้ง SHA pin เพิ่มผ่าน environment สำหรับ controlled deployment
 
 ### Gate B — เปิด Worker บนเครื่องนี้
 

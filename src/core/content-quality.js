@@ -14,6 +14,15 @@ const BENEFIT_CLAIMS = [
   'งานมั่นคง', 'สวัสดิการครบ', 'รายได้ดี', 'โอกาสเติบโต', 'ความก้าวหน้า',
   'เติบโตในสายงาน', 'สภาพแวดล้อมที่ดี', 'ประสบการณ์ที่ดี',
 ];
+// เงื่อนไข/ช่องทางที่พบว่ารุ่นข้อความชอบเติมเองจากตัวอย่างในตลาด แม้ ERP
+// ไม่ได้ยืนยัน. เก็บเป็น gate แยกจากสวัสดิการเพราะเป็นข้อเท็จจริงของผู้สมัคร
+// และการติดต่อที่ผิดได้ ไม่ใช่เพียง "โทนโฆษณา".
+const CONTROLLED_CLAIM_PATTERNS = [
+  { label: 'ใบขับขี่หรือประเภทใบขับขี่', pattern: /(?:มี|ต้องมี|พร้อม)?\s*ใบขับขี่(?:\s*(?:ท\.?\s*\d|ประเภท\s*\d|[a-z]\d?))?/ig },
+  { label: 'พร้อมเริ่มงาน', pattern: /พร้อมเริ่มงาน/ig },
+  { label: 'งานพาร์ทไทม์', pattern: /(?:งาน)?พาร์ทไทม์/ig },
+  { label: 'ช่องทาง LINE', pattern: /(?:แอด|add)\s*ไลน์|line\s*(?:id)?\s*[:@]/ig },
+];
 
 const clean = (value) => String(value ?? '').replace(/\s+/g, ' ').trim();
 const compact = (value) => clean(value).toLowerCase().replace(/[\s,._\-–—/()\[\]:]+/g, '');
@@ -47,6 +56,16 @@ function unsupportedContacts(text, sourceText) {
     return phones.some((phone) => !source.includes(compact(phone)))
       || (hasLineId && !source.includes(compact(line)));
   });
+}
+
+function unsupportedControlledClaims(text, sourceText) {
+  const source = compact(sourceText);
+  const found = [];
+  for (const rule of CONTROLLED_CLAIM_PATTERNS) {
+    const matches = String(text ?? '').match(rule.pattern) ?? [];
+    if (matches.some((match) => !source.includes(compact(match)))) found.push(rule.label);
+  }
+  return unique(found);
 }
 
 function claimedGender(text) {
@@ -153,6 +172,11 @@ export function evaluateContentQuality({ campaign = {}, caption = '', posterFiel
   checks.push(inventedContacts.length
     ? check('contact', 'ช่องทางติดต่อ', 'fail', 'พบเบอร์โทรหรือ LINE ที่ไม่มีในใบขอ', null, inventedContacts.join(' · '))
     : check('contact', 'ช่องทางติดต่อ', 'pass', 'ไม่พบช่องทางติดต่อที่แต่งเพิ่ม'));
+
+  const uncontrolledClaims = unsupportedControlledClaims(combinedRaw, facts.sourceText);
+  checks.push(uncontrolledClaims.length
+    ? check('controlled_claims', 'เงื่อนไขและช่องทางที่ต้องยืนยัน', 'fail', `พบข้อความที่ใบขอไม่ได้ยืนยัน: ${uncontrolledClaims.join(', ')}`, null, uncontrolledClaims.join(', '))
+    : check('controlled_claims', 'เงื่อนไขและช่องทางที่ต้องยืนยัน', 'pass', 'ไม่พบเงื่อนไขหรือช่องทางที่เติมเอง'));
 
   if (posterFields?.salaryTotal && posterFields?.salaryBreakdown
       && compact(posterFields.salaryTotal) === compact(posterFields.salaryBreakdown)) {

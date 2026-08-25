@@ -18,7 +18,7 @@ import { formatPerformanceInsight, patternDecision } from './content-second-brai
  *   4. insert campaign_contents (version ถัดไป, status='draft')
  *   5. ตั้ง campaign 'pending_approval' ให้คนอนุมัติในแดชบอร์ด
  *
- * ไม่มี ANTHROPIC_API_KEY/สร้างผลไม่ได้ = campaign เป็น draft_error พร้อมเหตุผล
+ * ไม่มี Text AI ที่ใช้งานได้/สร้างผลไม่ได้ = campaign เป็น draft_error พร้อมเหตุผล
  * และโยน error ให้ work_queue บันทึกว่าไม่สำเร็จ (ผู้ใช้กด Retry ได้จาก Work Center).
  */
 export async function generateDraftForCampaign(campaignId, { researchMode = 'production' } = {}) {
@@ -178,7 +178,7 @@ export async function generateDraftForCampaign(campaignId, { researchMode = 'pro
 
   if (!content) {
     // อย่ารายงาน queue ว่าสำเร็จ เพราะจะทำให้ campaign ค้างแบบไม่มีทางไปต่อ
-    const note = 'คิด content ไม่ได้ — ตรวจ ANTHROPIC_API_KEY บนเครื่อง worker';
+    const note = 'คิด Caption ไม่ได้ — ตรวจ Text AI ของ Worker (Ollama/OpenAI) แล้วลองใหม่';
     await query(`UPDATE recruit_campaigns SET status='draft_error', status_note=$2, updated_at=now() WHERE id=$1`, [campaignId, note]);
     throw new Error(note);
   }
@@ -343,6 +343,66 @@ export async function generateDraftForCampaign(campaignId, { researchMode = 'pro
   ]);
 
   return { campaignId, version, versions: savedDrafts, readyDrafts, hasImage: madeImages > 0, model: content.model };
+}
+
+/**
+ * คิดเฉพาะ Background/Subject ใหม่ของร่างที่ยังไม่อนุมัติ โดยคง Caption และ
+ * Text/Logo Layer (poster_fields) เดิมไว้ครบ ใช้เมื่อคนกด "ให้ AI คิดภาพใหม่".
+ * งานนี้จึงไม่เปลี่ยนข้อเท็จจริงจากใบขอและไม่สร้างโพสต์ Facebook.
+ */
+export async function regenerateImageForContent(contentId) {
+  if (!contentId) throw new Error('regenerateImageForContent: missing contentId');
+  const { rows } = await query(
+    `SELECT cc.id, cc.status, cc.caption, cc.poster_fields, cc.gen_notes,
+            to_jsonb(c.*) AS campaign
+       FROM campaign_contents cc
+       JOIN recruit_campaigns c ON c.id=cc.campaign_id
+      WHERE cc.id=$1`,
+    [contentId],
+  );
+  const row = rows[0];
+  if (!row) throw new Error('ไม่พบร่าง Content ที่ต้องการคิดภาพใหม่');
+  if (row.status !== 'draft') throw new Error('คิดภาพใหม่ได้เฉพาะร่างที่ยังไม่อนุมัติ');
+  if (row.gen_notes?.generation_mode === 'preview') throw new Error('ร่าง Preview ต้องให้ Worker สร้างร่าง Production ก่อน');
+  const fields = row.poster_fields;
+  const prompt = String(row.gen_notes?.image_generation?.prompt || '').trim();
+  if (!fields?.title || !prompt) throw new Error('ร่างนี้ไม่มี Brief ภาพที่ตรวจสอบได้ กรุณาให้ AI สร้างสื่อใหม่ทั้งร่าง');
+
+  const person = await generateImage({ prompt, transparent: false, strict: true });
+  if (!person?.bytes || !person?.mime) throw new Error('เครื่องสร้างรูปไม่คืนผลลัพธ์ กรุณาลองใหม่');
+  const sourceUri = `data:${person.mime};base64,${person.bytes.toString('base64')}`;
+  const rendered = await renderPoster(fields, sourceUri);
+  if (!rendered?.bytes || !rendered?.mime) throw new Error('ประกอบโปสเตอร์จากภาพใหม่ไม่สำเร็จ');
+  const researchGate = row.gen_notes?.research_gate ?? { ready: false, issues: ['ร่างนี้ไม่มีหลักฐานสำรวจตลาดก่อนสร้าง'] };
+  const quality = evaluateContentQuality({
+    campaign: row.campaign,
+    caption: row.caption,
+    posterFields: fields,
+    imageReady: true,
+    researchGate,
+  });
+  if (quality.blocking) throw new Error(`ภาพใหม่ยังไม่ผ่าน Quality Gate: ${quality.summary}`);
+  const notes = {
+    ...(row.gen_notes ?? {}),
+    image_generation: {
+      ...(row.gen_notes?.image_generation ?? {}),
+      ok: true,
+      provider: person.provider ?? 'openai',
+      model: person.model ?? null,
+      prompt,
+      regenerated_at: new Date().toISOString(),
+    },
+  };
+  await query(
+    `UPDATE campaign_contents
+        SET image_bytes=$2, image_mime=$3, source_image_bytes=$4, source_image_mime=$5,
+            gen_notes=$6::jsonb, quality_status=$7, quality_score=$8,
+            quality_checks=$9::jsonb, quality_checked_at=now()
+      WHERE id=$1 AND status='draft'`,
+    [contentId, rendered.bytes, rendered.mime, person.bytes, person.mime,
+      JSON.stringify(notes), quality.status, quality.score, JSON.stringify(quality)],
+  );
+  return { contentId, qualityScore: quality.score, model: person.model ?? null };
 }
 
 /**

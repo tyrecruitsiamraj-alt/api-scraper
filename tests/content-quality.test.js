@@ -106,6 +106,15 @@ test('เบอร์โทรหรือ LINE ที่ไม่ได้ม�
   assert.equal(result.checks.find((item) => item.code === 'contact')?.status, 'fail');
 });
 
+test('คุณสมบัติหรือช่องทางที่ AI เติมเองถูกบล็อกแม้ข้อมูลหลักถูกต้อง', () => {
+  const result = evaluateContentQuality({
+    campaign,
+    caption: `${goodCaption}\nมีใบขับขี่ ท.2 พร้อมเริ่มงาน แอดไลน์ด่วน`,
+  });
+  assert.equal(result.blocking, true);
+  assert.equal(result.checks.find((item) => item.code === 'controlled_claims')?.status, 'fail');
+});
+
 test('มีรายได้ถูกหนึ่งตัวแต่แอบเพิ่มตัวเลขอื่นยังถูกบล็อก', () => {
   const result = evaluateContentQuality({ campaign, caption: goodCaption.replace('18,000 บาท', '18,000–25,000 บาท') });
   assert.equal(result.blocking, true);

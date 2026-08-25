@@ -1,11 +1,12 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
-import { contentGenIngredients, getCampaign, getCampaignAutopostProgress, getCampaignPostQueueState, listCampaignContents, listCampaignPosts, listFacebookAccounts, soRecruitCheck } from '@/lib/repo';
-import type { CampaignPostRow } from '@/lib/repo';
+import { contentGenIngredients, getCampaign, getCampaignAutopostProgress, getCampaignDraftQueueState, getCampaignPostQueueState, listCampaignContents, listCampaignPosts, listFacebookAccounts, soRecruitCheck } from '@/lib/repo';
+import type { CampaignDraftQueueState, CampaignPostRow } from '@/lib/repo';
 import { approveContentAction, rejectContentAction, editCaptionAction, editPosterAction, measureCampaignAction, retryCampaignDraftAction, runFacebookPreflightAction } from '@/lib/actions';
 import { CaptionViewer } from '@/components/CaptionViewer';
 import { AutopostSummaryForm } from '@/components/AutopostSummaryForm';
 import { CampaignContentWorkspace } from '@/components/CampaignContentWorkspace';
+import { AutoRefresh } from '@/components/AutoRefresh';
 
 export const dynamic = 'force-dynamic';
 
@@ -62,31 +63,85 @@ function StageStrip({ status }: { status: string }) {
   const cur = STATUS_TO_STEP[status] ?? 0;
   const lowEng = status === 'low_engagement';
   return (
-    <div className="flex items-center gap-1 overflow-x-auto pb-1">
+    <div className="flex min-w-[640px] items-center justify-between gap-1">
       {STRIP.map((s, i) => {
         const done = i < cur;
         const active = i === cur;
         return (
-          <div key={s.label} className="flex items-center gap-1">
-            <span
-              className={`whitespace-nowrap rounded-full px-3 py-1 text-xs ${
-                active
-                  ? lowEng
-                    ? 'bg-red-100 font-medium text-red-700'
-                    : 'bg-accent/15 font-medium text-ink'
-                  : done
-                    ? 'bg-teal-50 text-teal-700'
-                    : 'bg-black/[0.04] text-subtle/60'
-              }`}
-            >
-              {done && '✓ '}
-              {s.label}
-            </span>
-            {i < STRIP.length - 1 && <span className="text-subtle/40">›</span>}
+          <div key={s.label} className={`flex min-w-0 flex-1 items-center ${i === STRIP.length - 1 ? '' : 'gap-2'}`}>
+            <div className="flex shrink-0 items-center gap-2">
+              <span className={`grid h-8 w-8 place-items-center rounded-full border text-sm font-semibold ${active ? (lowEng ? 'border-red-500 bg-red-500 text-white' : 'border-blue-600 bg-blue-600 text-white') : done ? 'border-blue-600 bg-blue-600 text-white' : 'border-slate-300 bg-white text-slate-400'}`}>
+                {done ? '✓' : i + 1}
+              </span>
+              <span className={`whitespace-nowrap text-sm ${active ? 'font-semibold text-blue-700' : done ? 'font-medium text-ink' : 'text-subtle'}`}>{s.label}</span>
+            </div>
+            {i < STRIP.length - 1 && <span className={`h-px min-w-5 flex-1 ${done ? 'bg-blue-500' : 'bg-slate-200'}`} />}
           </div>
         );
       })}
     </div>
+  );
+}
+
+function formatTime(value: string | null | undefined) {
+  if (!value) return '—';
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? '—' : new Intl.DateTimeFormat('th-TH', { hour: '2-digit', minute: '2-digit', day: 'numeric', month: 'short' }).format(date);
+}
+
+function WorkActionCenter({ campaignId, status, statusNote, queue }: {
+  campaignId: string;
+  status: string;
+  statusNote: string | null;
+  queue: CampaignDraftQueueState | null;
+}) {
+  const queueState = queue?.status;
+  const working = queueState === 'queued' || queueState === 'running' || ['researching', 'drafting'].includes(status);
+  const needsHelp = status === 'needs_input' || queueState === 'needs_input';
+  const failed = status === 'draft_error' || queueState === 'error';
+  if (!working && !needsHelp && !failed) return null;
+
+  const tone = needsHelp || failed ? 'border-amber-200 bg-amber-50' : 'border-blue-200 bg-blue-50';
+  const doing = queueState === 'queued'
+    ? 'งานอยู่ในคิว รอเครื่องสร้างสื่อรับงาน'
+    : status === 'researching'
+      ? statusNote || 'กำลังสำรวจคำค้นและโพสต์ที่เกี่ยวข้องก่อนสร้างสื่อ'
+      : queueState === 'running' || status === 'drafting'
+        ? 'กำลังเขียน Caption สร้างภาพ และตรวจข้อมูลสำคัญ'
+        : needsHelp
+          ? 'ระบบหยุดก่อนสร้างสื่อ เพื่อไม่ให้ข้อมูลหรือรูปผิดจากใบขอ'
+          : 'ระบบสร้างสื่อไม่สำเร็จ';
+  const blocker = needsHelp || failed
+    ? statusNote || queue?.last_error || 'ต้องตรวจข้อมูลก่อนเริ่มต่อ'
+    : 'ไม่มี — ระบบกำลังทำงาน';
+  const next = needsHelp
+    ? 'ลองสำรวจใหม่ได้หลังระบบมีแหล่งสำรอง หรือกลับไปตรวจข้อมูลใบขอ'
+    : failed
+      ? 'ลองสร้างสื่อใหม่ ระบบจะเก็บร่างเดิมไว้และไม่โพสต์ Facebook'
+      : 'ไม่ต้องกดซ้ำ หน้านี้จะอัปเดตเองเมื่อขั้นตอนถัดไปเสร็จ';
+
+  return (
+    <section className={`rounded-2xl border p-4 ${tone}`} aria-live="polite">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <p className="eyebrow">สถานะงานแบบเข้าใจง่าย</p>
+          <h2 className="mt-1 text-base font-semibold">{needsHelp ? 'ต้องให้ช่วยหนึ่งเรื่องก่อน' : failed ? 'ระบบหยุดและต้องลองใหม่' : 'ระบบกำลังทำงาน'}</h2>
+        </div>
+        {queue && <span className="rounded-full border border-current/15 bg-white/70 px-2.5 py-1 text-xs">{queueState === 'queued' ? 'รอคิว' : queueState === 'running' ? 'กำลังทำ' : queueState === 'needs_input' ? 'ต้องให้ช่วย' : queueState || '—'}</span>}
+      </div>
+      <div className="mt-3 grid gap-3 text-sm md:grid-cols-2">
+        <div><b>ระบบกำลังทำอะไร</b><p className="mt-1 text-ink/75">{doing}</p></div>
+        <div><b>ได้อะไรแล้ว</b><p className="mt-1 text-ink/75">{queue?.started_at ? `Worker เริ่มงานเมื่อ ${formatTime(queue.started_at)}` : 'รับใบขอและตรวจข้อมูลเบื้องต้นแล้ว'}</p></div>
+        <div><b>ติดอะไร</b><p className="mt-1 text-ink/75">{blocker}</p></div>
+        <div><b>คุณต้องทำอะไรต่อ</b><p className="mt-1 text-ink/75">{next}</p></div>
+      </div>
+      {(needsHelp || failed) && (
+        <div className="mt-4 flex flex-wrap gap-2">
+          <form action={retryCampaignDraftAction}><input type="hidden" name="campaignId" value={campaignId} /><button className="btn-primary btn-sm">{needsHelp ? 'ลองสำรวจและสร้างสื่อใหม่' : 'ลองสร้างสื่อใหม่'}</button></form>
+          <a href="#facts" className="btn-ghost btn-sm">ตรวจข้อมูลใบขอ</a>
+        </div>
+      )}
+    </section>
   );
 }
 
@@ -146,11 +201,16 @@ export default async function CampaignDetail({ params, searchParams }: { params:
   const publishAccounts = fbAccounts.filter((account) => account.group_count > 0 && account.preflight_verified && account.preflight_ready);
   const posts = await listCampaignPosts(params.id);
   const postQueue = await getCampaignPostQueueState(params.id);
+  const draftQueue = await getCampaignDraftQueueState(params.id);
   const autopostProgress = await getCampaignAutopostProgress(params.id);
   const engByContent = aggregateByContent(posts);
   const canMeasure = ['posting', 'measuring', 'low_engagement'].includes(c.status);
   const activePostQueue = postQueue?.status === 'queued' || postQueue?.status === 'running';
-  const regenerateBusy = ['researching', 'drafting', 'posting', 'measuring'].includes(c.status) || activePostQueue;
+  // Campaign อาจค้างสถานะ drafting จาก worker รุ่นเก่า แต่คิวจริงจบแล้ว.
+  // ใช้คิวเป็น source of truth เพื่อให้ปุ่ม "ลองใหม่" ไม่หายไป.
+  const activeDraftQueue = draftQueue?.status === 'queued' || draftQueue?.status === 'running';
+  const regenerateBusy = activeDraftQueue || ['posting', 'measuring'].includes(c.status) || activePostQueue;
+  const liveDraft = draftQueue?.status === 'queued' || draftQueue?.status === 'running' || ['researching', 'drafting'].includes(c.status);
   const pool = await soRecruitCheck(c.request_no);
   const ingredients = await contentGenIngredients(c.title);
 
@@ -167,21 +227,25 @@ export default async function CampaignDetail({ params, searchParams }: { params:
   const nextAction = NEXT_ACTION[c.status];
 
   return (
-    <div className="space-y-6">
-      <Link href="/orchestrator" className="text-sm text-subtle hover:text-accent">← กลับ Dashboard</Link>
-
-      <div className="card p-6">
+    <div className="space-y-5">
+      {liveDraft && <AutoRefresh seconds={6} />}
+      <div className="card overflow-hidden p-0">
+        <div className="border-b border-hairline px-6 pt-5">
+          <Link href="/orchestrator" className="text-sm text-subtle hover:text-accent">ศูนย์งาน <span className="mx-1">/</span> เวิร์กออเดอร์ <span className="mx-1">/</span> {c.request_no || 'ใบงาน'}</Link>
+        </div>
+        <div className="px-6 py-5">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
-            <h1 className="text-2xl font-semibold tracking-tight">{c.title || c.request_no || 'งานรับสมัคร'}</h1>
+            <h1 className="text-3xl font-semibold tracking-tight">{c.request_no || 'ใบงาน'} <span className="mx-2 font-normal text-hairline">|</span> {c.title || 'งานรับสมัคร'}</h1>
             <p className="mt-1 text-sm text-subtle">
-              ใบขอ {c.request_no || '—'}
               {c.province && ` · ${humanText(c.province)}`}
               {c.remaining_qty != null && ` · ยังขาด ${c.remaining_qty} อัตรา`}
             </p>
           </div>
           <div className="flex items-center gap-2">
-            <span className="pill bg-black/5 text-ink">{STAGE_LABEL[c.status] ?? c.status}</span>
+            <span className={`h-3 w-3 rounded-full ${c.status === 'pending_approval' ? 'bg-emerald-500' : c.status === 'needs_input' || c.status === 'draft_error' ? 'bg-amber-500' : 'bg-blue-500'}`} />
+            <span className="text-sm font-medium">{c.status === 'pending_approval' ? 'สื่อพร้อมแก้ไข' : STAGE_LABEL[c.status] ?? c.status}</span>
+            {recommendedContentId && <><span className="mx-1 h-6 w-px bg-hairline" /><span className="text-sm text-subtle">Quality</span><b className="text-2xl text-emerald-600">{readyContents[0]?.quality_score ?? '—'}</b></>}
             {canMeasure && (
               <form action={measureCampaignAction}>
                 <input type="hidden" name="campaignId" value={c.id} />
@@ -202,12 +266,11 @@ export default async function CampaignDetail({ params, searchParams }: { params:
           </div>
         </div>
         <div className="mt-4">
-          <StageStrip status={c.status} />
+          <div className="overflow-x-auto pb-1"><StageStrip status={c.status} /></div>
         </div>
-        {nextAction && (
-          <div className={`mt-4 rounded-xl border px-4 py-2.5 text-[13px] font-medium ${nextAction.cls}`}>
-            {nextAction.text}
-          </div>
+        <div className="mt-4"><WorkActionCenter campaignId={c.id} status={c.status} statusNote={c.status_note} queue={draftQueue} /></div>
+        {nextAction && !liveDraft && c.status !== 'needs_input' && (
+          <div className={`mt-4 rounded-xl border px-4 py-2.5 text-[13px] font-medium ${nextAction.cls}`}>{nextAction.text}</div>
         )}
         {contentError && (
           <div role="alert" className="mt-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-900">
@@ -220,10 +283,11 @@ export default async function CampaignDetail({ params, searchParams }: { params:
             <b>บันทึกรูปใหม่แล้ว</b> ระบบประกอบ PNG จากภาพต้นฉบับและตรวจข้อมูลสำคัญเรียบร้อยแล้ว
           </div>
         )}
+        </div>
       </div>
 
       {/* Pool pre-check: มีคนใน So Recruit สำหรับใบขอนี้หรือยัง (อ่านอย่างเดียว คนตัดสินใจเอง) */}
-      <div className="card p-4">
+      <div id="facts" className="card p-4">
         <div className="flex flex-wrap items-center gap-2 text-sm">
           <span className="font-medium">So Recruit:</span>
           {pool === null ? (
@@ -253,45 +317,26 @@ export default async function CampaignDetail({ params, searchParams }: { params:
         )}
       </div>
 
-      {snap.source === 'so_recruit' ? (
-        <div className="card p-6">
-          <h2 className="mb-4 text-sm font-semibold uppercase tracking-wide text-subtle">
-            ข้อมูลคำขอ (จาก So Recruit)
-            {snap.user_edited && <span className="ml-2 rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-medium normal-case text-amber-700">✎ มีการแก้ไขตอนรับงาน</span>}
-          </h2>
-          <dl className="grid grid-cols-2 gap-4 sm:grid-cols-3">
-            <Field label="ตำแหน่ง" value={snap.position || snap.request_name} />
-            <Field label="พื้นที่/สถานที่" value={humanText(snap.location || snap.work_addr)} />
-            <Field label="รายได้" value={snap.income} />
-            <Field label="จำนวนที่รับ" value={snap.qty} />
-            <Field label="เวลางาน" value={snap.work_schedule} />
-            <Field label="เพศ" value={snap.gender} />
-            <Field label="อายุ" value={snap.age_min || snap.age_max ? `${snap.age_min ?? ''}-${snap.age_max ?? ''} ปี` : ''} />
-            <Field label="หน่วยงาน" value={snap.unit_name} />
-            <Field label="ผู้ขอ" value={snap.requested_by_name} />
-            <div className="col-span-2 sm:col-span-3">
-              <Field label="เหตุผลที่ขอโพส" value={snap.reason} />
-            </div>
-            {snap.note && (
-              <div className="col-span-2 sm:col-span-3">
-                <Field label="หมายเหตุ" value={snap.note} />
-              </div>
-            )}
-          </dl>
-        </div>
-      ) : (
-        <div className="card p-6">
-          <h2 className="mb-4 text-sm font-semibold uppercase tracking-wide text-subtle">ข้อมูลใบขอ (จาก ERP)</h2>
-          <dl className="grid grid-cols-2 gap-4 sm:grid-cols-3">
-            <Field label="ไซต์" value={snap.site_name} />
-            <Field label="รหัสไซต์" value={snap.site_code} />
-            <Field label="แผนก" value={snap.department_code} />
-            <Field label="ประเภทใบขอ" value={snap.request_name} />
-            <Field label="ผู้ขอ" value={snap.requester_name} />
-            <Field label="สถานที่ทำงาน" value={humanText(snap.work_addr)} />
-          </dl>
-        </div>
-      )}
+      <div className="card p-6">
+        <h2 className="mb-4 text-sm font-semibold uppercase tracking-wide text-subtle">
+          ข้อเท็จจริงจากใบขอ
+          {snap.user_edited && <span className="ml-2 rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-medium normal-case text-amber-700">✎ มีการแก้ไขตอนรับงาน</span>}
+          {snap.simulation && <span className="ml-2 rounded-full bg-blue-50 px-2 py-0.5 text-[10px] font-medium normal-case text-blue-700">DEMO — ห้ามเผยแพร่</span>}
+        </h2>
+        <dl className="grid grid-cols-2 gap-4 sm:grid-cols-3">
+          <Field label="ตำแหน่ง" value={snap.position || snap.request_name || c.title} />
+          <Field label="พื้นที่/สถานที่" value={humanText(snap.location || snap.work_addr || c.province)} />
+          <Field label="รายได้" value={snap.income} />
+          <Field label="จำนวนที่รับ" value={snap.qty || c.qty} />
+          <Field label="เวลางาน" value={snap.work_schedule} />
+          <Field label="เพศ" value={snap.gender} />
+          <Field label="อายุ" value={snap.age_min || snap.age_max ? `${snap.age_min ?? ''}-${snap.age_max ?? ''} ปี` : ''} />
+          <Field label="หน่วยงาน" value={snap.unit_name || snap.site_name} />
+          <Field label="ผู้ขอ" value={snap.requested_by_name || snap.requester_name || c.created_by} />
+          <div className="col-span-2 sm:col-span-3"><Field label="หน้าที่/เหตุผลที่ขอโพส" value={snap.job_description || snap.detail || snap.reason} /></div>
+          {snap.note && <div className="col-span-2 sm:col-span-3"><Field label="หมายเหตุ" value={snap.note} /></div>}
+        </dl>
+      </div>
 
       {c.status === 'approved' && approvedContent && (
         <section className="overflow-hidden rounded-2xl border-2 border-violet-300 bg-violet-50/60">
@@ -384,8 +429,9 @@ export default async function CampaignDetail({ params, searchParams }: { params:
       <div>
         <h2 className="mb-3 text-base font-semibold">ร่างคอนเทนต์</h2>
         {contents.length === 0 ? (
-          <div className="card border-dashed p-6 text-center text-sm text-subtle">
-            ยังไม่มีร่างประกาศ — ระบบจะสร้างข้อความ รูป และแนววิดีโอเมื่อเครื่องทำงานอัตโนมัติพร้อม
+          <div className="card border-dashed p-6">
+            <h3 className="font-semibold text-ink">ยังไม่มีรูปและ Caption เพราะงานยังไม่ถึงขั้นสร้างร่าง</h3>
+            <p className="mt-2 text-sm text-subtle">ดูสถานะด้านบนเพื่อทราบว่า Worker กำลังสำรวจตลาด, กำลังสร้างสื่อ, รอคิว หรือมีข้อมูลใดต้องแก้ ระบบจะไม่แสดงร่างเปล่าหรือบอกว่างานเสร็จก่อนมีผลลัพธ์จริง.</p>
           </div>
         ) : (
           <div className="space-y-4">

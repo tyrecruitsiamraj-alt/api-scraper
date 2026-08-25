@@ -14,6 +14,7 @@ import {
   approveContentForSummary,
   enqueueApprovedPost,
   beginCampaignDraftRetry,
+  enqueueContentImageRegeneration,
   retryCampaignPost,
   enqueueMeasureForCampaign,
   getCampaign,
@@ -512,6 +513,19 @@ export async function editCaptionAction(formData: FormData) {
     await refreshContentQuality(contentId);
   }
   revalidatePath(`/orchestrator/${campaignId}`);
+}
+
+/** คิดเฉพาะภาพใหม่จาก brief เดิม โดยไม่แก้ Caption หรือข้อมูลบนโปสเตอร์. */
+export async function regenerateContentImageAction(formData: FormData) {
+  const session = await getServerSession(authOptions);
+  if (!session) throw new Error('unauthorized');
+  const contentId = String(formData.get('contentId') ?? '').trim();
+  const campaignId = String(formData.get('campaignId') ?? '').trim();
+  if (!contentId || !campaignId) throw new Error('ข้อมูล Content ไม่ครบ');
+  const queued = await enqueueContentImageRegeneration(contentId, campaignId, session.user?.email ?? session.user?.name ?? null);
+  if (queued) kickWorker();
+  revalidatePath(`/orchestrator/${campaignId}`);
+  revalidatePath('/orchestrator');
 }
 
 /** แก้ข้อความบนโปสเตอร์ แล้วประกอบ PNG ใหม่จากภาพต้นฉบับเดิม. */

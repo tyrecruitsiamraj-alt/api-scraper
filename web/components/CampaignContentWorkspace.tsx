@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { useFormStatus } from 'react-dom';
-import { approveContentAction, editCaptionAction, editPosterAction, rejectContentAction, runFacebookPreflightAction } from '@/lib/actions';
+import { approveContentAction, editCaptionAction, editPosterAction, rejectContentAction, regenerateContentImageAction, runFacebookPreflightAction } from '@/lib/actions';
 import type { PosterFields } from '@/lib/repo';
 
 type QualityCheck = { code: string; label: string; message: string; status: 'pass' | 'warning' | 'fail' | 'not_applicable' };
@@ -99,26 +99,35 @@ export function CampaignContentWorkspace({ campaignId, content, initialPoster, i
         <span className="pill bg-blue-50 text-blue-700">ยังไม่โพสต์จริง</span>
       </div>
 
-      <div className="grid items-start gap-6 p-5 xl:grid-cols-[minmax(320px,0.92fr)_minmax(420px,1.08fr)]">
+      <div className="grid items-start gap-6 p-5 xl:grid-cols-[minmax(360px,45fr)_minmax(460px,55fr)]">
         <div className="xl:sticky xl:top-5">
           <PosterPreview fields={poster} content={content} />
           <p className="mt-3 text-xs leading-5 text-subtle">นี่คือภาพตัวอย่างระหว่างแก้ไข ไฟล์ PNG จริงจะถูกประกอบใหม่จากภาพต้นฉบับหลังบันทึกเท่านั้น</p>
+          <div className="mt-4 grid grid-cols-2 gap-3">
+            <button type="button" className="btn-ghost justify-center" onClick={() => { setPoster(initialPoster); setCaption(initialCaption); }}>↻ คืนค่าเดิม</button>
+            <form action={regenerateContentImageAction}>
+              <input type="hidden" name="campaignId" value={campaignId} />
+              <input type="hidden" name="contentId" value={content.id} />
+              <button className="btn-secondary w-full justify-center" disabled={content.isPreview}>✦ ให้ AI คิดภาพใหม่</button>
+            </form>
+          </div>
+          <p className="mt-2 text-xs text-subtle">เปลี่ยนเฉพาะคนและฉากในภาพตาม Brief เดิม · Caption ข้อความบนภาพ และโลโก้จะคงเดิม · ยังไม่โพสต์จริง</p>
         </div>
 
         <div className="space-y-5">
           <form action={editPosterAction} className="rounded-2xl border border-blue-200 bg-blue-50/55 p-4">
             <input type="hidden" name="contentId" value={content.id} /><input type="hidden" name="campaignId" value={campaignId} />
             <div className="flex items-start justify-between gap-3"><div><h3 className="font-semibold">ข้อความบนภาพ</h3><p className="mt-1 text-xs text-subtle">ข้อมูลทุกช่องต้องตรงกับใบขอ ระบบจะตรวจอีกครั้งตอนบันทึก</p></div><button type="button" className="btn-ghost btn-sm" onClick={() => setPoster(initialPoster)}>คืนค่าเดิม</button></div>
+            <input type="hidden" name="posterBadge" value={poster.badge} />
             <div className="mt-4 grid gap-3 sm:grid-cols-2">
               <TextField name="title" label={COPY.title} value={poster.title} onChange={(value) => update('title', value)} />
-              <TextField name="badge" label={COPY.badge} value={poster.badge} onChange={(value) => update('badge', value)} />
-              <TextField name="location" label={COPY.location} value={poster.location} onChange={(value) => update('location', value)} multiline className="sm:col-span-2" />
+              <TextField name="location" label={COPY.location} value={poster.location} onChange={(value) => update('location', value)} />
               <TextField name="salaryTotal" label={COPY.salaryTotal} value={poster.salaryTotal} onChange={(value) => update('salaryTotal', value)} />
               <TextField name="quantity" label={COPY.quantity} value={poster.quantity} onChange={(value) => update('quantity', value)} />
-              <TextField name="worktime" label={COPY.worktime} value={poster.worktime} onChange={(value) => update('worktime', value)} multiline className="sm:col-span-2" />
-              <TextField name="salaryBreakdown" label={COPY.salaryBreakdown} value={poster.salaryBreakdown} onChange={(value) => update('salaryBreakdown', value)} className="sm:col-span-2" />
               <label><span className="label">เพศ / อายุ / คุณสมบัติ — 1 ข้อต่อบรรทัด</span><textarea name="posterQualifications" className="field min-h-24 w-full resize-y" value={poster.qualifications.join('\n')} onChange={(event) => update('qualifications', event.target.value.split(/\r?\n/).map((item) => item.trim()).filter(Boolean))} /></label>
-              <label><span className="label">สวัสดิการ — 1 ข้อต่อบรรทัด</span><textarea name="posterBenefits" className="field min-h-24 w-full resize-y" value={poster.benefits.join('\n')} onChange={(event) => update('benefits', event.target.value.split(/\r?\n/).map((item) => item.trim()).filter(Boolean))} /></label>
+              <TextField name="worktime" label={COPY.worktime} value={poster.worktime} onChange={(value) => update('worktime', value)} multiline />
+              <label className="sm:col-span-2"><span className="label">สวัสดิการ (แสดงในสื่อ) — 1 ข้อต่อบรรทัด</span><textarea name="posterBenefits" className="field min-h-20 w-full resize-y" value={poster.benefits.join('\n')} onChange={(event) => update('benefits', event.target.value.split(/\r?\n/).map((item) => item.trim()).filter(Boolean))} /></label>
+              <TextField name="salaryBreakdown" label={COPY.salaryBreakdown} value={poster.salaryBreakdown} onChange={(value) => update('salaryBreakdown', value)} className="sm:col-span-2" />
               <label><span className="label">เบอร์โทรที่ยืนยันแล้ว</span><input name="posterContactLine" inputMode="tel" className="field w-full" placeholder="เช่น 081-234-5678" value={poster.contactLine} onChange={(event) => update('contactLine', event.target.value)} /></label>
               <label><span className="label">ตำแหน่งคนในภาพ</span><select name="posterImageSide" className="field w-full" value={poster.imageSide} onChange={(event) => update('imageSide', event.target.value === 'left' ? 'left' : 'right')}><option value="right">ขวา — ข้อความอยู่ซ้าย</option><option value="left">ซ้าย — ข้อความอยู่ขวา</option></select></label>
             </div>
@@ -130,7 +139,7 @@ export function CampaignContentWorkspace({ campaignId, content, initialPoster, i
             <input type="hidden" name="contentId" value={content.id} /><input type="hidden" name="campaignId" value={campaignId} />
             <div className="flex items-start justify-between gap-3"><div><p className="eyebrow">Caption</p><h3 className="mt-1 font-semibold">ข้อความใต้โพสต์</h3></div><button type="button" className="btn-ghost btn-sm" onClick={() => setCaption(initialCaption)}>คืนค่า AI</button></div>
             <textarea name="caption" className="field mt-3 min-h-56 w-full resize-y whitespace-pre-wrap leading-6" value={caption} onChange={(event) => setCaption(event.target.value)} />
-            <div className="mt-3 flex flex-wrap items-center gap-2"><button className="btn-secondary btn-sm">บันทึก Caption</button><span className="text-xs text-subtle">การบันทึกไม่ส่งโพสต์ และระบบจะตรวจข้อมูลสำคัญใหม่</span></div>
+            <div className="mt-3 flex flex-wrap items-center justify-between gap-2"><span className={`text-xs ${caption.length > 1000 ? 'text-red-700' : 'text-subtle'}`}>{caption.length.toLocaleString('th-TH')} / 1,000 ตัวอักษร</span><div className="flex items-center gap-2"><span className="text-xs text-subtle">การบันทึกไม่ส่งโพสต์</span><button className="btn-secondary btn-sm">บันทึกร่าง Caption</button></div></div>
           </form>
         </div>
       </div>

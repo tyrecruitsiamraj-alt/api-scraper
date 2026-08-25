@@ -63,6 +63,11 @@ test('รับเฉพาะคำแนะนำที่มีเจตน�
   assert.equal(isJobSearchQuery('หางานภูมิทัศน์ ชลบุรี'), true);
   assert.equal(isJobSearchQuery('สมัครงาน landscape'), true);
   assert.equal(isJobSearchQuery('งาน หัวหน้า คน สวน'), true);
+  assert.equal(isJobSearchQuery('พนักงานขับรถ'), true);
+  assert.equal(isJobSearchQuery('ประชาสัมพันธ์'), true);
+  assert.equal(isJobSearchQuery('ช่างอาคาร'), true);
+  assert.equal(isJobSearchQuery('พนักงาน'), false);
+  assert.equal(isJobSearchQuery('ช่าง'), false);
   assert.equal(isJobSearchQuery('ภูมิทัศน์ แปลว่า'), false);
   assert.equal(isJobSearchQuery('ภูมิทัศน์วัฒนธรรม'), false);
   assert.equal(isJobSearchQuery('งาน ภูมิ ทัศน์ คือ'), false);

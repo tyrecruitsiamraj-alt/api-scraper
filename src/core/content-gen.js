@@ -186,7 +186,9 @@ export async function generateContent(campaign = {}) {
     : '';
   const userMsg = `เขียนคอนเทนต์สรรหาสำหรับใบขอนี้:\n${ctx}${winsBlock}${preferredBlock}${losesBlock}${performanceBlock}${researchBlock}${trendsBlock}${styleBlock}`;
 
-  // qwen/Ollama ตอบไม่นิ่งเป็นรอบ ๆ — ว่าง/พังให้ลองซ้ำสูงสุด 3 รอบ
+  // qwen/Ollama ตอบไม่นิ่งเป็นรอบ ๆ — ว่าง/พังให้ลองซ้ำสูงสุด 3 รอบ.
+  // หาก Ollama ที่เลือกไว้ใช้งานไม่ได้ แต่มี OpenAI key ที่ระบบใช้สร้างรูปอยู่แล้ว
+  // ให้ fallback เป็น GPT โดยบันทึก model ที่ใช้จริง แทนปล่อย Campaign ค้างแบบไร้ผลลัพธ์.
   let out = null;
   let modelUsed = '';
   for (let attempt = 1; attempt <= 3 && !String(out?.caption ?? '').trim(); attempt += 1) {
@@ -202,6 +204,15 @@ export async function generateContent(campaign = {}) {
     } catch (e) {
       console.warn(`  [content-gen] AI call failed (${provider}): ${e.message}`);
       out = null;
+    }
+    if (!String(out?.caption ?? '').trim() && provider === 'ollama' && openaiKey) {
+      try {
+        console.warn('  [content-gen] Ollama ยังสร้าง Caption ไม่ได้ — fallback ไป OpenAI');
+        ({ out, modelUsed } = await callOpenAI({ apiKey: openaiKey, userMsg }));
+      } catch (e) {
+        console.warn(`  [content-gen] OpenAI fallback failed: ${e.message}`);
+        out = null;
+      }
     }
   }
 
@@ -336,6 +347,15 @@ export async function generatePosterFields(campaign = {}) {
     } catch (e) {
       console.warn(`  [content-gen] poster fields ล้มเหลว (${provider}): ${e.message}`);
       out = null;
+    }
+    if (!complete() && provider === 'ollama' && openaiKey) {
+      try {
+        console.warn('  [content-gen] Ollama ยังสรุปข้อมูลโปสเตอร์ไม่ได้ — fallback ไป OpenAI');
+        ({ out } = await callOpenAI({ apiKey: openaiKey, userMsg, system: POSTER_SYSTEM, tool: POSTER_TOOL }));
+      } catch (e) {
+        console.warn(`  [content-gen] OpenAI fallback poster failed: ${e.message}`);
+        out = null;
+      }
     }
   }
   if (!complete()) {

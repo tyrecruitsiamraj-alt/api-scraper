@@ -52,7 +52,11 @@ export function assessMarketResearch(result = {}, { requireFacebook = true } = {
 export function isJobSearchQuery(value) {
   const text = clean(value);
   return /หางาน|หา\s+งาน|สมัครงาน|สมัคร\s+งาน|รับสมัคร|ตำแหน่งงาน|career|\bjob\b/i.test(text)
-    || /(?:^|\s)งาน\s+.*(?:หัวหน้า|พนักงาน|คนสวน|ช่าง|driver|supervisor|foreman|architect)/i.test(text);
+    || /(?:^|\s)งาน\s+.*(?:หัวหน้า|พนักงาน|คนสวน|ช่าง|driver|supervisor|foreman|architect)/i.test(text)
+    // Google Suggest มักคืน "พนักงานขับรถ" หรือ "ประชาสัมพันธ์" ตรง ๆ
+    // โดยไม่มีคำว่า "หางาน" นำหน้า จึงต้องยอมรับเฉพาะชื่อตำแหน่งที่เฉพาะเจาะจง
+    // ไม่รับคำกว้าง ๆ เช่น "พนักงาน" หรือ "ช่าง" เพียงคำเดียว.
+    || /(?:พนักงาน\s*(?:ขับรถ|คลังสินค้า|รักษาความปลอดภัย|ทำความสะอาด)|คน\s*(?:ขับรถ|สวน)|ประชาสัมพันธ์|ช่าง\s*(?:อาคาร|เทคนิค|ซ่อมบำรุง)|หัวหน้า\s*(?:ไซต์|คนสวน)|driver|receptionist|technician|gardener)/i.test(text);
 }
 
 export function parseGoogleSuggestResponse(raw) {
@@ -117,8 +121,11 @@ async function saveEvidence(campaignId, evidence) {
   );
 }
 
-async function collectGoogleSuggestions(campaignId, facts) {
+// Exported for deterministic integration checks: this is the exact Google step
+// used by the Worker, not a mock or a second implementation.
+export async function collectGoogleSuggestions(campaignId, facts) {
   const found = [];
+  let verifiedRoleSeed = '';
   for (const seed of buildResearchSeeds(facts)) {
     const endpoint = new URL('https://suggestqueries.google.com/complete/search');
     endpoint.searchParams.set('client', 'firefox');
@@ -130,6 +137,9 @@ async function collectGoogleSuggestions(campaignId, facts) {
     try {
       const response = await fetch(endpoint, { signal: controller.signal, headers: { 'User-Agent': 'Mozilla/5.0' } });
       if (!response.ok) throw new Error(`Google suggestions HTTP ${response.status}`);
+      // เก็บเฉพาะกรณีที่ Google ตอบกลับสำเร็จจริง ใช้เป็น fallback ได้เมื่อ
+      // Google ไม่แนะนำคำเพิ่ม แต่ยืนยันได้ว่าคำเรียกตำแหน่งนี้ค้นหาได้.
+      if (!verifiedRoleSeed && isJobSearchQuery(seed)) verifiedRoleSeed = seed;
       const suggestions = parseGoogleSuggestResponse(await response.text())
         .filter((item) => clean(item).toLowerCase() !== seed.toLowerCase())
         .filter(isJobSearchQuery);
@@ -144,9 +154,24 @@ async function collectGoogleSuggestions(campaignId, facts) {
         });
         if (found.length >= 8) return found;
       }
+    } catch (error) {
+      // คำค้นหนึ่งคำล้มเหลวต้องไม่ทำให้คำค้นอื่นใน Job Family เดียวกันหยุดหมด.
+      console.warn(`  [research] Google suggest ${seed}: ${error.message}`);
     } finally {
       clearTimeout(timer);
     }
+  }
+  // ไม่มีคำแนะนำใหม่ไม่ได้แปลว่าตำแหน่งนี้ค้นหาไม่ได้เสมอไป. เมื่อ Google
+  // ตอบรับคำค้นตำแหน่งเฉพาะเจาะจงแล้ว ให้เก็บเป็นหลักฐานชนิด fallback ที่
+  // ระบุที่มาตรงไปตรงมา ไม่อ้างว่าเป็นคำแนะนำหรือเทรนด์ใหม่.
+  if (!found.length && verifiedRoleSeed) {
+    await saveEvidence(campaignId, {
+      key: evidenceKey('google-verified-role-query', verifiedRoleSeed), sourceType: 'google_trends',
+      url: `https://trends.google.co.th/explore?geo=TH&q=${encodeURIComponent(verifiedRoleSeed)}`,
+      queryTerm: verifiedRoleSeed, sourceName: 'Google ตรวจคำค้นตำแหน่ง (TH)',
+      findings: { seed: verifiedRoleSeed, evidence_kind: 'google_verified_role_query', suggested_query: null },
+    });
+    return [verifiedRoleSeed];
   }
   return found;
 }
@@ -178,7 +203,19 @@ async function collectFacebookPosts(campaignId, facts) {
     .map((term) => term.replace(/^(?:หางาน|สมัครงาน|งาน)\s*/i, '').trim())
     .filter((term) => term.length >= 4);
   try {
-    for (const group of groups) {
+    for (let index = 0; index < groups.length; index += 1) {
+      const group = groups[index];
+      // งานสำรวจสดอาจใช้เวลาหลายนาทีเมื่อมีหลายกลุ่ม. เขียน progress ที่
+      // ตรวจย้อนกลับได้ให้หน้า Web ทุกกลุ่ม แทนการปล่อยให้ผู้ใช้เห็นว่า
+      // "กำลังทำ" เฉย ๆ ทั้งที่ Worker ยังปกติ.
+      await query(
+        `UPDATE recruit_campaigns
+            SET status='researching',
+                status_note=$2,
+                updated_at=now()
+          WHERE id=$1 AND status='researching'`,
+        [campaignId, `กำลังสำรวจโพสต์ Facebook กลุ่ม ${index + 1}/${groups.length} (${group.fb_group_id}) ก่อนสร้างสื่อ`],
+      );
       try {
         await page.goto(group.url, { waitUntil: 'domcontentloaded', timeout: 45_000 });
         await sleep(2_500);
@@ -280,11 +317,21 @@ export async function collectCampaignMarketResearch({
     result.gate = assessMarketResearch(result, { requireFacebook });
     return result;
   }
-  const keywords = await collectGoogleSuggestions(campaignId, facts).catch((error) => {
-    warnings.push(`Google: ${error.message}`); return [];
-  });
+  // Retry ของใบงานเดิมต้องไม่สแกน Google/Facebook ทั้งหมดซ้ำ หากมี
+  // หลักฐานที่ตรวจย้อนกลับได้ของ campaign นี้อยู่แล้ว. นี่เป็นการ resume
+  // งานเดิม ไม่ใช่การข้าม Research Gate หรือยืมผลของคนละตำแหน่ง.
+  const existingEvidence = await loadCampaignMarketResearch(campaignId).catch(() => []);
+  const existingGoogle = existingEvidence.filter((item) => item.source_type === 'google_trends' && isJobSearchQuery(item.query_term));
+  const existingFacebook = existingEvidence.filter((item) => item.source_type === 'facebook_post');
+  const keywords = existingGoogle.length
+    ? existingGoogle.map((item) => item.query_term).filter(Boolean)
+    : await collectGoogleSuggestions(campaignId, facts).catch((error) => {
+      warnings.push(`Google: ${error.message}`); return [];
+    });
   const ownedPosts = await collectOwnedFacebookHistory(campaignId, position).catch(() => []);
-  const facebook = requireFacebook
+  const facebook = existingFacebook.length
+    ? { posts: existingFacebook, reason: '', scannedGroups: 0, coverageComplete: false, reused: true }
+    : requireFacebook
     ? await collectFacebookPosts(campaignId, facts).catch((error) => ({ posts: [], reason: error.message, scannedGroups: 0, coverageComplete: false }))
     : { posts: [], reason: '', scannedGroups: 0, coverageComplete: false };
   if (requireFacebook && facebook.reason) warnings.push(`Facebook: ${facebook.reason}`);

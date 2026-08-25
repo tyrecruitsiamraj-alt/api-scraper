@@ -14,13 +14,13 @@ if (!/^[A-Za-z_][A-Za-z0-9_-]*$/.test(AP_SCHEMA)) {
   throw new Error(`AUTOPOST_SCHEMA ไม่ถูกต้อง: ${AP_SCHEMA}`);
 }
 const AP = `"${AP_SCHEMA}"`;
-// Worker compatibility is a release contract, not the current web commit.
-// UI-only deploys must not take both Windows/Mac workers offline. Bump this SHA
-// only after worker code changes have been deployed and verified end-to-end.
-// This is deliberately the last worker release that implements evidence-v1;
-// source_sha in the heartbeat remains available for diagnosis.
+// Worker compatibility is a semantic contract, not a stale Git SHA baked into
+// the Web bundle. A UI-only deploy must not turn an already compatible worker
+// offline. content_pipeline + declared capabilities below are the enforceable
+// contract; an environment can optionally pin a release SHA for a controlled
+// deployment. source_sha remains visible in the heartbeat for diagnosis.
 const REQUIRED_WORKER_BUILD_SHA = String(
-  process.env.REQUIRED_WORKER_BUILD_SHA || 'daa49f9d6c8ae7be99f33baebbf9c09d77b9c34e',
+  process.env.REQUIRED_WORKER_BUILD_SHA || '',
 ).trim();
 const REQUIRED_CONTENT_PIPELINE = 'evidence-v1';
 
@@ -1637,6 +1637,33 @@ export async function getCampaign(id: string) {
   return rows[0] ?? null;
 }
 
+/** สถานะ Queue ของการสร้าง Content ล่าสุด — หน้า Web ใช้อธิบายว่า
+ * งานกำลังรอเครื่อง, กำลังทำ, ต้องให้คนช่วย หรือระบบขัดข้อง โดยไม่เดาจาก campaign อย่างเดียว. */
+export type CampaignDraftQueueState = {
+  id: string;
+  status: 'queued' | 'running' | 'done' | 'needs_input' | 'error' | 'partial' | string;
+  attempts: number;
+  max_attempts: number;
+  created_at: string;
+  started_at: string | null;
+  finished_at: string | null;
+  locked_at: string | null;
+  last_error: string | null;
+  worker_id: string | null;
+};
+
+export async function getCampaignDraftQueueState(campaignId: string): Promise<CampaignDraftQueueState | null> {
+  const rows = await q<CampaignDraftQueueState>(
+    `SELECT id, status, attempts, max_attempts, created_at, started_at, finished_at, locked_at, last_error, worker_id
+       FROM work_queue
+      WHERE ref_id = $1 AND type = 'draft'
+      ORDER BY created_at DESC
+      LIMIT 1`,
+    [campaignId],
+  );
+  return rows[0] ?? null;
+}
+
 // --- Pool pre-check: มีคนใน So Recruit (jarvis_rm) สำหรับใบขอนี้หรือยัง ---
 // อ่านอย่างเดียว เชื่อมด้วย jobs.request_no = campaign.request_no (ตัวเชื่อมเดียวที่มีจริง
 // ในสคีมา). ไม่ตั้งกติกา matching เอง, ไม่ตัดสินใจแทนคน. guarded — null ถ้าเข้าไม่ได้.
@@ -2675,7 +2702,20 @@ export async function beginCampaignDraftRetry(campaignId: string, ownerUser: str
       [campaignId],
     );
     const status = campaigns.rows[0]?.status;
-    if (!status || ['researching', 'drafting', 'posting', 'measuring'].includes(status)) {
+    if (!status || ['posting', 'measuring'].includes(status)) {
+      await client.query('ROLLBACK');
+      return false;
+    }
+    // สถานะ campaign อาจค้างเป็น researching/drafting จาก worker ที่ตายไปแล้ว.
+    // ล็อกจริงต้องดูคิวที่ยัง queued/running; ถ้าไม่มีจึงเริ่ม retry ได้อย่างปลอดภัย.
+    const activeDraft = await client.query<{ busy: boolean }>(
+      `SELECT EXISTS (
+         SELECT 1 FROM work_queue
+          WHERE ref_id=$1 AND type='draft' AND status IN ('queued','running')
+       ) AS busy`,
+      [campaignId],
+    );
+    if (activeDraft.rows[0]?.busy) {
       await client.query('ROLLBACK');
       return false;
     }
@@ -2725,6 +2765,61 @@ export async function beginCampaignDraftRetry(campaignId: string, ownerUser: str
       `INSERT INTO work_queue (type, module, connector_key, ref_id, payload, owner_user, preferred_worker)
        VALUES ('draft', 'orchestrator', $1, $2, '{}'::jsonb, $3, $4)`,
       [`orchestrator:${campaignId}`, campaignId, ownerUser, workers.rows[0].name],
+    );
+    await client.query('COMMIT');
+    return true;
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+/**
+ * ส่งงานเปลี่ยนเฉพาะภาพของ Content เดิมเข้าคิว. Caption, ข้อความบนภาพ, Logo
+ * และสถานะอนุมัติจะไม่ถูกแตะ จึงปลอดภัยกว่าการสั่งสร้าง Content ใหม่ทั้งร่าง.
+ */
+export async function enqueueContentImageRegeneration(contentId: string, campaignId: string, ownerUser: string | null): Promise<boolean> {
+  const client = await pool().connect();
+  try {
+    await client.query('BEGIN');
+    const content = await client.query<{ id: string }>(
+      `SELECT cc.id
+         FROM campaign_contents cc
+         JOIN recruit_campaigns c ON c.id=cc.campaign_id
+        WHERE cc.id=$1 AND cc.campaign_id=$2 AND cc.status='draft'
+        FOR UPDATE`,
+      [contentId, campaignId],
+    );
+    if (!content.rows[0]) throw new Error('ร่างนี้ไม่อยู่ในสถานะที่เปลี่ยนภาพได้');
+    const alreadyQueued = await client.query<{ busy: boolean }>(
+      `SELECT EXISTS (
+         SELECT 1 FROM work_queue
+          WHERE ref_id=$1 AND type='regenerate_image' AND status IN ('queued','running')
+       ) AS busy`,
+      [contentId],
+    );
+    if (alreadyQueued.rows[0]?.busy) {
+      await client.query('COMMIT');
+      return false;
+    }
+    const workers = await client.query<{ name: string }>(
+      `SELECT name FROM workers
+        WHERE last_seen > now() - interval '2 minutes'
+          AND COALESCE((meta->'image_generation'->>'configured')::boolean, false)
+          AND COALESCE(meta->'image_generation'->>'model', '') = 'gpt-image-2'
+          AND COALESCE(meta->'types', '[]'::jsonb) ? 'regenerate_image'
+          AND ($1 = '' OR COALESCE(meta->>'build_sha', '') = $1)
+          AND COALESCE(meta->>'content_pipeline', '') = $2
+        ORDER BY last_seen DESC LIMIT 1`,
+      [REQUIRED_WORKER_BUILD_SHA, REQUIRED_CONTENT_PIPELINE],
+    );
+    if (!workers.rows[0]) throw new Error('เครื่องสร้างรูปยังไม่ออนไลน์ในรุ่นที่รองรับการคิดภาพใหม่');
+    await client.query(
+      `INSERT INTO work_queue (type, module, connector_key, ref_id, payload, owner_user, preferred_worker)
+       VALUES ('regenerate_image', 'orchestrator', $1, $2, $3::jsonb, $4, $5)`,
+      [`content-image:${contentId}`, contentId, JSON.stringify({ campaignId }), ownerUser, workers.rows[0].name],
     );
     await client.query('COMMIT');
     return true;

@@ -15,6 +15,15 @@ const NAV: { href: string; label: string; also?: string[] }[] = [
   { href: '/settings', label: 'ตั้งค่า', also: ['/connectors'] },
 ];
 
+// Shell หลักบน Desktop ใช้เมนูสั้นตาม Workflow ที่คนทำงานใช้จริง.
+// หน้าค้นหาและการโพสต์เป็นขั้นย่อยที่เข้าจากศูนย์งาน ไม่บังคับให้คนจำหลายหน้า.
+const DESKTOP_NAV = [
+  { href: '/orchestrator', label: 'ศูนย์งาน', icon: '▣' },
+  { href: '/candidates', label: 'คลังผู้สมัคร', icon: '♧', also: ['/scraping'] },
+  { href: '/autopost/results', label: 'ผลลัพธ์', icon: '▥', also: ['/autopost'] },
+  { href: '/settings', label: 'ตั้งค่า', icon: '⚙', also: ['/connectors'] },
+];
+
 /** active tab: exact หรือ prefix (ครอบหน้าย่อย) */
 function isActive(pathname: string, item: { href: string; also?: string[] }): boolean {
   const hrefs = [item.href, ...(item.also ?? [])];
@@ -58,7 +67,31 @@ export function Topbar() {
 
   return (
     <>
-      <header className="glass-dark sticky top-0 z-30 border-b border-white/10">
+      {/* Desktop shell — คง Sidebar ไว้ตลอดเพื่อให้ผู้ใช้รู้ว่ากำลังอยู่ระบบไหน */}
+      <aside className="fixed inset-y-0 left-0 z-40 hidden w-52 flex-col border-r border-white/10 bg-[#042d5a] text-white lg:flex">
+        <div className="border-b border-white/10 px-6 py-7">
+          <div className="flex items-center gap-3">
+            <Image src="/logo-SO.webp" alt="SO PEOPLE" width={48} height={48} className="h-12 w-auto" priority />
+            <div className="leading-none"><b className="block text-sm tracking-[0.16em]">SO</b><span className="mt-1 block text-[10px] font-semibold tracking-[0.12em] text-white/75">PEOPLE</span></div>
+          </div>
+          <p className="mt-2 text-[8px] font-medium tracking-[0.12em] text-white/60">WE MAKE IT EASY</p>
+        </div>
+        <nav className="flex-1 space-y-2 px-3 py-5">
+          {DESKTOP_NAV.map((item) => {
+            const active = isActive(pathname, item);
+            return <Link key={item.href} href={item.href} className={`flex items-center gap-3 rounded-lg px-3 py-3 text-sm font-semibold transition ${active ? 'bg-[#1261b9] text-white shadow-sm' : 'text-white/75 hover:bg-white/10 hover:text-white'}`}>
+              <span className="grid h-5 w-5 place-items-center text-base" aria-hidden>{item.icon}</span>{item.label}
+            </Link>;
+          })}
+        </nav>
+        <div className="border-t border-white/10 p-3">
+          <div className="flex items-center gap-2 rounded-xl bg-white/5 p-2">
+            {user?.image ? <img src={user.image} alt={label} referrerPolicy="no-referrer" className="h-8 w-8 rounded-full object-cover" /> : <div className="grid h-8 w-8 place-items-center rounded-full bg-white/15 text-[11px] font-semibold">{initials}</div>}
+            <div className="min-w-0"><div className="truncate text-xs font-medium">{label}</div><div className="truncate text-[10px] text-white/55">{user?.email || 'SO Recruiter'}</div></div>
+          </div>
+        </div>
+      </aside>
+      <header className="glass-dark sticky top-0 z-30 border-b border-white/10 lg:hidden">
         <div className="mx-auto flex h-16 max-w-7xl items-center justify-between gap-3 px-4 sm:px-6 lg:px-8">
           {/* hamburger + brand */}
           <div className="flex min-w-0 items-center gap-2">
@@ -96,7 +129,7 @@ export function Topbar() {
       <div
         onClick={() => setOpen(false)}
         aria-hidden
-        className={`fixed inset-0 z-40 bg-black/45 backdrop-blur-sm transition-opacity duration-200 ${
+        className={`fixed inset-0 z-40 bg-black/45 backdrop-blur-sm transition-opacity duration-200 lg:hidden ${
           open ? 'opacity-100' : 'pointer-events-none opacity-0'
         }`}
       />
@@ -104,7 +137,7 @@ export function Topbar() {
       {/* drawer ด้านข้าง */}
       <aside
         aria-hidden={!open}
-        className={`fixed left-0 top-0 z-50 flex h-full w-72 max-w-[82vw] flex-col border-r border-white/10 bg-[#181410] shadow-2xl transition-transform duration-200 ease-out ${
+        className={`fixed left-0 top-0 z-50 flex h-full w-72 max-w-[82vw] flex-col border-r border-white/10 bg-[#181410] shadow-2xl transition-transform duration-200 ease-out lg:hidden ${
           open ? 'translate-x-0' : '-translate-x-full'
         }`}
       >

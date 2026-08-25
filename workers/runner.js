@@ -22,13 +22,15 @@ import { query, closePool } from '../src/db/pool.js';
 import { getConnector, getTaskById, recoverStaleRunningTasks } from '../src/db/repositories.js';
 import { runConnector } from '../src/pipeline.js';
 import { runTask } from '../src/tasks-worker.js';
-import { generateDraftForCampaign } from '../src/core/orchestrator-draft.js';
+import { generateDraftForCampaign, regenerateImageForContent } from '../src/core/orchestrator-draft.js';
 import { measureCampaign } from '../src/core/orchestrator-measure.js';
 import { sendAlert } from '../src/core/alert.js';
 import { classifyScrapeTaskResult, requireSuccessfulScrapeTaskResult } from '../src/core/scrape-task-result.js';
 import { imageGenerationCapability } from '../src/core/ai-image.js';
 
-const WORKER_NAME = os.hostname();
+// ชื่อ Worker ต้องตรงกับ preferred_worker ใน Queue. เดิม heartbeat ใช้ hostname
+// เสมอ แม้ launcher ตั้ง WORKER_NAME คนละ slot ทำให้หลาย process ทับสถานะกัน.
+const WORKER_NAME = String(process.env.WORKER_NAME || os.hostname()).trim() || os.hostname();
 const WORKER_ID = `${WORKER_NAME}#${process.pid}`;
 const WORKER_SOURCE_SHA = (() => {
   try {
@@ -40,7 +42,10 @@ const WORKER_SOURCE_SHA = (() => {
 const WORKER_BUILD_SHA = String(process.env.WORKER_BUILD_SHA || '').trim() || WORKER_SOURCE_SHA;
 const CONTENT_PIPELINE_RELEASE = 'evidence-v1';
 const POLL_MS = Number.parseInt(process.env.WORKER_POLL_MS ?? '3000', 10);
-const STALE_SECONDS = Number.parseInt(process.env.WORKER_STALE_SECONDS ?? '1800', 10); // 30 min
+// ทุก handler ต่ออายุ lease ทุก 30 วินาทีอยู่แล้ว. ถ้า lock ไม่ขยับเกิน 2 นาที
+// แปลว่า process หายจริงในทางปฏิบัติ; 30 นาทีเดิมทำให้หน้าจอค้าง "กำลังทำ"
+// นานเกินกว่าจะใช้จริงหลัง Worker ถูกปิด/รีสตาร์ต.
+const STALE_SECONDS = Number.parseInt(process.env.WORKER_STALE_SECONDS ?? '120', 10);
 const LEASE_HEARTBEAT_MS = Number.parseInt(process.env.WORKER_LEASE_HEARTBEAT_MS ?? '30000', 10);
 const RETRY_BASE_SECONDS = Number.parseInt(process.env.WORKER_RETRY_BASE_SECONDS ?? '30', 10);
 const MEASURE_RETRY_MINUTES = Number.parseInt(process.env.MEASURE_RETRY_MINUTES ?? '30', 10);
@@ -99,11 +104,26 @@ async function heartbeat() {
   if (Date.now() - lastBeat < HEARTBEAT_MS) return;
   lastBeat = Date.now();
   try {
+    const meta = {
+      pid: process.pid,
+      worker_id: WORKER_ID,
+      build_sha: WORKER_BUILD_SHA,
+      source_sha: WORKER_SOURCE_SHA,
+      content_pipeline: CONTENT_PIPELINE_RELEASE,
+      types: SUPPORTED,
+      image_generation: imageGenerationCapability(),
+    };
     await query(
       `INSERT INTO workers (name, kind, last_seen, meta)
        VALUES ($1, 'scraper', now(), $2::jsonb)
-       ON CONFLICT (name) DO UPDATE SET last_seen = now(), meta = EXCLUDED.meta`,
-      [os.hostname(), JSON.stringify({ pid: process.pid, build_sha: WORKER_BUILD_SHA, source_sha: WORKER_SOURCE_SHA, content_pipeline: CONTENT_PIPELINE_RELEASE, types: SUPPORTED, image_generation: imageGenerationCapability() })],
+       ON CONFLICT (name) DO UPDATE SET
+         last_seen = now(),
+         meta = EXCLUDED.meta || jsonb_build_object(
+           'processes',
+           COALESCE(workers.meta->'processes', '{}'::jsonb) ||
+           jsonb_build_object($3::text, jsonb_build_object('worker_id', $4::text, 'last_seen', now()))
+         )`,
+      [WORKER_NAME, JSON.stringify(meta), String(process.pid), WORKER_ID],
     );
   } catch (e) {
     console.warn(`  [heartbeat] เขียนไม่ได้: ${e.message}`);
@@ -144,6 +164,12 @@ const HANDLERS = {
   async draft(job) {
     if (!job.ref_id) throw new Error('draft job missing ref_id (campaign id)');
     return generateDraftForCampaign(job.ref_id);
+  },
+  // เปลี่ยนเฉพาะภาพคน/ฉากของร่างเดิม โดยคง Caption และ Text/Logo Layer ไว้
+  // งานนี้ไม่เกี่ยวกับ Facebook และไม่สร้าง campaign/content ซ้ำ.
+  async regenerate_image(job) {
+    if (!job.ref_id) throw new Error('regenerate_image job missing ref_id (content id)');
+    return regenerateImageForContent(job.ref_id);
   },
   // Content Orchestrator วัดผล (เฟส 4): อ่าน engagement จาก post_logs → verdict →
   // regen (คนสนใจน้อย) / บันทึกแนวที่เวิร์ค (เยอะ). ไม่ต้อง browser (อ่าน DB).
@@ -249,6 +275,17 @@ async function retryOrFail(job, error) {
         WHERE id=$1 AND worker_id=$2 AND status='running'`,
       [job.id, WORKER_ID, attempts, error],
     );
+    // Queue จบด้วย error แต่ campaign ค้างคำว่า "กำลังทำ" ทำให้หน้า Web ไม่มี
+    // ปุ่มลองใหม่และผู้ใช้ต้องมาบอกผ่านแชต. เปลี่ยนเฉพาะ draft ที่ lease นี้ถืออยู่
+    // เพื่อให้ Action Center อธิบายสาเหตุและเปิด retry ตามเส้นทางปกติ.
+    if (job.type === 'draft' && job.ref_id) {
+      await query(
+        `UPDATE recruit_campaigns
+            SET status='draft_error', status_note=$2, updated_at=now()
+          WHERE id=$1 AND status IN ('researching','drafting')`,
+        [job.ref_id, `สร้างสื่อไม่สำเร็จ: ${error}`.slice(0, 520)],
+      );
+    }
     return false;
   }
   const delaySeconds = RETRY_BASE_SECONDS * (2 ** (attempts - 1));
@@ -304,7 +341,12 @@ async function runOne() {
     const outcome = job.type === 'scrape' ? classifyScrapeTaskResult(r) : 'completed';
     // partial เป็นผลลัพธ์ terminal ที่ระบบทำงานจบแต่ตลาดให้คนไม่ครบ ไม่ใช่ done
     // และไม่ใช่ infrastructure error ที่ควร retry แบบเดิมซ้ำ ๆ.
-    await finish(job.id, outcome === 'market_insufficient' ? 'partial' : 'done');
+    // Draft ที่หยุดตาม Fact/Research Gate ไม่ใช่งานสำเร็จ: ผู้ใช้ต้องเห็นว่า
+    // "ต้องให้ช่วย" และสามารถกดแก้/ลองใหม่ได้จาก Web โดยไม่เข้าใจว่า Queue done.
+    const needsInput = job.type === 'draft' && r?.status === 'needs_input';
+    const status = needsInput ? 'needs_input' : outcome === 'market_insufficient' ? 'partial' : 'done';
+    const detail = needsInput ? (r?.issues ?? []).join(' · ') || 'ต้องยืนยันข้อมูลก่อนสร้างสื่อ' : null;
+    await finish(job.id, status, detail);
     console.log(`  ✓ done: ${JSON.stringify(r).slice(0, 200)}`);
   } catch (e) {
     const errMsg = String(e?.message ?? e).slice(0, 500);
