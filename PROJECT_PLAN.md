@@ -466,6 +466,7 @@
 
 - Self-test ปลอดภัย `2eab530e-4d25-4503-a6fc-b4a4b6f07af2` ถูก Worker claim และจบ `done` โดยไม่มี Error
 - ผู้ใช้กดปุ่ม `ทดสอบระบบแบบไม่โพสต์จริง` จาก `/orchestrator` หลัง Login; งาน `5fb8b360-1a68-47d8-8a5a-b3930b131278` เข้า Queue เวลา `09:11:11.546Z`, Worker รับ `09:11:11.635Z` และจบ `done` เวลา `09:11:12.058Z`; `last_error=null`
+- หลักฐาน Gate C บันทึกใน commit `e5dd70c`
 
 ### Gate D — Content Golden Flow
 
