@@ -3,7 +3,7 @@
 > ไฟล์นี้เป็นแหล่งอ้างอิงแผนงานกลาง (Single Source of Truth) สำหรับคนและ AI ทุกโมเดล
 >
 > อัปเดตล่าสุด: 25 สิงหาคม 2026 (Asia/Bangkok)
-> สถานะ: รวม Master Roadmap แล้ว — งานหลายส่วนมีโค้ด แต่ยังต้องตรวจ Production ตาม Release Gate
+> สถานะ: Phase 9 กำลังทดสอบจริง — Gate A, B และ F มีหลักฐานแล้ว; Gate C ผ่านเฉพาะเส้น Queue→Worker; Gate D/E ถูกบล็อกที่ Facebook Session และยังไม่มี Controlled Real Post
 
 ## กติกาการใช้ไฟล์นี้
 
@@ -120,16 +120,16 @@
 
 | ด่าน | สถานะ | หลักฐาน/ความหมาย |
 |---|---|---|
-| เครื่องสร้างประกาศ | ไม่ผ่าน | ตอนตรวจไม่พบ Node Worker ออนไลน์บนเครื่องนี้ |
-| สิทธิ์สร้างรูป AI | ยังไม่ผ่านที่ระบบ | Root `.env` มี `OPENAI_API_KEY` แล้ว แต่ต้องให้ Worker รุ่นที่ถูกต้องรายงาน capability |
-| เครื่องเผยแพร่ Facebook | ไม่ผ่าน | ตอนตรวจไม่พบ Facebook Worker ออนไลน์ |
-| Facebook Preflight | ไม่ผ่าน | ต้องใช้ Worker ที่ประกาศ capability `preflight` และ Build ตรงกับ Production |
-| บัญชีและกลุ่ม Facebook | ผ่าน | พร้อมใช้งาน 1 บัญชี |
+| เครื่องสร้างประกาศ | ผ่าน | `SONB-RM009` ออนไลน์ และรายงาน `draft` + `content_pipeline=evidence-v1` |
+| สิทธิ์สร้างรูป AI | ผ่านที่ Worker | Worker รายงาน `gpt-image-2` และ `configured=true` โดยไม่เปิดเผย Key |
+| เครื่องเผยแพร่ Facebook | ยังไม่เปิด | Worker ทำงานแบบ `preflight` เท่านั้นตามกติกาความปลอดภัย จึงห้าม Dashboard นับว่าโพสต์จริงได้ |
+| Facebook Preflight | ไม่ผ่าน | Worker รับงานจริงแล้ว แต่ Facebook ยังไม่สร้าง employer session (Trace พบ `__user=0`) |
+| บัญชีและกลุ่ม Facebook | ผ่าน | 1 บัญชีถูก Pin มาที่ `SONB-RM009` และมี 1 กลุ่ม |
 | Caption และภาพ | ไม่ผ่าน | ยังไม่มีร่างใหม่ที่ Quality Gate ผ่าน มีรูปจริง และมีหลักฐานการสร้างรูป |
 | Scraping | ทำงานได้บางส่วน | ครบเป้า 1 งาน, ตลาดไม่พอ 5 งาน, ระบบขัดข้อง 0 งาน |
-| คิวเบื้องหลัง | ผ่าน | ไม่พบงานค้าง ณ เวลาตรวจ |
+| คิวเบื้องหลัง | ผ่านบางส่วน | Self-test ถูก Worker claim และจบ `done`; ยังไม่ยืนยันการกดจาก Web เพราะ Browser session เป็นหน้า Microsoft sign-in |
 | Facebook ล่าสุด | ไม่ผ่าน | การเผยแพร่จริงล้มเหลว 3 ครั้งติดต่อกัน |
-| Unit Test ของ Readiness | ผ่าน | `node --test tests/workflow-readiness.test.js` ผ่าน 9/9 เมื่อ 25 สิงหาคม 2026 |
+| Unit/Build/Logic Test | ผ่าน | Node test 95/95, Readiness test 13/13, AutoPost logic 4/4 และ `web npm run build` ผ่าน เมื่อ 25 สิงหาคม 2026 |
 
 ## Root Cause ที่ยืนยันจากโค้ด
 
@@ -166,6 +166,19 @@
 - ปัจจุบัน `src/core/workflow-readiness.js` ลดสถานะเป็น Warning เมื่อมีงาน Partial
 - ผลกระทบ: คะแนน Production Readiness ไม่สะท้อนความพร้อมของระบบอย่างตรงไปตรงมา
 
+### RC-06: Dashboard เดิมนับแค่ Capability แต่ยังไม่ยืนยันผล Facebook จริง
+
+- เดิม `src/core/workflow-readiness.js` นับ Facebook Preflight ว่าผ่านเพียงเพราะ Worker ประกาศ capability `preflight` และนับ Facebook Worker ว่าพร้อมโพสต์เพียงเพราะ `kind='autopost'`
+- ผลกระทบ: Worker แบบ preflight-only หรือบัญชีที่ Login ไม่สำเร็จอาจทำให้ Dashboard เขียวเกินจริง
+- แก้ใน Commit `26c6940941642b7e836482328b38979538b9618a`: ต้องมี capability `post` จึงนับว่าเผยแพร่จริงได้ และต้องมี Preflight สำเร็จของบัญชีภายใน 24 ชั่วโมงจึงนับว่า Facebook Preflight ผ่าน
+
+### RC-07: Facebook Session ของบัญชีที่ผูกไว้ยังเข้าใช้งานไม่ได้
+
+- งาน Preflight แบบไม่โพสต์จริงถูก Worker `SONB-RM009` claim แล้ว แต่จบ `failed` เมื่อ 25 ส.ค. 2026
+- Playwright Trace หลังส่ง Login พบ Facebook ทำงานในสถานะผู้ใช้ `__user=0`; จึงยังไม่เกิด employer session
+- จุดที่ตรวจและหยุดอย่างปลอดภัย: `autopost/src/helpers/facebookLogin.ts:107-155` และ `autopost/tests/facebookPreflight.spec.ts:4-29`
+- ไม่ได้มีการโพสต์จริง, ไม่ได้เปลี่ยนสถานะ Error และไม่พยายามข้าม checkpoint/ความปลอดภัยของ Facebook
+
 ## Recommendation หากเลือกเพียงทางเดียว
 
 ทำ Golden Flow Release บน Worker เครื่องนี้ให้ครบหนึ่งรอบ แล้วแยก Operational Readiness ออกจาก Business Outcome ของตลาดผู้สมัคร
@@ -174,10 +187,10 @@
 
 ### Gate A — จัด Version Contract
 
-- [ ] เลือก Worker Release SHA ที่จะใช้จริง
-- [ ] กำหนด `REQUIRED_WORKER_BUILD_SHA` ให้ตรงกันทั้ง Web และ Autopost Production
-- [ ] ตรวจว่า Worker รายงาน `build_sha`, `content_pipeline=evidence-v1`, `image_generation` และ `preflight`
-- [ ] Deploy Web และ Autopost ก่อนเปิด Worker รุ่นใหม่
+- [x] เลือก Worker Release SHA ที่จะใช้จริง
+- [x] กำหนด `REQUIRED_WORKER_BUILD_SHA` ให้ตรงกันทั้ง Web และ Autopost Production
+- [x] ตรวจว่า Worker รายงาน `build_sha`, `content_pipeline=evidence-v1`, `image_generation` และ `preflight`
+- [x] Deploy Web และ Autopost ก่อนเปิด Worker รุ่นใหม่
 
 เกณฑ์ผ่าน:
 
@@ -185,18 +198,19 @@
 - ไม่มีข้อความ `upgrade_required`
 - Web ไม่กรอง Worker ที่ถูกต้องออก
 
-หลักฐานระหว่างดำเนินการ (25 ส.ค. 2026):
+หลักฐาน (25 ส.ค. 2026) — ผ่าน:
 
 - แก้ fallback ของ Web, AutoPost และ launcher ให้ใช้ Compatibility Release `daa49f9d6c8ae7be99f33baebbf9c09d77b9c34e`
-- ต้อง Push และรอ Production deploy ก่อนนับว่า Gate A ผ่าน
+- Commit `a6f44ed` ถูก Push แล้ว; Production AutoPost รับ Worker claim ที่ส่ง build SHA นี้ได้ (ไม่ตอบ `upgrade_required`)
+- Heartbeat ของ Scraper/Content และ AutoPost รายงาน build SHA เดียวกัน พร้อม metadata ที่จำเป็น
 
 ### Gate B — เปิด Worker บนเครื่องนี้
 
-- [ ] เปิด `start-workers.bat`
-- [ ] ยืนยัน Scraper/Content Worker มี heartbeat ต่อเนื่อง
-- [ ] ยืนยัน Facebook Worker มี heartbeat ต่อเนื่อง
-- [ ] ยืนยัน `OPENAI_API_KEY` ถูกมองว่า configured โดยไม่เปิดเผย Key
-- [ ] ยืนยันบัญชี Facebook ถูก Pin มาที่ชื่อ Worker ที่ออนไลน์
+- [x] เปิด Scraper/Content Worker และ Facebook Worker แบบ preflight-only บนเครื่องนี้
+- [x] ยืนยัน Scraper/Content Worker มี heartbeat ต่อเนื่อง
+- [x] ยืนยัน Facebook Worker มี heartbeat ต่อเนื่อง
+- [x] ยืนยัน `OPENAI_API_KEY` ถูกมองว่า configured โดยไม่เปิดเผย Key
+- [x] ยืนยันบัญชี Facebook ถูก Pin มาที่ชื่อ Worker ที่ออนไลน์
 
 เกณฑ์ผ่าน:
 
@@ -205,18 +219,29 @@
 - เครื่องเผยแพร่ Facebook = ผ่าน
 - Facebook Preflight Worker = ผ่าน
 
+หลักฐาน (25 ส.ค. 2026) — ผ่าน:
+
+- Scraper/Content Worker รายงาน `types: scrape,draft,measure,selftest`, `content_pipeline=evidence-v1` และ Image Provider `gpt-image-2`
+- Facebook Worker รายงาน `capabilities: [preflight]`, เปิด `AUTO_POST_DAILY_ENABLED=0`; Commit `a4a7dc3` บังคับไม่ให้ Worker นี้ claim งาน `post`
+- Pin ของบัญชี Facebook ปรับเป็น `SONB-RM009`; จงใจยังไม่เปิด capability `post` ก่อน Controlled Real Post ได้รับอนุญาต
+
 ### Gate C — ทดสอบ Web → Queue → Worker
 
-- [ ] สั่ง Self-test จากหน้า Web
-- [ ] ตรวจงานเข้า `work_queue`
-- [ ] ตรวจ Worker Claim งานเอง
-- [ ] ตรวจสถานะจบเป็น `done`
-- [ ] ตรวจว่าไม่มีงาน `queued` เกิน 10 นาทีหรือ `running` ค้าง
+- [ ] สั่ง Self-test จากหน้า Web (Blocker: Browser ที่ตรวจเป็น Microsoft sign-in ยังไม่มี session ผู้ใช้)
+- [x] ตรวจงานเข้า `work_queue`
+- [x] ตรวจ Worker Claim งานเอง
+- [x] ตรวจสถานะจบเป็น `done`
+- [x] ตรวจว่าไม่มีงาน `queued` เกิน 10 นาทีหรือ `running` ค้าง
 
 เกณฑ์ผ่าน:
 
 - การทดสอบ Web → Queue → Worker = ผ่าน
 - คิวเบื้องหลัง = ผ่าน
+
+หลักฐาน (25 ส.ค. 2026) — ผ่านเฉพาะ Queue→Worker:
+
+- Self-test ปลอดภัย `2eab530e-4d25-4503-a6fc-b4a4b6f07af2` ถูก Worker claim และจบ `done` โดยไม่มี Error
+- ไม่ทำเครื่องหมาย Gate C ผ่านเต็ม เพราะยังไม่มีหลักฐานการกด Web Action ภายใต้ session ผู้ใช้
 
 ### Gate D — Content Golden Flow
 
@@ -233,6 +258,12 @@
 - มีร่างใหม่อย่างน้อย 1 ร่างที่ Quality Gate ผ่าน
 - มีภาพจริงพร้อมใช้และตรวจที่มาของการสร้างได้
 - ข้อเท็จจริงสำคัญผิด = 0
+
+หลักฐาน (25 ส.ค. 2026) — Blocked:
+
+- ใช้ใบขอจริง `LMM6705007` (หัวหน้าไซด์, สถานที่/รายได้/เวลาครบ) และ Worker รับงาน draft จริง
+- งาน draft จบอย่างปลอดภัยเป็น `needs_input` ก่อนสร้าง Caption/รูป เพราะ Research Gate พบว่า Facebook session ต้องยืนยันตัวตน จึงไม่มีหลักฐาน Engagement ที่ตรวจย้อนกลับได้
+- ไม่มีการสร้างภาพหรือ Caption ปลอมเพื่อให้ Gate ผ่าน; ดังนั้นยังไม่มี `image_generation.ok=true` หรือ Quality Gate ที่ผ่าน
 
 ### Gate E — Facebook Golden Flow
 
@@ -262,12 +293,18 @@
 - เพิ่ม `WORKER_CAPABILITIES` ให้เปิด remote worker แบบ `preflight` อย่างเดียวได้ และปิด auto-daily เมื่อไม่มี capability `post`
 - Syntax check ผ่าน; ต้อง Deploy Server แล้วทดสอบผ่านคิวจริง
 
+ผลทดสอบจริง (25 ส.ค. 2026) — Blocked:
+
+- งาน Preflight ถูก enqueue, Worker preflight-only claim แล้ว และล้มเหลวโดยไม่โพสต์จริง
+- สาเหตุยืนยันจาก Trace: Facebook Login ยังไม่ก่อตั้ง session (`__user=0`); ต้องให้เจ้าของบัญชี Login/ยืนยันตัวตนบนเครื่อง Worker ก่อน
+- Controlled Real Post ยังไม่เริ่มและจะหยุดขออนุญาตเป็นรายครั้งก่อนเปิด capability `post`
+
 ### Gate F — แยกคะแนน Scraping ออกจากความพร้อมระบบ
 
 - [x] ปรับ Readiness ให้ `error`, Worker offline, Queue ค้าง และ Pipeline ค้าง เป็นตัวหักคะแนนระบบ
 - [x] แสดงงาน `partial/market_exhausted` เป็น Business Outcome แยกต่างหาก
-- [ ] ห้ามเปลี่ยนงาน Partial เป็น Done หาก Resume ผ่าน Hard Filter ยังไม่ครบเป้าหมาย
-- [ ] เพิ่ม Test Case ยืนยันว่า “ตลาดไม่พอ แต่ระบบทำครบ” ไม่ทำให้ Operational Readiness ล้ม
+- [x] ห้ามเปลี่ยนงาน Partial เป็น Done หาก Resume ผ่าน Hard Filter ยังไม่ครบเป้าหมาย
+- [x] เพิ่ม Test Case ยืนยันว่า “ตลาดไม่พอ แต่ระบบทำครบ” ไม่ทำให้ Operational Readiness ล้ม
 
 เกณฑ์ผ่าน:
 
@@ -275,11 +312,12 @@
 - จำนวนงานตลาดไม่พอยังคงแสดงตามจริง
 - Definition of Done ของแต่ละงาน Scraping ไม่ถูกผ่อน
 
-หลักฐานระหว่างดำเนินการ (25 ส.ค. 2026):
+หลักฐาน (25 ส.ค. 2026) — ผ่าน:
 
 - เพิ่ม Unit Test: ตลาดไม่พอ 5 งานแต่ไม่มี system error ยังได้ Readiness 100%
 - เพิ่ม Unit Test: มี Scraping system error 1 งานต้อง Block Readiness
-- ชุด Unit Test ที่เกี่ยวข้องผ่าน 18/18; ยังต้อง Deploy ก่อนนับ Gate F ผ่านบน Production
+- Commit `a6f44ed` ถูก Push แล้ว; ชุด Unit Test เต็มผ่าน 95/95 โดยไม่แก้ข้อมูล `partial` ย้อนหลัง
+- งาน `partial` ยังแสดงเป็นผลตลาด และ `error` ยัง Block Readiness ตามจริง
 
 ### Gate G — Final Production Verification
 
@@ -297,6 +335,12 @@
 - งานค้างเงียบ = 0
 - โพสต์ซ้ำ = 0
 - ระบบขัดข้องใน Scraping = 0
+
+สถานะ (25 ส.ค. 2026) — ยังไม่ผ่าน:
+
+- ผ่านแล้ว: Unit test 95/95, Readiness test 13/13, AutoPost logic test 4/4, `web npm run build`, Queue→Worker self-test และ Version Contract
+- ยังไม่ผ่าน: Web Action ภายใต้ user session, Content Golden Flow ที่มี Facebook research + `gpt-image-2` จริง, Preflight สำเร็จ, Controlled Real Post และเฝ้าระวัง 24 ชั่วโมง
+- Commit ที่ตรวจ Gate: `a6f44ed`, `a4a7dc3`, `26c6940941642b7e836482328b38979538b9618a`
 
 ## KPI
 
@@ -358,3 +402,4 @@
 | 25 ส.ค. 2026 | กำหนด Terra เป็นผู้ลงมือ Phase 9 และ Luna เป็นผู้ตรวจอิสระหลัง Commit | Codex |
 | 25 ส.ค. 2026 | รวม Phase เดิมเป็น Master Roadmap 0–10, เพิ่ม Candidate Fit Score และเปลี่ยนแผน Readiness เป็น Release Gate A–G เพื่อไม่ให้ชื่อชนกัน | Codex |
 | 25 ส.ค. 2026 | สร้างแผนกลางครั้งแรกจากการตรวจ Production Readiness, Worker Version Contract, Content Golden Flow, Facebook และ Scraping | Codex |
+| 25 ส.ค. 2026 | ทำ Gate A/B/F, พิสูจน์ Queue→Worker, บันทึก Blocker Facebook Session และแก้ Readiness ไม่ให้นับ preflight-only/Preflight ที่ล้มเหลวเป็นพร้อม | Codex |
