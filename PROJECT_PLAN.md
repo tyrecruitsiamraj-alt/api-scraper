@@ -241,8 +241,8 @@
 หลักฐาน (25 ส.ค. 2026) — ผ่าน:
 
 - Scraper/Content Worker รายงาน `types: scrape,draft,measure,selftest`, `content_pipeline=evidence-v1` และ Image Provider `gpt-image-2`
-- Facebook Worker รายงาน `capabilities: [preflight]`, เปิด `AUTO_POST_DAILY_ENABLED=0`; Commit `a4a7dc3` บังคับไม่ให้ Worker นี้ claim งาน `post`
-- Pin ของบัญชี Facebook ปรับเป็น `SONB-RM009`; จงใจยังไม่เปิด capability `post` ก่อน Controlled Real Post ได้รับอนุญาต
+- Facebook Worker บน `SONB-RM009` รายงาน `capabilities: [post, preflight]`, Build contract `daa49…` และคง `AUTO_POST_DAILY_ENABLED=0`; จึงรับเฉพาะงานที่คนอนุมัติจากหน้า Web ไม่สร้างรอบโพสต์เอง
+- Pin ของบัญชี Facebook อยู่ที่ `SONB-RM009`; ก่อนเปิด capability ตรวจแล้ว `post_run_queue` ว่าง จึงไม่มีงานเก่าถูก claim ระหว่างรีสตาร์ท
 
 ### Gate C — ทดสอบ Web → Queue → Worker
 
@@ -318,7 +318,7 @@
 ผลทดสอบจริง (25 ส.ค. 2026) — Preflight ผ่าน; Controlled Real Post ยังไม่เริ่ม:
 
 - หลังเจ้าของบัญชียืนยัน Facebook session งาน `pf_mt89o4hc` ถูก Worker `SONB-RM009-29300` claim และจบ `completed` ใน mode `preflight`
-- ไม่มีการโพสต์จริง และ Worker ยังคง capability `preflight` เท่านั้น
+- ไม่มีการโพสต์จริง; จากนั้นเปิด Worker เครื่องนี้เป็น `post,preflight` โดยปิด Auto Daily เพื่อรอ Controlled Real Post ที่คนอนุมัติ
 - Controlled Real Post ยังไม่เริ่มและจะหยุดขออนุญาตเป็นรายครั้งก่อนเปิด capability `post`
 
 ### Gate F — แยกคะแนน Scraping ออกจากความพร้อมระบบ
@@ -427,3 +427,4 @@
 | 25 ส.ค. 2026 | ทำ Gate A/B/F, พิสูจน์ Queue→Worker, บันทึก Blocker Facebook Session และแก้ Readiness ไม่ให้นับ preflight-only/Preflight ที่ล้มเหลวเป็นพร้อม | Codex |
 | 25 ส.ค. 2026 | ยืนยัน Facebook Preflight, Golden Flow `LMM6705007`, แก้ Research coverage และการแต่งเพศจาก ERP `O`; Node 100/100, AutoPost 4/4 และ Web build ผ่าน | Codex |
 | 25 ส.ค. 2026 | แก้เกณฑ์ Readiness ของคิวให้ใช้ heartbeat ของ scrape run แทนเวลา Resume ล่าสุด; ยืนยันงานธุรการปิด partial ตามผลตลาด ไม่ค้าง | Codex |
+| 25 ส.ค. 2026 | เปิด Facebook Worker บน SONB-RM009 เป็น `post,preflight` ด้วย Build Contract ตรง Web และปิด Auto Daily; ยังไม่โพสต์จริง | Codex |
