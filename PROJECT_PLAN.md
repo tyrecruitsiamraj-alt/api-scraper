@@ -451,7 +451,7 @@
 
 ### Gate C — ทดสอบ Web → Queue → Worker
 
-- [ ] สั่ง Self-test จากหน้า Web (Blocker: Browser ที่ตรวจเป็น Microsoft sign-in ยังไม่มี session ผู้ใช้)
+- [x] สั่ง Self-test จากหน้า Web ภายใต้ session ผู้ใช้
 - [x] ตรวจงานเข้า `work_queue`
 - [x] ตรวจ Worker Claim งานเอง
 - [x] ตรวจสถานะจบเป็น `done`
@@ -462,10 +462,10 @@
 - การทดสอบ Web → Queue → Worker = ผ่าน
 - คิวเบื้องหลัง = ผ่าน
 
-หลักฐาน (25 ส.ค. 2026) — ผ่านเฉพาะ Queue→Worker:
+หลักฐาน (25 ส.ค. 2026) — ผ่าน Web → Queue → Worker:
 
 - Self-test ปลอดภัย `2eab530e-4d25-4503-a6fc-b4a4b6f07af2` ถูก Worker claim และจบ `done` โดยไม่มี Error
-- ไม่ทำเครื่องหมาย Gate C ผ่านเต็ม เพราะยังไม่มีหลักฐานการกด Web Action ภายใต้ session ผู้ใช้
+- ผู้ใช้กดปุ่ม `ทดสอบระบบแบบไม่โพสต์จริง` จาก `/orchestrator` หลัง Login; งาน `5fb8b360-1a68-47d8-8a5a-b3930b131278` เข้า Queue เวลา `09:11:11.546Z`, Worker รับ `09:11:11.635Z` และจบ `done` เวลา `09:11:12.058Z`; `last_error=null`
 
 ### Gate D — Content Golden Flow
 
@@ -565,8 +565,8 @@
 
 สถานะ (25 ส.ค. 2026) — ยังไม่ผ่าน:
 
-- ผ่านแล้ว: Node test 100/100, AutoPost logic test 4/4, `web npm run build`, Queue→Worker self-test, Version Contract, Content Golden Flow ผ่าน Research/Quality/Image Gate และ Facebook Preflight (ทดสอบก่อน Commit `4d5898c`)
-- ยังไม่ผ่าน: Web Action/Editor ภายใต้ user session, Controlled Real Post และเฝ้าระวัง 24 ชั่วโมง
+- ผ่านแล้ว: Node test 100/100, AutoPost logic test 4/4, `web npm run build`, Web → Queue → Worker self-test ภายใต้ session ผู้ใช้, Version Contract, Content Golden Flow ผ่าน Research/Quality/Image Gate และ Facebook Preflight (ทดสอบก่อน Commit `4d5898c`)
+- ยังไม่ผ่าน: การแก้ Editor ภายใต้ user session, Controlled Real Post และเฝ้าระวัง 24 ชั่วโมง
 - Commit ที่ตรวจ Gate: `a6f44ed`, `a4a7dc3`, `26c6940941642b7e836482328b38979538b9618a`
 
 ## KPI
