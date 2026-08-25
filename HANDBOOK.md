@@ -468,7 +468,18 @@ npm run migrate
 
 Resume PDF สร้าง server-side ด้วย Chromium; local ใช้ browser ที่ติดตั้ง ส่วน Vercel ใช้ `@sparticuz/chromium-min` และ remote pack
 
-### 10.4 Root Control API
+### 10.4 การประกอบโปสเตอร์ Content
+
+เมื่อใช้ปุ่ม `บันทึกและประกอบรูปใหม่` Web จะใช้ Playwright Chromium เพื่อวางข้อความไทยลงบนภาพต้นฉบับแล้วสร้าง PNG ใหม่ ดังนั้นเครื่องที่รัน `web` ต้องติดตั้ง browser runtime หลัง `npm install` เสมอ:
+
+```bash
+cd web
+npx playwright install chromium
+```
+
+หาก runtime หาย ระบบต้องกลับมาบอกข้อความ `บันทึกรูปยังไม่สำเร็จ` บนหน้าใบงานเดิม และห้ามแสดงหน้า Application error หรือสร้าง Post ซ้ำ
+
+### 10.5 Root Control API
 
 | Method | Path | หน้าที่ |
 |---|---|---|

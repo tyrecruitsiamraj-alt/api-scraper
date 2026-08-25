@@ -472,6 +472,7 @@
 
 - [x] เลือกใบขอจริงหนึ่งใบที่ข้อมูลตำแหน่ง, สถานที่, รายได้ และเวลางานครบ
 - [ ] สร้าง Content ใหม่ผ่านหน้า Web
+- [x] แก้และบันทึก Poster จากหน้า Web ภายใต้ session ผู้ใช้; ได้ PNG ใหม่และ Quality Gate ยังผ่าน
 - [x] ตรวจ Caption เทียบข้อเท็จจริงต้นทาง
 - [x] ตรวจภาพว่าตรงตำแหน่งและไม่มีข้อความผิด
 - [x] ตรวจ Research Gate และ Quality Gate
@@ -567,7 +568,7 @@
 สถานะ (25 ส.ค. 2026) — ยังไม่ผ่าน:
 
 - ผ่านแล้ว: Node test 100/100, AutoPost logic test 4/4, `web npm run build`, Web → Queue → Worker self-test ภายใต้ session ผู้ใช้, Version Contract, Content Golden Flow ผ่าน Research/Quality/Image Gate และ Facebook Preflight (ทดสอบก่อน Commit `4d5898c`)
-- ยังไม่ผ่าน: การแก้ Editor ภายใต้ user session, Controlled Real Post และเฝ้าระวัง 24 ชั่วโมง
+- ยังไม่ผ่าน: การสร้าง Content ใหม่จากหน้า Web, Visual Regression, Controlled Real Post และเฝ้าระวัง 24 ชั่วโมง
 - Commit ที่ตรวจ Gate: `a6f44ed`, `a4a7dc3`, `26c6940941642b7e836482328b38979538b9618a`
 
 ## KPI
@@ -638,3 +639,4 @@
 | 25 ส.ค. 2026 | เพิ่มแผน UX ใบงานเดียว: แปลงใบขอให้ตรวจครั้งเดียว, Scraping เริ่มจาก Search Spec ที่ AI กรอก, Content แก้ภาพและ Caption หน้าเดียว และรวม Summary/Auto-post ไว้ใน Workspace เดิม | Codex |
 | 25 ส.ค. 2026 | ล็อกภาพ `docs/ui-targets/unified-content-workspace-target.png` เป็น UI Target Contract ของหน้า Content Workspace พร้อม Layout, Field Order, Button Placement, Responsive และ Visual Regression Gate | Codex |
 | 25 ส.ค. 2026 | ลงมือ Content Workspace รุ่นแรก: รวม Preview จาก source image + Poster Editor + Caption Editor + Quality/Approve Gate ใน `/orchestrator/[id]`; เพิ่ม route ที่ล็อกอินเท่านั้นสำหรับ source image; Stepper 5 ขั้นตาม UX Target; `web npm run build` และ Node test 100/100 ผ่าน; Code commit `d5493a4` — ยังเหลือ Parent Work Order/Scraping และ Visual Regression ตามแผน | Codex |
+| 25 ส.ค. 2026 | ปิด Root Cause Editor Application error: Next.js ไม่มี Playwright Chromium runtime จึง render PNG ไม่ได้; ติดตั้ง runtime, ทำ Server Action ส่งข้อความภาษาคนกลับหน้าเดิมแทน error page, บันทึกคู่มือ; ผู้ใช้บันทึก Poster v3 จาก Web สำเร็จ ได้ PNG ใหม่และ Quality 100/100; Node test 100/100 ผ่าน | Codex |

@@ -127,9 +127,10 @@ function aggregateByContent(posts: CampaignPostRow[]): Map<string, Engagement> {
   return map;
 }
 
-export default async function CampaignDetail({ params }: { params: { id: string } }) {
+export default async function CampaignDetail({ params, searchParams }: { params: { id: string }; searchParams?: { contentError?: string } }) {
   const c = await getCampaign(params.id);
   if (!c) notFound();
+  const contentError = typeof searchParams?.contentError === 'string' ? searchParams.contentError : null;
   const snap = (c.request_snapshot ?? {}) as Record<string, any>;
   const contents = await listCampaignContents(params.id);
   const approvedContent = contents.find((item) => item.status === 'approved') ?? null;
@@ -205,6 +206,12 @@ export default async function CampaignDetail({ params }: { params: { id: string 
         {nextAction && (
           <div className={`mt-4 rounded-xl border px-4 py-2.5 text-[13px] font-medium ${nextAction.cls}`}>
             {nextAction.text}
+          </div>
+        )}
+        {contentError && (
+          <div role="alert" className="mt-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-900">
+            <b>บันทึกรูปยังไม่สำเร็จ:</b> {contentError}
+            <p className="mt-1 text-xs text-red-800">ข้อมูลเดิมยังอยู่ครบ ลองบันทึกอีกครั้งได้โดยไม่ต้องสร้าง Content หรือโพสต์ใหม่</p>
           </div>
         )}
       </div>

@@ -1,6 +1,7 @@
 'use server';
 
 import { revalidatePath } from 'next/cache';
+import { redirect } from 'next/navigation';
 import { getServerSession } from 'next-auth';
 import { authOptions } from './auth';
 import { encryptSecret } from './crypto';
@@ -520,27 +521,33 @@ export async function editPosterAction(formData: FormData) {
   const contentId = String(formData.get('contentId') ?? '').trim();
   const campaignId = String(formData.get('campaignId') ?? '').trim();
   if (!contentId || !campaignId) throw new Error('ข้อมูล Content ไม่ครบ');
-  const contactLine = String(formData.get('posterContactLine') ?? '').trim();
-  if (contactLine) {
-    const confirmedPhone = await confirmCampaignContactPhone(campaignId, contactLine);
-    await syncContentContactPhone(contentId, confirmedPhone);
+  try {
+    const contactLine = String(formData.get('posterContactLine') ?? '').trim();
+    if (contactLine) {
+      const confirmedPhone = await confirmCampaignContactPhone(campaignId, contactLine);
+      await syncContentContactPhone(contentId, confirmedPhone);
+    }
+    const list = (name: string) => String(formData.get(name) ?? '')
+      .split(/\r?\n/).map((value) => value.trim()).filter(Boolean);
+    await updateContentPoster(contentId, {
+      title: String(formData.get('posterTitle') ?? ''),
+      badge: String(formData.get('posterBadge') ?? ''),
+      location: String(formData.get('posterLocation') ?? ''),
+      worktime: String(formData.get('posterWorktime') ?? ''),
+      salaryTotal: String(formData.get('posterSalaryTotal') ?? ''),
+      salaryBreakdown: String(formData.get('posterSalaryBreakdown') ?? ''),
+      quantity: String(formData.get('posterQuantity') ?? ''),
+      qualifications: list('posterQualifications'),
+      benefits: list('posterBenefits'),
+      contactLine,
+      imageSide: String(formData.get('posterImageSide') ?? '') === 'left' ? 'left' : 'right',
+    }, session.user?.email ?? session.user?.name ?? null);
+    revalidatePath(`/orchestrator/${campaignId}`);
+  } catch (error) {
+    // Server Action ต้องไม่โยน error จนผู้ใช้เห็นหน้า Application error; กลับไปหน้าเดิมพร้อมคำที่แก้ได้.
+    const message = error instanceof Error ? error.message : 'บันทึกรูปไม่สำเร็จ กรุณาลองใหม่';
+    redirect(`/orchestrator/${campaignId}?contentError=${encodeURIComponent(message)}`);
   }
-  const list = (name: string) => String(formData.get(name) ?? '')
-    .split(/\r?\n/).map((value) => value.trim()).filter(Boolean);
-  await updateContentPoster(contentId, {
-    title: String(formData.get('posterTitle') ?? ''),
-    badge: String(formData.get('posterBadge') ?? ''),
-    location: String(formData.get('posterLocation') ?? ''),
-    worktime: String(formData.get('posterWorktime') ?? ''),
-    salaryTotal: String(formData.get('posterSalaryTotal') ?? ''),
-    salaryBreakdown: String(formData.get('posterSalaryBreakdown') ?? ''),
-    quantity: String(formData.get('posterQuantity') ?? ''),
-    qualifications: list('posterQualifications'),
-    benefits: list('posterBenefits'),
-    contactLine,
-    imageSide: String(formData.get('posterImageSide') ?? '') === 'left' ? 'left' : 'right',
-  }, session.user?.email ?? session.user?.name ?? null);
-  revalidatePath(`/orchestrator/${campaignId}`);
 }
 
 /** สั่งวัดผล engagement ของ campaign (อ่านจาก post_logs → verdict → regen/บันทึกแนวที่เวิร์ค). */
