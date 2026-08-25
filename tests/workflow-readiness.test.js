@@ -7,7 +7,7 @@ const readyInput = {
     { kind: 'scraper', online: true, meta: { types: ['draft', 'measure'], image_generation: { configured: true, model: 'gpt-image-2' } } },
     { kind: 'autopost', online: true, meta: { capabilities: ['post', 'preflight'] } },
   ],
-  facebookAccounts: [{ group_count: 3 }],
+  facebookAccounts: [{ group_count: 3, preflight_verified: true }],
   queue: { queued: 0, stale_running: 0, errors_24h: 0 },
   postQueue: { queued: 0, running: 0, failed_24h: 0 },
   contentOutput: { passing_with_image: 1, verified_generation: 1, failed_quality: 0 },
@@ -44,6 +44,29 @@ test('preflight ที่ผ่านห้ามล้างสถิติโ�
   });
   assert.equal(result.status, 'blocked');
   assert.match(result.checks.find((x) => x.code === 'recent_errors')?.message ?? '', /3 ครั้ง/);
+});
+
+test('Facebook preflight ที่ Worker รองรับแต่ Session หรือกลุ่มยังไม่ผ่าน ต้องบล็อก Readiness', () => {
+  const result = evaluateWorkflowReadiness({
+    ...readyInput,
+    facebookAccounts: [{ group_count: 1, preflight_verified: false }],
+  });
+  assert.equal(result.status, 'blocked');
+  assert.equal(result.checks.find((x) => x.code === 'facebook_preflight')?.status, 'fail');
+  assert.match(result.checks.find((x) => x.code === 'facebook_preflight')?.message ?? '', /Session และกลุ่ม/);
+});
+
+test('Facebook Worker ที่รับได้เฉพาะ preflight ห้ามถูกนับว่าเผยแพร่จริงได้', () => {
+  const result = evaluateWorkflowReadiness({
+    ...readyInput,
+    workers: [
+      readyInput.workers[0],
+      { kind: 'autopost', online: true, meta: { capabilities: ['preflight'] } },
+    ],
+  });
+  assert.equal(result.status, 'blocked');
+  assert.equal(result.checks.find((x) => x.code === 'post_worker')?.status, 'fail');
+  assert.match(result.checks.find((x) => x.code === 'post_worker')?.message ?? '', /capability post/);
 });
 
 test('worker สร้างประกาศออฟไลน์ถูกบล็อก', () => {

@@ -11,7 +11,7 @@ function item(code, label, status, message) {
  * @param {{
  *  requiredBuildSha?: string,
  *  workers?: Array<{kind?:string, online?:boolean, meta?:Record<string,any>|null}>,
- *  facebookAccounts?: Array<{group_count?:number}>,
+ *  facebookAccounts?: Array<{group_count?:number,preflight_verified?:boolean}>,
  *  queue?: {queued?:number, oldest_queued_minutes?:number|null, stale_running?:number, stalled_progress?:number, errors_24h?:number},
  *  postQueue?: {queued?:number, running?:number, failed_24h?:number},
  *  contentOutput?: {passing_with_image?:number, verified_generation?:number, failed_quality?:number},
@@ -55,21 +55,35 @@ export function evaluateWorkflowReadiness(input = {}) {
     checks.push(item('image_provider', 'สิทธิ์สร้างรูป AI', 'fail', 'Worker รุ่นเดิมยังไม่รายงานความพร้อมของรูปและ Golden Flow กรุณารีเฟรช Worker ก่อนรับงานใหม่'));
   }
 
-  const postWorker = workers.some((worker) => worker.online && worker.kind === 'autopost');
+  const postWorker = workers.some((worker) => (
+    worker.online
+    && worker.kind === 'autopost'
+    && Array.isArray(worker.meta?.capabilities)
+    && worker.meta.capabilities.includes('post')
+  ));
   checks.push(postWorker
     ? item('post_worker', 'เครื่องเผยแพร่ Facebook', 'pass', 'พร้อมรับงานเผยแพร่')
-    : item('post_worker', 'เครื่องเผยแพร่ Facebook', 'fail', 'ยังไม่มีเครื่องเผยแพร่ Facebook ออนไลน์'));
+    : item('post_worker', 'เครื่องเผยแพร่ Facebook', 'fail', 'ยังไม่มีเครื่องเผยแพร่ Facebook ที่ประกาศ capability post'));
   const preflightWorker = workers.some((worker) => (
     worker.online
     && worker.kind === 'autopost'
     && Array.isArray(worker.meta?.capabilities)
     && worker.meta.capabilities.includes('preflight')
   ));
-  checks.push(preflightWorker
-    ? item('facebook_preflight', 'การทดสอบ Facebook แบบไม่โพสต์จริง', 'pass', 'Worker รองรับการตรวจ session และกลุ่มโดยไม่เผยแพร่โพสต์')
-    : item('facebook_preflight', 'การทดสอบ Facebook แบบไม่โพสต์จริง', 'fail', 'Worker ยังเป็นรุ่นเดิม กรุณารีเฟรช Worker ก่อนทดสอบ Facebook'));
-
   const readyAccounts = accounts.filter((account) => Number(account.group_count || 0) > 0).length;
+  const verifiedPreflightAccounts = accounts.filter((account) => (
+    Number(account.group_count || 0) > 0 && account.preflight_verified === true
+  )).length;
+  if (!preflightWorker) {
+    checks.push(item('facebook_preflight', 'การทดสอบ Facebook แบบไม่โพสต์จริง', 'fail', 'Worker ยังเป็นรุ่นเดิม กรุณารีเฟรช Worker ก่อนทดสอบ Facebook'));
+  } else if (readyAccounts <= 0) {
+    checks.push(item('facebook_preflight', 'การทดสอบ Facebook แบบไม่โพสต์จริง', 'fail', 'ยังไม่มีบัญชีและกลุ่ม Facebook สำหรับทดสอบแบบไม่โพสต์จริง'));
+  } else if (verifiedPreflightAccounts <= 0) {
+    checks.push(item('facebook_preflight', 'การทดสอบ Facebook แบบไม่โพสต์จริง', 'fail', 'ยังไม่มีบัญชีที่ผ่านการตรวจ Session และกลุ่มแบบไม่โพสต์จริงภายใน 24 ชั่วโมง'));
+  } else {
+    checks.push(item('facebook_preflight', 'การทดสอบ Facebook แบบไม่โพสต์จริง', 'pass', `ผ่านการตรวจ Session และกลุ่มแบบไม่โพสต์จริง ${verifiedPreflightAccounts} บัญชี`));
+  }
+
   checks.push(readyAccounts > 0
     ? item('facebook_account', 'บัญชีและกลุ่ม Facebook', 'pass', `พร้อมใช้งาน ${readyAccounts} บัญชี`)
     : item('facebook_account', 'บัญชีและกลุ่ม Facebook', 'fail', 'ยังไม่มีบัญชีที่ผูกกลุ่มสำหรับเผยแพร่'));
