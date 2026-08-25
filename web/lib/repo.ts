@@ -2898,11 +2898,18 @@ export async function getWorkflowReadiness(): Promise<WorkflowReadinessSnapshot>
          count(*) FILTER (WHERE status='running' AND locked_at < now() - interval '30 minutes')::int AS stale_running,
          count(*) FILTER (
            WHERE status='running' AND type='scrape'
-             AND GREATEST(
-               COALESCE(started_at, created_at),
-               (SELECT max(tc.last_matched_at)
-                  FROM scrape_task_candidates tc
-                 WHERE tc.task_id::text=work_queue.ref_id)
+             -- A shortage of matching resumes is a business outcome, not a
+             -- stuck worker.  Only fail readiness when the active scrape run
+             -- itself stopped reporting.  A queue lease can keep renewing while
+             -- a browser is hung, so it is intentionally not the primary signal.
+             AND COALESCE(
+               (SELECT max(r.heartbeat_at)
+                  FROM scrape_runs r
+                 WHERE r.task_id::text=work_queue.ref_id
+                   AND r.status='running'),
+               locked_at,
+               started_at,
+               created_at
              ) < now() - interval '10 minutes'
          )::int AS stalled_progress,
          count(*) FILTER (WHERE status='error' AND finished_at > now() - interval '24 hours')::int AS errors_24h

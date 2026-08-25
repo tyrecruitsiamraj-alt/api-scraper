@@ -121,7 +121,7 @@ export function evaluateWorkflowReadiness(input = {}) {
   const staleRunning = Number(queue.stale_running || 0);
   const stalledProgress = Number(queue.stalled_progress || 0);
   if (stalledProgress > 0) {
-    checks.push(item('work_queue', 'คิวงานเบื้องหลัง', 'fail', `พบงานค้นหาที่ heartbeat ยังมา แต่ไม่มี Resume ใหม่เกิน 10 นาที ${stalledProgress} งาน`));
+    checks.push(item('work_queue', 'คิวงานเบื้องหลัง', 'fail', `พบงานค้นหาที่หยุดรายงานความคืบหน้าเกิน 10 นาที ${stalledProgress} งาน`));
   } else if (staleRunning > 0) {
     checks.push(item('work_queue', 'คิวงานเบื้องหลัง', 'fail', `พบงานกำลังทำที่ไม่มีการตอบสนอง ${staleRunning} งาน`));
   } else if (queued > 0 && oldestMinutes >= 10) {

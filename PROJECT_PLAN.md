@@ -191,6 +191,13 @@
 - แก้: normalize `O/all/any/ไม่จำกัดเพศ` เป็นค่าว่างก่อนส่งเข้า Caption/Poster และเพิ่ม Quality Gate บล็อกเมื่อสื่อระบุชาย/หญิงที่ใบขอไม่ได้กำหนด
 - ผลพิสูจน์: ร่างใหม่ `2f7c0dab-2ecd-4ba3-925a-75dd86a2358c` ไม่มีการอ้างเพศ และ Quality check `gender=pass`
 
+### RC-10: Readiness ตีงานค้นหาที่ยังทำงานเป็นงานค้าง และ lock จาก Worker ที่หยุดรอนานเกินไป
+
+- งาน `ธุรการ` ถูก process `SONB-RM009#24376` รับแล้ว process หยุดระหว่างรีเฟรช Worker; Queue lock เดิมรอ recovery 30 นาที ขณะที่ Dashboard แจ้งเตือนหลัง 10 นาที
+- เกณฑ์เดิมใน `web/lib/repo.ts` ใช้เวลา Resume ล่าสุด จึง Fail แม้ `scrape_runs.heartbeat_at` ของงานใหม่ยังเดินอยู่หรือกรณีตลาดไม่มี Resume ตรงเงื่อนไข
+- แก้: Readiness ตรวจ heartbeat ของ active `scrape_run` โดยตรง; Fail เฉพาะ run ที่หยุดรายงานเกิน 10 นาที ไม่เอา market gap มาปนกับ system failure
+- ผลตรวจจริง: คืนเฉพาะ lock ที่ยืนยันว่า process เดิมหายแล้วกลับ Queue, Worker รับใหม่และงานปิด `partial` อย่างถูกต้อง (ผ่าน 5/15, ต้องตรวจเพิ่ม 1, ไม่ผ่าน 85); เกณฑ์ใหม่พบ stalled execution 0 งาน
+
 ## Recommendation หากเลือกเพียงทางเดียว
 
 ทำ Golden Flow Release บน Worker เครื่องนี้ให้ครบหนึ่งรอบ แล้วแยก Operational Readiness ออกจาก Business Outcome ของตลาดผู้สมัคร
@@ -419,3 +426,4 @@
 | 25 ส.ค. 2026 | สร้างแผนกลางครั้งแรกจากการตรวจ Production Readiness, Worker Version Contract, Content Golden Flow, Facebook และ Scraping | Codex |
 | 25 ส.ค. 2026 | ทำ Gate A/B/F, พิสูจน์ Queue→Worker, บันทึก Blocker Facebook Session และแก้ Readiness ไม่ให้นับ preflight-only/Preflight ที่ล้มเหลวเป็นพร้อม | Codex |
 | 25 ส.ค. 2026 | ยืนยัน Facebook Preflight, Golden Flow `LMM6705007`, แก้ Research coverage และการแต่งเพศจาก ERP `O`; Node 100/100, AutoPost 4/4 และ Web build ผ่าน | Codex |
+| 25 ส.ค. 2026 | แก้เกณฑ์ Readiness ของคิวให้ใช้ heartbeat ของ scrape run แทนเวลา Resume ล่าสุด; ยืนยันงานธุรการปิด partial ตามผลตลาด ไม่ค้าง | Codex |

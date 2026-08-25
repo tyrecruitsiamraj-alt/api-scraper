@@ -104,14 +104,14 @@ test('คิวเกิน 10 นาทีถูกมองว่าเป็�
   assert.equal(result.checks.find((x) => x.code === 'work_queue')?.status, 'fail');
 });
 
-test('heartbeat ที่เดินแต่ไม่มีผลค้นหาใหม่ถูกมองว่าเป็นงานค้าง', () => {
+test('งานค้นหาที่หยุดรายงานความคืบหน้าถูกมองว่าเป็นงานค้าง', () => {
   const result = evaluateWorkflowReadiness({
     ...readyInput,
     queue: { queued: 0, stale_running: 0, stalled_progress: 1, errors_24h: 0 },
   });
   assert.equal(result.status, 'blocked');
   assert.equal(result.checks.find((x) => x.code === 'work_queue')?.status, 'fail');
-  assert.match(result.checks.find((x) => x.code === 'work_queue')?.message ?? '', /heartbeat/);
+  assert.match(result.checks.find((x) => x.code === 'work_queue')?.message ?? '', /หยุดรายงานความคืบหน้า/);
 });
 
 test('สถานะไม่ตรงกับระบบต้นทางถูกบล็อก', () => {
