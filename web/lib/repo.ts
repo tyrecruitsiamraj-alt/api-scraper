@@ -15,10 +15,12 @@ if (!/^[A-Za-z_][A-Za-z0-9_-]*$/.test(AP_SCHEMA)) {
 }
 const AP = `"${AP_SCHEMA}"`;
 // Worker compatibility is a release contract, not the current web commit.
-// UI-only deploys must not take both Mac workers offline. Bump this SHA only
-// after worker code changes have been deployed and verified on the Mac.
+// UI-only deploys must not take both Windows/Mac workers offline. Bump this SHA
+// only after worker code changes have been deployed and verified end-to-end.
+// This is deliberately the last worker release that implements evidence-v1;
+// source_sha in the heartbeat remains available for diagnosis.
 const REQUIRED_WORKER_BUILD_SHA = String(
-  process.env.REQUIRED_WORKER_BUILD_SHA || 'a602d66cd932c23de05541cae70bd3456a76f56e',
+  process.env.REQUIRED_WORKER_BUILD_SHA || 'daa49f9d6c8ae7be99f33baebbf9c09d77b9c34e',
 ).trim();
 const REQUIRED_CONTENT_PIPELINE = 'evidence-v1';
 

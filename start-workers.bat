@@ -12,6 +12,11 @@ git pull
 echo.
 echo [2/2] กำลังเปิด Worker 2 หน้าต่าง...
 
+REM Compatibility release ของ Worker — แยกจาก commit ของ UI/server เพื่อให้
+REM web-only deploy ไม่ทำให้ worker ที่ผ่าน Golden Flow ถูกตัดออก.
+REM เปลี่ยนค่านี้พร้อม REQUIRED_WORKER_BUILD_SHA บน Web/AutoPost เท่านั้น
+set "WORKER_BUILD_SHA=daa49f9d6c8ae7be99f33baebbf9c09d77b9c34e"
+
 REM Scraper POOL - นับบัญชี JobBKK/JobThai อัตโนมัติ แล้วเปิด runner ให้พอดี (ขนานข้ามบัญชี)
 REM เพิ่มบัญชีในอนาคต = ขยาย runner เองไม่ต้องแก้อะไร (เพดาน SCRAPER_POOL_MAX, default 8)
 start "SO Scraper Pool (auto-scale)" cmd /k "cd /d %~dp0 && npm run scraper:pool"
@@ -23,6 +28,7 @@ echo.
 echo --------------------------------------------------
 echo  เปิดแล้ว 2 หน้าต่าง: Scraper Pool + AutoPost
 echo  (Scraper Pool ปรับจำนวน runner ตามบัญชีเองอัตโนมัติ)
+echo  Worker compatibility release: %WORKER_BUILD_SHA%
 echo  *** ห้ามปิดหน้าต่างเหล่านั้น ระหว่างใช้งาน ***
 echo  (หน้าต่างนี้ปิดได้เลย)
 echo --------------------------------------------------

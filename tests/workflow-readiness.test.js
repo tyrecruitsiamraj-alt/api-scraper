@@ -96,3 +96,22 @@ test('สถานะไม่ตรงกับระบบต้นทาง�
   assert.equal(result.status, 'blocked');
   assert.equal(result.checks.find((x) => x.code === 'source_alignment')?.status, 'fail');
 });
+
+test('ตลาดผู้สมัครไม่พอไม่ลดความพร้อมของระบบเมื่อไม่มี system error', () => {
+  const result = evaluateWorkflowReadiness({
+    ...readyInput,
+    scrapeOutput: { completed: 1, partial: 5, error: 0 },
+  });
+  assert.equal(result.status, 'ready');
+  assert.equal(result.score, 100);
+  assert.match(result.checks.find((x) => x.code === 'scrape_output')?.message ?? '', /ตลาดยังไม่ครบ 5 งาน/);
+});
+
+test('system error ของการค้นหาผู้สมัครต้องบล็อก Production Readiness', () => {
+  const result = evaluateWorkflowReadiness({
+    ...readyInput,
+    scrapeOutput: { completed: 1, partial: 0, error: 1 },
+  });
+  assert.equal(result.status, 'blocked');
+  assert.equal(result.checks.find((x) => x.code === 'scrape_output')?.status, 'fail');
+});

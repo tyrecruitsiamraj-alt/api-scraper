@@ -89,10 +89,15 @@ export function evaluateWorkflowReadiness(input = {}) {
   const completedScrapes = Number(scrapeOutput.completed || 0);
   const partialScrapes = Number(scrapeOutput.partial || 0);
   const scrapeErrors = Number(scrapeOutput.error || 0);
-  if (completedScrapes <= 0) {
+  if (scrapeErrors > 0) {
+    checks.push(item('scrape_output', 'ผลค้นหาผู้สมัคร', 'fail', `ระบบค้นหาขัดข้อง ${scrapeErrors} งาน ต้องตรวจและแก้ก่อนรับงานใหม่`));
+  } else if (completedScrapes <= 0) {
     checks.push(item('scrape_output', 'ผลค้นหาผู้สมัคร', 'fail', 'ยังไม่มีงานล่าสุดที่ได้ Resume ผ่านเกณฑ์ครบจำนวนเป้าหมาย'));
-  } else if (partialScrapes > 0 || scrapeErrors > 0) {
-    checks.push(item('scrape_output', 'ผลค้นหาผู้สมัคร', 'warning', `มีงานได้ครบ ${completedScrapes} งาน · ยังไม่ครบตลาด ${partialScrapes} งาน · ระบบขัดข้อง ${scrapeErrors} งาน`));
+  } else if (partialScrapes > 0) {
+    // Market exhaustion is a business outcome: keep it visible, but do not
+    // mark a healthy queue/worker as degraded merely because the market did
+    // not contain enough qualified people for a particular requisition.
+    checks.push(item('scrape_output', 'ผลค้นหาผู้สมัคร', 'pass', `ระบบค้นหาทำงานปกติ: ได้ Resume ครบเป้า ${completedScrapes} งาน · ตลาดยังไม่ครบ ${partialScrapes} งาน`));
   } else {
     checks.push(item('scrape_output', 'ผลค้นหาผู้สมัคร', 'pass', `งานค้นหาล่าสุดได้ Resume ครบเป้าหมาย ${completedScrapes} งาน`));
   }

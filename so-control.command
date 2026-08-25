@@ -90,7 +90,7 @@ start_workers() {
   printf "  ${D}build ที่ Worker จะใช้: %s${N}\n" "$pulled_sha"
   # Worker release is deliberately independent from UI/server commits. Bump
   # only after worker code changes have passed the Golden Flow verification.
-  export WORKER_BUILD_SHA="a602d66cd932c23de05541cae70bd3456a76f56e"
+  export WORKER_BUILD_SHA="daa49f9d6c8ae7be99f33baebbf9c09d77b9c34e"
   script_sha_after="$pulled_sha"
   if [ -n "$script_sha_before" ] && [ "$script_sha_before" != "$script_sha_after" ] && [ "${SO_CONTROL_RELOADED:-0}" != "1" ]; then
     printf "  ${C}↻ แผงควบคุมมีรุ่นใหม่ — โหลดคำสั่งใหม่ก่อนเปิด Worker${N}\n"

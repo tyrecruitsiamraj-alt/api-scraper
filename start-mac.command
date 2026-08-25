@@ -75,9 +75,9 @@ set_env() {
 echo "[2/3] ตั้งค่าให้ชี้ so-autopost (schema แยกของเรา)..."
 set_env "$ROOT/autopost/.env" DB_SCHEMA so_autopost_apiscraper
 set_env "$ROOT/autopost/.env" WORKER_API_BASE https://so-autopost.vercel.app
-set_env "$ROOT/autopost/.env" WORKER_BUILD_SHA a602d66cd932c23de05541cae70bd3456a76f56e
+set_env "$ROOT/autopost/.env" WORKER_BUILD_SHA daa49f9d6c8ae7be99f33baebbf9c09d77b9c34e
 set_env "$ROOT/.env" AUTOPOST_SCHEMA so_autopost_apiscraper
-set_env "$ROOT/.env" WORKER_BUILD_SHA a602d66cd932c23de05541cae70bd3456a76f56e
+set_env "$ROOT/.env" WORKER_BUILD_SHA daa49f9d6c8ae7be99f33baebbf9c09d77b9c34e
 # caption ใช้ Ollama บริษัท (ฟรี ประหยัด token) — OPENAI key บนเครื่องนี้มีไว้สร้างรูปอย่างเดียว
 # (ไม่ตั้ง = auto-select จะเห็น OPENAI_API_KEY แล้วสลับไปใช้ GPT ซึ่งเสียเงิน)
 set_env "$ROOT/.env" CONTENT_TEXT_PROVIDER ollama
