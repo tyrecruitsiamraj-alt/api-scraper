@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { useFormStatus } from 'react-dom';
 import { approveContentAction, editCaptionAction, editPosterAction, rejectContentAction, runFacebookPreflightAction } from '@/lib/actions';
 import type { PosterFields } from '@/lib/repo';
 
@@ -22,6 +23,7 @@ type Props = {
   initialPoster: PosterFields;
   initialCaption: string;
   preflightAccounts: { id: string; label: string }[];
+  posterSaved?: boolean;
 };
 
 const COPY = {
@@ -78,7 +80,12 @@ function TextField({ name, label, value, onChange, multiline = false, className 
   return <label className={className}><span className="label">{label}</span>{multiline ? <textarea name={`poster${name[0].toUpperCase()}${name.slice(1)}`} className="field min-h-20 w-full resize-y" value={value} onChange={(event) => onChange(event.target.value)} /> : <input name={`poster${name[0].toUpperCase()}${name.slice(1)}`} className="field w-full" value={value} onChange={(event) => onChange(event.target.value)} />}</label>;
 }
 
-export function CampaignContentWorkspace({ campaignId, content, initialPoster, initialCaption, preflightAccounts }: Props) {
+function PosterSaveButton({ disabled }: { disabled: boolean }) {
+  const { pending } = useFormStatus();
+  return <button className="btn-primary btn-sm" disabled={disabled || pending}>{pending ? 'กำลังประกอบรูป…' : 'บันทึกและประกอบรูปใหม่'}</button>;
+}
+
+export function CampaignContentWorkspace({ campaignId, content, initialPoster, initialCaption, preflightAccounts, posterSaved = false }: Props) {
   const [poster, setPoster] = useState<PosterFields>(initialPoster);
   const [caption, setCaption] = useState(initialCaption);
   const update = <K extends keyof PosterFields>(key: K, value: PosterFields[K]) => setPoster((current) => ({ ...current, [key]: value }));
@@ -115,7 +122,8 @@ export function CampaignContentWorkspace({ campaignId, content, initialPoster, i
               <label><span className="label">เบอร์โทรที่ยืนยันแล้ว</span><input name="posterContactLine" inputMode="tel" className="field w-full" placeholder="เช่น 081-234-5678" value={poster.contactLine} onChange={(event) => update('contactLine', event.target.value)} /></label>
               <label><span className="label">ตำแหน่งคนในภาพ</span><select name="posterImageSide" className="field w-full" value={poster.imageSide} onChange={(event) => update('imageSide', event.target.value === 'left' ? 'left' : 'right')}><option value="right">ขวา — ข้อความอยู่ซ้าย</option><option value="left">ซ้าย — ข้อความอยู่ขวา</option></select></label>
             </div>
-            <div className="mt-4 flex flex-wrap items-center gap-2"><button className="btn-primary btn-sm" disabled={!content.hasSourceImage}>บันทึกและประกอบรูปใหม่</button><span className="text-xs text-subtle">{content.hasSourceImage ? 'มีภาพต้นฉบับพร้อมแก้ไข' : 'ร่างนี้ไม่มีภาพต้นฉบับ จึงต้องให้ AI สร้างร่างใหม่ก่อน'}</span></div>
+            <div className="mt-4 flex flex-wrap items-center gap-2"><PosterSaveButton disabled={!content.hasSourceImage} /><span className="text-xs text-subtle">{content.hasSourceImage ? 'มีภาพต้นฉบับพร้อมแก้ไข' : 'ร่างนี้ไม่มีภาพต้นฉบับ จึงต้องให้ AI สร้างร่างใหม่ก่อน'}</span></div>
+            {posterSaved && <div role="status" className="mt-3 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-900"><b>✓ บันทึกรูปใหม่แล้ว</b><span className="ml-1 text-emerald-800">PNG ถูกประกอบใหม่และตรวจข้อมูลสำคัญเรียบร้อย</span></div>}
           </form>
 
           <form action={editCaptionAction} className="rounded-2xl border border-hairline p-4">

@@ -548,6 +548,8 @@ export async function editPosterAction(formData: FormData) {
     const message = error instanceof Error ? error.message : 'บันทึกรูปไม่สำเร็จ กรุณาลองใหม่';
     redirect(`/orchestrator/${campaignId}?contentError=${encodeURIComponent(message)}`);
   }
+  // ผลสำเร็จต้องเห็นได้บนหน้าเดียวกัน ไม่ปล่อยให้ผู้ใช้เดาว่าปุ่มทำงานหรือไม่.
+  redirect(`/orchestrator/${campaignId}?contentSaved=poster`);
 }
 
 /** สั่งวัดผล engagement ของ campaign (อ่านจาก post_logs → verdict → regen/บันทึกแนวที่เวิร์ค). */

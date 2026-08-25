@@ -127,10 +127,11 @@ function aggregateByContent(posts: CampaignPostRow[]): Map<string, Engagement> {
   return map;
 }
 
-export default async function CampaignDetail({ params, searchParams }: { params: { id: string }; searchParams?: { contentError?: string } }) {
+export default async function CampaignDetail({ params, searchParams }: { params: { id: string }; searchParams?: { contentError?: string; contentSaved?: string } }) {
   const c = await getCampaign(params.id);
   if (!c) notFound();
   const contentError = typeof searchParams?.contentError === 'string' ? searchParams.contentError : null;
+  const posterSaved = searchParams?.contentSaved === 'poster';
   const snap = (c.request_snapshot ?? {}) as Record<string, any>;
   const contents = await listCampaignContents(params.id);
   const approvedContent = contents.find((item) => item.status === 'approved') ?? null;
@@ -212,6 +213,11 @@ export default async function CampaignDetail({ params, searchParams }: { params:
           <div role="alert" className="mt-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-900">
             <b>บันทึกรูปยังไม่สำเร็จ:</b> {contentError}
             <p className="mt-1 text-xs text-red-800">ข้อมูลเดิมยังอยู่ครบ ลองบันทึกอีกครั้งได้โดยไม่ต้องสร้าง Content หรือโพสต์ใหม่</p>
+          </div>
+        )}
+        {posterSaved && (
+          <div role="status" className="mt-4 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-900">
+            <b>บันทึกรูปใหม่แล้ว</b> ระบบประกอบ PNG จากภาพต้นฉบับและตรวจข้อมูลสำคัญเรียบร้อยแล้ว
           </div>
         )}
       </div>
@@ -442,6 +448,7 @@ export default async function CampaignDetail({ params, searchParams }: { params:
                       initialPoster={posterFields}
                       initialCaption={ct.caption ?? ''}
                       preflightAccounts={preflightAccounts.map((account) => ({ id: account.id, label: account.label }))}
+                      posterSaved={posterSaved}
                     />
                   ) : (
                     <>
