@@ -3,7 +3,7 @@
 > ไฟล์นี้เป็นแหล่งอ้างอิงแผนงานกลาง (Single Source of Truth) สำหรับคนและ AI ทุกโมเดล
 >
 > อัปเดตล่าสุด: 25 สิงหาคม 2026 (Asia/Bangkok)
-> สถานะ: Phase 9 กำลังทดสอบจริง — Gate A, B และ F มีหลักฐานแล้ว; Gate C ผ่านเฉพาะเส้น Queue→Worker; Gate D/E ถูกบล็อกที่ Facebook Session และยังไม่มี Controlled Real Post
+> สถานะ: Phase 9 กำลังทดสอบจริง — Gate A, B, D (เส้น Queue→Worker) และ F มีหลักฐานแล้ว; Gate E ผ่าน Preflight แต่ยังไม่มี Controlled Real Post; Gate C ยังขาดหลักฐานการกดจาก Web ภายใต้ session ผู้ใช้
 
 ## กติกาการใช้ไฟล์นี้
 
@@ -123,13 +123,13 @@
 | เครื่องสร้างประกาศ | ผ่าน | `SONB-RM009` ออนไลน์ และรายงาน `draft` + `content_pipeline=evidence-v1` |
 | สิทธิ์สร้างรูป AI | ผ่านที่ Worker | Worker รายงาน `gpt-image-2` และ `configured=true` โดยไม่เปิดเผย Key |
 | เครื่องเผยแพร่ Facebook | ยังไม่เปิด | Worker ทำงานแบบ `preflight` เท่านั้นตามกติกาความปลอดภัย จึงห้าม Dashboard นับว่าโพสต์จริงได้ |
-| Facebook Preflight | ไม่ผ่าน | Worker รับงานจริงแล้ว แต่ Facebook ยังไม่สร้าง employer session (Trace พบ `__user=0`) |
+| Facebook Preflight | ผ่าน | งาน `pf_mt89o4hc` จบ `completed` แบบไม่โพสต์จริงหลังเจ้าของบัญชียืนยัน Facebook session |
 | บัญชีและกลุ่ม Facebook | ผ่าน | 1 บัญชีถูก Pin มาที่ `SONB-RM009` และมี 1 กลุ่ม |
-| Caption และภาพ | ไม่ผ่าน | ยังไม่มีร่างใหม่ที่ Quality Gate ผ่าน มีรูปจริง และมีหลักฐานการสร้างรูป |
+| Caption และภาพ | ผ่านที่ Golden Flow | ใบงาน `LMM6705007` สร้างร่าง `2f7c0dab-2ecd-4ba3-925a-75dd86a2358c` ผ่าน Quality 100 พร้อมภาพจริงจาก `gpt-image-2` |
 | Scraping | ทำงานได้บางส่วน | ครบเป้า 1 งาน, ตลาดไม่พอ 5 งาน, ระบบขัดข้อง 0 งาน |
 | คิวเบื้องหลัง | ผ่านบางส่วน | Self-test ถูก Worker claim และจบ `done`; ยังไม่ยืนยันการกดจาก Web เพราะ Browser session เป็นหน้า Microsoft sign-in |
 | Facebook ล่าสุด | ไม่ผ่าน | การเผยแพร่จริงล้มเหลว 3 ครั้งติดต่อกัน |
-| Unit/Build/Logic Test | ผ่าน | Node test 95/95, Readiness test 13/13, AutoPost logic 4/4 และ `web npm run build` ผ่าน เมื่อ 25 สิงหาคม 2026 |
+| Unit/Build/Logic Test | ผ่าน | Node test 100/100, AutoPost logic 4/4 และ `web npm run build` ผ่าน เมื่อ 25 สิงหาคม 2026 |
 
 ## Root Cause ที่ยืนยันจากโค้ด
 
@@ -172,12 +172,24 @@
 - ผลกระทบ: Worker แบบ preflight-only หรือบัญชีที่ Login ไม่สำเร็จอาจทำให้ Dashboard เขียวเกินจริง
 - แก้ใน Commit `26c6940941642b7e836482328b38979538b9618a`: ต้องมี capability `post` จึงนับว่าเผยแพร่จริงได้ และต้องมี Preflight สำเร็จของบัญชีภายใน 24 ชั่วโมงจึงนับว่า Facebook Preflight ผ่าน
 
-### RC-07: Facebook Session ของบัญชีที่ผูกไว้ยังเข้าใช้งานไม่ได้
+### RC-07: Facebook Session ของบัญชีที่ผูกไว้เคยเข้าใช้งานไม่ได้ — แก้แล้ว
 
-- งาน Preflight แบบไม่โพสต์จริงถูก Worker `SONB-RM009` claim แล้ว แต่จบ `failed` เมื่อ 25 ส.ค. 2026
-- Playwright Trace หลังส่ง Login พบ Facebook ทำงานในสถานะผู้ใช้ `__user=0`; จึงยังไม่เกิด employer session
+- ก่อนแก้ งาน Preflight แบบไม่โพสต์จริงถูก Worker `SONB-RM009` claim แล้ว แต่จบ `failed`; Playwright Trace หลังส่ง Login พบ Facebook ทำงานในสถานะผู้ใช้ `__user=0`
+- เจ้าของบัญชียืนยัน Facebook checkpoint บนเครื่อง Worker แล้ว งาน `pf_mt89o4hc` จบ `completed` ใน mode `preflight` เมื่อ 25 ส.ค. 2026
 - จุดที่ตรวจและหยุดอย่างปลอดภัย: `autopost/src/helpers/facebookLogin.ts:107-155` และ `autopost/tests/facebookPreflight.spec.ts:4-29`
 - ไม่ได้มีการโพสต์จริง, ไม่ได้เปลี่ยนสถานะ Error และไม่พยายามข้าม checkpoint/ความปลอดภัยของ Facebook
+
+### RC-08: Research Gate หยุดหลังตรวจ Facebook เพียงชุดแรก
+
+- เดิม `collectFacebookPosts` จำกัดการตรวจไว้ 4 กลุ่มต่อรอบ จึงสรุปว่าไม่มีโพสต์ที่เกี่ยวข้องทั้งที่ยังสำรวจ source ที่กำหนดไม่ครบ
+- ผลกระทบ: Golden Flow หยุดเป็น `needs_input` ทั้งที่ Google Trends ใช้งานได้และ Facebook session ถูกต้อง
+- แก้: `src/core/market-research.js` ตรวจได้สูงสุด 50 กลุ่ม (bounded) และส่งสัญญาณ coverage ครบ; หาก Google มีหลักฐานและตรวจทุกกลุ่มที่ตั้งค่าแล้วไม่พบโพสต์ตรงตำแหน่ง ให้ผ่านเป็น **market gap** โดยไม่สร้าง Engagement ปลอม
+
+### RC-09: รหัสเพศเปิดกว้างจาก ERP ถูกโมเดลแปลงเป็นชาย/หญิง
+
+- ใบขอ `LMM6705007` มี `gender=O` ซึ่งหมายถึงไม่ระบุเพศ แต่ร่างแรกระบุเพศชายใน Caption และเพศหญิงบนโปสเตอร์ โดย Quality Gate เดิมไม่ตรวจ
+- แก้: normalize `O/all/any/ไม่จำกัดเพศ` เป็นค่าว่างก่อนส่งเข้า Caption/Poster และเพิ่ม Quality Gate บล็อกเมื่อสื่อระบุชาย/หญิงที่ใบขอไม่ได้กำหนด
+- ผลพิสูจน์: ร่างใหม่ `2f7c0dab-2ecd-4ba3-925a-75dd86a2358c` ไม่มีการอ้างเพศ และ Quality check `gender=pass`
 
 ## Recommendation หากเลือกเพียงทางเดียว
 
@@ -245,12 +257,12 @@
 
 ### Gate D — Content Golden Flow
 
-- [ ] เลือกใบขอจริงหนึ่งใบที่ข้อมูลตำแหน่ง, สถานที่, รายได้ และเวลางานครบ
+- [x] เลือกใบขอจริงหนึ่งใบที่ข้อมูลตำแหน่ง, สถานที่, รายได้ และเวลางานครบ
 - [ ] สร้าง Content ใหม่ผ่านหน้า Web
-- [ ] ตรวจ Caption เทียบข้อเท็จจริงต้นทาง
-- [ ] ตรวจภาพว่าตรงตำแหน่งและไม่มีข้อความผิด
-- [ ] ตรวจ Research Gate และ Quality Gate
-- [ ] ตรวจหลักฐาน `image_generation.ok=true`
+- [x] ตรวจ Caption เทียบข้อเท็จจริงต้นทาง
+- [x] ตรวจภาพว่าตรงตำแหน่งและไม่มีข้อความผิด
+- [x] ตรวจ Research Gate และ Quality Gate
+- [x] ตรวจหลักฐาน `image_generation.ok=true`
 - [ ] ทดลองแก้ข้อความบนภาพและ Caption จากหน้า Web
 
 เกณฑ์ผ่าน:
@@ -259,16 +271,19 @@
 - มีภาพจริงพร้อมใช้และตรวจที่มาของการสร้างได้
 - ข้อเท็จจริงสำคัญผิด = 0
 
-หลักฐาน (25 ส.ค. 2026) — Blocked:
+หลักฐาน (25 ส.ค. 2026) — Golden Flow Queue→Worker ผ่าน; Web Editor ยังรอพิสูจน์:
 
-- ใช้ใบขอจริง `LMM6705007` (หัวหน้าไซด์, สถานที่/รายได้/เวลาครบ) และ Worker รับงาน draft จริง
-- งาน draft จบอย่างปลอดภัยเป็น `needs_input` ก่อนสร้าง Caption/รูป เพราะ Research Gate พบว่า Facebook session ต้องยืนยันตัวตน จึงไม่มีหลักฐาน Engagement ที่ตรวจย้อนกลับได้
-- ไม่มีการสร้างภาพหรือ Caption ปลอมเพื่อให้ Gate ผ่าน; ดังนั้นยังไม่มี `image_generation.ok=true` หรือ Quality Gate ที่ผ่าน
+- ใช้ใบขอจริง `LMM6705007` (หัวหน้าไซด์, โรงงานคูโบต้า นวนคร, 15,000 บาท, จ.-ศ. 7.00–17.00 น., 1 อัตรา)
+- งาน draft `fc7e4c7e-46e3-4492-b368-98c962da0983` ถูก Worker claim และจบ `done`; ร่าง `2f7c0dab-2ecd-4ba3-925a-75dd86a2358c` เป็น `pending_approval`, Quality 100 และ `image_generation.ok=true` จาก `gpt-image-2`
+- Research Gate มีคำแนะนำ Google 7 คำ และตรวจ Facebook source ครบ 36 กลุ่มแล้วไม่พบโพสต์ตรงตำแหน่ง; บันทึกเป็น market gap ไม่ใช่ Engagement ปลอม
+- ตรวจภาพจริงแล้ว: หัวหน้าไซต์งานภูมิทัศน์พร้อม PPE/clipboard ไม่มีข้อความจากโมเดลทับโปสเตอร์ และ Caption/Poster ไม่ระบุเพศเนื่องจากใบขอใช้ `gender=O`
+- Commit โค้ดและ Test: `4d5898c fix: ground content research and gender facts`
+- ยังไม่ทำเครื่องหมายผ่านเต็ม เพราะหลักฐานการกดสร้างและทดลอง Editor จาก Web ภายใต้ session ผู้ใช้ยังไม่มี
 
 ### Gate E — Facebook Golden Flow
 
-- [ ] รัน Preflight โดยไม่โพสต์จริง
-- [ ] ตรวจ Session, บัญชี และกลุ่มเป้าหมาย
+- [x] รัน Preflight โดยไม่โพสต์จริง
+- [x] ตรวจ Session, บัญชี และกลุ่มเป้าหมาย
 - [ ] เลือกกลุ่มทดสอบ/กลุ่มส่วนตัวที่ได้รับอนุญาต
 - [ ] เผยแพร่จริงหนึ่งโพสต์แบบ Controlled Test
 - [ ] ตรวจ Post Link, รูป, Caption, จำนวนกลุ่ม และการป้องกันโพสต์ซ้ำ
@@ -293,10 +308,10 @@
 - เพิ่ม `WORKER_CAPABILITIES` ให้เปิด remote worker แบบ `preflight` อย่างเดียวได้ และปิด auto-daily เมื่อไม่มี capability `post`
 - Syntax check ผ่าน; ต้อง Deploy Server แล้วทดสอบผ่านคิวจริง
 
-ผลทดสอบจริง (25 ส.ค. 2026) — Blocked:
+ผลทดสอบจริง (25 ส.ค. 2026) — Preflight ผ่าน; Controlled Real Post ยังไม่เริ่ม:
 
-- งาน Preflight ถูก enqueue, Worker preflight-only claim แล้ว และล้มเหลวโดยไม่โพสต์จริง
-- สาเหตุยืนยันจาก Trace: Facebook Login ยังไม่ก่อตั้ง session (`__user=0`); ต้องให้เจ้าของบัญชี Login/ยืนยันตัวตนบนเครื่อง Worker ก่อน
+- หลังเจ้าของบัญชียืนยัน Facebook session งาน `pf_mt89o4hc` ถูก Worker `SONB-RM009-29300` claim และจบ `completed` ใน mode `preflight`
+- ไม่มีการโพสต์จริง และ Worker ยังคง capability `preflight` เท่านั้น
 - Controlled Real Post ยังไม่เริ่มและจะหยุดขออนุญาตเป็นรายครั้งก่อนเปิด capability `post`
 
 ### Gate F — แยกคะแนน Scraping ออกจากความพร้อมระบบ
@@ -338,8 +353,8 @@
 
 สถานะ (25 ส.ค. 2026) — ยังไม่ผ่าน:
 
-- ผ่านแล้ว: Unit test 95/95, Readiness test 13/13, AutoPost logic test 4/4, `web npm run build`, Queue→Worker self-test และ Version Contract
-- ยังไม่ผ่าน: Web Action ภายใต้ user session, Content Golden Flow ที่มี Facebook research + `gpt-image-2` จริง, Preflight สำเร็จ, Controlled Real Post และเฝ้าระวัง 24 ชั่วโมง
+- ผ่านแล้ว: Node test 100/100, AutoPost logic test 4/4, `web npm run build`, Queue→Worker self-test, Version Contract, Content Golden Flow ผ่าน Research/Quality/Image Gate และ Facebook Preflight (ทดสอบก่อน Commit `4d5898c`)
+- ยังไม่ผ่าน: Web Action/Editor ภายใต้ user session, Controlled Real Post และเฝ้าระวัง 24 ชั่วโมง
 - Commit ที่ตรวจ Gate: `a6f44ed`, `a4a7dc3`, `26c6940941642b7e836482328b38979538b9618a`
 
 ## KPI
@@ -403,3 +418,4 @@
 | 25 ส.ค. 2026 | รวม Phase เดิมเป็น Master Roadmap 0–10, เพิ่ม Candidate Fit Score และเปลี่ยนแผน Readiness เป็น Release Gate A–G เพื่อไม่ให้ชื่อชนกัน | Codex |
 | 25 ส.ค. 2026 | สร้างแผนกลางครั้งแรกจากการตรวจ Production Readiness, Worker Version Contract, Content Golden Flow, Facebook และ Scraping | Codex |
 | 25 ส.ค. 2026 | ทำ Gate A/B/F, พิสูจน์ Queue→Worker, บันทึก Blocker Facebook Session และแก้ Readiness ไม่ให้นับ preflight-only/Preflight ที่ล้มเหลวเป็นพร้อม | Codex |
+| 25 ส.ค. 2026 | ยืนยัน Facebook Preflight, Golden Flow `LMM6705007`, แก้ Research coverage และการแต่งเพศจาก ERP `O`; Node 100/100, AutoPost 4/4 และ Web build ผ่าน | Codex |
