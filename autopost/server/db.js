@@ -1827,9 +1827,13 @@ async function claimNextPostRunJob(workerId, runId, workerName, capabilities = [
          FROM post_run_queue q
          LEFT JOIN users u ON u.id = q.user_id
          WHERE q.status = 'queued'
-           /** Safety gate: worker รุ่นเก่าที่ไม่รู้จัก preflight ห้ามรับงานนี้
-                มิฉะนั้นมันจะเปิด postAll และอาจโพสต์จริงแทนการตรวจแบบ dry-run */
-           AND (COALESCE(q.mode, 'post') <> 'preflight' OR $4::jsonb ? 'preflight')
+           /** Capability gate: Worker รับได้เฉพาะ mode ที่ประกาศไว้เท่านั้น.
+                สำคัญสำหรับการเปิด Worker แบบ preflight-only เพื่อทดสอบ session
+                โดยไม่มีโอกาส claim งาน post จริง. */
+           AND (
+             (COALESCE(q.mode, 'post') = 'preflight' AND $4::jsonb ? 'preflight')
+             OR (COALESCE(q.mode, 'post') = 'post' AND $4::jsonb ? 'post')
+           )
            /** ข้ามบัญชีที่โดนพัก (circuit breaker) */
            AND (u.paused_until IS NULL OR u.paused_until <= NOW())
            /** pin บัญชี→เครื่อง: บัญชีที่ผูกเครื่องไว้ ให้เครื่องนั้นหยิบเท่านั้น

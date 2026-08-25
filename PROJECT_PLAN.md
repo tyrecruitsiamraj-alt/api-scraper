@@ -250,6 +250,18 @@
 - โพสต์ซ้ำ = 0
 - ไม่มีงานผิดพลาดใหม่ในช่วงตรวจย้อนหลัง 24 ชั่วโมง
 
+กติกาความปลอดภัยระหว่างดำเนินการ:
+
+- เปิด Facebook Worker สำหรับ Gate E ด้วย `WORKER_CAPABILITIES=preflight` และ `AUTO_POST_DAILY_ENABLED=0` เท่านั้น
+- Server ต้องส่งงานเฉพาะ mode ที่ Worker ประกาศ capability; ห้ามให้ preflight-only Worker claim งาน `post`
+- เปลี่ยนเป็น capability `post` ได้หลังผู้ใช้อนุญาต Controlled Real Post เป็นรายครั้งเท่านั้น
+
+หลักฐานระหว่างดำเนินการ (25 ส.ค. 2026):
+
+- แก้ AutoPost Server ให้ Capability `preflight` รับได้เฉพาะงาน `preflight` และ Capability `post` รับได้เฉพาะงาน `post`
+- เพิ่ม `WORKER_CAPABILITIES` ให้เปิด remote worker แบบ `preflight` อย่างเดียวได้ และปิด auto-daily เมื่อไม่มี capability `post`
+- Syntax check ผ่าน; ต้อง Deploy Server แล้วทดสอบผ่านคิวจริง
+
 ### Gate F — แยกคะแนน Scraping ออกจากความพร้อมระบบ
 
 - [x] ปรับ Readiness ให้ `error`, Worker offline, Queue ค้าง และ Pipeline ค้าง เป็นตัวหักคะแนนระบบ

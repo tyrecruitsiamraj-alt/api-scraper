@@ -62,9 +62,19 @@ const workerSourceSha = (() => {
   }
 })();
 const workerBuildSha = String(process.env.WORKER_BUILD_SHA || '').trim() || workerSourceSha;
-// Server ใช้รายการนี้เป็น compatibility gate: worker รุ่นเก่าที่ไม่ประกาศ
-// `preflight` จะไม่มีวันได้รับงานตรวจ Facebook แบบไม่โพสต์จริง
-const WORKER_CAPABILITIES = ['post', 'preflight'];
+// Server จะส่งเฉพาะงานที่อยู่ใน capability นี้เท่านั้น. จึงเปิด Worker
+// แบบ `WORKER_CAPABILITIES=preflight` ได้อย่างปลอดภัยเพื่อทดสอบ session/group
+// โดยไม่ claim งาน post จริง. ค่า default รักษาพฤติกรรม production เดิม.
+const WORKER_CAPABILITIES = [...new Set(
+  String(process.env.WORKER_CAPABILITIES || 'post,preflight')
+    .split(',')
+    .map((item) => item.trim())
+    .filter((item) => ['post', 'preflight'].includes(item))
+)];
+if (WORKER_CAPABILITIES.length === 0) {
+  console.error('[post-worker] WORKER_CAPABILITIES ต้องมี post หรือ preflight อย่างน้อยหนึ่งรายการ');
+  process.exit(1);
+}
 let activeJobs = 0;
 let claiming = false;
 
@@ -264,7 +274,8 @@ setInterval(() => {
  * รอบโพสต์อัตโนมัติประจำวัน (รวมเสาร์-อาทิตย์) — worker เป็นคนยิงเพราะ server บน Vercel
  * ไม่มี process ค้างไว้ทำตามเวลา. server ฝั่ง enqueue idempotent ต่อวัน (รีสตาร์ท worker ไม่ enqueue ซ้ำ)
  */
-const AUTO_POST_DAILY_ENABLED = String(process.env.AUTO_POST_DAILY_ENABLED ?? '1').trim() !== '0';
+const AUTO_POST_DAILY_ENABLED = WORKER_CAPABILITIES.includes('post')
+  && String(process.env.AUTO_POST_DAILY_ENABLED ?? '1').trim() !== '0';
 const AUTO_POST_HOUR = Math.min(23, Math.max(0, Number(process.env.AUTO_POST_HOUR) || 8));
 const AUTO_POST_MINUTE = Math.min(59, Math.max(0, Number(process.env.AUTO_POST_MINUTE) || 0));
 const AUTO_POST_TZ = process.env.AUTO_POST_TZ || 'Asia/Bangkok';
