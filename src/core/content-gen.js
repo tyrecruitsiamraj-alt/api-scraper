@@ -1,7 +1,7 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { envString } from '../config.js';
 import { buildVisualBrief, composeVisualPrompt } from './visual-brief.js';
-import { extractCampaignFacts } from './campaign-facts.js';
+import { extractCampaignFacts, normalizedGenderRequirement } from './campaign-facts.js';
 
 /**
  * Content generation (text) — Claude คิด "โพสต์สรรหา" ให้ 1 ใบขอที่หาคนไม่ได้:
@@ -263,12 +263,8 @@ export function buildGroundedCaption(campaign = {}) {
     .slice(0, 3);
   if (duties.length) lines.push('', 'หน้าที่หลัก', ...duties.map((item) => `• ${item.slice(0, 180)}`));
   const qualifications = [];
-  const gender = String(facts.gender || '').trim().toLowerCase();
-  if (gender && !['o', 'all', 'any', 'a', 'ไม่จำกัด', 'ไม่ระบุ'].includes(gender)) {
-    qualifications.push(`เพศ ${facts.gender}`);
-  } else if (gender) {
-    qualifications.push('ไม่จำกัดเพศ');
-  }
+  const gender = normalizedGenderRequirement(facts.gender);
+  if (gender) qualifications.push(gender);
   if (facts.ageMin || facts.ageMax) qualifications.push(`อายุ ${facts.ageMin || ''}–${facts.ageMax || ''} ปี`);
   if (facts.education) qualifications.push(`วุฒิการศึกษา ${facts.education}`);
   if (qualifications.length) lines.push('', 'คุณสมบัติ', ...qualifications.map((item) => `• ${item}`));
@@ -281,6 +277,7 @@ export function buildGroundedCaption(campaign = {}) {
 /** สร้าง context ใบขอ (แชร์ระหว่าง caption กับ poster) */
 function campaignContext(campaign = {}) {
   const snap = campaign.snapshot ?? {};
+  const gender = normalizedGenderRequirement(snap.gender);
   const position = String(campaign.title || snap.request_name || snap.job_description_name || '').trim();
   if (!position) return null;
   return [
@@ -292,7 +289,7 @@ function campaignContext(campaign = {}) {
     campaign.remaining_qty ? `ยังขาดอีก: ${campaign.remaining_qty} คน` : '',
     snap.income ? `รายได้ที่ยืนยันจากใบขอ: ${snap.income}` : '',
     snap.work_schedule ? `วันและเวลาทำงานที่ยืนยัน: ${snap.work_schedule}` : '',
-    snap.gender ? `เพศตามใบขอ: ${snap.gender}` : '',
+    gender ? `เพศตามใบขอ: ${gender}` : '',
     snap.age_min || snap.age_max ? `ช่วงอายุ: ${snap.age_min ?? ''}-${snap.age_max ?? ''} ปี` : '',
     snap.education ? `วุฒิการศึกษา: ${snap.education}` : '',
     snap.department_code ? `แผนก: ${snap.department_code}` : '',

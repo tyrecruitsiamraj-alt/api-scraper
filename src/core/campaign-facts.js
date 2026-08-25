@@ -8,6 +8,17 @@ const compact = (value) => clean(value).toLowerCase().replace(/[\s,._\-–—/()
 const pick = (...values) => values.map(clean).find(Boolean) ?? '';
 const BROAD_TITLES = new Set(['งาน', 'พนักงาน', 'เจ้าหน้าที่', 'ช่าง', 'พนักงานทั่วไป', 'รับสมัครงาน', 'ไม่ระบุ']);
 
+/** ERP uses O/all/any for an open gender requirement. Never render that
+ * internal code or let a model turn it into male/female. */
+export function normalizedGenderRequirement(value) {
+  const raw = clean(value);
+  const key = compact(raw);
+  if (!raw || ['o', 'all', 'any', 'a', 'ไม่จำกัด', 'ไม่ระบุ', 'ไม่จำกัดเพศ', 'ทุกเพศ'].includes(key)) return '';
+  if (/^(?:m|male|ชาย|เพศชาย)$/i.test(raw) || /(?:เพศ)?ชาย/.test(raw)) return 'เพศชาย';
+  if (/^(?:f|female|หญิง|เพศหญิง)$/i.test(raw) || /(?:เพศ)?หญิง/.test(raw)) return 'เพศหญิง';
+  return `เพศ ${raw}`;
+}
+
 function normalizeKnownThaiTypos(value) {
   return clean(value)
     .replace(/โรงงาร/g, 'โรงงาน');
@@ -106,6 +117,12 @@ function salaryBreakdown(income) {
 /** Force display fields that must never be invented or mutated by a model. */
 export function applyTrustedPosterFacts(fields = {}, campaign = {}) {
   const facts = extractCampaignFacts(campaign);
+  const gender = normalizedGenderRequirement(facts.gender);
+  const qualifications = (Array.isArray(fields.qualifications) ? fields.qualifications : [])
+    .map(clean)
+    .filter(Boolean)
+    .filter((item) => !/เพศ\s*(?:ชาย|หญิง|ไม่จำกัด|ทุกเพศ|all|any|male|female|m|f|o)\b/i.test(item));
+  if (gender) qualifications.unshift(gender);
   return {
     ...fields,
     title: facts.position || clean(fields.title),
@@ -115,5 +132,6 @@ export function applyTrustedPosterFacts(fields = {}, campaign = {}) {
     salaryBreakdown: salaryBreakdown(facts.income),
     quantity: facts.qty ? `${facts.qty} อัตรา` : clean(fields.quantity),
     contactLine: facts.contactPhone || clean(fields.contactLine),
+    qualifications: [...new Set(qualifications)].slice(0, 6),
   };
 }

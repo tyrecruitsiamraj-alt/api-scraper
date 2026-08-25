@@ -5,7 +5,7 @@
  * current source request and the current caption, not on a model's confidence.
  */
 
-import { extractCampaignFacts } from './campaign-facts.js';
+import { extractCampaignFacts, normalizedGenderRequirement } from './campaign-facts.js';
 
 const AMBIGUOUS_TITLES = new Set(['งาน', 'พนักงาน', 'เจ้าหน้าที่', 'ช่าง', 'พนักงานทั่วไป', 'รับสมัครงาน', 'ไม่ระบุ']);
 const BENEFIT_CLAIMS = [
@@ -49,6 +49,13 @@ function unsupportedContacts(text, sourceText) {
   });
 }
 
+function claimedGender(text) {
+  const raw = clean(text);
+  if (/เพศ\s*ชาย|\bmale\b/i.test(raw)) return 'เพศชาย';
+  if (/เพศ\s*หญิง|\bfemale\b/i.test(raw)) return 'เพศหญิง';
+  return '';
+}
+
 function check(code, label, status, message, expected = null, actual = null) {
   return { code, label, status, message, expected, actual };
 }
@@ -66,8 +73,11 @@ export function evaluateContentQuality({ campaign = {}, caption = '', posterFiel
   const checks = [];
 
   if (researchGate) {
+    const facebookDetail = researchGate.facebookMarketGap
+      ? ` · ตรวจ Facebook ครบ ${Number(researchGate.facebookScannedGroups) || 0} กลุ่มแล้ว แต่ไม่พบโพสต์ตรงตำแหน่ง`
+      : '';
     checks.push(researchGate.ready
-      ? check('market_research', 'หลักฐานสำรวจตลาด', 'pass', `สำรวจ Google ${Number(researchGate.googleEvidence) || 0} รายการ และ Facebook ${Number(researchGate.facebookEvidence) || 0} โพสต์ก่อนสร้างแล้ว`)
+      ? check('market_research', 'หลักฐานสำรวจตลาด', 'pass', `สำรวจ Google ${Number(researchGate.googleEvidence) || 0} รายการ และ Facebook ${Number(researchGate.facebookEvidence) || 0} โพสต์ก่อนสร้างแล้ว${facebookDetail}`)
       : check('market_research', 'หลักฐานสำรวจตลาด', 'fail', `ยังสำรวจตลาดไม่ครบ: ${(researchGate.issues || []).join(' · ') || 'ไม่พบหลักฐานที่ตรวจย้อนกลับได้'}`));
   }
 
@@ -158,6 +168,18 @@ export function evaluateContentQuality({ campaign = {}, caption = '', posterFiel
     : qualificationPresent
       ? check('qualifications', 'คุณสมบัติผู้สมัคร', 'pass', 'พบคุณสมบัติจากใบขอในประกาศ')
       : check('qualifications', 'คุณสมบัติผู้สมัคร', 'warning', 'ประกาศยังไม่แสดงคุณสมบัติที่มีในใบขอ'));
+
+  const expectedGender = normalizedGenderRequirement(facts.gender);
+  const actualGender = claimedGender(combinedRaw);
+  if (actualGender && actualGender !== expectedGender) {
+    checks.push(check('gender', 'เพศผู้สมัคร', 'fail', expectedGender
+      ? `ประกาศระบุ ${actualGender} แต่ใบขอกำหนด ${expectedGender}`
+      : `ประกาศระบุ ${actualGender} แต่ใบขอไม่ได้กำหนดเพศ`, expectedGender || 'ไม่ระบุเพศ', actualGender));
+  } else {
+    checks.push(check('gender', 'เพศผู้สมัคร', 'pass', expectedGender
+      ? `เพศในประกาศตรงกับใบขอ (${expectedGender})`
+      : 'ใบขอไม่ได้กำหนดเพศ และประกาศไม่ได้แต่งเพศเพิ่ม'));
+  }
 
   const applicable = checks.filter((item) => item.status !== 'not_applicable');
   const failures = applicable.filter((item) => item.status === 'fail');

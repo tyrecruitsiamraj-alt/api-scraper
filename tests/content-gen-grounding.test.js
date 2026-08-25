@@ -60,3 +60,8 @@ test('Caption ใส่เบอร์เฉพาะเมื่อมีอย
   assert.match(buildGroundedCaption(withPhone), /📞 ติดต่อ: 02-123-4567/);
   assert.doesNotMatch(buildGroundedCaption(campaign), /📞 ติดต่อ:/);
 });
+
+test('รหัสเพศ O จาก ERP ต้องไม่กลายเป็นเพศชายหรือเพศหญิงใน Caption', () => {
+  const caption = buildGroundedCaption(campaign);
+  assert.doesNotMatch(caption, /เพศ\s*(?:ชาย|หญิง|O)/);
+});

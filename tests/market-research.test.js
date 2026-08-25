@@ -33,6 +33,18 @@ test('ไม่มีหลักฐาน Facebook ต้องหยุดก�
   assert.equal(gate.facebookEvidence, 0);
 });
 
+test('ตรวจครบทุกกลุ่มแล้วไม่พบโพสต์ตรงตำแหน่ง เป็น market gap ไม่ใช่ system failure', () => {
+  const gate = assessMarketResearch({
+    evidence: [{ source_type: 'google_trends' }],
+    facebookCoverageComplete: true,
+    facebookScannedGroups: 42,
+  });
+  assert.equal(gate.ready, true);
+  assert.equal(gate.facebookEvidence, 0);
+  assert.equal(gate.facebookMarketGap, true);
+  assert.equal(gate.facebookScannedGroups, 42);
+});
+
 test('โหมด Preview ใช้หลักฐาน Google อย่างเดียวได้โดยไม่ผ่อนกฎ Production', () => {
   const evidence = [{ source_type: 'google_trends' }];
   assert.equal(assessMarketResearch({ evidence }, { requireFacebook: false }).ready, true);

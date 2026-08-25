@@ -33,6 +33,38 @@ test('ประกาศที่ข้อมูลตรงใบขอผ่�
   assert.equal(result.checks.filter((item) => item.status === 'fail').length, 0);
 });
 
+test('Quality Gate ระบุชัดเมื่อสำรวจ Facebook ครบแล้วแต่ตลาดไม่มีโพสต์ตรงตำแหน่ง', () => {
+  const result = evaluateContentQuality({
+    campaign,
+    caption: goodCaption,
+    imageReady: true,
+    researchGate: {
+      ready: true,
+      googleEvidence: 3,
+      facebookEvidence: 0,
+      facebookMarketGap: true,
+      facebookScannedGroups: 42,
+    },
+  });
+  assert.equal(result.blocking, false);
+  assert.match(result.checks.find((item) => item.code === 'market_research')?.message ?? '', /42 กลุ่ม/);
+});
+
+test('ใบขอที่เปิดกว้างเรื่องเพศ ห้ามให้ Caption หรือโปสเตอร์แต่งเป็นชายหรือหญิง', () => {
+  const openGender = {
+    ...campaign,
+    request_snapshot: { ...campaign.request_snapshot, gender: 'O' },
+  };
+  const result = evaluateContentQuality({
+    campaign: openGender,
+    caption: goodCaption.replace('เพศชาย อายุ 25-45 ปี', 'เพศชาย อายุ 25-45 ปี'),
+    imageReady: true,
+    posterFields: { qualifications: ['เพศหญิง อายุ 25-45 ปี'] },
+  });
+  assert.equal(result.blocking, true);
+  assert.equal(result.checks.find((item) => item.code === 'gender')?.status, 'fail');
+});
+
 test('ไม่มีภาพต้นฉบับจาก AI ถูกบล็อกแม้ข้อความถูกต้อง', () => {
   const result = evaluateContentQuality({ campaign, caption: goodCaption, imageReady: false });
   assert.equal(result.blocking, true);

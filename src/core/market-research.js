@@ -31,14 +31,21 @@ export function assessMarketResearch(result = {}, { requireFacebook = true } = {
   const evidence = Array.isArray(result.evidence) ? result.evidence : [];
   const google = evidence.filter((item) => item?.source_type === 'google_trends');
   const facebook = evidence.filter((item) => item?.source_type === 'facebook_post');
+  const facebookCoverageComplete = result.facebookCoverageComplete === true
+    && Number(result.facebookScannedGroups || 0) > 0;
   const issues = [];
   if (!google.length) issues.push('ยังไม่พบคำค้นจาก Google สำหรับตำแหน่งนี้');
-  if (requireFacebook && !facebook.length) issues.push('ยังไม่พบโพสต์ Facebook ที่เกี่ยวข้องพร้อมยอด Reaction/Comment/Share');
+  if (requireFacebook && !facebook.length && !facebookCoverageComplete) {
+    issues.push('ยังไม่พบโพสต์ Facebook ที่เกี่ยวข้องพร้อมยอด Reaction/Comment/Share');
+  }
   return {
     ready: issues.length === 0,
     issues,
     googleEvidence: google.length,
     facebookEvidence: facebook.length,
+    facebookCoverageComplete,
+    facebookScannedGroups: Number(result.facebookScannedGroups || 0),
+    facebookMarketGap: requireFacebook && !facebook.length && facebookCoverageComplete,
   };
 }
 
@@ -147,14 +154,20 @@ async function collectGoogleSuggestions(campaignId, facts) {
 async function collectFacebookPosts(campaignId, facts) {
   const position = clean(facts?.position);
   const sessionFile = findFacebookSession();
-  if (!sessionFile) return { posts: [], reason: 'ไม่พบ Facebook session' };
+  if (!sessionFile) return { posts: [], reason: 'ไม่พบ Facebook session', scannedGroups: 0, coverageComplete: false };
+  // A draft must not become permanently blocked merely because the first few
+  // configured groups have no matching post. Scan every configured source up
+  // to a bounded operational cap, then record a genuine market gap instead of
+  // inventing Facebook engagement.
+  const maxGroups = Math.max(1, Math.min(50, Number(process.env.RESEARCH_MAX_GROUPS) || 50));
   const { rows: groups } = await query(
-    `SELECT fb_group_id, COALESCE(url, 'https://www.facebook.com/groups/' || fb_group_id) AS url
+    `SELECT fb_group_id, COALESCE(url, 'https://www.facebook.com/groups/' || fb_group_id) AS url,
+            count(*) OVER()::int AS total_active
        FROM content_group_sources WHERE active=true
       ORDER BY last_scanned_at NULLS FIRST, created_at LIMIT $1`,
-    [Math.max(1, Math.min(8, Number(process.env.RESEARCH_MAX_GROUPS) || 4))],
+    [maxGroups],
   );
-  if (!groups.length) return { posts: [], reason: 'ยังไม่ได้ตั้งกลุ่ม Facebook สำหรับสำรวจ' };
+  if (!groups.length) return { posts: [], reason: 'ยังไม่ได้ตั้งกลุ่ม Facebook สำหรับสำรวจ', scannedGroups: 0, coverageComplete: false };
 
   const headless = process.env.RESEARCH_HEADLESS !== '0';
   const browser = await chromium.launch({ headless });
@@ -169,7 +182,9 @@ async function collectFacebookPosts(campaignId, facts) {
       try {
         await page.goto(group.url, { waitUntil: 'domcontentloaded', timeout: 45_000 });
         await sleep(2_500);
-        if (/login|checkpoint|login\.php/i.test(page.url())) return { posts, reason: 'Facebook session ต้องยืนยันตัวตน' };
+        if (/login|checkpoint|login\.php/i.test(page.url())) {
+          return { posts, reason: 'Facebook session ต้องยืนยันตัวตน', scannedGroups: 0, coverageComplete: false };
+        }
         for (let round = 0; round < 2; round += 1) {
           await page.mouse.wheel(0, 1_200).catch(() => {});
           await sleep(1_200);
@@ -199,7 +214,12 @@ async function collectFacebookPosts(campaignId, facts) {
   } finally {
     await browser.close().catch(() => {});
   }
-  return { posts, reason: '' };
+  return {
+    posts,
+    reason: '',
+    scannedGroups: groups.length,
+    coverageComplete: groups.length >= Number(groups[0]?.total_active || 0),
+  };
 }
 
 async function collectOwnedFacebookHistory(campaignId, position) {
@@ -265,11 +285,18 @@ export async function collectCampaignMarketResearch({
   });
   const ownedPosts = await collectOwnedFacebookHistory(campaignId, position).catch(() => []);
   const facebook = requireFacebook
-    ? await collectFacebookPosts(campaignId, facts).catch((error) => ({ posts: [], reason: error.message }))
-    : { posts: [], reason: '' };
+    ? await collectFacebookPosts(campaignId, facts).catch((error) => ({ posts: [], reason: error.message, scannedGroups: 0, coverageComplete: false }))
+    : { posts: [], reason: '', scannedGroups: 0, coverageComplete: false };
   if (requireFacebook && facebook.reason) warnings.push(`Facebook: ${facebook.reason}`);
   const evidence = await loadCampaignMarketResearch(campaignId).catch(() => []);
-  const result = { keywords, facebookPosts: [...ownedPosts, ...facebook.posts], evidence, warnings };
+  const result = {
+    keywords,
+    facebookPosts: [...ownedPosts, ...facebook.posts],
+    evidence,
+    warnings,
+    facebookCoverageComplete: facebook.coverageComplete === true,
+    facebookScannedGroups: Number(facebook.scannedGroups || 0),
+  };
   result.gate = assessMarketResearch(result, { requireFacebook });
   return result;
 }
