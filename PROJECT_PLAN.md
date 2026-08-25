@@ -198,6 +198,13 @@
 - แก้: Readiness ตรวจ heartbeat ของ active `scrape_run` โดยตรง; Fail เฉพาะ run ที่หยุดรายงานเกิน 10 นาที ไม่เอา market gap มาปนกับ system failure
 - ผลตรวจจริง: คืนเฉพาะ lock ที่ยืนยันว่า process เดิมหายแล้วกลับ Queue, Worker รับใหม่และงานปิด `partial` อย่างถูกต้อง (ผ่าน 5/15, ต้องตรวจเพิ่ม 1, ไม่ผ่าน 85); เกณฑ์ใหม่พบ stalled execution 0 งาน
 
+### RC-11: Failure จากการทดสอบเคยค้างใน Dashboard โดยไม่มีบทเรียนถาวร
+
+- ตรวจ Failure Facebook 7 รายการ: 1 รายการเป็น Phase 9 Preflight ที่ไม่โพสต์จริง และ 6 รายการเป็น Auto Daily จาก Mac เก่าที่ไม่มี Build Contract; Assignment เดิมไม่มี Post Log จึงยืนยันว่าไม่มีการเผยแพร่จริง
+- ก่อนลบ บันทึกลง `operational_failure_lessons` 2 บทเรียน: Session ต้องผ่าน Preflight และ Auto Daily ต้องใช้ Worker ที่ Pin/มี Build Contract; เก็บเฉพาะหมวดสาเหตุและวิธีป้องกัน ไม่มี credential หรือข้อมูลผู้สมัคร
+- ลบเฉพาะ `post_run_queue` 7 แถวและ `run_logs` ทดสอบ 1 แถวหลังตรวจหลักฐานแล้ว; ไม่ลบ Assignment, Job, Candidate หรือผลโพสต์จริง
+- เพิ่ม Skill ไทย `.agents/skills/autopost-failure-learning` และให้ `completePostRunJob` บันทึก Failure ใหม่อัตโนมัติก่อนจบงาน
+
 ## Recommendation หากเลือกเพียงทางเดียว
 
 ทำ Golden Flow Release บน Worker เครื่องนี้ให้ครบหนึ่งรอบ แล้วแยก Operational Readiness ออกจาก Business Outcome ของตลาดผู้สมัคร
@@ -428,3 +435,4 @@
 | 25 ส.ค. 2026 | ยืนยัน Facebook Preflight, Golden Flow `LMM6705007`, แก้ Research coverage และการแต่งเพศจาก ERP `O`; Node 100/100, AutoPost 4/4 และ Web build ผ่าน | Codex |
 | 25 ส.ค. 2026 | แก้เกณฑ์ Readiness ของคิวให้ใช้ heartbeat ของ scrape run แทนเวลา Resume ล่าสุด; ยืนยันงานธุรการปิด partial ตามผลตลาด ไม่ค้าง | Codex |
 | 25 ส.ค. 2026 | เปิด Facebook Worker บน SONB-RM009 เป็น `post,preflight` ด้วย Build Contract ตรง Web และปิด Auto Daily; ยังไม่โพสต์จริง | Codex |
+| 25 ส.ค. 2026 | เก็บบทเรียน Failure Facebook 2 หมวดก่อนลบ run ทดสอบ 7 รายการ/Log 1 รายการ; เพิ่ม Autopost Failure Learning Skill และการบันทึกอัตโนมัติ | Codex |

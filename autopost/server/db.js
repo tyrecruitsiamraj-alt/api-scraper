@@ -3,6 +3,7 @@
  */
 require('dotenv').config();
 const { Pool } = require('pg');
+const { classifyPostFailure } = require('./failure-learning');
 
 const DATABASE_URL = process.env.DATABASE_URL;
 const SCHEMA = process.env.DB_SCHEMA || 'so_autopost_apiscraper';
@@ -1659,6 +1660,59 @@ async function ensurePostRunQueueTable() {
   await query(`ALTER TABLE post_run_queue ADD COLUMN IF NOT EXISTS worker_build_sha VARCHAR(64)`);
 }
 
+/**
+ * Audit trail for operational lessons. It intentionally stores a safe summary,
+ * never credentials, post copy, Facebook content, or applicant information.
+ */
+async function ensureOperationalFailureLessonsTable() {
+  await query(`
+    CREATE TABLE IF NOT EXISTS operational_failure_lessons (
+      lesson_key TEXT PRIMARY KEY,
+      category TEXT NOT NULL,
+      lesson TEXT NOT NULL,
+      prevention TEXT NOT NULL,
+      occurrence_count INTEGER NOT NULL DEFAULT 1,
+      first_seen TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      last_seen TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      last_queue_id VARCHAR(50),
+      last_mode VARCHAR(30),
+      last_requested_by VARCHAR(255),
+      status VARCHAR(30) NOT NULL DEFAULT 'active',
+      evidence JSONB NOT NULL DEFAULT '{}'::jsonb
+    )
+  `);
+}
+
+async function recordPostFailureLesson(row) {
+  if (!row) return null;
+  const lesson = classifyPostFailure({
+    mode: row.mode,
+    requestedBy: row.requested_by,
+    workerBuildSha: row.worker_build_sha,
+    error: row.error,
+  });
+  await ensureOperationalFailureLessonsTable();
+  const evidence = {
+    queue_id: String(row.id || ''),
+    mode: String(row.mode || 'post'),
+    requested_by: String(row.requested_by || ''),
+    worker_build_verified: Boolean(String(row.worker_build_sha || '').trim()),
+  };
+  const { rows } = await query(
+    `INSERT INTO operational_failure_lessons
+       (lesson_key, category, lesson, prevention, last_queue_id, last_mode, last_requested_by, evidence)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8::jsonb)
+     ON CONFLICT (lesson_key) DO UPDATE SET
+       occurrence_count=operational_failure_lessons.occurrence_count + 1,
+       last_seen=NOW(), last_queue_id=EXCLUDED.last_queue_id,
+       last_mode=EXCLUDED.last_mode, last_requested_by=EXCLUDED.last_requested_by,
+       evidence=EXCLUDED.evidence
+     RETURNING *`,
+    [lesson.key, lesson.category, lesson.lesson, lesson.prevention, evidence.queue_id, evidence.mode, evidence.requested_by, JSON.stringify(evidence)]
+  );
+  return rows[0] || null;
+}
+
 /** post_run_queue.user_id — 1 คิว = 1 บัญชี (ให้ lock ต่อบัญชี + ขนานข้ามบัญชีได้) */
 async function ensurePostRunQueueUserColumn() {
   await ensurePostRunQueueTable();
@@ -2188,6 +2242,11 @@ async function completePostRunJob(id, data = {}) {
     [String(id || ''), status, data.run_id || null, data.message || null, data.error || null]
   );
   const completed = rows[0] || null;
+  if (!ok && completed) {
+    await recordPostFailureLesson(completed).catch((e) => {
+      console.warn('[learning] record post failure lesson failed:', e.message);
+    });
+  }
   if (ok && completed && String(completed.mode || 'post') === 'post') {
     // เมื่อเผยแพร่เสร็จ ให้ระบบเริ่มติดตามผลเอง ไม่ต้องรอผู้ใช้กดวัดผล.
     try {
@@ -2551,6 +2610,8 @@ module.exports = {
   deleteSchedule,
   updateScheduleByRunId,
   ensurePostRunQueueTable,
+  ensureOperationalFailureLessonsTable,
+  recordPostFailureLesson,
   enqueuePostRunJob,
   enqueuePostRunJobsPerUser,
   enqueueDailyPostRunJobs,
