@@ -2291,6 +2291,15 @@ export async function listFacebookAccounts(): Promise<FbAccount[]> {
   }
 }
 
+/** ภาพต้นฉบับที่ใช้ประกอบโปสเตอร์ — สตรีมแยกจาก PNG ที่มีข้อความแล้ว เพื่อ Preview ขณะแก้ไข. */
+export async function getContentSourceImageBytes(id: string) {
+  const rows = await q<{ source_image_bytes: Buffer | null; source_image_mime: string | null }>(
+    `SELECT source_image_bytes, source_image_mime FROM campaign_contents WHERE id = $1`,
+    [id],
+  );
+  return rows[0] ?? null;
+}
+
 /** ส่งงานตรวจ Facebook ไปยังเครื่องที่ผูกไว้ โดยเปิด browser ตรวจ session+group และไม่โพสต์จริง */
 export async function enqueueFacebookPreflight(userId: string, requestedBy: string | null): Promise<string> {
   const id = autopostId();

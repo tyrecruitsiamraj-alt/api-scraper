@@ -5,6 +5,7 @@ import type { CampaignPostRow } from '@/lib/repo';
 import { approveContentAction, rejectContentAction, editCaptionAction, editPosterAction, measureCampaignAction, retryCampaignDraftAction, runFacebookPreflightAction } from '@/lib/actions';
 import { CaptionViewer } from '@/components/CaptionViewer';
 import { AutopostSummaryForm } from '@/components/AutopostSummaryForm';
+import { CampaignContentWorkspace } from '@/components/CampaignContentWorkspace';
 
 export const dynamic = 'force-dynamic';
 
@@ -38,24 +39,23 @@ const STAGE_LABEL: Record<string, string> = {
 
 // แถบสเตจบนหน้า detail — ไฮไลต์ว่างานนี้อยู่ช่วงไหน
 const STRIP = [
-  { label: 'รับงาน' },
-  { label: 'ตรวจข้อมูล' },
-  { label: 'ทำ Content' },
-  { label: 'สรุป / อนุมัติ' },
-  { label: 'Auto-post' },
+  { label: 'ตรวจใบขอ' },
+  { label: 'ค้นผู้สมัคร' },
+  { label: 'ทำและแก้สื่อ' },
+  { label: 'ตรวจสรุป' },
   { label: 'เสร็จสิ้น' },
 ];
 const STATUS_TO_STEP: Record<string, number> = {
-  new: 1,
-  needs_input: 1,
+  new: 0,
+  needs_input: 0,
   researching: 2,
   drafting: 2,
   low_engagement: 2,
-  pending_approval: 3,
+  pending_approval: 2,
   approved: 3,
-  posting: 4,
-  measuring: 4,
-  done: 5,
+  posting: 3,
+  measuring: 3,
+  done: 4,
 };
 
 function StageStrip({ status }: { status: string }) {
@@ -418,7 +418,27 @@ export default async function CampaignDetail({ params }: { params: { id: string 
                       Preview ชั่วคราวจาก Codex — ใช้ตรวจรูปและแคปชันได้ แต่ระบบปิดการโพสต์ไว้จนกว่า Worker จะสร้างร่าง Production ใหม่
                     </div>
                   )}
-                  <div className={`grid items-start gap-5 ${ct.status === 'draft' ? 'xl:grid-cols-[minmax(300px,0.78fr)_minmax(0,1.22fr)]' : 'sm:grid-cols-[180px_1fr]'}`}>
+                  {ct.status === 'draft' ? (
+                    <CampaignContentWorkspace
+                      campaignId={c.id}
+                      content={{
+                        id: ct.id,
+                        hasImage: ct.has_image,
+                        hasSourceImage: ct.has_source_image,
+                        imageGenerationOk: ct.image_generation_ok,
+                        qualityStatus: ct.quality_status,
+                        qualityScore: ct.quality_score,
+                        qualitySummary: ct.quality_checks?.summary,
+                        qualityChecks: ct.quality_checks?.checks,
+                        isPreview,
+                      }}
+                      initialPoster={posterFields}
+                      initialCaption={ct.caption ?? ''}
+                      preflightAccounts={preflightAccounts.map((account) => ({ id: account.id, label: account.label }))}
+                    />
+                  ) : (
+                    <>
+                  <div className="grid items-start gap-5 sm:grid-cols-[180px_1fr]">
                     {ct.has_image ? (
                       // คลิกเปิดรูปเต็ม (แท็บใหม่ — ซูม/เซฟได้)
                       <a
@@ -612,6 +632,8 @@ export default async function CampaignDetail({ params }: { params: { id: string 
                       )}
                     </div>
                   </div>
+                    </>
+                  )}
 
                   {/* engagement ของเวอร์ชันนี้ (ถ้าเคยโพสต์+วัดผลแล้ว) */}
                   {eng && (
@@ -631,84 +653,6 @@ export default async function CampaignDetail({ params }: { params: { id: string 
                     </div>
                   )}
 
-                  {ct.status === 'draft' && (
-                    <div className="mt-4 space-y-3">
-                      <div className="flex flex-wrap items-end gap-2">
-                        {preflightAccounts.length > 0 ? (
-                          <form action={runFacebookPreflightAction} className="flex flex-wrap items-end gap-2 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2">
-                            <label className="text-xs text-blue-800">
-                              <span className="mb-1 block font-medium">ทดสอบ Facebook ก่อน (ไม่โพสต์จริง)</span>
-                              <select name="fbAccountId" required defaultValue="" className="rounded-lg border border-blue-200 bg-white px-2 py-1.5 text-sm text-ink">
-                                <option value="" disabled>เลือกบัญชี…</option>
-                                {preflightAccounts.map((a) => <option key={a.id} value={a.id}>{a.label}</option>)}
-                              </select>
-                            </label>
-                            <button className="btn-secondary btn-sm">ตรวจ Session + กลุ่ม</button>
-                          </form>
-                        ) : (
-                          <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
-                            เครื่อง Facebook ยังเป็นรุ่นเดิม จึงปิดการทดสอบและการโพสต์ไว้ก่อนเพื่อไม่ให้โพสต์จริงโดยไม่ตั้งใจ
-                          </div>
-                        )}
-                        <form action={approveContentAction} className="flex flex-wrap items-end gap-2">
-                          <input type="hidden" name="contentId" value={ct.id} />
-                          <input type="hidden" name="campaignId" value={c.id} />
-                          <label className="text-xs text-subtle">
-                            <span className="mb-1 block">จุดที่ทำได้ดี</span>
-                            <select name="feedbackCode" defaultValue="ready" className="rounded-lg border border-hairline bg-transparent px-2 py-1.5 text-sm text-ink">
-                              <option value="ready">พร้อมใช้ ไม่ต้องแก้</option>
-                              <option value="strong_hook">ประโยคเปิดน่าสนใจ</option>
-                              <option value="complete_info">ข้อมูลครบและถูกต้อง</option>
-                              <option value="good_visual">รูปเหมาะกับงาน</option>
-                            </select>
-                          </label>
-                          <button className="btn-primary btn-sm" disabled={isPreview || !ct.has_image || !ct.image_generation_ok || ct.quality_status === 'fail'}>
-                            {isPreview ? 'Preview — ยังอนุมัติไม่ได้' : !ct.has_image || !ct.image_generation_ok || ct.quality_status === 'fail' ? 'ยังไม่ผ่านด่านอนุมัติ' : '✓ อนุมัติ ไปหน้าสรุป'}
-                          </button>
-                        </form>
-                        <form action={rejectContentAction} className="flex flex-wrap items-end gap-2">
-                          <input type="hidden" name="contentId" value={ct.id} />
-                          <input type="hidden" name="campaignId" value={c.id} />
-                          <label className="text-xs text-subtle">
-                            <span className="mb-1 block">ปัญหาหลัก</span>
-                            <select name="reasonCode" required defaultValue="" className="rounded-lg border border-hairline bg-transparent px-2 py-1.5 text-sm text-ink">
-                              <option value="" disabled>เลือกเหตุผล…</option>
-                              <option value="incorrect_info">ข้อมูลไม่ถูกต้อง</option>
-                              <option value="weak_hook">ประโยคเปิดไม่น่าสนใจ</option>
-                              <option value="too_long">เนื้อหายาวเกินไป</option>
-                              <option value="missing_details">ข้อมูลสำคัญไม่ครบ</option>
-                              <option value="wrong_tone">ภาษาไม่เหมาะกับกลุ่มเป้าหมาย</option>
-                              <option value="poor_visual">รูปไม่เหมาะสม</option>
-                              <option value="other">เหตุผลอื่น</option>
-                            </select>
-                          </label>
-                          <label className="min-w-[220px] flex-1 text-xs text-subtle">
-                            <span className="mb-1 block">รายละเอียดเพิ่มเติม</span>
-                            <input name="reason" className="w-full rounded-lg border border-hairline bg-transparent px-2 py-1.5 text-sm text-ink" placeholder="บอกให้ AI รู้ว่ารอบใหม่ควรแก้อะไร" />
-                          </label>
-                          <button className="btn-ghost btn-sm">↻ ตีกลับ ให้ AI คิดใหม่</button>
-                        </form>
-                      </div>
-
-                      {/* แก้แคปชัน — ใช้ <details> เปิด/ปิดได้โดยไม่ต้อง client JS */}
-                      <details className="group">
-                        <summary className="inline-flex cursor-pointer select-none items-center gap-1 text-xs text-subtle hover:text-accent">
-                          ✎ แก้แคปชัน
-                        </summary>
-                        <form action={editCaptionAction} className="mt-2 space-y-2">
-                          <input type="hidden" name="contentId" value={ct.id} />
-                          <input type="hidden" name="campaignId" value={c.id} />
-                          <textarea
-                            name="caption"
-                            defaultValue={ct.caption ?? ''}
-                            rows={6}
-                            className="w-full rounded-lg border border-hairline bg-transparent p-3 text-sm"
-                          />
-                          <button className="btn-secondary btn-sm">บันทึกแคปชัน</button>
-                        </form>
-                      </details>
-                    </div>
-                  )}
                 </div>
               );
             })}
