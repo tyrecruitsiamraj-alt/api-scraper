@@ -12,7 +12,7 @@ function item(code, label, status, message) {
  *  requiredBuildSha?: string,
  *  workers?: Array<{kind?:string, online?:boolean, meta?:Record<string,any>|null}>,
  *  facebookAccounts?: Array<{group_count?:number,preflight_verified?:boolean}>,
- *  queue?: {queued?:number, oldest_queued_minutes?:number|null, stale_running?:number, stalled_progress?:number, errors_24h?:number},
+ *  queue?: {queued?:number, oldest_queued_minutes?:number|null, stale_running?:number, stalled_progress?:number, errors_24h?:number, resolved_errors_24h?:number},
  *  postQueue?: {queued?:number, running?:number, failed_24h?:number},
  *  contentOutput?: {passing_with_image?:number, verified_generation?:number, failed_quality?:number},
  *  scrapeOutput?: {completed?:number, partial?:number, error?:number},
@@ -75,7 +75,15 @@ export function evaluateWorkflowReadiness(input = {}) {
     Number(account.group_count || 0) > 0 && account.preflight_verified === true
   )).length;
   if (!preflightWorker) {
-    checks.push(item('facebook_preflight', 'การทดสอบ Facebook แบบไม่โพสต์จริง', 'fail', 'Worker ยังเป็นรุ่นเดิม กรุณารีเฟรช Worker ก่อนทดสอบ Facebook'));
+    const anyFacebookWorkerOnline = workers.some((worker) => worker.online && worker.kind === 'autopost');
+    checks.push(item(
+      'facebook_preflight',
+      'การทดสอบ Facebook แบบไม่โพสต์จริง',
+      'fail',
+      anyFacebookWorkerOnline
+        ? 'เครื่องเผยแพร่ Facebook ที่ออนไลน์ยังไม่ประกาศ capability preflight'
+        : 'ยังไม่มีเครื่องเผยแพร่ Facebook ออนไลน์สำหรับทดสอบ Session และกลุ่ม',
+    ));
   } else if (readyAccounts <= 0) {
     checks.push(item('facebook_preflight', 'การทดสอบ Facebook แบบไม่โพสต์จริง', 'fail', 'ยังไม่มีบัญชีและกลุ่ม Facebook สำหรับทดสอบแบบไม่โพสต์จริง'));
   } else if (verifiedPreflightAccounts <= 0) {
@@ -132,7 +140,12 @@ export function evaluateWorkflowReadiness(input = {}) {
     checks.push(item('work_queue', 'คิวงานเบื้องหลัง', 'pass', 'ไม่มีงานค้าง'));
   }
 
-  const failed = Number(queue.errors_24h || 0) + Number(postQueue.failed_24h || 0);
+  // `errors_24h` must contain only errors that have not been successfully
+  // retried for the same work item. Recovered demo attempts stay in the audit
+  // trail and Lessons table, but must not be presented as a live incident.
+  const unresolvedCoreErrors = Number(queue.errors_24h || 0);
+  const recoveredCoreErrors = Number(queue.resolved_errors_24h || 0);
+  const failed = unresolvedCoreErrors + Number(postQueue.failed_24h || 0);
   // A successful preflight proves only session/group access and must never
   // hide a streak of real publish failures.
   const recentPostRuns = (input.recentPostRuns ?? []).filter((run) => String(run.mode || 'post') === 'post');
@@ -141,7 +154,9 @@ export function evaluateWorkflowReadiness(input = {}) {
     ? item('recent_errors', 'งานผิดพลาดล่าสุด', 'fail', `การเผยแพร่ Facebook ล่าสุดล้มเหลวติดต่อกัน ${recentPostRuns.length} ครั้ง ห้ามรายงานว่าระบบพร้อม`)
     : failed > 0
       ? item('recent_errors', 'งานผิดพลาดล่าสุด', 'warning', `มีงานผิดพลาดใน 24 ชั่วโมง ${failed} งาน`)
-    : item('recent_errors', 'งานผิดพลาดล่าสุด', 'pass', 'ไม่พบงานผิดพลาดใน 24 ชั่วโมง'));
+      : recoveredCoreErrors > 0
+        ? item('recent_errors', 'งานผิดพลาดล่าสุด', 'pass', `ไม่พบงานผิดพลาดที่ยังไม่แก้ไข (มีรอบทดลองที่แก้สำเร็จแล้ว ${recoveredCoreErrors} งาน เก็บเป็นบทเรียน)`)
+        : item('recent_errors', 'งานผิดพลาดล่าสุด', 'pass', 'ไม่พบงานผิดพลาดใน 24 ชั่วโมง'));
 
   const inconsistent = Number(input.inconsistentCampaigns || 0);
   checks.push(inconsistent > 0

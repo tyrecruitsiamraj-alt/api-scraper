@@ -69,6 +69,16 @@ test('Facebook Worker ที่รับได้เฉพาะ preflight ห�
   assert.match(result.checks.find((x) => x.code === 'post_worker')?.message ?? '', /capability post/);
 });
 
+test('รอบทดลองที่ล้มแล้ว retry สำเร็จถูกเก็บเป็นบทเรียน แต่ไม่ปิดกั้นความพร้อมปัจจุบัน', () => {
+  const result = evaluateWorkflowReadiness({
+    ...readyInput,
+    queue: { queued: 0, stale_running: 0, errors_24h: 0, resolved_errors_24h: 3 },
+  });
+  assert.equal(result.status, 'ready');
+  assert.equal(result.checks.find((x) => x.code === 'recent_errors')?.status, 'pass');
+  assert.match(result.checks.find((x) => x.code === 'recent_errors')?.message ?? '', /แก้สำเร็จแล้ว 3 งาน/);
+});
+
 test('worker สร้างประกาศออฟไลน์ถูกบล็อก', () => {
   const result = evaluateWorkflowReadiness({ ...readyInput, workers: readyInput.workers.slice(1) });
   assert.equal(result.status, 'blocked');

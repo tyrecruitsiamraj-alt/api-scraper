@@ -2995,7 +2995,7 @@ export async function getWorkflowReadiness(): Promise<WorkflowReadinessSnapshot>
   const [workers, facebookAccounts, queue, postQueue, inconsistent, selftest, contentOutput, scrapeOutput, recentPostRuns] = await Promise.all([
     listWorkerHeartbeats(),
     listFacebookAccounts(),
-    q<{ queued: number; oldest_queued_minutes: number | null; stale_running: number; stalled_progress: number; errors_24h: number }>(
+    q<{ queued: number; oldest_queued_minutes: number | null; stale_running: number; stalled_progress: number; errors_24h: number; resolved_errors_24h: number }>(
       `SELECT
          count(*) FILTER (WHERE status='queued')::int AS queued,
          EXTRACT(EPOCH FROM (now() - min(created_at) FILTER (WHERE status='queued'))) / 60 AS oldest_queued_minutes,
@@ -3016,7 +3016,30 @@ export async function getWorkflowReadiness(): Promise<WorkflowReadinessSnapshot>
                created_at
              ) < now() - interval '10 minutes'
          )::int AS stalled_progress,
-         count(*) FILTER (WHERE status='error' AND finished_at > now() - interval '24 hours')::int AS errors_24h
+         count(*) FILTER (
+           WHERE status='error'
+             AND finished_at > now() - interval '24 hours'
+             AND NOT EXISTS (
+               SELECT 1
+                 FROM work_queue retry
+                WHERE retry.ref_id=work_queue.ref_id
+                  AND retry.type=work_queue.type
+                  AND retry.status='done'
+                  AND retry.finished_at > work_queue.finished_at
+             )
+         )::int AS errors_24h,
+         count(*) FILTER (
+           WHERE status='error'
+             AND finished_at > now() - interval '24 hours'
+             AND EXISTS (
+               SELECT 1
+                 FROM work_queue retry
+                WHERE retry.ref_id=work_queue.ref_id
+                  AND retry.type=work_queue.type
+                  AND retry.status='done'
+                  AND retry.finished_at > work_queue.finished_at
+             )
+         )::int AS resolved_errors_24h
        FROM work_queue`,
     ).then((rows) => rows[0] ?? {}).catch(() => ({})),
     q<{ queued: number; running: number; failed_24h: number }>(

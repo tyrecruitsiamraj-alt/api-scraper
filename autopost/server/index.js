@@ -1509,12 +1509,10 @@ app.post('/api/worker/post/claim', async (req, res) => {
     const sourceSha = String(req.body?.source_sha || '').trim();
     // heartbeat: worker โพลทุก ~5 วิ → แตะ last_seen ให้เว็บเห็นว่าเครื่องยังมีชีวิต (fail-soft ใน db)
     await db.touchWorkerHeartbeat(workerName || workerId, { worker_id: workerId, build_sha: buildSha, source_sha: sourceSha, capabilities });
-    // A web/server-only deploy must not invalidate a compatible Windows/Mac worker.
-    // Bump the fallback only when worker code itself changes and that release
-    // has been verified. Vercel's commit SHA changes on every UI edit.
-    const requiredBuildSha = String(
-      process.env.REQUIRED_WORKER_BUILD_SHA || 'daa49f9d6c8ae7be99f33baebbf9c09d77b9c34e'
-    ).trim();
+    // A Web/server deploy must not invalidate an already compatible Windows/Mac
+    // worker. Pin a SHA only for a deliberate incident rollback via the
+    // environment; capability is the normal release contract.
+    const requiredBuildSha = String(process.env.REQUIRED_WORKER_BUILD_SHA || '').trim();
     if (requiredBuildSha && buildSha !== requiredBuildSha) {
       return res.json({ ok: true, job: null, upgrade_required: true, required_build_sha: requiredBuildSha });
     }
