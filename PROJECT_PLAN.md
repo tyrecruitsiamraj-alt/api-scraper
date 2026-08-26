@@ -2,8 +2,8 @@
 
 > ไฟล์นี้เป็นแหล่งอ้างอิงแผนงานกลาง (Single Source of Truth) สำหรับคนและ AI ทุกโมเดล
 >
-> อัปเดตล่าสุด: 25 สิงหาคม 2026 (Asia/Bangkok)
-> สถานะ: Phase 9 กำลังทดสอบจริง — Gate A, B, D (เส้น Queue→Worker) และ F มีหลักฐานแล้ว; Gate E ผ่าน Preflight แต่ยังไม่มี Controlled Real Post; Gate C ยังขาดหลักฐานการกดจาก Web ภายใต้ session ผู้ใช้
+> อัปเดตล่าสุด: 26 สิงหาคม 2026 (Asia/Bangkok)
+> สถานะ: Operational Readiness snapshot = 100% หลังตรวจ Worker/Queue/Preflight จริง; แต่ **Phase 9 ยังไม่ปิด** เพราะ Gate E Controlled Real Post และการเฝ้าระวัง 24 ชั่วโมงยังต้องได้รับอนุญาตจากผู้ใช้ก่อน
 
 ## กติกาการใช้ไฟล์นี้
 
@@ -122,13 +122,13 @@
 |---|---|---|
 | เครื่องสร้างประกาศ | ผ่าน | `SONB-RM009` ออนไลน์ และรายงาน `draft` + `content_pipeline=evidence-v1` |
 | สิทธิ์สร้างรูป AI | ผ่านที่ Worker | Worker รายงาน `gpt-image-2` และ `configured=true` โดยไม่เปิดเผย Key |
-| เครื่องเผยแพร่ Facebook | ยังไม่เปิด | Worker ทำงานแบบ `preflight` เท่านั้นตามกติกาความปลอดภัย จึงห้าม Dashboard นับว่าโพสต์จริงได้ |
-| Facebook Preflight | ผ่าน | งาน `pf_mt89o4hc` จบ `completed` แบบไม่โพสต์จริงหลังเจ้าของบัญชียืนยัน Facebook session |
+| เครื่องเผยแพร่ Facebook | ผ่าน | `SONB-RM009` ออนไลน์และประกาศ `post, preflight`; ปิด `AUTO_POST_DAILY_ENABLED=0` จึงไม่สร้างโพสต์เอง |
+| Facebook Preflight | ผ่าน | งาน `pf_mt9gcg5v_readiness` จบ `completed` แบบไม่โพสต์จริงบน Worker build `414a499` |
 | บัญชีและกลุ่ม Facebook | ผ่าน | 1 บัญชีถูก Pin มาที่ `SONB-RM009` และมี 1 กลุ่ม |
 | Caption และภาพ | ผ่านที่ Golden Flow | ใบงาน `LMM6705007` สร้างร่าง `2f7c0dab-2ecd-4ba3-925a-75dd86a2358c` ผ่าน Quality 100 พร้อมภาพจริงจาก `gpt-image-2` |
 | Scraping | ทำงานได้บางส่วน | ครบเป้า 1 งาน, ตลาดไม่พอ 5 งาน, ระบบขัดข้อง 0 งาน |
 | คิวเบื้องหลัง | ผ่านบางส่วน | Self-test ถูก Worker claim และจบ `done`; ยังไม่ยืนยันการกดจาก Web เพราะ Browser session เป็นหน้า Microsoft sign-in |
-| Facebook ล่าสุด | ไม่ผ่าน | การเผยแพร่จริงล้มเหลว 3 ครั้งติดต่อกัน |
+| Facebook ล่าสุด | ผ่านแบบไม่โพสต์จริง | ไม่มี post queue ค้างหรือ failed ใน 24 ชม.; Controlled Real Post ยังไม่เริ่ม |
 | Unit/Build/Logic Test | ผ่าน | Node test 100/100, AutoPost logic 4/4 และ `web npm run build` ผ่าน เมื่อ 25 สิงหาคม 2026 |
 
 ## Root Cause ที่ยืนยันจากโค้ด
@@ -469,14 +469,15 @@
 - ไม่มีข้อความ `upgrade_required`
 - Web ไม่กรอง Worker ที่ถูกต้องออก
 
-หลักฐาน (25 ส.ค. 2026) — ผ่าน:
+หลักฐาน (25–26 ส.ค. 2026) — ผ่าน:
 
 - 25 ส.ค. 2026 ตรวจพบ fallback SHA `daa49…` ไม่ตรง Worker ที่ทำงานจริง `943180…`; แก้แล้วให้ Web ไม่ reject Worker ที่ผ่าน semantic contract เพียงเพราะ UI build คนละ commit
 - Heartbeat ของ Scraper/Content รายงาน `build_sha` เพื่อวินิจฉัย, `content_pipeline=evidence-v1`, `types` และ `image_generation` ครบ; สามารถตั้ง SHA pin เพิ่มผ่าน environment สำหรับ controlled deployment
+- Commit `414a499 fix: align facebook worker readiness` เอา SHA fallback ที่ฝังใน AutoPost Server ออก; หากต้อง pin release ให้ตั้ง `REQUIRED_WORKER_BUILD_SHA` ใน environment เท่านั้น. Worker source/build `414a499` claim preflight ได้จริง จึงไม่มี `upgrade_required`.
 
 ### Gate B — เปิด Worker บนเครื่องนี้
 
-- [x] เปิด Scraper/Content Worker และ Facebook Worker แบบ preflight-only บนเครื่องนี้
+- [x] เปิด Scraper/Content Worker และ Facebook Worker บนเครื่องนี้ โดยปิด Auto-post รายวัน
 - [x] ยืนยัน Scraper/Content Worker มี heartbeat ต่อเนื่อง
 - [x] ยืนยัน Facebook Worker มี heartbeat ต่อเนื่อง
 - [x] ยืนยัน `OPENAI_API_KEY` ถูกมองว่า configured โดยไม่เปิดเผย Key
@@ -489,10 +490,10 @@
 - เครื่องเผยแพร่ Facebook = ผ่าน
 - Facebook Preflight Worker = ผ่าน
 
-หลักฐาน (25 ส.ค. 2026) — ผ่าน:
+หลักฐาน (26 ส.ค. 2026) — ผ่าน:
 
 - Scraper/Content Worker รายงาน `types: scrape,draft,measure,selftest`, `content_pipeline=evidence-v1` และ Image Provider `gpt-image-2`
-- Facebook Worker บน `SONB-RM009` รายงาน `capabilities: [post, preflight]`, Build contract `daa49…` และคง `AUTO_POST_DAILY_ENABLED=0`; จึงรับเฉพาะงานที่คนอนุมัติจากหน้า Web ไม่สร้างรอบโพสต์เอง
+- Facebook Worker บน `SONB-RM009` รายงาน `capabilities: [post, preflight]`, source/build `414a499…` และคง `AUTO_POST_DAILY_ENABLED=0`; จึงไม่มีการสร้างรอบโพสต์เอง
 - Pin ของบัญชี Facebook อยู่ที่ `SONB-RM009`; ก่อนเปิด capability ตรวจแล้ว `post_run_queue` ว่าง จึงไม่มีงานเก่าถูก claim ระหว่างรีสตาร์ท
 
 ### Gate C — ทดสอบ Web → Queue → Worker
@@ -558,9 +559,9 @@
 
 กติกาความปลอดภัยระหว่างดำเนินการ:
 
-- เปิด Facebook Worker สำหรับ Gate E ด้วย `WORKER_CAPABILITIES=preflight` และ `AUTO_POST_DAILY_ENABLED=0` เท่านั้น
-- Server ต้องส่งงานเฉพาะ mode ที่ Worker ประกาศ capability; ห้ามให้ preflight-only Worker claim งาน `post`
-- เปลี่ยนเป็น capability `post` ได้หลังผู้ใช้อนุญาต Controlled Real Post เป็นรายครั้งเท่านั้น
+- `AUTO_POST_DAILY_ENABLED=0` เสมอระหว่าง Gate E; Worker ไม่สร้างรอบโพสต์เอง
+- Server ต้องส่งงานเฉพาะ mode ที่ Worker ประกาศ capability; Worker preflight-only ห้าม claim งาน `post`
+- แม้ Worker ประกาศ `post` ได้ งานโพสต์จริงจะเกิดได้เฉพาะเมื่อผู้ใช้กดอนุมัติ/สั่ง Autopost และบัญชีเดียวกันผ่าน Preflight ใน 24 ชั่วโมง
 
 หลักฐานระหว่างดำเนินการ (25 ส.ค. 2026):
 
@@ -573,6 +574,11 @@
 - หลังเจ้าของบัญชียืนยัน Facebook session งาน `pf_mt89o4hc` ถูก Worker `SONB-RM009-29300` claim และจบ `completed` ใน mode `preflight`
 - ไม่มีการโพสต์จริง; จากนั้นเปิด Worker เครื่องนี้เป็น `post,preflight` โดยปิด Auto Daily เพื่อรอ Controlled Real Post ที่คนอนุมัติ
 - Controlled Real Post ยังไม่เริ่มและจะหยุดขออนุญาตเป็นรายครั้งก่อนเปิด capability `post`
+
+ผลยืนยันซ้ำ (26 ส.ค. 2026) — ผ่านโดยไม่โพสต์จริง:
+
+- Push `414a499` แล้วเปิด Worker `SONB-RM009` ด้วย `post,preflight` + `AUTO_POST_DAILY_ENABLED=0`; ก่อนเปิดตรวจ `post_run_queue` ว่าง
+- Preflight `pf_mt9gcg5v_readiness` ถูก claim เวลา `02:05:55Z` และจบ `completed` เวลา `02:06:22Z`, `worker_build_sha=414a499…`, `error=null`; ไม่มี Post ถูกสร้าง
 
 ### Gate F — แยกคะแนน Scraping ออกจากความพร้อมระบบ
 
@@ -593,6 +599,7 @@
 - เพิ่ม Unit Test: มี Scraping system error 1 งานต้อง Block Readiness
 - Commit `a6f44ed` ถูก Push แล้ว; ชุด Unit Test เต็มผ่าน 95/95 โดยไม่แก้ข้อมูล `partial` ย้อนหลัง
 - งาน `partial` ยังแสดงเป็นผลตลาด และ `error` ยัง Block Readiness ตามจริง
+- 26 ส.ค. 2026: Error DEMO Content 3 แถวถูก retry จบ `done` แล้วทั้ง 3 ใบ จึงบันทึก Lesson `content:demo-worker-missing-ai-key` และ `content:worker-heartbeat-restart` เป็น `resolved` โดยไม่ลบหลักฐาน. Query Readiness นับเฉพาะ Error ที่ยังไม่มี successful retry; Dashboard แสดงว่าเป็นรอบทดลองที่แก้สำเร็จแล้วแทนการเตือนเหตุการณ์ปัจจุบัน
 
 ### Gate G — Final Production Verification
 
@@ -611,11 +618,12 @@
 - โพสต์ซ้ำ = 0
 - ระบบขัดข้องใน Scraping = 0
 
-สถานะ (25 ส.ค. 2026) — ยังไม่ผ่าน:
+สถานะ (26 ส.ค. 2026) — Operational Readiness 100%, Phase 9 ยังไม่ปิด:
 
 - ผ่านแล้ว: Node test 100/100, AutoPost logic test 4/4, `web npm run build`, Web → Queue → Worker self-test ภายใต้ session ผู้ใช้, Version Contract, Content Golden Flow ผ่าน Research/Quality/Image Gate และ Facebook Preflight (ทดสอบก่อน Commit `4d5898c`)
-- ยังไม่ผ่าน: การสร้าง Content ใหม่จากหน้า Web, Visual Regression, Controlled Real Post และเฝ้าระวัง 24 ชั่วโมง
-- Commit ที่ตรวจ Gate: `a6f44ed`, `a4a7dc3`, `26c6940941642b7e836482328b38979538b9618a`
+- ผ่านเพิ่ม: Facebook Worker online `post,preflight`, Preflight จริงบน Build `414a499`, core queue มี unresolved error = 0, post queue failed = 0, Operational Readiness = 100%
+- ยังไม่ผ่าน/ไม่เริ่มโดยตั้งใจ: Controlled Real Post ที่ผู้ใช้อนุญาตเป็นรายครั้ง และเฝ้าระวัง 24 ชั่วโมง; ห้ามเรียก Phase 9 ว่า Production Ready จนกว่าสองข้อนี้ผ่าน
+- Commit ที่ตรวจ Gate: `a6f44ed`, `a4a7dc3`, `26c6940941642b7e836482328b38979538b9618a`, `414a499`
 
 ## KPI
 
