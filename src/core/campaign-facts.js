@@ -121,7 +121,12 @@ export function applyTrustedPosterFacts(fields = {}, campaign = {}) {
   const qualifications = (Array.isArray(fields.qualifications) ? fields.qualifications : [])
     .map(clean)
     .filter(Boolean)
-    .filter((item) => !/เพศ\s*(?:ชาย|หญิง|ไม่จำกัด|ทุกเพศ|all|any|male|female|m|f|o)\b/i.test(item));
+    // JavaScript \b only understands ASCII word characters.  It does not
+    // create a boundary after Thai words such as "ชาย", so the previous
+    // expression leaked model-invented gender requirements into the poster.
+    // Use an explicit Thai/whitespace boundary and always rebuild gender from
+    // the ERP fact below.
+    .filter((item) => !/เพศ\s*(?:ชาย|หญิง|ไม่จำกัด(?:เพศ)?|ทุกเพศ|all|any|male|female|[mfo])(?=$|[\s:•,;/()])/iu.test(item));
   if (gender) qualifications.unshift(gender);
   return {
     ...fields,

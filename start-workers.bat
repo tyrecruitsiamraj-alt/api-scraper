@@ -12,10 +12,9 @@ git pull
 echo.
 echo [2/2] กำลังเปิด Worker 2 หน้าต่าง...
 
-REM Compatibility release ของ Worker — แยกจาก commit ของ UI/server เพื่อให้
-REM web-only deploy ไม่ทำให้ worker ที่ผ่าน Golden Flow ถูกตัดออก.
-REM เปลี่ยนค่านี้พร้อม REQUIRED_WORKER_BUILD_SHA บน Web/AutoPost เท่านั้น
-set "WORKER_BUILD_SHA=daa49f9d6c8ae7be99f33baebbf9c09d77b9c34e"
+REM ประกาศ Build จริงที่กำลังรัน ห้ามฝัง SHA เก่าไว้ใน launcher เพราะหลัง
+REM git pull แล้ว Dashboard จะเห็น Worker คนละรุ่นกับ Source ที่เปิดอยู่.
+for /f %%i in ('git rev-parse HEAD') do set "WORKER_BUILD_SHA=%%i"
 
 REM เครื่องนี้รับทั้งตรวจ Facebook และโพสต์ที่คนอนุมัติจากหน้า Web ได้
 REM แต่ห้ามให้ worker สร้างรอบโพสต์อัตโนมัติเอง; Controlled Post ต้องมาจากงานที่คนอนุมัติเท่านั้น

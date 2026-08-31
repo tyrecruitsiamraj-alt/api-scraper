@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { buildGroundedCaption } from '../src/core/content-gen.js';
 import { evaluateContentQuality } from '../src/core/content-quality.js';
+import { applyTrustedPosterFacts } from '../src/core/campaign-facts.js';
 
 const campaign = {
   title: 'หัวหน้าไซด์',
@@ -64,4 +65,18 @@ test('Caption ใส่เบอร์เฉพาะเมื่อมีอย
 test('รหัสเพศ O จาก ERP ต้องไม่กลายเป็นเพศชายหรือเพศหญิงใน Caption', () => {
   const caption = buildGroundedCaption(campaign);
   assert.doesNotMatch(caption, /เพศ\s*(?:ชาย|หญิง|O)/);
+});
+
+test('รหัสเพศ O ต้องลบเพศที่โมเดลแต่งจากโปสเตอร์ภาษาไทยก่อน Quality Gate', () => {
+  const poster = applyTrustedPosterFacts({
+    qualifications: ['เพศชาย อายุ 20-55 ปี', 'เพศหญิง', 'เพศ O', 'มีประสบการณ์ดูแลสวน'],
+  }, campaign);
+  assert.deepEqual(poster.qualifications, ['มีประสบการณ์ดูแลสวน']);
+  const quality = evaluateContentQuality({
+    campaign,
+    caption: buildGroundedCaption(campaign),
+    posterFields: poster,
+    researchGate: { ready: true, googleEvidence: 2, facebookEvidence: 0, facebookMarketGap: true, facebookScannedGroups: 36 },
+  });
+  assert.notEqual(quality.checks.find((item) => item.code === 'gender')?.status, 'fail');
 });

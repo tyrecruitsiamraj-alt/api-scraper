@@ -3,7 +3,7 @@
 > ไฟล์นี้เป็นแหล่งอ้างอิงแผนงานกลาง (Single Source of Truth) สำหรับคนและ AI ทุกโมเดล
 >
 > อัปเดตล่าสุด: 31 สิงหาคม 2026 (Asia/Bangkok)
-> สถานะ: Operational Readiness snapshot = 100% หลังตรวจ Worker/Queue/Preflight จริง; แต่ **Phase 9 ยังไม่ปิด** เพราะ Gate E Controlled Real Post และการเฝ้าระวัง 24 ชั่วโมงยังต้องได้รับอนุญาตจากผู้ใช้ก่อน
+> สถานะ: Operational Readiness snapshot = 91% ณ 31 สิงหาคม 2026; ระบบหลัก, Content Golden Flow, JobThai, Queue และ Facebook Preflight ผ่านจริง แต่ **Phase 9 ยังไม่ปิด** เพราะ Worker Facebook ถูกจำกัดไว้ที่ `preflight` จนกว่าจะได้รับอนุญาตโพสต์จริง, ต้องเฝ้าระวัง 24 ชั่วโมงหลังโพสต์ และ JobBKK ยังไม่ได้ Employer Session
 
 ## กติกาการใช้ไฟล์นี้
 
@@ -31,7 +31,7 @@
 |---|---|---|---|
 | 0. Foundation & Settings | รวม Connector, บัญชี Facebook, Job และตั้งค่าโพสต์ไว้ใต้ Settings | 🟡 มีแล้วแต่ยังไม่จบ | ตรวจทุกหน้าด้วยข้อมูลจริง, ตัดทางเก่าที่ซ้ำ, ยืนยัน Pin บัญชีกับ Worker |
 | 1. ใบขอและศูนย์งาน | รับใบขอ, แปลงข้อมูล, ตรวจความครบถ้วน และเลือก Scraping/Content/ทั้งสอง | 🟡 มีแล้วแต่ยังไม่จบ | ทำใบขอเป็น Parent Work Order จริง, แสดง Next Action และสถานะลูกทุกงานให้ครบ |
-| 2. Resume Sourcing | JobBKK/JobThai, คำค้นอัตโนมัติ, อายุ/วันที่อัปเดต, รูป, dedupe และค้นต่อจนถึงเป้า | 🟡 มีแล้วแต่ยังไม่จบ | ทดสอบ JobThai สด, พิสูจน์ auto-run หลังสั่ง Web, แยก market exhausted จาก system error |
+| 2. Resume Sourcing | JobBKK/JobThai, คำค้นอัตโนมัติ, อายุ/วันที่อัปเดต, รูป, dedupe และค้นต่อจนถึงเป้า | 🟡 มีแล้วแต่ยังไม่จบ | JobThai สดผ่านแล้ว; เหลือแก้สิทธิ์/Session นายจ้าง JobBKK และพิสูจน์ Live Search |
 | 3. Candidate Library & Qualification | คลังผู้สมัคร, รูปทุกคน, อ่านแล้ว/โทรแล้ว, Hard Filter และผลตรวจรับ | 🟡 มีแล้วแต่ยังไม่จบ | แสดงเหตุผลผ่าน/ไม่ผ่านรายคน, ตรวจรูป/ไฟล์ครบ, เพิ่มคะแนนความเหมาะสมต่อใบงาน |
 | 4. Content Intelligence | ใช้ข้อเท็จจริงใบขอ, Google Trends, คำค้นแนะนำ, Facebook research และ Second Brain | 🟡 มีแล้วแต่ยังไม่จบ | พิสูจน์ Research Gate สด, ตรวจ provenance และห้ามข้อมูลเทรนด์เปลี่ยนข้อเท็จจริงใบขอ |
 | 5. Image, Template & Editor | สร้างภาพตรงตำแหน่ง, แก้ข้อความ/Caption, คิดใหม่, Template, Logo และ Brand Rule | 🟡 มีแล้วแต่ยังไม่จบ | พิสูจน์ gpt-image-2 จริง, ตรวจ Editor บน Web, ทำระบบ Template/Material/Brand Lock จาก Artwork |
@@ -161,14 +161,14 @@
 |---|---|---|
 | เครื่องสร้างประกาศ | ผ่าน | `SONB-RM009` ออนไลน์ และรายงาน `draft` + `content_pipeline=evidence-v1` |
 | สิทธิ์สร้างรูป AI | ผ่านที่ Worker | Worker รายงาน `gpt-image-2` และ `configured=true` โดยไม่เปิดเผย Key |
-| เครื่องเผยแพร่ Facebook | ผ่าน | `SONB-RM009` ออนไลน์และประกาศ `post, preflight`; ปิด `AUTO_POST_DAILY_ENABLED=0` จึงไม่สร้างโพสต์เอง |
-| Facebook Preflight | ผ่าน | งาน `pf_mt9gcg5v_readiness` จบ `completed` แบบไม่โพสต์จริงบน Worker build `414a499` |
+| เครื่องเผยแพร่ Facebook | รออนุญาตโพสต์จริง | `SONB-RM009` ออนไลน์แบบ `preflight` เท่านั้นและปิด `AUTO_POST_DAILY_ENABLED=0`; จะเปิด `post` ต่อเมื่อผู้ใช้ยืนยันเป้าหมายและอนุญาต ณ เวลาทำจริง |
+| Facebook Preflight | ผ่าน | งาน `pf_mtgzcbni_readiness` จบ `completed` แบบไม่โพสต์จริงเมื่อ 31 ส.ค. 2026; Session และกลุ่มผ่าน |
 | บัญชีและกลุ่ม Facebook | ผ่าน | 1 บัญชีถูก Pin มาที่ `SONB-RM009` และมี 1 กลุ่ม |
-| Caption และภาพ | ผ่านที่ Golden Flow | ใบงาน `LMM6705007` สร้างร่าง `2f7c0dab-2ecd-4ba3-925a-75dd86a2358c` ผ่าน Quality 100 พร้อมภาพจริงจาก `gpt-image-2` |
-| Scraping | ทำงานได้บางส่วน | ครบเป้า 1 งาน, ตลาดไม่พอ 5 งาน, ระบบขัดข้อง 0 งาน |
-| คิวเบื้องหลัง | ผ่านบางส่วน | Self-test ถูก Worker claim และจบ `done`; ยังไม่ยืนยันการกดจาก Web เพราะ Browser session เป็นหน้า Microsoft sign-in |
+| Caption และภาพ | ผ่านที่ Golden Flow | ใบงาน `LMM6705007` สร้างร่างใหม่ `23c164ea-b2e3-4a09-8d84-80951eea41ae` ผ่าน Quality 100, Research Gate และภาพจริงจาก `gpt-image-2` |
+| Scraping | ระบบผ่าน/ผลตลาดแยก | ครบเป้า 1 งาน, ตลาดไม่พอ 7 งาน, ระบบขัดข้อง 0 งาน; JobThai สดได้ 5/5 แต่ JobBKK ยังติด Employer Session |
+| คิวเบื้องหลัง | ผ่าน | Self-test `6c783df7-7b7b-4272-8556-52794c272794` ถูก Worker claim และจบ `done`; ไม่มีงานค้าง |
 | Facebook ล่าสุด | ผ่านแบบไม่โพสต์จริง | ไม่มี post queue ค้างหรือ failed ใน 24 ชม.; Controlled Real Post ยังไม่เริ่ม |
-| Unit/Build/Logic Test | ผ่าน | Node test 100/100, AutoPost logic 4/4 และ `web npm run build` ผ่าน เมื่อ 25 สิงหาคม 2026 |
+| Unit/Build/Logic Test | ผ่าน | Node test 112/112, AutoPost logic 4/4 และ `web npm run build` ผ่าน เมื่อ 31 สิงหาคม 2026 |
 
 ## Root Cause ที่ยืนยันจากโค้ด
 
@@ -244,6 +244,24 @@
 - ลบเฉพาะ `post_run_queue` 7 แถวและ `run_logs` ทดสอบ 1 แถวหลังตรวจหลักฐานแล้ว; ไม่ลบ Assignment, Job, Candidate หรือผลโพสต์จริง
 - เพิ่ม Skill ไทย `.agents/skills/autopost-failure-learning` และให้ `completePostRunJob` บันทึก Failure ใหม่อัตโนมัติก่อนจบงาน
 - บังคับที่ Server: Worker จะ claim งาน `post` ไม่ได้จนกว่าบัญชีเดียวกันจะมี `preflight=completed` ภายใน 24 ชั่วโมง
+
+### RC-12: กฎล้างเพศบนโปสเตอร์ใช้ Word Boundary ที่ไม่รองรับภาษาไทย
+
+- `applyTrustedPosterFacts` เดิมใช้ `\b` ต่อท้ายคำไทย จึงไม่จับข้อความที่ AI แต่งว่า `เพศชาย`/`เพศหญิง` แม้ใบขอ `gender=O`
+- แก้ `src/core/campaign-facts.js` ให้ใช้ขอบเขตช่องว่าง/เครื่องหมายที่รองรับภาษาไทย และเพิ่ม Regression Test
+- ผลพิสูจน์: Golden Flow รอบใหม่ใช้ Queue `6f3e6da5-d063-4b46-baad-6336dd749dad`, ได้ Content `23c164ea-b2e3-4a09-8d84-80951eea41ae`, Quality 100, `image_generation.ok=true`, model `gpt-image-2` และไม่มีข้อเท็จจริงเรื่องเพศเกินใบขอ
+
+### RC-13: Scraper Pool สร้าง Restart Timer ซ้ำและลบ Lock โดยไม่ผูกกับ PID
+
+- เมื่อ runner จบ Pool เดิมอาจตั้ง timer เปิด slot เดิมมากกว่าหนึ่งครั้ง ทำให้เกิดข้อความ `work-queue runner already active` และ Worker ดูเหมือนไม่เสถียร
+- แก้ `workers/scraper-pool.mjs` ให้หนึ่ง slot มี restart timer ได้หนึ่งตัว, ตรวจ child ที่กำลังทำงานก่อนเปิด และลบเฉพาะ lock ที่บันทึก PID ตรงกับ child ที่เพิ่งจบ
+- ทดสอบ kill slot จริงแล้ว Pool เปิดใหม่หนึ่งครั้งภายใน 3 วินาที โดยไม่เกิด restart loop
+
+### RC-14: JobBKK รายงาน Login ผ่านผิดเมื่อถูกส่งกลับหน้า `/home`
+
+- Logic เดิมถือว่า URL ใด ๆ ที่ไม่ใช่หน้า Login/`noLogIn` คือสำเร็จ จึงนับหน้า Jobseeker `/home` เป็น Employer Session
+- แก้ `src/providers/jobbkk/session.js` ให้ผ่านเฉพาะ URL ใต้ `/employer/` และเพิ่ม Test URL Contract
+- Live Diagnostic ยืนยันว่าบัญชีปัจจุบันถูกส่งกลับ `/home`; ระบบจึงหยุดพร้อมข้อความภาษาคนแทนการค้นต่อผิดหน้า ส่วนการปลดล็อกต้องตรวจสิทธิ์บัญชีนายจ้าง/แพ็กเกจ Resume กับ JobBKK
 
 ## Recommendation หากเลือกเพียงทางเดียว
 
@@ -536,6 +554,12 @@
 - Facebook Worker บน `SONB-RM009` รายงาน `capabilities: [post, preflight]`, source/build `414a499…` และคง `AUTO_POST_DAILY_ENABLED=0`; จึงไม่มีการสร้างรอบโพสต์เอง
 - Pin ของบัญชี Facebook อยู่ที่ `SONB-RM009`; ก่อนเปิด capability ตรวจแล้ว `post_run_queue` ว่าง จึงไม่มีงานเก่าถูก claim ระหว่างรีสตาร์ท
 
+สถานะความปลอดภัยรอบ 31 ส.ค. 2026:
+
+- Scraper/Content Worker ทำงานบนเครื่องนี้และรับ Self-test/Content Queue จริง
+- Facebook Worker เปิดเฉพาะ `preflight` และปิด Auto Daily; จึงไม่นับว่า Gate B ด้าน “พร้อมเผยแพร่จริง” ผ่านครบจนกว่าผู้ใช้อนุญาตเปิด `post`
+- `start-workers.bat` อ่าน SHA ปัจจุบันหลัง `git pull` อัตโนมัติ และ Scraper Pool recovery ถูกแก้ไม่ให้สร้าง runner ซ้ำ
+
 ### Gate C — ทดสอบ Web → Queue → Worker
 
 - [x] สั่ง Self-test จากหน้า Web ภายใต้ session ผู้ใช้
@@ -554,6 +578,7 @@
 - Self-test ปลอดภัย `2eab530e-4d25-4503-a6fc-b4a4b6f07af2` ถูก Worker claim และจบ `done` โดยไม่มี Error
 - ผู้ใช้กดปุ่ม `ทดสอบระบบแบบไม่โพสต์จริง` จาก `/orchestrator` หลัง Login; งาน `5fb8b360-1a68-47d8-8a5a-b3930b131278` เข้า Queue เวลา `09:11:11.546Z`, Worker รับ `09:11:11.635Z` และจบ `done` เวลา `09:11:12.058Z`; `last_error=null`
 - หลักฐาน Gate C บันทึกใน commit `e5dd70c`
+- 31 ส.ค. 2026 ยืนยันซ้ำด้วย Self-test `6c783df7-7b7b-4272-8556-52794c272794`; Worker claim และจบ `done` เวลา 15:31:59 น. โดยไม่มีงานค้าง (รอบนี้ส่งเข้าคิวด้วย Safe Gate script เพราะเครื่องมือ Browser ไม่อนุญาตควบคุม URL localhost จึงไม่ใช้แทนหลักฐาน Web-click เดิม)
 
 ### Gate D — Content Golden Flow
 
@@ -582,6 +607,12 @@
 - 26 ส.ค. 2026: นำสื่อที่อนุมัติแล้วกลับมาแก้ผ่านปุ่ม `กลับไปแก้รูปและ Caption` โดยตรวจว่าไม่มี `campaign_posts`; แก้/บันทึกโปสเตอร์จากหน้า Web สำเร็จ, PNG จริงตรง Renderer กลาง, Quality กลับเป็น 100/100 และค้างที่ `pending_approval` โดยไม่มีคิวโพสต์
 - Root Cause ที่ปิด: `poster.js` กับ Web Preview ใช้คนละ Template, Quality เดิมตรวจเพียงว่ามีภาพ, งาน approved กลับมาแก้ไม่ได้ และ Image API cache 300 วินาทีทำให้เห็นรูปเก่า
 - Test รอบนี้: Content/Fact/Visual/Poster Template 27/27 ผ่าน, TypeScript ผ่าน และ `web npm run build` ผ่าน
+
+ผลยืนยันซ้ำ (31 ส.ค. 2026) — Golden Flow ใหม่ผ่าน:
+
+- Queue `6f3e6da5-d063-4b46-baad-6336dd749dad` ถูก Worker รับเอง, Research ตรวจครบ 36/36 กลุ่ม และจบ `done`
+- Content `23c164ea-b2e3-4a09-8d84-80951eea41ae` เวอร์ชัน 6 อยู่ `pending_approval`, Quality 100, มีภาพจริง, `image_generation.ok=true` และ model `gpt-image-2`
+- รอบแรกเปิดเผยบัคกฎเพศภาษาไทยและถูก Regression Test ป้องกันแล้ว; ไม่ลบ Failure และใช้ Retry ของ Queue เดิมจนจบสำเร็จ
 
 ### Gate E — Facebook Golden Flow
 
@@ -622,6 +653,11 @@
 - Push `414a499` แล้วเปิด Worker `SONB-RM009` ด้วย `post,preflight` + `AUTO_POST_DAILY_ENABLED=0`; ก่อนเปิดตรวจ `post_run_queue` ว่าง
 - Preflight `pf_mt9gcg5v_readiness` ถูก claim เวลา `02:05:55Z` และจบ `completed` เวลา `02:06:22Z`, `worker_build_sha=414a499…`, `error=null`; ไม่มี Post ถูกสร้าง
 
+ผลยืนยันซ้ำ (31 ส.ค. 2026) — ผ่านโดยไม่โพสต์จริง:
+
+- Preflight `pf_mtgzcbni_readiness` ถูก Worker `SONB-RM009-20368` claim และจบ `completed` เวลา `08:32:28.983Z`; Session และกลุ่มเป้าหมายผ่าน ไม่มีการสร้าง Post
+- Worker ยังคงเปิดเฉพาะ `preflight`; Controlled Real Post, การตรวจลิงก์/ป้องกันโพสต์ซ้ำ และการเฝ้าระวัง 24 ชั่วโมงยังรออนุญาตจากผู้ใช้
+
 ### Gate F — แยกคะแนน Scraping ออกจากความพร้อมระบบ
 
 - [x] ปรับ Readiness ให้ `error`, Worker offline, Queue ค้าง และ Pipeline ค้าง เป็นตัวหักคะแนนระบบ
@@ -645,11 +681,11 @@
 
 ### Gate G — Final Production Verification
 
-- [ ] สถานะตรงกับ So Recruit
+- [x] สถานะตรงกับ So Recruit
 - [ ] ทุก Readiness Gate ผ่าน
-- [ ] ไม่มี Warning ที่ถูกซ่อนหรือลบข้อมูลเพื่อให้คะแนนเพิ่ม
-- [ ] รัน Unit/Integration/E2E ที่เกี่ยวข้องทั้งหมด
-- [ ] บันทึกผลทดสอบ เวลา Commit และผู้ตรวจลงในไฟล์นี้
+- [x] ไม่มี Warning ที่ถูกซ่อนหรือลบข้อมูลเพื่อให้คะแนนเพิ่ม
+- [x] รัน Unit/Integration/E2E ที่ปลอดภัยและไม่โพสต์จริงทั้งหมด
+- [x] บันทึกผลทดสอบ เวลา Commit และผู้ตรวจลงในไฟล์นี้
 
 เกณฑ์ผ่านสุดท้าย:
 
@@ -660,12 +696,12 @@
 - โพสต์ซ้ำ = 0
 - ระบบขัดข้องใน Scraping = 0
 
-สถานะ (26 ส.ค. 2026) — Operational Readiness 100%, Phase 9 ยังไม่ปิด:
+สถานะ (31 ส.ค. 2026) — Operational Readiness 91%, Phase 9 ยังไม่ปิด:
 
-- ผ่านแล้ว: Node test 100/100, AutoPost logic test 4/4, `web npm run build`, Web → Queue → Worker self-test ภายใต้ session ผู้ใช้, Version Contract, Content Golden Flow ผ่าน Research/Quality/Image Gate และ Facebook Preflight (ทดสอบก่อน Commit `4d5898c`)
-- ผ่านเพิ่ม: Facebook Worker online `post,preflight`, Preflight จริงบน Build `414a499`, core queue มี unresolved error = 0, post queue failed = 0, Operational Readiness = 100%
-- ยังไม่ผ่าน/ไม่เริ่มโดยตั้งใจ: Controlled Real Post ที่ผู้ใช้อนุญาตเป็นรายครั้ง และเฝ้าระวัง 24 ชั่วโมง; ห้ามเรียก Phase 9 ว่า Production Ready จนกว่าสองข้อนี้ผ่าน
-- Commit ที่ตรวจ Gate: `a6f44ed`, `a4a7dc3`, `26c6940941642b7e836482328b38979538b9618a`, `414a499`
+- ผ่านแล้ว: Node test 112/112, AutoPost logic test 4/4, `web npm run build`, Queue → Worker self-test, Content Golden Flow ผ่าน Research/Quality/Image Gate, JobThai Live 5/5, Facebook Preflight, Queue ว่าง และ unresolved system error = 0
+- Operational Readiness เป็น 91% เพราะ Worker Facebook ตั้งใจเปิดเฉพาะ `preflight`; ห้ามทำ Dashboard เป็น 100 ด้วยการประกาศ capability `post` โดยยังไม่อนุญาตเผยแพร่จริง
+- ยังไม่ผ่าน: Controlled Real Post, เฝ้าระวัง 24 ชั่วโมงหลังโพสต์ และ JobBKK Live Search ซึ่งบัญชีปัจจุบันยังถูกส่งไปหน้า `/home` แทน Employer Dashboard
+- Commit ชุดแก้ 31 ส.ค. 2026: บันทึกหลัง Test ผ่านและ Push ในรอบส่งมอบนี้
 
 ## KPI
 
@@ -739,3 +775,4 @@
 | 25 ส.ค. 2026 | ปิด UX feedback ของ Poster Editor: ระหว่างทำงานปุ่มแสดง `กำลังประกอบรูป…`; เมื่อสำเร็จแสดงผลใต้ปุ่มทันทีแทนให้ผู้ใช้เดา; ผู้ใช้ยืนยันผ่านหน้า Web; code commit `36ad247` | Codex |
 | 26 ส.ค. 2026 | เปลี่ยนโปสเตอร์จริงเป็น SO PEOPLE Navy/White Renderer กลางสำหรับ Preview+PNG, เพิ่ม Logo/Layer/Visual Gate, ปุ่มกลับมาแก้ก่อนโพสต์ และปิด Cache รูปเก่า; พิสูจน์กับ `LMM6705007` ผ่าน Web ได้ Quality 100 และค้างรอตรวจโดยไม่โพสต์ | Codex |
 | 31 ส.ค. 2026 | บังคับ Resume ล่าสุดก่อน: JobThai ใช้ Sort/วันที่จากหน้า Employer จริงและ Live Search ผ่าน; JobBKK เพิ่ม Fail-safe แต่ Live Search ยังติด Employer Resume Session/URL จึงบันทึกเป็น Blocker ไม่รายงานเกินหลักฐาน | Codex |
+| 31 ส.ค. 2026 | ยืนยัน Queue/Content/Preflight สด, แก้ Thai Fact Grounding, Scraper Pool restart และ JobBKK Employer Session false-positive; Test 112/112, AutoPost 4/4 และ Web build ผ่าน โดยคง Readiness 91% จนกว่าจะได้รับอนุญาต Controlled Real Post | Codex |

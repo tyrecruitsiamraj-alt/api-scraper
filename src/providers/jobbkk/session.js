@@ -16,6 +16,19 @@ const LOGIN_GOTO_TIMEOUT_MS = () => envInt('JOBBKK_LOGIN_GOTO_TIMEOUT_MS', 30_00
 const LOGIN_REQUEST_TIMEOUT_MS = () => envInt('JOBBKK_LOGIN_REQUEST_TIMEOUT_MS', 10_000);
 const CAPTCHA_TIMEOUT_MS = () => envInt('JOBBKK_CAPTCHA_TIMEOUT_MS', 30_000);
 
+/** A public /home redirect is logged out even when it no longer contains the
+ * old username_emp form in the first HTML chunk. */
+export function isEmployerSessionUrl(value) {
+  try {
+    const url = new URL(String(value || ''));
+    return /(^|\.)jobbkk\.com$/i.test(url.hostname)
+      && /^\/employer\//i.test(url.pathname)
+      && !/noLogIn|login/i.test(`${url.pathname}${url.search}`);
+  } catch {
+    return false;
+  }
+}
+
 function abortError() {
   const error = new Error('ยกเลิกการเข้าสู่ระบบ JobBKK เพราะใช้เวลานานเกินกำหนด');
   error.code = 'LOGIN_ABORTED';
@@ -46,7 +59,7 @@ async function isLoggedIn(context) {
     .catch(() => null);
   if (!res) return false;
   const finalUrl = res.url();
-  if (/employer_login|\/login\//i.test(finalUrl)) return false;
+  if (!isEmployerSessionUrl(finalUrl)) return false;
   const body = await res.text().catch(() => '');
   // logged-out pages bounce to the login form
   return !/name=["']?username_emp/i.test(body.slice(0, 8000));
@@ -240,7 +253,7 @@ async function performLogin(context, { username, password, debug, onHeartbeat, s
     // false-positives here (cookies half-set) while the page is stuck on the dialog, so
     // we drive the PAGE: confirm the dialog, solve captcha, and wait until the page
     // actually reaches the employer area.
-    const isPageLoggedIn = () => /\/employer\/(?!.*noLogIn)|\/resumes\//i.test(page.url());
+    const isPageLoggedIn = () => isEmployerSessionUrl(page.url()) || /\/resumes\//i.test(page.url());
     const deadline = Date.now() + LOGIN_TIMEOUT_MS();
     let confirmedKick = false;
     while (Date.now() < deadline) {
@@ -285,9 +298,12 @@ async function performLogin(context, { username, password, debug, onHeartbeat, s
     await page.goto(DASHBOARD_URL(), { waitUntil: 'domcontentloaded', timeout: LOGIN_GOTO_TIMEOUT_MS() }).catch(() => {});
     await page.waitForLoadState('networkidle').catch(() => {});
     if (debug) console.log(`  [JobBKK] login result: url=${page.url()} (kickConfirmed=${confirmedKick})`);
-    if (/noLogIn|\/login\//i.test(page.url())) {
+    const finalEmployerUrl = page.url();
+    const employerSessionReady = isEmployerSessionUrl(finalEmployerUrl)
+      && await isLoggedIn(context).catch(() => false);
+    if (!employerSessionReady) {
       await page.screenshot({ path: join(AUTH_DIR, 'jobbkk-postlogin.png'), fullPage: true }).catch(() => {});
-      throw new Error('JobBKK ปฏิเสธการเข้าสู่ระบบหรือ Session ยังไม่พร้อม โปรดดูภาพ .auth/jobbkk-postlogin.png');
+      throw new Error(`JobBKK Login ยังไม่สร้าง Employer Session (ไปที่ ${finalEmployerUrl}) โปรดตรวจบัญชี/สิทธิ์และภาพ .auth/jobbkk-postlogin.png`);
     }
 
     // Keep this page OPEN and return it — the premium search must run on the same page.

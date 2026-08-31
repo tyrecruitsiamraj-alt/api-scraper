@@ -1,6 +1,6 @@
 # SO Recruitment Platform — Project Handbook
 
-> ฉบับปรับปรุงจากโค้ดจริง ณ 17 กรกฎาคม 2026
+> ฉบับปรับปรุงจากโค้ดจริง ณ 31 สิงหาคม 2026
 > Repository: `api-scraper`
 > กลุ่มผู้อ่าน: Developer, Operator, HR Admin และผู้รับช่วงดูแลระบบ
 
@@ -576,6 +576,10 @@ npm run dev
 1. Scraper autoscaling pool
 2. Auto‑Post posting worker supervisor
 
+Launcher อ่าน Git SHA หลัง `git pull` แล้วส่งเป็น `WORKER_BUILD_SHA` อัตโนมัติ ห้ามฝัง SHA เก่าไว้ในไฟล์ เพราะ Dashboard จะรายงาน Version ไม่ตรงกับ Source ที่กำลังรัน
+
+`workers/scraper-pool.mjs` ดูแล runner แต่ละ slot และเปิดใหม่เมื่อ process ตาย โดยลบเฉพาะ lock ที่บันทึก PID ตรงกับ child ที่เพิ่งจบ เพื่อให้กลับมารับงานได้ภายในรอบ restart และไม่สร้าง restart timer ซ้ำ
+
 ไฟล์นี้ **ไม่เปิด** Express Auto‑Post server, collect worker หรือ ERP sync ให้ ตรวจว่าบริการเหล่านั้นถูกรันด้วย process manager/Task Scheduler ตาม topology ที่เลือก
 
 ### 12.4 Docker
@@ -666,6 +670,8 @@ ORDER BY updated_at;
 - ต้องใช้ headful browser
 - ตรวจว่าบัญชีเดียวไม่ได้ login จากหลายเครื่อง
 - ตรวจ `.auth/` และ screenshot debug
+- Login ถือว่าสำเร็จต่อเมื่อ Dashboard จบที่ URL ใต้ `/employer/` จริงเท่านั้น; หาก Redirect ไป `/home` ให้ถือว่ายังไม่มี Employer Session แม้ไม่เห็นฟอร์ม Login
+- เมื่อเกิด `/home` ให้ตรวจสิทธิ์บัญชีนายจ้าง/แพ็กเกจ Resume และภาพ `.auth/jobbkk-postlogin.png`; ห้ามเดินต่อไป `/resumes/premium` เพราะจะวน Redirect และรายงาน Login ผ่านผิด
 - เพิ่ม login timeout เฉพาะเมื่อหน้าเว็บช้า ไม่ใช่ใช้ซ่อน CAPTCHA
 - worker ควร logout ตอนจบ; ถ้า process ถูก kill อาจต้องรอหรือ login takeover
 
@@ -725,11 +731,11 @@ ORDER BY updated_at;
 
 ## 16. Testing และ verification
 
-สถานะ test suite ปัจจุบัน:
+สถานะ test suite ณ 31 สิงหาคม 2026:
 
-- root ไม่มี `test` script และไม่มี unit test suite ที่ครอบคลุม pipeline/repositories
-- web มี build/type validation ผ่าน `next build`; script `lint` ต้องตรวจ compatibility กับ Next.js version
-- Auto‑Post มี Playwright specs สำหรับ posting, collect, Facebook session และ logic บางส่วน
+- root มี Node test ใน `tests/`; รอบ Production Readiness ล่าสุดผ่าน 112/112 ครอบคลุม Content Fact/Quality/Research, Queue result contract, Candidate qualification, latest-sort, JobBKK Employer Session URL และ Readiness policy
+- web ผ่าน build/type validation ด้วย `next build`; script `lint` ต้องตรวจ compatibility กับ Next.js version
+- Auto‑Post logic test ที่ไม่โพสต์จริงผ่าน 4/4; spec ที่เปิด Facebook/โพสต์จริงต้องขออนุญาตและยืนยัน target ก่อนรัน
 
 คำสั่งที่ใช้บ่อย:
 
