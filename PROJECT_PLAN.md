@@ -3,7 +3,7 @@
 > ไฟล์นี้เป็นแหล่งอ้างอิงแผนงานกลาง (Single Source of Truth) สำหรับคนและ AI ทุกโมเดล
 >
 > อัปเดตล่าสุด: 31 สิงหาคม 2026 (Asia/Bangkok)
-> สถานะ: Operational Readiness snapshot = 91% ณ 31 สิงหาคม 2026; ระบบหลัก, Content Golden Flow, JobThai, Queue และ Facebook Preflight ผ่านจริง แต่ **Phase 9 ยังไม่ปิด** เพราะ Worker Facebook ถูกจำกัดไว้ที่ `preflight` จนกว่าจะได้รับอนุญาตโพสต์จริง, ต้องเฝ้าระวัง 24 ชั่วโมงหลังโพสต์ และ JobBKK ยังไม่ได้ Employer Session
+> สถานะ: Operational Readiness snapshot = 77% ณ 31 สิงหาคม 2026 หลังทดสอบงานจริง; ระบบหลัก, Content Golden Flow, JobThai, Queue และ Facebook Preflight ผ่าน แต่ **Phase 9 ยังไม่ปิด** เพราะ JobBKK เปิด Resume Search Talent ไม่ได้และเกิด Error จริง 1 งาน รวมทั้ง Worker Facebook ยังเป็น `preflight` จนกว่าจะได้รับอนุญาตโพสต์จริง
 
 ## กติกาการใช้ไฟล์นี้
 
@@ -268,6 +268,7 @@
 - Task ล่าสุด `77fe1117-b7ee-45a9-aaa3-e8a0725456ab` ถูกสร้างแล้วแต่ไม่เข้า `work_queue`; DB ยืนยัน `last_error=เครื่อง SONB-RM009 ที่ตั้งไว้ยังไม่พร้อมรับงาน`
 - Root Cause คือ `SCRAPE_PREFERRED_WORKER=SONB-RM009` แต่ Worker ออนไลน์จริงประกาศชื่อ `scraper-1`/`scraper-2`; Logic เดิมเปรียบเทียบชื่อสองชนิดนี้ตรง ๆ
 - แก้ให้ heartbeat รายงาน `machine_name` และให้ Web เลือก slot ที่ออนไลน์จากชื่อเครื่องหรือชื่อ slot ได้ พร้อม Regression Test 3 กรณี; ชุด Test รวมผ่าน 115/115 และ Production Build ผ่าน
+- ผลทดสอบสด: Task เดิมเข้า Queue `e2a0d67d-f8a2-445c-ac75-140ea789cd5a` และ Worker `scraper-1#13720` claim ภายในประมาณ 1 วินาที จึงปิดปัญหา “กดแล้วไม่มีงานเข้า Queue”; จากนั้น JobBKK ล้มที่ `Resume Search Talent premium page not ready` ครบ Retry และจบ `error` โดยไม่ค้าง แยกเป็น Blocker สิทธิ์/แพ็กเกจของแพลตฟอร์ม
 
 ## Recommendation หากเลือกเพียงทางเดียว
 
@@ -702,12 +703,13 @@
 - โพสต์ซ้ำ = 0
 - ระบบขัดข้องใน Scraping = 0
 
-สถานะ (31 ส.ค. 2026) — Operational Readiness 91%, Phase 9 ยังไม่ปิด:
+สถานะ (31 ส.ค. 2026 หลังทดสอบ JobBKK สด) — Operational Readiness 77%, Phase 9 ยังไม่ปิด:
 
-- ผ่านแล้ว: Node test 112/112, AutoPost logic test 4/4, `web npm run build`, Queue → Worker self-test, Content Golden Flow ผ่าน Research/Quality/Image Gate, JobThai Live 5/5, Facebook Preflight, Queue ว่าง และ unresolved system error = 0
-- Operational Readiness เป็น 91% เพราะ Worker Facebook ตั้งใจเปิดเฉพาะ `preflight`; ห้ามทำ Dashboard เป็น 100 ด้วยการประกาศ capability `post` โดยยังไม่อนุญาตเผยแพร่จริง
+- ผ่านแล้ว: Node test 115/115, AutoPost logic test 4/4, `web npm run build`, Queue → Worker self-test, Content Golden Flow ผ่าน Research/Quality/Image Gate, JobThai Live 5/5, Facebook Preflight และ Queue ไม่มีงานค้าง
+- ก่อนทดสอบ JobBKK สด Operational Readiness เป็น 91% เพราะ Worker Facebook ตั้งใจเปิดเฉพาะ `preflight`; ห้ามทำ Dashboard เป็น 100 ด้วยการประกาศ capability `post` โดยยังไม่อนุญาตเผยแพร่จริง
+- หลังส่ง Task JobBKK จริง คะแนนเป็น 77% เพราะ Queue/Worker ทำงานถูกต้องแต่ Resume Search Talent เปิดไม่ได้และระบบเก็บ Error ตามจริง 1 งาน; ห้ามลบ Error นี้เพื่อเพิ่มคะแนน
 - ยังไม่ผ่าน: Controlled Real Post, เฝ้าระวัง 24 ชั่วโมงหลังโพสต์ และ JobBKK Live Search ซึ่งบัญชีปัจจุบันยังถูกส่งไปหน้า `/home` แทน Employer Dashboard
-- Commit ชุดแก้ 31 ส.ค. 2026: `9b495f8 fix: harden production worker gates` (Test ผ่านก่อน Commit; Push ในรอบส่งมอบนี้)
+- Commit ชุดแก้ Worker Pin 31 ส.ค. 2026: `0ba357c fix: resolve machine-pinned scraper workers` (Test ผ่านก่อน Commit และ Push แล้ว)
 
 ## KPI
 
@@ -783,3 +785,4 @@
 | 31 ส.ค. 2026 | บังคับ Resume ล่าสุดก่อน: JobThai ใช้ Sort/วันที่จากหน้า Employer จริงและ Live Search ผ่าน; JobBKK เพิ่ม Fail-safe แต่ Live Search ยังติด Employer Resume Session/URL จึงบันทึกเป็น Blocker ไม่รายงานเกินหลักฐาน | Codex |
 | 31 ส.ค. 2026 | ยืนยัน Queue/Content/Preflight สด, แก้ Thai Fact Grounding, Scraper Pool restart และ JobBKK Employer Session false-positive; Test 112/112, AutoPost 4/4 และ Web build ผ่าน โดยคง Readiness 91% จนกว่าจะได้รับอนุญาต Controlled Real Post | Codex |
 | 31 ส.ค. 2026 | แก้ Task สร้างแล้วไม่เข้า Queue เพราะ Pin ชื่อเครื่อง `SONB-RM009` ไม่ตรงชื่อ slot `scraper-1/2`; เพิ่ม machine-aware worker selection และ Test รวม 115/115 | Codex |
+| 31 ส.ค. 2026 | ส่ง Task เดิมเข้าคิวสำเร็จและ Worker รับทันที; ยืนยัน Blocker ถัดไปคือ JobBKK Resume Search Talent ไม่พร้อม ไม่ใช่ Queue/Worker พร้อมเก็บ Error จริงและปรับ Readiness เป็น 77% | Codex |
