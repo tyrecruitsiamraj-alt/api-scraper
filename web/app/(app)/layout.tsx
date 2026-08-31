@@ -9,7 +9,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   if (!session) redirect('/');
 
   return (
-    <div className="min-h-screen lg:pl-52">
+    <div className="min-h-screen bg-white lg:pl-[190px]">
       <Topbar />
       <main className="mx-auto max-w-[1600px] px-4 py-6 sm:px-6 lg:px-7">
         <div className="animate-fadeUp">{children}</div>

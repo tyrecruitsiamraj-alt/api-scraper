@@ -6,6 +6,7 @@
 // yields the masked (.ownerNoLogin) variant. Requires a headful browser (headless
 // login is blocked by JobBKK's bot-check).
 import { applyJobBkkFilters, clickSearchButton, waitForSearchResults } from './browser/jobbkk-filters.js';
+import { ensureLatestUpdatedSort } from './latest-sort.js';
 
 const SEARCH_URL = 'https://www.jobbkk.com/resumes/premium';
 const CARD_SELECTOR = 'article.bg-resume a.clickShowDetail[data-id], article.bg-resume a.read-profile[data-id]';
@@ -73,6 +74,8 @@ export async function browserSearchResumeIds(session, criteria, runtime = {}) {
   const beforeSearchIds = await visibleCardIds(page);
   await clickSearchButton(page);
   await waitForSearchResults(page, 45_000, beforeSearchIds);
+  const latestSort = await ensureLatestUpdatedSort(page);
+  if (runtime.debug) console.log(`  [JobBKK] newest-first: ${latestSort.method}`);
   await collectIds(page, seen, ids);
   if (runtime.debug) console.log(`  [JobBKK] search page 1: ${ids.length} ids`);
 

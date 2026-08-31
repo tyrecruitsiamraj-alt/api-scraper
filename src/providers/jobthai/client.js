@@ -74,8 +74,38 @@ function mapGender(gender) {
   return '';
 }
 
+/** JobThai's official latest-updated sort uses an empty `sort` value. */
+export function isLatestUpdatedSortSelected(html) {
+  const $ = cheerio.load(html);
+  const selected = $('#mainsort option:selected, #mainsort2 option:selected').first();
+  return selected.length > 0 && /วันที่แก้ไขล่าสุด/u.test(cleanText(selected.text()));
+}
+
+function cleanText(value) {
+  return String(value ?? '').replace(/\s+/g, ' ').trim();
+}
+
+export function normalizeUpdatedSince(value) {
+  const text = String(value ?? '').trim();
+  if (!text) return '';
+  const match = text.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) throw new Error(`updatedSince ต้องเป็น YYYY-MM-DD แต่ได้รับ "${text}"`);
+  const [, year, month, day] = match;
+  const date = new Date(`${year}-${month}-${day}T00:00:00Z`);
+  if (
+    Number.isNaN(date.getTime())
+    || date.getUTCFullYear() !== Number(year)
+    || date.getUTCMonth() + 1 !== Number(month)
+    || date.getUTCDate() !== Number(day)
+  ) {
+    throw new Error(`updatedSince ไม่ใช่วันที่จริง: "${text}"`);
+  }
+  return text;
+}
+
 /** Build the resume_list.php advanced-search URL from criteria. */
 export function buildSearchUrl(criteria, page = 1) {
+  const updatedSince = normalizeUpdatedSince(criteria.updatedSince);
   const p = new URLSearchParams({
     'search-section': 'advance-search',
     StepSearch: '1',
@@ -92,7 +122,14 @@ export function buildSearchUrl(criteria, page = 1) {
     amphoe: 'All',
     KeyWord: hasValue(criteria.keyword) ? String(criteria.keyword).trim() : '',
     KWType: '2',
+    // Verified against JobThai's #mainsort: sort= means "วันที่แก้ไขล่าสุด".
+    sort: '',
   });
+  if (updatedSince) {
+    // Verified against #selecttime + #lastUpdateValue on the live employer page.
+    p.set('time', '65535');
+    p.set('theDate', updatedSince);
+  }
   if (page > 1) p.set('page', String(page));
   return `${SEARCH}?${p.toString()}`;
 }
@@ -157,6 +194,9 @@ export async function searchResumeIds(session, criteria, runtime) {
   while (ids.length < need && url) {
     pagesScanned += 1;
     const html = await getText(request, url, runtime);
+    if (pagesScanned === 1 && !isLatestUpdatedSortSelected(html)) {
+      throw new Error('JobThai ไม่ยืนยันการเรียงวันที่แก้ไขล่าสุด — หยุดเพื่อไม่ดึง Resume ผิดลำดับ');
+    }
     for (const id of extractIdsFromList(html)) {
       if (!seen.has(id)) {
         seen.add(id);

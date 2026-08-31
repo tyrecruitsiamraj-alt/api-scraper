@@ -4,6 +4,7 @@ import { buildGroundedCaption, generateContent, generatePosterFields } from './c
 import { researchContentAngles } from './content-research.js';
 import { generateImage } from './ai-image.js';
 import { renderPoster } from './poster.js';
+import { withPosterTemplate } from './poster-template.js';
 import { evaluateContentQuality } from './content-quality.js';
 import { applyTrustedPosterFacts, preflightCampaign, visualBriefFromFacts } from './campaign-facts.js';
 import { assessMarketResearch, collectCampaignMarketResearch } from './market-research.js';
@@ -206,7 +207,7 @@ export async function generateDraftForCampaign(campaignId, { researchMode = 'pro
   }
   // The model may summarize presentation text, but the fields below are facts
   // and always come from ERP.  In particular it cannot turn 12,000 into 120.
-  if (posterFields) posterFields = applyTrustedPosterFacts(posterFields, c);
+  if (posterFields) posterFields = withPosterTemplate(applyTrustedPosterFacts(posterFields, c));
   // Repair factual failures before paying for image generation. Creative copy
   // is kept only when it passes; otherwise a deterministic ERP-only caption
   // replaces it, so the user never has to discover invented claims by eye.
@@ -364,7 +365,7 @@ export async function regenerateImageForContent(contentId) {
   if (!row) throw new Error('ไม่พบร่าง Content ที่ต้องการคิดภาพใหม่');
   if (row.status !== 'draft') throw new Error('คิดภาพใหม่ได้เฉพาะร่างที่ยังไม่อนุมัติ');
   if (row.gen_notes?.generation_mode === 'preview') throw new Error('ร่าง Preview ต้องให้ Worker สร้างร่าง Production ก่อน');
-  const fields = row.poster_fields;
+  const fields = withPosterTemplate(row.poster_fields);
   const prompt = String(row.gen_notes?.image_generation?.prompt || '').trim();
   if (!fields?.title || !prompt) throw new Error('ร่างนี้ไม่มี Brief ภาพที่ตรวจสอบได้ กรุณาให้ AI สร้างสื่อใหม่ทั้งร่าง');
 
@@ -396,11 +397,11 @@ export async function regenerateImageForContent(contentId) {
   await query(
     `UPDATE campaign_contents
         SET image_bytes=$2, image_mime=$3, source_image_bytes=$4, source_image_mime=$5,
-            gen_notes=$6::jsonb, quality_status=$7, quality_score=$8,
-            quality_checks=$9::jsonb, quality_checked_at=now()
+            poster_fields=$6::jsonb, gen_notes=$7::jsonb, quality_status=$8, quality_score=$9,
+            quality_checks=$10::jsonb, quality_checked_at=now()
       WHERE id=$1 AND status='draft'`,
     [contentId, rendered.bytes, rendered.mime, person.bytes, person.mime,
-      JSON.stringify(notes), quality.status, quality.score, JSON.stringify(quality)],
+      JSON.stringify(fields), JSON.stringify(notes), quality.status, quality.score, JSON.stringify(quality)],
   );
   return { contentId, qualityScore: quality.score, model: person.model ?? null };
 }

@@ -53,15 +53,18 @@ const termMatches = (haystack, rawTerm) => {
   return alternatives.length > 1 && alternatives.some((part) => haystack.includes(part));
 };
 
-const roleMatches = (roleText, acceptedPosition) => {
-  if (termMatches(roleText, acceptedPosition)) return true;
+const roleMatchQuality = (roleText, acceptedPosition) => {
+  if (termMatches(roleText, acceptedPosition)) return 1;
   const core = roleCore(acceptedPosition);
-  if (core.length >= 4 && roleCore(roleText).includes(core)) return true;
+  if (core.length >= 4 && roleCore(roleText).includes(core)) return 0.9;
   const acceptedConcepts = roleConcepts(acceptedPosition);
-  if (!acceptedConcepts.length) return false;
+  if (!acceptedConcepts.length) return 0;
   const candidateConcepts = new Set(roleConcepts(roleText));
-  return acceptedConcepts.some((concept) => candidateConcepts.has(concept));
+  return acceptedConcepts.some((concept) => candidateConcepts.has(concept)) ? 0.85 : 0;
 };
+
+const roleMatches = (roleText, acceptedPosition) => roleMatchQuality(roleText, acceptedPosition) > 0;
+const bestRoleQuality = (text, acceptedPositions) => acceptedPositions.reduce((best, position) => Math.max(best, roleMatchQuality(text, position)), 0);
 
 const EDU = [
   [/ประถม/u, 1], [/ม\.?\s*ต้น|มัธยม.{0,6}ต้น/u, 2], [/ม\.?\s*ปลาย|มัธยม.{0,6}ปลาย|ปวช/u, 3],
@@ -109,6 +112,15 @@ export function evaluateResumeQualification(candidate = {}, { criteria = {}, sou
   const candidateAge = num(candidate.age);
 
   const acceptedPositions = (sourcingSpec.accepted_positions || []).map(clean).filter(Boolean);
+  const desiredRoleText = clean(candidate.desired_positions).toLowerCase();
+  const experienceRoles = (candidate.work_experience || []).map((item) => clean(item?.position).toLowerCase()).filter(Boolean);
+  const experienceRoleText = experienceRoles.join(' ');
+  const desiredRoleQuality = acceptedPositions.length > 0 ? bestRoleQuality(desiredRoleText, acceptedPositions) : 0;
+  const experienceRoleQualities = acceptedPositions.length > 0
+    ? experienceRoles.map((position) => bestRoleQuality(position, acceptedPositions)).filter((score) => score > 0)
+    : [];
+  const desiredRoleMatched = desiredRoleQuality > 0;
+  const experienceRoleMatched = experienceRoleQualities.length > 0;
   if (acceptedPositions.length) {
     const identity = clean(candidate.name || candidate.full_name);
     if (!identity) missing.push('insufficient_evidence:identity');
@@ -176,7 +188,31 @@ export function evaluateResumeQualification(candidate = {}, { criteria = {}, sou
   const reasons = [...new Set(rejected.length ? rejected : missing)];
   const status = rejected.length ? 'rejected' : missing.length ? 'needs_review' : 'qualified';
   const softTotal = softPassed.length + softMissing.length;
-  const qualifiedScore = softTotal ? 60 + Math.round((softPassed.length / softTotal) * 40) : 100;
+  // Scorecard v1 แยก “ผ่าน Gate” ออกจาก “เหมาะแค่ไหน”. งานที่มี Role Gate
+  // จะไม่แจก 100 อัตโนมัติ: ตำแหน่งที่ต้องการ, ประสบการณ์ตรง, เงื่อนไข
+  // บังคับ, Soft Evidence และความใหม่ของ Resume มีน้ำหนักที่อธิบายได้.
+  const roleScore = acceptedPositions.length
+    ? Math.min(60, Math.round(
+      desiredRoleQuality * 35
+      + (experienceRoleQualities.length ? Math.max(...experienceRoleQualities) * 15 : 0)
+      + Math.min(10, experienceRoleQualities.length * 3.34),
+    ))
+    : 0;
+  const hardScore = filters.length ? 20 : 12;
+  const softScore = softTotal ? Math.round((softPassed.length / softTotal) * 15) : 8;
+  const knownEvidence = passed.length + softPassed.length;
+  const unknownEvidence = missing.length + softMissing.length;
+  const confidenceScore = Math.round((knownEvidence / Math.max(1, knownEvidence + unknownEvidence)) * 100);
+  const confidenceBonus = Math.round(confidenceScore / 20);
+  const scoreBreakdown = acceptedPositions.length ? {
+    role: roleScore,
+    hard_filters: status === 'qualified' ? hardScore : 0,
+    soft_evidence: softScore,
+    evidence_confidence: confidenceBonus,
+  } : null;
+  const qualifiedScore = acceptedPositions.length
+    ? Math.max(60, Math.min(100, roleScore + hardScore + softScore + confidenceBonus))
+    : softTotal ? 60 + Math.round((softPassed.length / softTotal) * 40) : 100;
   return {
     status,
     reasons,
@@ -186,6 +222,9 @@ export function evaluateResumeQualification(candidate = {}, { criteria = {}, sou
       missing: [...new Set(missing)],
       soft_passed: [...new Set(softPassed)],
       soft_missing: [...new Set(softMissing)],
+      score_breakdown: scoreBreakdown,
+      scorecard_version: acceptedPositions.length ? 'candidate-fit-v1' : 'qualification-v1',
+      confidence_score: confidenceScore,
     },
     hardFilterCount: filters.length,
   };

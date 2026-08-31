@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { useFormStatus } from 'react-dom';
 import { approveContentAction, editCaptionAction, editPosterAction, rejectContentAction, regenerateContentImageAction, runFacebookPreflightAction } from '@/lib/actions';
 import type { PosterFields } from '@/lib/repo';
+import { buildPosterSvg } from '../../src/core/poster-template.js';
 
 type QualityCheck = { code: string; label: string; message: string; status: 'pass' | 'warning' | 'fail' | 'not_applicable' };
 
@@ -48,31 +49,9 @@ function PosterPreview({ fields, content }: { fields: PosterFields; content: Pro
     );
   }
 
-  const imageOnLeft = fields.imageSide === 'left';
+  const svg = buildPosterSvg(fields, source, '/logo-SO.webp');
   return (
-    <div className="relative aspect-square overflow-hidden rounded-3xl bg-[#fff] shadow-[0_20px_50px_rgba(11,42,85,0.18)]" aria-label={`ตัวอย่างโปสเตอร์ ${fields.title}`}>
-      <img src={source} alt="ภาพต้นฉบับสำหรับทำโปสเตอร์" className={`absolute inset-0 h-full w-full object-cover ${imageOnLeft ? 'object-left' : 'object-right'}`} />
-      <div className={`absolute inset-0 ${imageOnLeft ? 'bg-gradient-to-r from-transparent via-white/55 to-white' : 'bg-gradient-to-l from-transparent via-white/55 to-white'}`} />
-      <div className={`absolute top-[5%] w-[59%] ${imageOnLeft ? 'right-[5%]' : 'left-[5%]'}`}>
-        <div className="inline-flex rounded-full bg-[#1d1d1f] px-3 py-1 text-[10px] font-semibold text-white sm:text-xs">{fields.badge || 'เปิดรับสมัครด่วน'}</div>
-        <p className="mt-4 text-[10px] font-semibold tracking-wide text-[#e41c24] sm:text-xs">SO WORK!</p>
-        <h2 className="mt-1 break-words text-[clamp(1.35rem,4.3cqw,3.3rem)] font-bold leading-[0.98] tracking-[-0.05em] text-[#1d1d1f]">{fields.title || 'ระบุตำแหน่ง'}</h2>
-        {fields.location && <p className="mt-3 whitespace-pre-line text-[clamp(0.63rem,1.7cqw,1.05rem)] leading-snug text-[#343438]">📍 {fields.location}</p>}
-        {fields.worktime && <p className="mt-2 whitespace-pre-line text-[clamp(0.58rem,1.5cqw,0.95rem)] leading-snug text-[#343438]">🕒 {fields.worktime}</p>}
-      </div>
-      <div className="absolute inset-x-[5%] top-[48%] rounded-2xl bg-[#1d1d1f] px-4 py-3 text-white shadow-xl">
-        <span className="block text-[10px] text-white/65">รายได้รวม</span>
-        <b className="block break-words text-[clamp(1rem,3.3cqw,2.4rem)] leading-tight text-[#ff6b64]">{fields.salaryTotal || 'ระบุตามใบขอ'}</b>
-        <span className="mt-1 block text-xs text-white/80">{fields.salaryBreakdown || fields.quantity || 'รายละเอียดตามใบขอ'}</span>
-      </div>
-      <div className="absolute inset-x-[5%] bottom-[8%] space-y-1 text-[clamp(0.58rem,1.5cqw,0.92rem)] leading-snug text-[#1d1d1f]">
-        {fields.qualifications.slice(0, 3).map((item) => <p key={item}>✓ {item}</p>)}
-        {fields.benefits.slice(0, 2).map((item) => <span key={item} className="mr-1.5 inline-block rounded-full bg-[#fff0f0] px-2 py-0.5 text-[0.85em] text-[#b0140f]">{item}</span>)}
-      </div>
-      <div className="absolute inset-x-[5%] bottom-[2%] flex items-center justify-between rounded-xl border border-black/10 bg-white/90 px-3 py-2 text-[clamp(0.58rem,1.4cqw,0.88rem)] text-[#1d1d1f] backdrop-blur">
-        <span>สนใจสมัคร ทักเลย</span><b>{fields.contactLine || 'ส่งข้อความผ่านโพสต์นี้ได้เลย'}</b>
-      </div>
-    </div>
+    <div className="aspect-square overflow-hidden rounded-3xl bg-white shadow-[0_20px_50px_rgba(11,42,85,0.18)] [&>svg]:block [&>svg]:h-full [&>svg]:w-full" aria-label={`ตัวอย่างโปสเตอร์ ${fields.title}`} dangerouslySetInnerHTML={{ __html: svg }} />
   );
 }
 
@@ -95,14 +74,14 @@ export function CampaignContentWorkspace({ campaignId, content, initialPoster, i
   return (
     <section className="overflow-hidden rounded-2xl border border-hairline bg-white">
       <div className="flex flex-wrap items-start justify-between gap-3 border-b border-hairline bg-black/[0.015] px-5 py-4">
-        <div><p className="eyebrow">ขั้นที่ 3 · ทำและแก้สื่อ</p><h2 className="mt-1 text-lg font-semibold">รูปและ Caption อยู่หน้าเดียวกัน</h2><p className="mt-1 text-xs text-subtle">แก้ด้านขวาแล้วภาพตัวอย่างด้านซ้ายเปลี่ยนทันที · ต้องกดบันทึกก่อนจึงเปลี่ยนไฟล์จริง</p></div>
+        <div><p className="eyebrow">ขั้นที่ 3 · ทำและแก้สื่อ</p><h2 className="mt-1 text-lg font-semibold">แก้รูปและ Caption ได้จากหน้าเดียว</h2><p className="mt-1 text-xs text-subtle">แก้ข้อความด้านขวาแล้วโปสเตอร์ด้านซ้ายเปลี่ยนทันที · Preview และ PNG ใช้ Template SO PEOPLE ชุดเดียวกัน</p></div>
         <span className="pill bg-blue-50 text-blue-700">ยังไม่โพสต์จริง</span>
       </div>
 
       <div className="grid items-start gap-6 p-5 xl:grid-cols-[minmax(360px,45fr)_minmax(460px,55fr)]">
         <div className="xl:sticky xl:top-5">
           <PosterPreview fields={poster} content={content} />
-          <p className="mt-3 text-xs leading-5 text-subtle">นี่คือภาพตัวอย่างระหว่างแก้ไข ไฟล์ PNG จริงจะถูกประกอบใหม่จากภาพต้นฉบับหลังบันทึกเท่านั้น</p>
+          <p className="mt-3 text-xs leading-5 text-subtle">สิ่งที่เห็นคือองค์ประกอบเดียวกับไฟล์ PNG จริง แก้ข้อความได้จากฟอร์ม หรือกดให้ AI เปลี่ยนเฉพาะคนและสถานที่</p>
           <div className="mt-4 grid grid-cols-2 gap-3">
             <button type="button" className="btn-ghost justify-center" onClick={() => { setPoster(initialPoster); setCaption(initialCaption); }}>↻ คืนค่าเดิม</button>
             <form action={regenerateContentImageAction}>
@@ -130,6 +109,7 @@ export function CampaignContentWorkspace({ campaignId, content, initialPoster, i
               <TextField name="salaryBreakdown" label={COPY.salaryBreakdown} value={poster.salaryBreakdown} onChange={(value) => update('salaryBreakdown', value)} className="sm:col-span-2" />
               <label><span className="label">เบอร์โทรที่ยืนยันแล้ว</span><input name="posterContactLine" inputMode="tel" className="field w-full" placeholder="เช่น 081-234-5678" value={poster.contactLine} onChange={(event) => update('contactLine', event.target.value)} /></label>
               <label><span className="label">ตำแหน่งคนในภาพ</span><select name="posterImageSide" className="field w-full" value={poster.imageSide} onChange={(event) => update('imageSide', event.target.value === 'left' ? 'left' : 'right')}><option value="right">ขวา — ข้อความอยู่ซ้าย</option><option value="left">ซ้าย — ข้อความอยู่ขวา</option></select></label>
+              <label><span className="label">โลโก้บนภาพ</span><select name="posterLogoVariant" className="field w-full" value={poster.logoVariant ?? 'people-navy'} onChange={(event) => update('logoVariant', event.target.value === 'so-red' ? 'so-red' : 'people-navy')}><option value="people-navy">SO PEOPLE สีน้ำเงิน</option><option value="so-red">SO สีแดง</option></select></label>
             </div>
             <div className="mt-4 flex flex-wrap items-center gap-2"><PosterSaveButton disabled={!content.hasSourceImage} /><span className="text-xs text-subtle">{content.hasSourceImage ? 'มีภาพต้นฉบับพร้อมแก้ไข' : 'ร่างนี้ไม่มีภาพต้นฉบับ จึงต้องให้ AI สร้างร่างใหม่ก่อน'}</span></div>
             {posterSaved && <div role="status" className="mt-3 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-900"><b>✓ บันทึกรูปใหม่แล้ว</b><span className="ml-1 text-emerald-800">PNG ถูกประกอบใหม่และตรวจข้อมูลสำคัญเรียบร้อย</span></div>}

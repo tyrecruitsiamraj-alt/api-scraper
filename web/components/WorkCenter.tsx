@@ -368,10 +368,6 @@ function WorkAction({ item, connectors, facebookAccounts }: {
   }
 
   if (item.stage === 'review' && item.kind === 'content' && item.content) {
-    const readyAccounts = facebookAccounts.filter((account) => !facebookAccountProblem(account));
-    const noAccount = facebookAccounts.length === 0;
-    const noReady = readyAccounts.length === 0;
-    // เลือกบัญชีที่พร้อม (มีกลุ่ม) เป็นค่าเริ่มต้น — บัญชีที่ไม่มีกลุ่มเลือกไม่ได้ (กันโพสต์ไปตายทีหลัง)
     return (
       <div className="w-full space-y-3">
         <div className={`rounded-lg border px-3 py-2 text-sm ${
@@ -387,46 +383,10 @@ function WorkAction({ item, connectors, facebookAccounts }: {
           {item.content.qualityScore != null ? ` · ${item.content.qualityScore}/100` : ''}
           {item.content.qualitySummary ? ` — ${item.content.qualitySummary}` : ''}
         </div>
-        <form action={approveContentAction} className="flex flex-wrap items-end gap-2">
-          <input type="hidden" name="contentId" value={item.content.id} />
-          <input type="hidden" name="campaignId" value={item.content.campaignId} />
-          <div>
-            <label className="label" htmlFor={`facebook-${item.id}`}>บัญชีสำหรับเผยแพร่</label>
-            <select id={`facebook-${item.id}`} name="fbAccountId" required defaultValue="" className="field">
-              <option value="" disabled>เลือกบัญชี Facebook…</option>
-              {facebookAccounts.map((account) => (
-                <option key={account.id} value={account.id} disabled={!!facebookAccountProblem(account)}>
-                  {account.label}{facebookAccountProblem(account) ? ` (${facebookAccountProblem(account)})` : ` · พร้อมเผยแพร่ ${account.groupCount} กลุ่ม`}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div>
-            <label className="label" htmlFor={`postmode-${item.id}`}>โพสต์อะไร</label>
-            <select id={`postmode-${item.id}`} name="postMode" defaultValue="both" className="field">
-              <option value="both">รูป + แคปชัน</option>
-              <option value="image" disabled={!item.content.hasImage}>เฉพาะรูป{item.content.hasImage ? '' : ' (ไม่มีรูป)'}</option>
-              <option value="caption">เฉพาะแคปชัน</option>
-            </select>
-          </div>
-          <div>
-            <label className="label" htmlFor={`approve-feedback-${item.id}`}>จุดที่ทำได้ดี</label>
-            <select id={`approve-feedback-${item.id}`} name="feedbackCode" defaultValue="ready" className="field">
-              <option value="ready">พร้อมใช้ ไม่ต้องแก้</option>
-              <option value="strong_hook">ประโยคเปิดน่าสนใจ</option>
-              <option value="complete_info">ข้อมูลครบและถูกต้อง</option>
-              <option value="good_visual">รูปเหมาะกับงาน</option>
-            </select>
-          </div>
-          <button className="btn-primary" disabled={noReady || item.content.qualityStatus === 'fail'}>
-            {item.content.qualityStatus === 'fail' ? 'แก้ข้อมูลก่อนอนุมัติ' : noAccount ? 'ยังไม่มีบัญชี' : noReady ? 'ยังไม่มีบัญชีที่ผ่านการทดสอบ' : 'อนุมัติและโพสต์'}
-          </button>
-          {noReady && (
-            <Link href="/settings/connectors" className="text-xs text-accent hover:underline">
-              {noAccount ? 'เพิ่มบัญชี Facebook ก่อน' : 'เตรียมและทดสอบบัญชีก่อน'}
-            </Link>
-          )}
-        </form>
+        <div className="flex flex-wrap items-center gap-2">
+          <Link href={`/orchestrator/${item.content.campaignId}`} className="btn-primary">เปิดและแก้รูป + Caption</Link>
+          <span className="text-xs text-subtle">ตรวจสื่อจากหน้าเดียว แล้วค่อยอนุมัติไปหน้าสรุป · ยังไม่โพสต์จริง</span>
+        </div>
 
         {/* ตีกลับให้ AI แก้ใหม่ พร้อมบอกว่าขาด/ผิดอะไร */}
         <form action={rejectContentAction} className="flex flex-wrap items-end gap-2 border-t border-line/60 pt-3">

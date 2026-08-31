@@ -154,6 +154,18 @@ export async function runTask(t, runtime) {
     }
   }
 
+  // งานที่คนกรอกชื่อตำแหน่งตรง ๆ ก็ต้องมี Role Gate เช่นเดียวกับงานที่ AI
+  // แปลงจากเนื้องาน ไม่เช่นนั้น Resume ทุกคนจะได้ 100 ทั้งที่ยังไม่เคยตรวจว่า
+  // อยู่สายงานเดียวกัน คะแนนนี้ผูกเฉพาะ task จึงไม่เปลี่ยนข้อมูลผู้สมัครกลาง.
+  const directPosition = String(criteria.position || criteria.keyword || '').trim();
+  if (directPosition && !(qualificationSpec.accepted_positions || []).length) {
+    qualificationSpec = {
+      ...qualificationSpec,
+      accepted_positions: [directPosition],
+      scorecard_version: 'candidate-fit-v1',
+    };
+  }
+
   // ---- phase 1: scrape ----
   await markTaskRunning(t.id, target);
   if (alreadyMatched > 0) await bumpTaskProgress(t.id, alreadyMatched);

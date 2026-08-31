@@ -18,11 +18,18 @@ const NAV: { href: string; label: string; also?: string[] }[] = [
 // Shell หลักบน Desktop ใช้เมนูสั้นตาม Workflow ที่คนทำงานใช้จริง.
 // หน้าค้นหาและการโพสต์เป็นขั้นย่อยที่เข้าจากศูนย์งาน ไม่บังคับให้คนจำหลายหน้า.
 const DESKTOP_NAV = [
-  { href: '/orchestrator', label: 'ศูนย์งาน', icon: '▣' },
-  { href: '/candidates', label: 'คลังผู้สมัคร', icon: '♧', also: ['/scraping'] },
-  { href: '/autopost/results', label: 'ผลลัพธ์', icon: '▥', also: ['/autopost'] },
-  { href: '/settings', label: 'ตั้งค่า', icon: '⚙', also: ['/connectors'] },
+  { href: '/orchestrator', label: 'ศูนย์งาน', icon: 'work' },
+  { href: '/candidates', label: 'คลังผู้สมัคร', icon: 'people', also: ['/scraping'] },
+  { href: '/autopost/results', label: 'ผลลัพธ์', icon: 'chart', also: ['/autopost'] },
+  { href: '/settings', label: 'ตั้งค่า', icon: 'settings', also: ['/connectors'] },
 ];
+
+function NavIcon({ name }: { name: string }) {
+  if (name === 'work') return <path d="M4 8h16v11H4zM9 8V5h6v3M9 13h6" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />;
+  if (name === 'people') return <><circle cx="9" cy="8" r="3" fill="none" stroke="currentColor" strokeWidth="1.8"/><circle cx="17" cy="9" r="2.5" fill="none" stroke="currentColor" strokeWidth="1.8"/><path d="M3.5 20c.4-4 2.4-6 5.5-6s5.2 2 5.5 6M14 15c3.4-.7 5.7 1 6.5 4" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"/></>;
+  if (name === 'chart') return <path d="M5 20V10h4v10M10 20V4h4v16M15 20v-7h4v7M3 20h18" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/>;
+  return <><circle cx="12" cy="12" r="3" fill="none" stroke="currentColor" strokeWidth="1.8"/><path d="M12 3v2M12 19v2M3 12h2M19 12h2M5.6 5.6 7 7M17 17l1.4 1.4M18.4 5.6 17 7M7 17l-1.4 1.4" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"/></>;
+}
 
 /** active tab: exact หรือ prefix (ครอบหน้าย่อย) */
 function isActive(pathname: string, item: { href: string; also?: string[] }): boolean {
@@ -68,26 +75,24 @@ export function Topbar() {
   return (
     <>
       {/* Desktop shell — คง Sidebar ไว้ตลอดเพื่อให้ผู้ใช้รู้ว่ากำลังอยู่ระบบไหน */}
-      <aside className="fixed inset-y-0 left-0 z-40 hidden w-52 flex-col border-r border-white/10 bg-[#042d5a] text-white lg:flex">
-        <div className="border-b border-white/10 px-6 py-7">
-          <div className="flex items-center gap-3">
-            <Image src="/logo-SO.webp" alt="SO PEOPLE" width={48} height={48} className="h-12 w-auto" priority />
-            <div className="leading-none"><b className="block text-sm tracking-[0.16em]">SO</b><span className="mt-1 block text-[10px] font-semibold tracking-[0.12em] text-white/75">PEOPLE</span></div>
-          </div>
-          <p className="mt-2 text-[8px] font-medium tracking-[0.12em] text-white/60">WE MAKE IT EASY</p>
+      <aside className="fixed inset-y-0 left-0 z-40 hidden w-[190px] flex-col border-r border-white/10 bg-gradient-to-b from-[#032d5a] to-[#022447] text-white lg:flex">
+        <div className="px-6 pb-2 pt-6 text-center">
+          <div className="text-[53px] font-bold italic leading-[0.75] tracking-[-0.08em]">SO</div>
+          <div className="mt-3 text-[13px] font-bold tracking-[0.3em]">PEOPLE</div>
+          <p className="mt-1.5 text-[8px] font-medium tracking-[0.12em] text-white/80">WE MAKE IT EASY</p>
         </div>
-        <nav className="flex-1 space-y-2 px-3 py-5">
+        <nav className="flex-1 space-y-4 px-3 py-1">
           {DESKTOP_NAV.map((item) => {
             const active = isActive(pathname, item);
-            return <Link key={item.href} href={item.href} className={`flex items-center gap-3 rounded-lg px-3 py-3 text-sm font-semibold transition ${active ? 'bg-[#1261b9] text-white shadow-sm' : 'text-white/75 hover:bg-white/10 hover:text-white'}`}>
-              <span className="grid h-5 w-5 place-items-center text-base" aria-hidden>{item.icon}</span>{item.label}
+            return <Link key={item.href} href={item.href} className={`flex h-[52px] items-center gap-3 rounded-md px-4 text-[17px] font-medium transition ${active ? 'bg-[#1261b9] text-white shadow-sm' : 'text-white/80 hover:bg-white/10 hover:text-white'}`}>
+              <svg className="h-6 w-6" viewBox="0 0 24 24" aria-hidden><NavIcon name={item.icon} /></svg>{item.label}
             </Link>;
           })}
         </nav>
         <div className="border-t border-white/10 p-3">
-          <div className="flex items-center gap-2 rounded-xl bg-white/5 p-2">
-            {user?.image ? <img src={user.image} alt={label} referrerPolicy="no-referrer" className="h-8 w-8 rounded-full object-cover" /> : <div className="grid h-8 w-8 place-items-center rounded-full bg-white/15 text-[11px] font-semibold">{initials}</div>}
-            <div className="min-w-0"><div className="truncate text-xs font-medium">{label}</div><div className="truncate text-[10px] text-white/55">{user?.email || 'SO Recruiter'}</div></div>
+          <div className="flex items-center gap-2 rounded-xl p-1">
+            {user?.image ? <img src={user.image} alt={label} referrerPolicy="no-referrer" className="h-10 w-10 rounded-full border border-white/60 object-cover" /> : <div className="grid h-10 w-10 place-items-center rounded-full border border-white/60 bg-white text-[11px] font-semibold text-[#082b62]">SO</div>}
+            <div className="min-w-0"><div className="truncate text-xs font-medium">SO Recruiter</div><div className="truncate text-[10px] text-white/65">{user?.email || label}</div></div>
           </div>
         </div>
       </aside>

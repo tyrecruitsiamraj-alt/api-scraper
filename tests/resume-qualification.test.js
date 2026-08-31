@@ -65,7 +65,7 @@ test('ทักษะที่เป็น Soft Score ไม่กัน Resume 
     { sourcingSpec: { accepted_positions: ['Data Tester'], soft_scores: [{ field: 'skill', value: 'SQL', evidence_terms: ['SQL'] }, { field: 'skill', value: 'ETL/ELT', evidence_terms: ['ETL/ELT'] }] } },
   );
   assert.equal(result.status, 'qualified');
-  assert.equal(result.score, 60);
+  assert.ok(result.score >= 60);
   assert.deepEqual(result.evidence.soft_missing, ['SQL', 'ETL/ELT']);
 });
 
@@ -75,7 +75,29 @@ test('Soft Score จัดคนที่มีหลักฐานครบไ
     { sourcingSpec: { accepted_positions: ['Data Tester'], soft_scores: [{ field: 'skill', value: 'SQL', evidence_terms: ['SQL'] }, { field: 'skill', value: 'ETL/ELT', evidence_terms: ['ETL/ELT'] }] } },
   );
   assert.equal(result.status, 'qualified');
-  assert.equal(result.score, 100);
+  assert.ok(result.score > 60);
+});
+
+test('ผู้สมัครที่มีประสบการณ์ตรงต้องได้คะแนนสูงกว่าคนที่ระบุแค่ตำแหน่งที่ต้องการ', () => {
+  const spec = { sourcingSpec: { accepted_positions: ['พนักงานขับรถ'] } };
+  const desiredOnly = evaluateResumeQualification({
+    name: 'ผู้สมัครหนึ่ง', desired_positions: 'พนักงานขับรถ', last_updated_at: '2020-01-01',
+  }, spec);
+  const experienced = evaluateResumeQualification({
+    name: 'ผู้สมัครสอง', desired_positions: 'พนักงานขับรถ', work_experience: [{ position: 'พนักงานขับรถผู้บริหาร' }], last_updated_at: new Date().toISOString(),
+  }, spec);
+  assert.equal(desiredOnly.status, 'qualified');
+  assert.equal(experienced.status, 'qualified');
+  assert.ok(experienced.score > desiredOnly.score);
+  assert.equal(experienced.evidence.scorecard_version, 'candidate-fit-v1');
+});
+
+test('ผ่าน Role Gate อย่างเดียวห้ามได้ 100 โดยไม่มีหลักฐานเชิงลึก', () => {
+  const result = evaluateResumeQualification({
+    name: 'ผู้สมัครทดสอบ', desired_positions: 'ธุรการ',
+  }, { sourcingSpec: { accepted_positions: ['ธุรการ'] } });
+  assert.equal(result.status, 'qualified');
+  assert.ok(result.score < 100);
 });
 
 test('ชื่อตำแหน่งที่คนเข้าใจว่าเป็นงานเดียวกันไม่ต้องตรงทุกตัวอักษร', () => {

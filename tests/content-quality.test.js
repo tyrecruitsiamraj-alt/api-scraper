@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { evaluateContentQuality } from '../src/core/content-quality.js';
+import { withPosterTemplate } from '../src/core/poster-template.js';
 
 const campaign = {
   title: 'พนักงานขับรถผู้บริหาร',
@@ -26,8 +27,18 @@ const goodCaption = `🚗 เปิดรับสมัคร พนักง�
 เพศชาย อายุ 25-45 ปี
 สนใจทักแชทได้เลย #สมัครงาน #งานขับรถ`;
 
+const goodPoster = withPosterTemplate({
+  title: 'พนักงานขับรถผู้บริหาร',
+  location: 'กรุงเทพมหานคร เขตห้วยขวาง',
+  salaryTotal: '18,000 บาท',
+  quantity: '2 อัตรา',
+  qualifications: ['เพศชาย อายุ 25-45 ปี'],
+  benefits: [],
+  imageSide: 'right',
+});
+
 test('ประกาศที่ข้อมูลตรงใบขอผ่านด่านตรวจ', () => {
-  const result = evaluateContentQuality({ campaign, caption: goodCaption, imageReady: true });
+  const result = evaluateContentQuality({ campaign, caption: goodCaption, posterFields: goodPoster, imageReady: true });
   assert.equal(result.blocking, false);
   assert.ok(['pass', 'warning'].includes(result.status));
   assert.equal(result.checks.filter((item) => item.status === 'fail').length, 0);
@@ -37,6 +48,7 @@ test('Quality Gate ระบุชัดเมื่อสำรวจ Facebook 
   const result = evaluateContentQuality({
     campaign,
     caption: goodCaption,
+    posterFields: goodPoster,
     imageReady: true,
     researchGate: {
       ready: true,

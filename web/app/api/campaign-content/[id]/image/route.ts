@@ -16,7 +16,8 @@ export async function GET(_req: Request, { params }: { params: { id: string } })
     headers: {
       'Content-Type': row.image_mime || 'image/png',
       'Content-Disposition': `inline; filename="campaign-${params.id}.png"`,
-      'Cache-Control': 'private, max-age=300',
+      // รูปนี้แก้และประกอบใหม่จากหน้าเดียวกันได้ จึงห้าม Browser ค้างไฟล์รุ่นก่อน.
+      'Cache-Control': 'private, no-store, max-age=0',
     },
   });
 }

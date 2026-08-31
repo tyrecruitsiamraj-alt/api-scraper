@@ -6,6 +6,7 @@
  */
 
 import { extractCampaignFacts, normalizedGenderRequirement } from './campaign-facts.js';
+import { evaluatePosterVisual } from './poster-template.js';
 
 const AMBIGUOUS_TITLES = new Set(['งาน', 'พนักงาน', 'เจ้าหน้าที่', 'ช่าง', 'พนักงานทั่วไป', 'รับสมัครงาน', 'ไม่ระบุ']);
 const BENEFIT_CLAIMS = [
@@ -104,6 +105,7 @@ export function evaluateContentQuality({ campaign = {}, caption = '', posterFiel
     checks.push(check('visual', 'รูปประกาศตามตำแหน่ง', 'fail', 'AI ยังสร้างรูปที่ใช้ประกอบโปสเตอร์ไม่ได้ ห้ามส่งอนุมัติ'));
   } else if (imageReady === true) {
     checks.push(check('visual', 'รูปประกาศตามตำแหน่ง', 'pass', 'มีภาพต้นฉบับจาก Brief ตำแหน่งก่อนประกอบโปสเตอร์'));
+    for (const visualCheck of evaluatePosterVisual(posterFields ?? {})) checks.push(visualCheck);
   }
 
   const ambiguous = !facts.position || AMBIGUOUS_TITLES.has(compact(facts.position)) || /^(opl|job|req)[-_]?\d+$/i.test(facts.position);

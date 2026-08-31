@@ -6,15 +6,19 @@ import { usePathname } from 'next/navigation';
 // แท็บย่อยใต้ "งาน Scraping" — คลังผู้สมัคร + สร้างงาน Scraping อยู่ใต้หัวข้อเดียวกัน
 const ITEMS = [
   { href: '/candidates', label: 'คลังผู้สมัคร', detail: 'ค้นหา/กรองผู้สมัครที่ดึงมา' },
+  { href: '/candidates/jobs', label: 'ผู้สมัครตามใบงาน', detail: 'เปิดงานแล้วดูคนที่ตรงที่สุดก่อน' },
   { href: '/scraping', label: 'สร้างงานค้นหาผู้สมัคร', detail: 'กำหนดเงื่อนไขและติดตามผล' },
 ];
 
 export function ScrapingNav() {
   const pathname = usePathname();
+  const activeHref = ITEMS
+    .filter((item) => pathname === item.href || pathname.startsWith(`${item.href}/`))
+    .sort((a, b) => b.href.length - a.href.length)[0]?.href;
   return (
-    <nav className="mb-6 grid gap-3 sm:grid-cols-2" aria-label="เมนูค้นหาผู้สมัคร">
+    <nav className="mb-6 grid gap-3 sm:grid-cols-3" aria-label="เมนูค้นหาผู้สมัคร">
       {ITEMS.map((item) => {
-        const active = pathname === item.href || pathname.startsWith(`${item.href}/`);
+        const active = activeHref === item.href;
         return (
           <Link
             key={item.href}

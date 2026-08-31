@@ -2,7 +2,7 @@
 
 > ไฟล์นี้เป็นแหล่งอ้างอิงแผนงานกลาง (Single Source of Truth) สำหรับคนและ AI ทุกโมเดล
 >
-> อัปเดตล่าสุด: 26 สิงหาคม 2026 (Asia/Bangkok)
+> อัปเดตล่าสุด: 31 สิงหาคม 2026 (Asia/Bangkok)
 > สถานะ: Operational Readiness snapshot = 100% หลังตรวจ Worker/Queue/Preflight จริง; แต่ **Phase 9 ยังไม่ปิด** เพราะ Gate E Controlled Real Post และการเฝ้าระวัง 24 ชั่วโมงยังต้องได้รับอนุญาตจากผู้ใช้ก่อน
 
 ## กติกาการใช้ไฟล์นี้
@@ -83,14 +83,53 @@
 
 ### งานที่ต้องทำ
 
-- [ ] นิยาม Candidate Spec และ Scorecard Version
+- [x] นิยาม Candidate Spec และ Scorecard Version (`candidate-fit-v1`: Role/Experience, Hard Gate, Soft Evidence, Evidence Confidence)
 - [ ] ทำ Hard Gate Editor และ Weight Editor ต่อใบงาน
 - [ ] กำหนดน้ำหนักเริ่มต้นตาม Job Family แต่ให้คนแก้ได้
-- [ ] ทำ Scoring Engine ที่อธิบายผลได้
-- [ ] ผูก Assessment กับใบงานและ Candidate โดยไม่แก้ข้อมูล Candidate ต้นฉบับ
-- [ ] ทำหน้าสรุปเรียงผู้สมัครตามสถานะก่อนคะแนน
-- [ ] ทำ Re-score หลังเปลี่ยนน้ำหนัก
-- [ ] เพิ่ม Test กรณีตก Hard Gate แต่ Soft Score สูง, หลักฐานหาย และผู้สมัครซ้ำ
+- [x] ทำ Scoring Engine ที่อธิบายผลได้
+- [x] ผูก Assessment กับใบงานและ Candidate โดยไม่แก้ข้อมูล Candidate ต้นฉบับ (`scrape_task_candidates`)
+- [x] ทำหน้าสรุปเรียงผู้สมัครตามสถานะก่อนคะแนน
+- [x] ทำ Re-score จาก Candidate Spec/Resume เดิมโดยไม่ Scrap และไม่ใช้โควตาเพิ่ม (Weight Editor ยังเป็นงานถัดไป)
+- [x] เพิ่ม Test กรณีตก Hard Gate แต่ Soft Score สูง, หลักฐานหาย และผู้สมัครซ้ำ
+
+### Phase 8.1 — ผู้สมัครแยกตามใบงานและจัดอันดับ (กำลังทำ)
+
+เป้าหมายรอบนี้คือแก้ปัญหาคลังผู้สมัครรวมจนคนทำงานหา Resume ของแต่ละใบงานไม่เจอ โดยใช้ข้อมูลผูกงานและผล Qualification เดิมเป็น Source of Truth ไม่สร้างรายชื่อหรือคะแนนซ้ำอีกชุด
+
+- [x] เพิ่มหน้า `ผู้สมัครตามใบงาน` เป็นกล่อง แสดงตำแหน่ง เลขใบขอ เป้าหมาย ผลผ่าน/ต้องตรวจ/ไม่ผ่าน และเวลาที่ได้ Resume ล่าสุด
+- [x] กดกล่องแล้วเปิดรายชื่อเฉพาะผู้สมัครที่ Scrap จากใบงานนั้น
+- [x] เรียง `qualified` ก่อน `needs_review` ก่อน `rejected` และเรียงคะแนนมากไปน้อยภายในสถานะ
+- [x] แสดงคะแนนความเหมาะสม เหตุผล Hard Gate หลักฐานที่ผ่าน และข้อมูลที่ยังต้องตรวจเป็นภาษาคน
+- [x] ผู้สมัครคนเดียวกันต้องมีคะแนนต่างกันได้ตามใบงาน โดยอ้างอิง `scrape_task_candidates`
+- [x] ห้ามแสดง `100%` เมื่อไม่มีเกณฑ์หรือหลักฐานรองรับ และห้ามนับ `needs_review` เป็นผ่าน
+- [ ] เพิ่ม Test Query/Scoring และทดสอบ Build + Web จริง — Unit 99/99, Production Build และ Read-only DB Query ผ่าน; เหลือเปิดตรวจ Visual หลัง Login ใหม่
+
+หลักฐานรอบ 31 ส.ค. 2569:
+
+- ฐานจริงพบ 9 งานที่มีผู้สมัครผูกกับใบงาน และ Query แยก qualified/needs_review/rejected ได้ครบ
+- Re-score ผลเดิม 437 Candidate×Task ด้วย `candidate-fit-v1` แล้ว คะแนนถูกเก็บเฉพาะความสัมพันธ์ต่อใบงานและ Resume ต้นฉบับไม่ถูกแก้
+- หลัง Re-score งานจริงมีความหลากหลายสูงสุด 6 ระดับคะแนน; กรณีหลักฐานเท่ากันคงคะแนนเท่ากันและใช้ความครบหลักฐาน/เวลาพบล่าสุดเป็น Tie-breaker
+- `node --test tests/*.test.js` ผ่าน 99/99
+- `web npm run build` ผ่าน และสร้าง Route `/candidates/jobs` กับ `/candidates/jobs/[taskId]`
+- Browser ถูกพากลับหน้า Microsoft Login หลังรีสตาร์ต Production server จึงยังไม่ปิดเช็กบ็อกซ์ Visual Web จนกว่าจะ Login ใหม่
+
+### Phase 8.2 — Resume ที่อัปเดตล่าสุดก่อน
+
+เป้าหมายคือให้ Connector เปิด Resume ใหม่สุดก่อนจริง ไม่ใช้เวลาที่ระบบเขียนฐานข้อมูลแทนวันที่แก้ไขของแพลตฟอร์ม และห้ามเดินต่อหากยืนยันลำดับไม่ได้
+
+- [x] JobThai ส่ง `sort=` ซึ่งหน้า Employer ระบุว่า `วันที่แก้ไขล่าสุด`
+- [x] JobThai ตรวจตัวเลือกที่ถูกเลือกจาก HTML ก่อนเปิด Resume หากเว็บเปลี่ยนจนยืนยันไม่ได้ให้หยุดพร้อม Error
+- [x] โหมดตั้งแต่วันที่ส่ง `time=65535` และ `theDate=YYYY-MM-DD` ตามฟิลด์จริงของ JobThai
+- [x] JobBKK ตรวจตัวเลือก Sort ที่มีความหมายว่าอัปเดตล่าสุด หรือพิสูจน์ลำดับจากวันที่บน Card; หากไม่มีหลักฐานให้หยุดแทนการดึงผิดลำดับ
+- [x] เพิ่ม Unit Test วันที่ไทย/พ.ศ., ลำดับใหม่ไปเก่า, JobThai query contract และ fail-closed contract
+- [ ] JobBKK Live Search: Login ถึง Dashboard ได้ แต่ทั้ง `/resumes/premium` และ `/resume/lists` ถูก Redirect ออกจาก Employer Resume Search จึงยังทดสอบ Sort จริงไม่ได้ ต้องแก้สิทธิ์/Session ของบัญชีหรือยืนยัน URL ใหม่ก่อน
+
+หลักฐานรอบ 31 ส.ค. 2569:
+
+- ตรวจหน้า JobThai Employer จริงพบ `#mainsort` เลือก `วันที่แก้ไขล่าสุด`, Card เรียง 31 ส.ค. 69 → 30 ส.ค. 69 และฟิลด์วันที่คือ `#selecttime`, `time=65535`, `name=theDate`
+- JobThai Live Search ด้วยวันที่เริ่ม `2026-08-20` ได้ 5/5 Resume จากหน้าแรกและผ่าน Latest Sort Gate
+- Node Test ทั้งระบบผ่าน 110/110 และ `web npm run build` ผ่าน
+- JobBKK ถูกบล็อกก่อน Search ที่ `src/providers/jobbkk/browser/jobbkk-filters.js` เพราะ Premium UI ไม่พร้อม; ห้ามรายงานว่าทดสอบ JobBKK Latest Sort ผ่าน
 
 ## เป้าหมายปัจจุบัน
 
@@ -432,13 +471,14 @@
 ### งาน Implementation ที่ต้องลงมือภายหลัง
 
 - [x] รวม Content Preview, Poster Editor และ Caption Editor ใน `/orchestrator/[id]` หน้าเดียว โดย Preview ใช้ภาพต้นฉบับและเปลี่ยนตามฟอร์มทันที; บันทึกผ่าน Action/Quality Gate เดิม (Web production build และ Node test 100/100 ผ่าน 25 ส.ค. 2026)
+- [x] ใช้ Renderer กลาง `so-people-recruitment v2` สำหรับ Preview และ PNG จริง แทน Template คนละชุด; ล็อก Navy/White, Brand Rule, Logo Layer และปิด Cache รูปเก่าหลังแก้ (ตรวจผ่าน Web จริง 26 ส.ค. 2026)
 - [ ] ใช้ `docs/ui-targets/unified-content-workspace-target.png` เป็น UI Target หลักและทำ Visual Regression ตาม Contract
 - [ ] เพิ่ม Parent Work Order/Child Work Types และ state transition ที่ตรวจสอบได้
 - [ ] รวม intake review ของ Scraping และ Content ให้อ่าน Fact Snapshot ชุดเดียว
 - [ ] เปลี่ยน `/orchestrator/[id]` เป็น Workspace หน้าเดียว พร้อม Stepper และ Next Action
 - [ ] ฝัง Scraping Review/Progress/Result ใน Workspace โดยใช้ข้อมูลเดิม ไม่ทำระบบค้นหาใหม่
 - [ ] ฝัง Content Preview + Poster Editor + Caption Editor + Version History ใน Workspace หน้าเดียว
-- [ ] ทำ Layer Model สำหรับ Background, Subject, Text, Logo, CTA และ Brand Lock
+- [x] ทำ Layer Model สำหรับ Background, Subject, Text, Logo, CTA และ Brand Lock; AI เปลี่ยนเฉพาะภาพคน/ฉาก ส่วนข้อความไทยและโลโก้เป็น Layer ที่แก้และตรวจได้
 - [ ] ย้าย Summary/Account/Group/Post Progress เข้า Workspace โดยคง Safety Gate เดิม
 - [ ] ทำ Redirect/ลิงก์กลับจากหน้าที่ซ้ำ และเก็บหน้ากรอก Scraping เองเป็น Advanced Action
 - [ ] เพิ่ม Unit Test ของ State Machine และ Idempotency
@@ -524,7 +564,7 @@
 - [x] ตรวจภาพว่าตรงตำแหน่งและไม่มีข้อความผิด
 - [x] ตรวจ Research Gate และ Quality Gate
 - [x] ตรวจหลักฐาน `image_generation.ok=true`
-- [ ] ทดลองแก้ข้อความบนภาพและ Caption จากหน้า Web
+- [x] ทดลองแก้ข้อความบนภาพและ Caption จากหน้า Web
 
 เกณฑ์ผ่าน:
 
@@ -532,14 +572,16 @@
 - มีภาพจริงพร้อมใช้และตรวจที่มาของการสร้างได้
 - ข้อเท็จจริงสำคัญผิด = 0
 
-หลักฐาน (25 ส.ค. 2026) — Golden Flow Queue→Worker ผ่าน; Web Editor ยังรอพิสูจน์:
+หลักฐาน (25–26 ส.ค. 2026) — Golden Flow Queue→Worker และ Web Editor ผ่าน:
 
 - ใช้ใบขอจริง `LMM6705007` (หัวหน้าไซด์, โรงงานคูโบต้า นวนคร, 15,000 บาท, จ.-ศ. 7.00–17.00 น., 1 อัตรา)
 - งาน draft `fc7e4c7e-46e3-4492-b368-98c962da0983` ถูก Worker claim และจบ `done`; ร่าง `2f7c0dab-2ecd-4ba3-925a-75dd86a2358c` เป็น `pending_approval`, Quality 100 และ `image_generation.ok=true` จาก `gpt-image-2`
 - Research Gate มีคำแนะนำ Google 7 คำ และตรวจ Facebook source ครบ 36 กลุ่มแล้วไม่พบโพสต์ตรงตำแหน่ง; บันทึกเป็น market gap ไม่ใช่ Engagement ปลอม
 - ตรวจภาพจริงแล้ว: หัวหน้าไซต์งานภูมิทัศน์พร้อม PPE/clipboard ไม่มีข้อความจากโมเดลทับโปสเตอร์ และ Caption/Poster ไม่ระบุเพศเนื่องจากใบขอใช้ `gender=O`
 - Commit โค้ดและ Test: `4d5898c fix: ground content research and gender facts`
-- ยังไม่ทำเครื่องหมายผ่านเต็ม เพราะหลักฐานการกดสร้างและทดลอง Editor จาก Web ภายใต้ session ผู้ใช้ยังไม่มี
+- 26 ส.ค. 2026: นำสื่อที่อนุมัติแล้วกลับมาแก้ผ่านปุ่ม `กลับไปแก้รูปและ Caption` โดยตรวจว่าไม่มี `campaign_posts`; แก้/บันทึกโปสเตอร์จากหน้า Web สำเร็จ, PNG จริงตรง Renderer กลาง, Quality กลับเป็น 100/100 และค้างที่ `pending_approval` โดยไม่มีคิวโพสต์
+- Root Cause ที่ปิด: `poster.js` กับ Web Preview ใช้คนละ Template, Quality เดิมตรวจเพียงว่ามีภาพ, งาน approved กลับมาแก้ไม่ได้ และ Image API cache 300 วินาทีทำให้เห็นรูปเก่า
+- Test รอบนี้: Content/Fact/Visual/Poster Template 27/27 ผ่าน, TypeScript ผ่าน และ `web npm run build` ผ่าน
 
 ### Gate E — Facebook Golden Flow
 
@@ -695,3 +737,5 @@
 | 25 ส.ค. 2026 | ลงมือ Content Workspace รุ่นแรก: รวม Preview จาก source image + Poster Editor + Caption Editor + Quality/Approve Gate ใน `/orchestrator/[id]`; เพิ่ม route ที่ล็อกอินเท่านั้นสำหรับ source image; Stepper 5 ขั้นตาม UX Target; `web npm run build` และ Node test 100/100 ผ่าน; Code commit `d5493a4` — ยังเหลือ Parent Work Order/Scraping และ Visual Regression ตามแผน | Codex |
 | 25 ส.ค. 2026 | ปิด Root Cause Editor Application error: Next.js ไม่มี Playwright Chromium runtime จึง render PNG ไม่ได้; ติดตั้ง runtime, ทำ Server Action ส่งข้อความภาษาคนกลับหน้าเดิมแทน error page, บันทึกคู่มือ; ผู้ใช้บันทึก Poster v3 จาก Web สำเร็จ ได้ PNG ใหม่และ Quality 100/100; Node test 100/100 ผ่าน; code commit `0b90e3a` | Codex |
 | 25 ส.ค. 2026 | ปิด UX feedback ของ Poster Editor: ระหว่างทำงานปุ่มแสดง `กำลังประกอบรูป…`; เมื่อสำเร็จแสดงผลใต้ปุ่มทันทีแทนให้ผู้ใช้เดา; ผู้ใช้ยืนยันผ่านหน้า Web; code commit `36ad247` | Codex |
+| 26 ส.ค. 2026 | เปลี่ยนโปสเตอร์จริงเป็น SO PEOPLE Navy/White Renderer กลางสำหรับ Preview+PNG, เพิ่ม Logo/Layer/Visual Gate, ปุ่มกลับมาแก้ก่อนโพสต์ และปิด Cache รูปเก่า; พิสูจน์กับ `LMM6705007` ผ่าน Web ได้ Quality 100 และค้างรอตรวจโดยไม่โพสต์ | Codex |
+| 31 ส.ค. 2026 | บังคับ Resume ล่าสุดก่อน: JobThai ใช้ Sort/วันที่จากหน้า Employer จริงและ Live Search ผ่าน; JobBKK เพิ่ม Fail-safe แต่ Live Search ยังติด Employer Resume Session/URL จึงบันทึกเป็น Blocker ไม่รายงานเกินหลักฐาน | Codex |

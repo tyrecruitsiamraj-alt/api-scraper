@@ -196,8 +196,8 @@ export async function runConnector(connector, criteria, runtime, opts = {}) {
       search = await runSearch();
     }
     found = search.ids.length;
-    // ทั้ง JobBKK และ JobThai ดัน Resume ที่เพิ่งอัปเดตไว้ต้นผลค้นหา.
-    // เก็บอันดับเดิมก่อนตัดรายการซ้ำ เพื่อให้คลังไม่เรียงกลับด้านตามเวลาเขียน DB.
+    // Provider ต้องผ่าน newest-first gate ก่อนคืน ids (official sort หรือหลักฐานวันที่บน card).
+    // เก็บอันดับที่ผ่านการยืนยันไว้ก่อนตัดรายการซ้ำ เพื่อไม่เรียงกลับด้านตามเวลาเขียน DB.
     const sourceRankById = new Map(search.ids.map((id, index) => [String(id), index + 1]));
     // A retry may need to page past many Resume IDs already linked to this
     // task. Do not then open hundreds of profiles in one round: remove known

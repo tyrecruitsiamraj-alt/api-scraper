@@ -12,6 +12,7 @@ import {
   createCampaignFromRequest,
   enqueueDraftForCampaign,
   approveContentForSummary,
+  reopenContentForEditing,
   enqueueApprovedPost,
   beginCampaignDraftRetry,
   enqueueContentImageRegeneration,
@@ -56,6 +57,7 @@ import {
   getWorkflowSelfTest,
   enqueueFacebookPreflight,
   recordCandidateActivity,
+  reassessCandidateJob,
 } from './repo';
 
 /** ทดสอบ Web → Queue → Worker แบบไม่แตะงานจริงหรือ Facebook. */
@@ -123,6 +125,16 @@ export async function markCandidateCalledAction(formData: FormData) {
   });
   revalidatePath('/candidates');
   revalidatePath(`/candidates/${candidateId}`);
+}
+
+export async function reassessCandidateJobAction(formData: FormData) {
+  await requireSession();
+  const taskId = String(formData.get('taskId') ?? '').trim();
+  if (!taskId) throw new Error('ไม่พบใบงานที่ต้องประเมิน');
+  await reassessCandidateJob(taskId);
+  revalidatePath('/candidates/jobs');
+  revalidatePath(`/candidates/jobs/${taskId}`);
+  redirect(`/candidates/jobs/${taskId}?rescored=1`);
 }
 
 // ---- เทรนด์คอนเทนต์ (schema-016) — คนกรอกเทรนด์ที่อยากให้คอนเทนต์เกาะ ----
@@ -446,6 +458,18 @@ export async function approveContentAction(formData: FormData) {
   revalidatePath('/orchestrator');
 }
 
+/** ย้อนจากหน้าสรุปกลับมาหน้าแก้รูปและ Caption โดยไม่สร้างคิวโพสต์. */
+export async function reopenContentForEditingAction(formData: FormData) {
+  const session = await getServerSession(authOptions);
+  if (!session) throw new Error('unauthorized');
+  const campaignId = String(formData.get('campaignId') ?? '').trim();
+  const contentId = String(formData.get('contentId') ?? '').trim();
+  if (!campaignId || !contentId) throw new Error('ข้อมูล Content ไม่ครบ');
+  await reopenContentForEditing(campaignId, contentId, session.user?.email ?? session.user?.name ?? null);
+  revalidatePath(`/orchestrator/${campaignId}`);
+  revalidatePath('/orchestrator');
+}
+
 /** หน้าสรุปยืนยันบัญชี/จำนวนกลุ่มแล้วจึงสร้างคิวโพสต์จริง. */
 export async function startCampaignAutopostAction(formData: FormData) {
   const session = await getServerSession(authOptions);
@@ -555,6 +579,7 @@ export async function editPosterAction(formData: FormData) {
       benefits: list('posterBenefits'),
       contactLine,
       imageSide: String(formData.get('posterImageSide') ?? '') === 'left' ? 'left' : 'right',
+      logoVariant: String(formData.get('posterLogoVariant') ?? '') === 'so-red' ? 'so-red' : 'people-navy',
     }, session.user?.email ?? session.user?.name ?? null);
     revalidatePath(`/orchestrator/${campaignId}`);
   } catch (error) {
@@ -564,6 +589,68 @@ export async function editPosterAction(formData: FormData) {
   }
   // ผลสำเร็จต้องเห็นได้บนหน้าเดียวกัน ไม่ปล่อยให้ผู้ใช้เดาว่าปุ่มทำงานหรือไม่.
   redirect(`/orchestrator/${campaignId}?contentSaved=poster`);
+}
+
+async function saveContentWorkspace(formData: FormData, editor: string | null) {
+  const contentId = String(formData.get('contentId') ?? '').trim();
+  const campaignId = String(formData.get('campaignId') ?? '').trim();
+  if (!contentId || !campaignId) throw new Error('ข้อมูล Content ไม่ครบ');
+  const caption = String(formData.get('caption') ?? '').trim();
+  await updateContentCaption(contentId, caption);
+  const contactLine = String(formData.get('posterContactLine') ?? '').trim();
+  if (contactLine) {
+    const confirmedPhone = await confirmCampaignContactPhone(campaignId, contactLine);
+    await syncContentContactPhone(contentId, confirmedPhone);
+  }
+  const list = (name: string) => String(formData.get(name) ?? '')
+    .split(/\r?\n/).map((value) => value.trim()).filter(Boolean);
+  await updateContentPoster(contentId, {
+    title: String(formData.get('posterTitle') ?? ''),
+    badge: String(formData.get('posterBadge') ?? ''),
+    location: String(formData.get('posterLocation') ?? ''),
+    worktime: String(formData.get('posterWorktime') ?? ''),
+    salaryTotal: String(formData.get('posterSalaryTotal') ?? ''),
+    salaryBreakdown: String(formData.get('posterSalaryBreakdown') ?? ''),
+    quantity: String(formData.get('posterQuantity') ?? ''),
+    qualifications: list('posterQualifications'),
+    benefits: list('posterBenefits'),
+    contactLine,
+    imageSide: String(formData.get('posterImageSide') ?? '') === 'left' ? 'left' : 'right',
+    logoVariant: String(formData.get('posterLogoVariant') ?? '') === 'so-red' ? 'so-red' : 'people-navy',
+  }, editor);
+  return { campaignId, contentId };
+}
+
+/** ปุ่มบันทึกร่างใน Pixel Workspace: บันทึกรูปและ Caption พร้อมกัน แต่ไม่อนุมัติ/ไม่โพสต์. */
+export async function saveContentWorkspaceAction(formData: FormData) {
+  const session = await getServerSession(authOptions);
+  if (!session) throw new Error('unauthorized');
+  let campaignId = String(formData.get('campaignId') ?? '').trim();
+  try {
+    ({ campaignId } = await saveContentWorkspace(formData, session.user?.email ?? session.user?.name ?? null));
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'บันทึกร่างไม่สำเร็จ กรุณาลองใหม่';
+    redirect(`/orchestrator/${campaignId}?contentError=${encodeURIComponent(message)}`);
+  }
+  revalidatePath(`/orchestrator/${campaignId}`);
+  redirect(`/orchestrator/${campaignId}?contentSaved=workspace`);
+}
+
+/** บันทึกรูป+Caption แล้วอนุมัติสื่อไปหน้าสรุป โดยยังไม่สร้างคิว Facebook. */
+export async function saveAndApproveContentWorkspaceAction(formData: FormData) {
+  const session = await getServerSession(authOptions);
+  if (!session) throw new Error('unauthorized');
+  try {
+    const reviewer = session.user?.email ?? session.user?.name ?? null;
+    const { campaignId, contentId } = await saveContentWorkspace(formData, reviewer);
+    await approveContentForSummary({ campaignId, contentId, reviewer, feedbackCode: 'ready' });
+    revalidatePath(`/orchestrator/${campaignId}`);
+    revalidatePath('/orchestrator');
+  } catch (error) {
+    const campaignId = String(formData.get('campaignId') ?? '').trim();
+    const message = error instanceof Error ? error.message : 'อนุมัติสื่อไม่สำเร็จ กรุณาตรวจข้อมูลอีกครั้ง';
+    redirect(`/orchestrator/${campaignId}?contentError=${encodeURIComponent(message)}`);
+  }
 }
 
 /** สั่งวัดผล engagement ของ campaign (อ่านจาก post_logs → verdict → regen/บันทึกแนวที่เวิร์ค). */

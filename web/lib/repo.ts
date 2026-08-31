@@ -6,6 +6,8 @@ import type { ContentQualityResult } from '../../src/core/content-quality.js';
 import { evaluateWorkflowReadiness } from '../../src/core/workflow-readiness.js';
 import type { WorkflowReadiness } from '../../src/core/workflow-readiness.js';
 import { renderPoster } from '../../src/core/poster.js';
+import { withPosterTemplate } from '../../src/core/poster-template.js';
+import { evaluateResumeQualification } from '../../src/core/resume-qualification.js';
 
 // schema ของ autopost — แยกต่อ project ได้ผ่าน env (ไม่ตั้ง = so_autopost_jobs เดิม)
 // ใช้กับทุก query ข้าม schema ไปฝั่ง autopost. ค่าจาก env เราคุมเอง (ไม่ใช่ input ผู้ใช้)
@@ -161,6 +163,219 @@ export async function listCandidateProvinces(): Promise<string[]> {
       ORDER BY province`,
   );
   return rows.map((r) => r.province);
+}
+
+export type CandidateJobGroupRow = {
+  id: string;
+  name: string;
+  position: string;
+  source_request_no: string | null;
+  platform: string;
+  connector_label: string;
+  job_family: string | null;
+  status: string;
+  phase: string;
+  target_count: number | null;
+  total_count: number;
+  qualified_count: number;
+  needs_review_count: number;
+  rejected_count: number;
+  scored_count: number;
+  latest_matched_at: string | null;
+  created_at: string;
+};
+
+export type CandidateJobMatchRow = CandidateRow & {
+  task_id: string;
+  matched_position: string | null;
+  qualification_status: 'qualified' | 'needs_review' | 'rejected';
+  qualification_score: number | null;
+  qualification_reasons: string[];
+  qualification_evidence: Record<string, unknown>;
+  assessment_ready: boolean;
+  evaluated_at: string | null;
+  first_matched_at: string;
+  last_matched_at: string;
+};
+
+/** กล่องใบงานที่มีผู้สมัครจริง แยกจากคลังรวมเพื่อให้ Recruiter ไม่ต้องเดาว่าคนมาจากงานใด */
+export async function listCandidateJobGroups(): Promise<CandidateJobGroupRow[]> {
+  return q<CandidateJobGroupRow>(
+    `SELECT t.id, t.name,
+            COALESCE(NULLIF(t.criteria->>'position',''), NULLIF(t.criteria->>'keyword',''),
+                     NULLIF(t.criteria->>'job_description',''), t.name) AS position,
+            t.source_request_no, c.platform, c.label AS connector_label,
+            NULLIF(t.adjacent_plan->>'family_label','') AS job_family,
+            t.status, t.phase, t.target_count, t.created_at,
+            count(tc.candidate_id)::int AS total_count,
+            count(*) FILTER (WHERE tc.qualification_status='qualified')::int AS qualified_count,
+            count(*) FILTER (WHERE tc.qualification_status='needs_review')::int AS needs_review_count,
+            count(*) FILTER (WHERE tc.qualification_status='rejected')::int AS rejected_count,
+            count(*) FILTER (WHERE tc.qualification_score IS NOT NULL
+              AND (COALESCE(jsonb_array_length(tc.qualification_evidence->'passed'),0)
+                 + COALESCE(jsonb_array_length(tc.qualification_evidence->'missing'),0)
+                 + COALESCE(jsonb_array_length(tc.qualification_reasons),0)) > 0)::int AS scored_count,
+            max(tc.last_matched_at) AS latest_matched_at
+       FROM scrape_tasks t
+       JOIN connectors c ON c.id=t.connector_id
+       JOIN scrape_task_candidates tc ON tc.task_id=t.id
+      GROUP BY t.id, c.platform, c.label
+      ORDER BY max(tc.last_matched_at) DESC NULLS LAST, t.created_at DESC`,
+  );
+}
+
+export async function getCandidateJobGroup(taskId: string): Promise<CandidateJobGroupRow | null> {
+  const rows = await q<CandidateJobGroupRow>(
+    `SELECT t.id, t.name,
+            COALESCE(NULLIF(t.criteria->>'position',''), NULLIF(t.criteria->>'keyword',''),
+                     NULLIF(t.criteria->>'job_description',''), t.name) AS position,
+            t.source_request_no, c.platform, c.label AS connector_label,
+            NULLIF(t.adjacent_plan->>'family_label','') AS job_family,
+            t.status, t.phase, t.target_count, t.created_at,
+            count(tc.candidate_id)::int AS total_count,
+            count(*) FILTER (WHERE tc.qualification_status='qualified')::int AS qualified_count,
+            count(*) FILTER (WHERE tc.qualification_status='needs_review')::int AS needs_review_count,
+            count(*) FILTER (WHERE tc.qualification_status='rejected')::int AS rejected_count,
+            count(*) FILTER (WHERE tc.qualification_score IS NOT NULL
+              AND (COALESCE(jsonb_array_length(tc.qualification_evidence->'passed'),0)
+                 + COALESCE(jsonb_array_length(tc.qualification_evidence->'missing'),0)
+                 + COALESCE(jsonb_array_length(tc.qualification_reasons),0)) > 0)::int AS scored_count,
+            max(tc.last_matched_at) AS latest_matched_at
+       FROM scrape_tasks t
+       JOIN connectors c ON c.id=t.connector_id
+       LEFT JOIN scrape_task_candidates tc ON tc.task_id=t.id
+      WHERE t.id=$1
+      GROUP BY t.id, c.platform, c.label`,
+    [taskId],
+  );
+  return rows[0] ?? null;
+}
+
+/** ผลต่อใบงาน: สถานะ Hard Gate มาก่อน แล้วจึงเรียงคะแนนที่มีหลักฐานจากมากไปน้อย */
+export async function listCandidateJobMatches(taskId: string): Promise<CandidateJobMatchRow[]> {
+  return q<CandidateJobMatchRow>(
+    `SELECT c.id, c.full_name, c.prefix, c.phone, c.email, c.province, c.age, c.expected_salary,
+            c.desired_positions, c.last_updated_at,
+            tc.task_id, tc.matched_position, tc.qualification_status, tc.qualification_score,
+            tc.qualification_reasons, tc.qualification_evidence, tc.evaluated_at,
+            tc.first_matched_at, tc.last_matched_at,
+            ((COALESCE(jsonb_array_length(tc.qualification_evidence->'passed'),0)
+             + COALESCE(jsonb_array_length(tc.qualification_evidence->'missing'),0)
+             + COALESCE(jsonb_array_length(tc.qualification_reasons),0)) > 0) AS assessment_ready,
+            tc.last_matched_at AS latest_source_seen_at,
+            s.search_rank AS latest_search_rank,
+            ARRAY(SELECT DISTINCT sx.platform FROM candidate_sources sx WHERE sx.candidate_id=c.id) AS platforms,
+            (SELECT count(*)::int FROM candidate_assets a WHERE a.candidate_id=c.id) AS asset_count,
+            (SELECT a.id FROM candidate_assets a
+              WHERE a.candidate_id=c.id AND a.kind='profile'
+                AND a.download_status='success' AND a.content IS NOT NULL
+              ORDER BY a.created_at DESC NULLS LAST, a.id DESC LIMIT 1) AS profile_asset_id,
+            (SELECT av.occurred_at FROM candidate_activity av
+              WHERE av.candidate_id=c.id AND av.activity_type='viewed'
+              ORDER BY av.occurred_at DESC LIMIT 1) AS viewed_at,
+            (SELECT av.actor FROM candidate_activity av
+              WHERE av.candidate_id=c.id AND av.activity_type='viewed'
+              ORDER BY av.occurred_at DESC LIMIT 1) AS viewed_by,
+            (SELECT ac.occurred_at FROM candidate_activity ac
+              WHERE ac.candidate_id=c.id AND ac.activity_type='called'
+              ORDER BY ac.occurred_at DESC LIMIT 1) AS called_at,
+            (SELECT ac.actor FROM candidate_activity ac
+              WHERE ac.candidate_id=c.id AND ac.activity_type='called'
+              ORDER BY ac.occurred_at DESC LIMIT 1) AS called_by
+       FROM scrape_task_candidates tc
+       JOIN candidates c ON c.id=tc.candidate_id
+       LEFT JOIN candidate_sources s ON s.id=tc.candidate_source_id
+      WHERE tc.task_id=$1
+      ORDER BY CASE tc.qualification_status WHEN 'qualified' THEN 0 WHEN 'needs_review' THEN 1 ELSE 2 END,
+               CASE WHEN (COALESCE(jsonb_array_length(tc.qualification_evidence->'passed'),0)
+                            + COALESCE(jsonb_array_length(tc.qualification_evidence->'missing'),0)
+                            + COALESCE(jsonb_array_length(tc.qualification_reasons),0)) > 0
+                    THEN tc.qualification_score END DESC NULLS LAST,
+               CASE WHEN (tc.qualification_evidence->>'confidence_score') ~ '^\d+$'
+                    THEN (tc.qualification_evidence->>'confidence_score')::int END DESC NULLS LAST,
+               tc.last_matched_at DESC, c.full_name ASC`,
+    [taskId],
+  );
+}
+
+/**
+ * ประเมินผลเก่าซ้ำจาก Candidate Spec ของงานและข้อมูล Resume ที่เก็บไว้แล้ว
+ * ไม่เปิด Resume/ไม่เสียโควตา/ไม่แก้ข้อมูลผู้สมัครกลาง เปลี่ยนเฉพาะ Assessment ต่อ task.
+ */
+export async function reassessCandidateJob(taskId: string): Promise<number> {
+  const taskRows = await q<{ criteria: Record<string, any>; adjacent_plan: Record<string, any> | null }>(
+    `SELECT criteria, adjacent_plan FROM scrape_tasks WHERE id=$1`,
+    [taskId],
+  );
+  const task = taskRows[0];
+  if (!task) throw new Error('ไม่พบงานค้นหาผู้สมัคร');
+  const criteria = task.criteria ?? {};
+  const plan = task.adjacent_plan ?? {};
+  const sourcingSpec: Record<string, any> = { ...(plan.sourcing_spec ?? {}) };
+  const directPosition = String(criteria.position || criteria.keyword || '').trim();
+  const plannedPositions = Array.isArray(plan.positions) ? plan.positions.map(String).filter(Boolean) : [];
+  if (!Array.isArray(sourcingSpec.accepted_positions) || sourcingSpec.accepted_positions.length === 0) {
+    sourcingSpec.accepted_positions = directPosition ? [directPosition] : plannedPositions;
+  }
+  sourcingSpec.scorecard_version = 'candidate-fit-v1';
+
+  const candidates = await q<any>(
+    `SELECT c.*, tc.candidate_id,
+            COALESCE((SELECT s.raw_text FROM candidate_sources s
+                       WHERE s.id=tc.candidate_source_id
+                       LIMIT 1), '') AS source_raw_text,
+            COALESCE((SELECT string_agg(a.extracted_text, ' ')
+                       FROM candidate_assets a
+                      WHERE a.candidate_id=c.id AND a.extracted_text IS NOT NULL), '') AS attachment_text
+       FROM scrape_task_candidates tc
+       JOIN candidates c ON c.id=tc.candidate_id
+      WHERE tc.task_id=$1`,
+    [taskId],
+  );
+
+  const client = await pool().connect();
+  try {
+    await client.query('BEGIN');
+    for (const candidate of candidates) {
+      const assessment = evaluateResumeQualification({
+        ...candidate,
+        raw_text: [candidate.source_raw_text, candidate.attachment_text].filter(Boolean).join(' '),
+      }, { criteria, sourcingSpec });
+      await client.query(
+        `UPDATE scrape_task_candidates
+            SET qualification_status=$3, qualification_reasons=$4::jsonb,
+                qualification_score=$5, qualification_evidence=$6::jsonb,
+                evaluated_at=now()
+          WHERE task_id=$1 AND candidate_id=$2`,
+        [taskId, candidate.candidate_id, assessment.status, JSON.stringify(assessment.reasons),
+         assessment.score, JSON.stringify(assessment.evidence)],
+      );
+    }
+    await client.query(
+      `WITH result AS (
+         SELECT count(*) FILTER (WHERE qualification_status='qualified')::int AS qualified
+           FROM scrape_task_candidates WHERE task_id=$1
+       )
+       UPDATE scrape_tasks t SET
+         progress_got=result.qualified,
+         status=CASE WHEN t.status IN ('done','partial')
+                     THEN CASE WHEN result.qualified >= COALESCE(t.target_count,0) THEN 'done' ELSE 'partial' END
+                     ELSE t.status END,
+         phase=CASE WHEN t.phase IN ('done','partial')
+                    THEN CASE WHEN result.qualified >= COALESCE(t.target_count,0) THEN 'done' ELSE 'partial' END
+                    ELSE t.phase END,
+         updated_at=now()
+       FROM result WHERE t.id=$1`,
+      [taskId],
+    );
+    await client.query('COMMIT');
+    return candidates.length;
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally {
+    client.release();
+  }
 }
 
 export async function getCandidate(id: string) {
@@ -1862,6 +2077,10 @@ export type PosterFields = {
   benefits: string[];
   contactLine: string;
   imageSide: 'left' | 'right';
+  templateId?: string;
+  templateVersion?: number;
+  brandRuleVersion?: number;
+  logoVariant?: 'people-navy' | 'so-red';
 };
 
 export type ContentRow = {
@@ -2083,6 +2302,47 @@ export async function approveContentForSummary(opts: {
   }
 }
 
+/** กลับจากหน้าสรุปมาแก้สื่อได้ ตราบใดที่ยังไม่เคยสร้างงานโพสต์จริง. */
+export async function reopenContentForEditing(campaignId: string, contentId: string, editor: string | null) {
+  const client = await pool().connect();
+  try {
+    await client.query('BEGIN');
+    const locked = await client.query<{
+      campaign_status: string;
+      content_status: string;
+      has_post: boolean;
+    }>(
+      `SELECT c.status AS campaign_status, cc.status AS content_status,
+              EXISTS(SELECT 1 FROM campaign_posts cp WHERE cp.campaign_id=c.id) AS has_post
+         FROM recruit_campaigns c
+         JOIN campaign_contents cc ON cc.id=$2 AND cc.campaign_id=c.id
+        WHERE c.id=$1
+        FOR UPDATE OF c, cc`,
+      [campaignId, contentId],
+    );
+    const row = locked.rows[0];
+    if (!row) throw new Error('ไม่พบสื่อที่ต้องการกลับมาแก้');
+    if (row.has_post) throw new Error('งานนี้เริ่ม Auto-post แล้ว จึงห้ามแก้ทับสื่อที่ใช้เผยแพร่');
+    if (row.campaign_status !== 'approved' || row.content_status !== 'approved') {
+      throw new Error('สื่อนี้ไม่ได้อยู่หน้าสรุป กรุณารีเฟรชหน้า');
+    }
+    await client.query(
+      `UPDATE campaign_contents
+          SET status='draft',
+              gen_notes=COALESCE(gen_notes,'{}'::jsonb) || $2::jsonb
+        WHERE id=$1`,
+      [contentId, JSON.stringify({ reopened_for_edit_at: new Date().toISOString(), reopened_for_edit_by: editor })],
+    );
+    await client.query(`UPDATE recruit_campaigns SET status='pending_approval', status_note='กลับมาแก้รูปและ Caption', updated_at=now() WHERE id=$1`, [campaignId]);
+    await client.query('COMMIT');
+  } catch (error) {
+    await client.query('ROLLBACK').catch(() => {});
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
 /** เบอร์ที่ผู้ตรวจกรอกถือเป็นข้อมูลยืนยันล่าสุดของงาน และถูกเก็บกลับเข้า source snapshot. */
 export async function confirmCampaignContactPhone(campaignId: string, value: string) {
   const phone = String(value ?? '').trim();
@@ -2139,7 +2399,7 @@ export async function updateContentPoster(id: string, input: Partial<PosterField
       throw new Error('ร่างเก่านี้ไม่มีภาพต้นฉบับ กรุณาสั่งสร้างรูปใหม่หนึ่งครั้งก่อนแก้ข้อความบนรูป');
     }
 
-    const fields: PosterFields = {
+    const fields: PosterFields = withPosterTemplate({
       title: cleanPosterText(input.title, 80),
       badge: cleanPosterText(input.badge || 'เปิดรับสมัครด่วน', 40),
       location: cleanPosterText(input.location, 140),
@@ -2151,7 +2411,8 @@ export async function updateContentPoster(id: string, input: Partial<PosterField
       benefits: (input.benefits ?? []).map((value) => cleanPosterText(value, 70)).filter(Boolean).slice(0, 4),
       contactLine: cleanPosterText(input.contactLine, 80),
       imageSide: input.imageSide === 'left' ? 'left' : 'right',
-    };
+      logoVariant: input.logoVariant === 'so-red' ? 'so-red' : 'people-navy',
+    });
     if (!fields.title) throw new Error('กรุณาระบุตำแหน่งบนรูป');
 
     const sourceUri = `data:${row.source_image_mime};base64,${row.source_image_bytes.toString('base64')}`;

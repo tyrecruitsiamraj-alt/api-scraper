@@ -13,7 +13,7 @@ export async function GET(_req: Request, { params }: { params: { id: string } })
     headers: {
       'Content-Type': row.source_image_mime || 'image/png',
       'Content-Disposition': `inline; filename="campaign-source-${params.id}.png"`,
-      'Cache-Control': 'private, max-age=300',
+      'Cache-Control': 'private, no-store, max-age=0',
     },
   });
 }
