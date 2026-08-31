@@ -263,6 +263,12 @@
 - แก้ `src/providers/jobbkk/session.js` ให้ผ่านเฉพาะ URL ใต้ `/employer/` และเพิ่ม Test URL Contract
 - Live Diagnostic ยืนยันว่าบัญชีปัจจุบันถูกส่งกลับ `/home`; ระบบจึงหยุดพร้อมข้อความภาษาคนแทนการค้นต่อผิดหน้า ส่วนการปลดล็อกต้องตรวจสิทธิ์บัญชีนายจ้าง/แพ็กเกจ Resume กับ JobBKK
 
+### RC-15: Web Pin ด้วยชื่อเครื่อง แต่ Scraper Pool ประกาศชื่อเป็นราย Slot
+
+- Task ล่าสุด `77fe1117-b7ee-45a9-aaa3-e8a0725456ab` ถูกสร้างแล้วแต่ไม่เข้า `work_queue`; DB ยืนยัน `last_error=เครื่อง SONB-RM009 ที่ตั้งไว้ยังไม่พร้อมรับงาน`
+- Root Cause คือ `SCRAPE_PREFERRED_WORKER=SONB-RM009` แต่ Worker ออนไลน์จริงประกาศชื่อ `scraper-1`/`scraper-2`; Logic เดิมเปรียบเทียบชื่อสองชนิดนี้ตรง ๆ
+- แก้ให้ heartbeat รายงาน `machine_name` และให้ Web เลือก slot ที่ออนไลน์จากชื่อเครื่องหรือชื่อ slot ได้ พร้อม Regression Test 3 กรณี; ชุด Test รวมผ่าน 115/115 และ Production Build ผ่าน
+
 ## Recommendation หากเลือกเพียงทางเดียว
 
 ทำ Golden Flow Release บน Worker เครื่องนี้ให้ครบหนึ่งรอบ แล้วแยก Operational Readiness ออกจาก Business Outcome ของตลาดผู้สมัคร
@@ -776,3 +782,4 @@
 | 26 ส.ค. 2026 | เปลี่ยนโปสเตอร์จริงเป็น SO PEOPLE Navy/White Renderer กลางสำหรับ Preview+PNG, เพิ่ม Logo/Layer/Visual Gate, ปุ่มกลับมาแก้ก่อนโพสต์ และปิด Cache รูปเก่า; พิสูจน์กับ `LMM6705007` ผ่าน Web ได้ Quality 100 และค้างรอตรวจโดยไม่โพสต์ | Codex |
 | 31 ส.ค. 2026 | บังคับ Resume ล่าสุดก่อน: JobThai ใช้ Sort/วันที่จากหน้า Employer จริงและ Live Search ผ่าน; JobBKK เพิ่ม Fail-safe แต่ Live Search ยังติด Employer Resume Session/URL จึงบันทึกเป็น Blocker ไม่รายงานเกินหลักฐาน | Codex |
 | 31 ส.ค. 2026 | ยืนยัน Queue/Content/Preflight สด, แก้ Thai Fact Grounding, Scraper Pool restart และ JobBKK Employer Session false-positive; Test 112/112, AutoPost 4/4 และ Web build ผ่าน โดยคง Readiness 91% จนกว่าจะได้รับอนุญาต Controlled Real Post | Codex |
+| 31 ส.ค. 2026 | แก้ Task สร้างแล้วไม่เข้า Queue เพราะ Pin ชื่อเครื่อง `SONB-RM009` ไม่ตรงชื่อ slot `scraper-1/2`; เพิ่ม machine-aware worker selection และ Test รวม 115/115 | Codex |

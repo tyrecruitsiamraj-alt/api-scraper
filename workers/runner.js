@@ -109,6 +109,7 @@ async function heartbeat() {
       worker_id: WORKER_ID,
       build_sha: WORKER_BUILD_SHA,
       source_sha: WORKER_SOURCE_SHA,
+      machine_name: os.hostname(),
       content_pipeline: CONTENT_PIPELINE_RELEASE,
       types: SUPPORTED,
       image_generation: imageGenerationCapability(),

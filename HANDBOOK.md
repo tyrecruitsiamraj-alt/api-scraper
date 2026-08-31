@@ -580,6 +580,8 @@ Launcher อ่าน Git SHA หลัง `git pull` แล้วส่งเ�
 
 `workers/scraper-pool.mjs` ดูแล runner แต่ละ slot และเปิดใหม่เมื่อ process ตาย โดยลบเฉพาะ lock ที่บันทึก PID ตรงกับ child ที่เพิ่งจบ เพื่อให้กลับมารับงานได้ภายในรอบ restart และไม่สร้าง restart timer ซ้ำ
 
+`SCRAPE_PREFERRED_WORKER` ตั้งได้ทั้งชื่อ slot เช่น `scraper-1` หรือชื่อเครื่องหลัก เช่น `SONB-RM009` โดย runner รายงาน `machine_name` ใน heartbeat และ Web จะแปลงชื่อเครื่องเป็น slot ที่ออนไลน์จริงก่อนใส่งานเข้าคิว ห้ามเปรียบเทียบชื่อเครื่องกับชื่อ slot โดยตรง เพราะจะทำให้ Task ถูกสร้างแต่ไม่เข้า Queue
+
 ไฟล์นี้ **ไม่เปิด** Express Auto‑Post server, collect worker หรือ ERP sync ให้ ตรวจว่าบริการเหล่านั้นถูกรันด้วย process manager/Task Scheduler ตาม topology ที่เลือก
 
 ### 12.4 Docker

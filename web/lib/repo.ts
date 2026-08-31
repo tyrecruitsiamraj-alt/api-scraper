@@ -8,6 +8,7 @@ import type { WorkflowReadiness } from '../../src/core/workflow-readiness.js';
 import { renderPoster } from '../../src/core/poster.js';
 import { withPosterTemplate } from '../../src/core/poster-template.js';
 import { evaluateResumeQualification } from '../../src/core/resume-qualification.js';
+import { selectPreferredScrapeWorker } from '../../src/core/worker-selection.js';
 
 // schema ของ autopost — แยกต่อ project ได้ผ่าน env (ไม่ตั้ง = so_autopost_jobs เดิม)
 // ใช้กับทุก query ข้าม schema ไปฝั่ง autopost. ค่าจาก env เราคุมเอง (ไม่ใช่ input ผู้ใช้)
@@ -1442,9 +1443,7 @@ export async function enqueueScrapeForTask(taskId: string, ownerUser: string | n
   // to one known-good machine.  Without this, an older Mac that happens to come
   // back online can win the alphabetical worker list and receive the next job.
   const configuredWorker = String(process.env.SCRAPE_PREFERRED_WORKER ?? '').trim();
-  const preferredWorker = configuredWorker
-    ? readyWorkers.find((worker) => worker.name === configuredWorker)?.name
-    : readyWorkers[0].name;
+  const preferredWorker = selectPreferredScrapeWorker(readyWorkers, configuredWorker);
   if (!preferredWorker) {
     await q(
       `UPDATE scrape_tasks
