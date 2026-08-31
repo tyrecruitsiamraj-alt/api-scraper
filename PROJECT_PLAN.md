@@ -701,7 +701,7 @@
 - ผ่านแล้ว: Node test 112/112, AutoPost logic test 4/4, `web npm run build`, Queue → Worker self-test, Content Golden Flow ผ่าน Research/Quality/Image Gate, JobThai Live 5/5, Facebook Preflight, Queue ว่าง และ unresolved system error = 0
 - Operational Readiness เป็น 91% เพราะ Worker Facebook ตั้งใจเปิดเฉพาะ `preflight`; ห้ามทำ Dashboard เป็น 100 ด้วยการประกาศ capability `post` โดยยังไม่อนุญาตเผยแพร่จริง
 - ยังไม่ผ่าน: Controlled Real Post, เฝ้าระวัง 24 ชั่วโมงหลังโพสต์ และ JobBKK Live Search ซึ่งบัญชีปัจจุบันยังถูกส่งไปหน้า `/home` แทน Employer Dashboard
-- Commit ชุดแก้ 31 ส.ค. 2026: บันทึกหลัง Test ผ่านและ Push ในรอบส่งมอบนี้
+- Commit ชุดแก้ 31 ส.ค. 2026: `9b495f8 fix: harden production worker gates` (Test ผ่านก่อน Commit; Push ในรอบส่งมอบนี้)
 
 ## KPI
 
