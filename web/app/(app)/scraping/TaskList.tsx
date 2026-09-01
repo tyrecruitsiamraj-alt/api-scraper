@@ -1,9 +1,11 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import Link from 'next/link';
 import type { TaskRow } from '@/lib/repo';
 import { ScrapingStatusBar } from '@/components/ScrapingStatusBar';
 import { deleteTaskAction, expandAdjacentTaskAction, queueTaskAction, toggleTaskAction, updateTaskCriteriaAction } from '@/lib/actions';
+import { humanizeOperatorError, operatorJobTitle } from '@/lib/operator-copy';
 
 type LiveStatus = {
   id: string;
@@ -213,13 +215,15 @@ export function TaskList({ initialTasks }: { initialTasks: TaskRow[] }) {
         const pct = target > 0 ? Math.min(100, Math.round((pctBase / target) * 100)) : 0;
         const phaseIdx = PHASES.indexOf(phase as (typeof PHASES)[number]);
         const alreadyComplete = status === 'done' && target > 0 && qualified >= target;
+        const taskTitle = operatorJobTitle({ position: t.criteria?.position || t.criteria?.keyword, title: t.name, requestNo: t.source_request_no });
+        const humanError = humanizeOperatorError(error);
 
         return (
           <div key={t.id} className="card p-4">
             <div className="flex flex-wrap items-start justify-between gap-3">
               <div className="min-w-0">
                 <div className="flex items-center gap-2">
-                  <span className="font-medium text-ink">{t.name}</span>
+                  <span className="font-medium text-ink">{taskTitle}</span>
                   <span className={`pill ${meta.cls}`}>{meta.label}</span>
                   {!t.enabled && <span className="pill bg-black/5 text-subtle">ปิดอยู่</span>}
                 </div>
@@ -228,7 +232,7 @@ export function TaskList({ initialTasks }: { initialTasks: TaskRow[] }) {
                   {t.mode === 'count' ? `จำนวน ${t.target_count ?? '-'}` : `ตั้งแต่ ${t.updated_since ?? '-'}`} ·{' '}
                   {scheduleLabel(t.schedule_cron)}
                 </div>
-                {assessed > 0 && (
+                  {assessed > 0 && (
                   <div className="mt-2 flex flex-wrap gap-1.5 text-[11px]">
                     <span className="pill bg-green-50 text-green-700">ผ่าน {qualified}</span>
                     <span className="pill bg-amber-50 text-amber-700">ต้องตรวจเพิ่ม {needsReview}</span>
@@ -244,12 +248,13 @@ export function TaskList({ initialTasks }: { initialTasks: TaskRow[] }) {
                     ))}
                   </div>
                 )}
-              </div>
+                </div>
 
               <div className="flex items-center gap-2">
+                <Link href={`/scraping/${t.id}`} className="btn-ghost px-3 py-2 text-sm">เปิดงาน</Link>
                 <form action={queueTaskAction}>
                   <input type="hidden" name="id" value={t.id} />
-                  <button className="btn-ghost px-4 py-2 text-sm disabled:opacity-40" disabled={busy || !t.enabled || alreadyComplete}>
+                  <button className="btn-ghost px-4 py-2 text-sm disabled:opacity-40" disabled={busy || !t.enabled || alreadyComplete || !t.connector_available} title={t.connector_block_reason || undefined}>
                     {alreadyComplete ? '✓ ครบเป้าแล้ว' : '▶ รันตอนนี้'}
                   </button>
                 </form>
@@ -267,6 +272,13 @@ export function TaskList({ initialTasks }: { initialTasks: TaskRow[] }) {
 
             {alreadyComplete && (
               <p className="mt-2 text-xs text-subtle">งานนี้มีผู้สมัครผ่านครบ {qualified}/{target} แล้ว หากต้องการค้นเพิ่มให้สร้างงานใหม่หรือเพิ่มจำนวนเป้าหมาย</p>
+            )}
+
+            {!t.connector_available && t.connector_block_reason && (
+              <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+                <b>ยังเริ่มงานนี้ไม่ได้:</b> {t.connector_block_reason}
+                <Link href="/settings/connectors" className="ml-2 font-medium text-accent hover:underline">ไปตรวจ Connector</Link>
+              </div>
             )}
 
             {/* phase checklist — narrates scrape → ocr → enrich → เสร็จสิ้น */}
@@ -339,8 +351,8 @@ export function TaskList({ initialTasks }: { initialTasks: TaskRow[] }) {
                 ไม่พบผลลัพธ์ในรอบนี้ — มักเกิดจากใส่ฟิลเตอร์ซ้อนกันแน่นเกิน (ตำแหน่ง + จังหวัด + วุฒิ + อายุ พร้อมกัน) หรือคำค้นตำแหน่งไม่ตรงกับที่คนไทยเขียนในเรซูเม่ ลองลดฟิลเตอร์ (เอาอายุ/วุฒิออก) แล้วกด “รันตอนนี้” อีกครั้ง
               </p>
             )}
-            {status === 'partial' && error && <p className="mt-2 text-xs text-amber-700">{error}</p>}
-            {status === 'error' && error && <p className="mt-2 text-xs text-red-600">⚠ {error}</p>}
+            {status === 'partial' && humanError && <p className="mt-2 text-xs text-amber-700">{humanError.detail} · {humanError.next}</p>}
+            {status === 'error' && humanError && <div className="mt-3 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-800"><b>{humanError.title}</b><p className="mt-1">{humanError.detail}</p><p className="mt-1 font-medium">ทำต่อ: {humanError.next}</p><details className="mt-2 text-red-700/75"><summary className="cursor-pointer">รายละเอียดสำหรับผู้ดูแล</summary><p className="mt-1 break-words">{humanError.technical}</p></details></div>}
 
             {/* แก้เกณฑ์การค้นหลังสร้าง — ปิดตอนกำลังวิ่ง (จะมีผลรอบถัดไปที่กดรัน) */}
             {!busy && (

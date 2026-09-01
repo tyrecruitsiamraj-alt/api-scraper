@@ -75,10 +75,15 @@ export default async function ImportsPage() {
                         <select name="connectorId" required defaultValue="" className="field h-8 min-w-36 py-1 text-xs">
                           <option value="" disabled>เลือกบัญชีที่ใช้ค้นหา…</option>
                           {connectors.map((connector) => (
-                            <option key={connector.id} value={connector.id}>{connector.platform} · {connector.label}</option>
+                            <option key={connector.id} value={connector.id} disabled={!connector.available}>
+                              {connector.platform} · {connector.label}
+                              {connector.available ? '' : ` — ยังใช้ไม่ได้: ${connector.block_reason}`}
+                            </option>
                           ))}
                         </select>
-                        <button className="btn-primary btn-sm shrink-0" disabled={connectors.length === 0}>เริ่มค้นหาผู้สมัคร</button>
+                        <button className="btn-primary btn-sm shrink-0" disabled={!connectors.some((connector) => connector.available)}>
+                          เริ่มค้นหาผู้สมัคร
+                        </button>
                       </form>
                     ) : (
                       <form action={startCampaignAction} className="inline">

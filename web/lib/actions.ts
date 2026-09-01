@@ -55,6 +55,7 @@ import {
   deleteContentTrend,
   enqueueWorkflowSelfTest,
   getWorkflowSelfTest,
+  getConnectorOption,
   enqueueFacebookPreflight,
   recordCandidateActivity,
   reassessCandidateJob,
@@ -234,6 +235,11 @@ export async function createTaskAction(formData: FormData) {
   const jobDescription = String(formData.get('jobDescription') ?? '').trim();
   if (!jobDescription) throw new Error('กรุณาใส่รายละเอียดเนื้องาน');
   if (!connectorId) throw new Error('ยังไม่มีบัญชีสำหรับค้นหา Resume กรุณาเพิ่ม Connector ก่อน');
+  const connector = await getConnectorOption(connectorId);
+  if (!connector?.available) {
+    const reason = connector?.block_reason || 'บัญชี Connector นี้ยังไม่พร้อมใช้งาน';
+    redirect(`/scraping?notice=${encodeURIComponent(reason)}`);
+  }
   const name = requestedName || jobDescription.replace(/\s+/g, ' ').slice(0, 80);
   const criteria: Record<string, unknown> = {};
   if (position) criteria.position = position;
@@ -299,6 +305,8 @@ export async function createTaskAction(formData: FormData) {
     if (queued) kickWorker(); // drain only when a capability-verified worker owns it
   }
   revalidatePath('/scraping');
+  revalidatePath('/orchestrator');
+  redirect(`/scraping/${taskId}?${runNow ? 'started=1' : 'created=1'}`);
 }
 
 export async function queueTaskAction(formData: FormData) {
@@ -310,6 +318,8 @@ export async function queueTaskAction(formData: FormData) {
     if (queued) kickWorker(); // no generic Next.js Digest when worker is not ready
   }
   revalidatePath('/scraping');
+  revalidatePath(`/scraping/${id}`);
+  revalidatePath('/orchestrator');
 }
 
 /** แก้เกณฑ์การค้นของ task หลังสร้าง (ตำแหน่ง/คำค้น/จังหวัด/เป้า) — ห้ามแก้ตอนกำลังวิ่ง. */
@@ -324,6 +334,7 @@ export async function updateTaskCriteriaAction(formData: FormData) {
     targetCount: Number(formData.get('targetCount')) || null,
   });
   revalidatePath('/scraping');
+  revalidatePath(`/scraping/${id}`);
   revalidatePath('/orchestrator');
 }
 
@@ -338,6 +349,7 @@ export async function expandAdjacentTaskAction(formData: FormData) {
     if (queued) kickWorker();
   }
   revalidatePath('/scraping');
+  revalidatePath(`/scraping/${id}`);
 }
 
 export async function toggleTaskAction(formData: FormData) {
@@ -346,6 +358,7 @@ export async function toggleTaskAction(formData: FormData) {
   const enabled = formData.get('enabled') === 'true';
   if (id) await setTaskEnabled(id, enabled);
   revalidatePath('/scraping');
+  revalidatePath(`/scraping/${id}`);
 }
 
 export async function deleteTaskAction(formData: FormData) {
@@ -409,6 +422,10 @@ export async function startSoRecruitScrapeAction(formData: FormData) {
   const requestNo = String(formData.get('requestNo') ?? '').trim();
   const connectorId = String(formData.get('connectorId') ?? '').trim();
   if (!requestNo || !connectorId) throw new Error('กรุณาเลือก Connector ก่อนอนุมัติ');
+  const connector = await getConnectorOption(connectorId);
+  if (!connector?.available) {
+    redirect(`/orchestrator?notice=${encodeURIComponent(connector?.block_reason || 'บัญชี Connector นี้ยังไม่พร้อมใช้งาน')}`);
+  }
   const owner = session.user?.email ?? session.user?.name ?? null;
   // แผน scrape ที่คนเห็น/แก้บนการ์ดก่อนกด (ว่าง = ตามใบขอ)
   const taskId = await createScrapeTaskFromSoRecruit(requestNo, connectorId, {

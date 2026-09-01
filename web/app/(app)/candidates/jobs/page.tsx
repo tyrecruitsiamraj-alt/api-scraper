@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { ScrapingNav } from '@/components/ScrapingNav';
 import { listCandidateJobGroups } from '@/lib/repo';
+import { humanizeJobFamily, operatorJobTitle } from '@/lib/operator-copy';
 
 export const dynamic = 'force-dynamic';
 
@@ -43,13 +44,15 @@ export default async function CandidateJobsPage() {
             const target = Math.max(0, job.target_count ?? 0);
             const percent = target ? Math.min(100, Math.round((job.qualified_count / target) * 100)) : 0;
             const state = STATUS[job.status] ?? { label: job.status, cls: 'bg-black/5 text-subtle' };
+            const title = operatorJobTitle({ position: job.position, title: job.name, requestNo: job.source_request_no });
+            const family = humanizeJobFamily(job.job_family);
             return (
               <Link key={job.id} href={`/candidates/jobs/${job.id}`} className="group rounded-2xl border border-line bg-white p-5 shadow-sm transition hover:-translate-y-0.5 hover:border-accent/40 hover:shadow-md">
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
                     <p className="text-xs font-medium text-accent">{job.source_request_no || 'งานค้นหาที่สร้างเอง'}</p>
-                    <h2 className="mt-1 line-clamp-2 text-lg font-semibold text-ink group-hover:text-accent">{job.position}</h2>
-                    <p className="mt-1 truncate text-xs text-subtle">{job.job_family || `${PLATFORM[job.platform] || job.platform} · ${job.connector_label}`}</p>
+                    <h2 className="mt-1 line-clamp-2 text-lg font-semibold text-ink group-hover:text-accent">{title}</h2>
+                    <p className="mt-1 truncate text-xs text-subtle">{family || `${PLATFORM[job.platform] || job.platform} · ${job.connector_label}`}</p>
                   </div>
                   <span className={`pill shrink-0 ${state.cls}`}>{state.label}</span>
                 </div>
@@ -71,7 +74,7 @@ export default async function CandidateJobsPage() {
 
                 <div className="mt-5 flex items-center justify-between border-t border-line pt-4 text-xs">
                   <span className="text-subtle">ผลล่าสุด {dateTime(job.latest_matched_at)}</span>
-                  <span className="font-medium text-accent">เปิดรายชื่อ →</span>
+                  <span className="font-medium text-accent">ดูคนที่เหมาะที่สุด →</span>
                 </div>
               </Link>
             );

@@ -4,13 +4,14 @@ import { useState } from 'react';
 import { createTaskAction } from '@/lib/actions';
 import { EDUCATION_LEVELS, GENDERS, PROVINCES, SALARY_LABELS, SALARY_STEPS } from '@/lib/filter-options';
 
-type ConnectorOption = { id: string; platform: string; label: string; scrape_limit: number };
+type ConnectorOption = { id: string; platform: string; label: string; scrape_limit: number; available: boolean; block_reason: string | null };
 
 const PLATFORM_LABEL: Record<string, string> = { jobbkk: 'JobBKK', jobthai: 'JobThai' };
 
 export function NewTaskForm({ connectors }: { connectors: ConnectorOption[] }) {
   const [scheduled, setScheduled] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const readyConnectors = connectors.filter((connector) => connector.available);
 
   return (
     <form
@@ -61,14 +62,15 @@ export function NewTaskForm({ connectors }: { connectors: ConnectorOption[] }) {
           </div>
           <div>
             <label className="label">แหล่งค้นหา</label>
-            <select name="connectorId" required className="field" defaultValue={connectors[0]?.id ?? ''}>
-              {connectors.length === 0 && <option value="">ยังไม่มีบัญชีที่พร้อมใช้งาน</option>}
+            <select name="connectorId" required className="field" defaultValue={readyConnectors[0]?.id ?? ''}>
+              {readyConnectors.length === 0 && <option value="">ยังไม่มีบัญชีที่พร้อมใช้งาน</option>}
               {connectors.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {PLATFORM_LABEL[c.platform] ?? c.platform} — {c.label} (รอบละ {c.scrape_limit})
+                <option key={c.id} value={c.id} disabled={!c.available}>
+                  {PLATFORM_LABEL[c.platform] ?? c.platform} — {c.label}{c.available ? ` (รอบละ ${c.scrape_limit})` : ` — ยังใช้ไม่ได้: ${c.block_reason}`}
                 </option>
               ))}
             </select>
+            {connectors.some((connector) => !connector.available) && <p className="mt-1 text-xs text-amber-700">บัญชีที่ยังใช้ไม่ได้ถูกปิดการเลือกไว้ เพื่อไม่ให้สั่งงานแล้วล้มซ้ำ</p>}
           </div>
         </div>
 
@@ -189,14 +191,14 @@ export function NewTaskForm({ connectors }: { connectors: ConnectorOption[] }) {
       </details>
 
       <div className="mt-5 flex items-center gap-3">
-        <button type="submit" name="runNow" value="on" disabled={submitting || connectors.length === 0} className="btn-primary disabled:opacity-50">
+        <button type="submit" name="runNow" value="on" disabled={submitting || readyConnectors.length === 0} className="btn-primary disabled:opacity-50">
           {submitting ? 'กำลังบันทึก…' : 'สร้าง & เริ่มทันที'}
         </button>
-        <button type="submit" disabled={submitting || connectors.length === 0} className="btn-ghost disabled:opacity-50">
+        <button type="submit" disabled={submitting || readyConnectors.length === 0} className="btn-ghost disabled:opacity-50">
           บันทึกไว้เฉยๆ
         </button>
       </div>
-      {connectors.length === 0 && <p className="mt-2 text-xs text-red-600">ยังเริ่มค้นหาไม่ได้ — กรุณาเพิ่มบัญชี Connector ก่อน</p>}
+      {readyConnectors.length === 0 && <p className="mt-2 text-xs text-red-600">ยังเริ่มค้นหาไม่ได้ — ตรวจ Connector ที่ตั้งค่าไว้ก่อน</p>}
     </form>
   );
 }

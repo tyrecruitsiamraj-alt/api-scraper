@@ -68,9 +68,6 @@ export function ContentReviewWorkspace({ campaignId, content, initialPoster, ini
         <input type="hidden" name="contentId" value={content.id} />
         <input type="hidden" name="posterBadge" value={poster.badge} />
         <input type="hidden" name="posterSalaryBreakdown" value={poster.salaryBreakdown} />
-        <input type="hidden" name="posterContactLine" value={poster.contactLine} />
-        <input type="hidden" name="posterImageSide" value={poster.imageSide} />
-        <input type="hidden" name="posterLogoVariant" value={poster.logoVariant ?? 'people-navy'} />
 
         <div className="grid gap-x-12 gap-y-5 md:grid-cols-2">
           <PixelField label="ตำแหน่ง" name="posterTitle" value={poster.title} onChange={(value) => update('title', value)} />
@@ -82,6 +79,21 @@ export function ContentReviewWorkspace({ campaignId, content, initialPoster, ini
             <PixelArea label="เวลาทำงาน" name="posterWorktime" value={poster.worktime} className="h-10 py-2" onChange={(value) => update('worktime', value)} />
             <PixelArea label="สวัสดิการ (แสดงในสื่อ)" name="posterBenefits" value={poster.benefits.join('\n')} className="h-[62px]" onChange={(value) => update('benefits', value.split(/\r?\n/).map((item) => item.trim()).filter(Boolean))} />
           </div>
+          <PixelField label="เบอร์โทรที่ยืนยันแล้ว" name="posterContactLine" value={poster.contactLine} onChange={(value) => update('contactLine', value)} />
+          <label>
+            <span className="mb-2 block text-[16px] font-medium text-[#222]">โลโก้บนภาพ</span>
+            <select name="posterLogoVariant" value={poster.logoVariant ?? 'people-navy'} onChange={(event) => update('logoVariant', event.target.value === 'so-red' ? 'so-red' : 'people-navy')} className="h-10 w-full rounded-md border border-[#cbd2dc] bg-white px-4 text-[15px] text-[#222] outline-none transition focus:border-[#0a3970] focus:ring-2 focus:ring-blue-100">
+              <option value="people-navy">SO PEOPLE สีน้ำเงิน</option>
+              <option value="so-red">SO สีแดง</option>
+            </select>
+          </label>
+          <label>
+            <span className="mb-2 block text-[16px] font-medium text-[#222]">ตำแหน่งคนในภาพ</span>
+            <select name="posterImageSide" value={poster.imageSide} onChange={(event) => update('imageSide', event.target.value === 'left' ? 'left' : 'right')} className="h-10 w-full rounded-md border border-[#cbd2dc] bg-white px-4 text-[15px] text-[#222] outline-none transition focus:border-[#0a3970] focus:ring-2 focus:ring-blue-100">
+              <option value="right">ขวา — ข้อความอยู่ซ้าย</option>
+              <option value="left">ซ้าย — ข้อความอยู่ขวา</option>
+            </select>
+          </label>
         </div>
 
         <label className="mt-6 block">

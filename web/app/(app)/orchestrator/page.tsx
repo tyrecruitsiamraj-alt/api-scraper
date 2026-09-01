@@ -12,6 +12,7 @@ import {
 import { AutoRefresh } from '@/components/AutoRefresh';
 import { WorkerStatus } from '@/components/WorkerStatus';
 import { WorkCenter, type WorkCenterItem, type WorkCenterStage, type Step } from '@/components/WorkCenter';
+import { humanizeOperatorError, operatorJobTitle } from '@/lib/operator-copy';
 
 export const dynamic = 'force-dynamic';
 
@@ -85,7 +86,7 @@ function intakeSteps(kind: 'content' | 'scraping'): Step[] {
   return mkSteps(['active', 'todo', 'todo', scrape, post, 'todo']);
 }
 
-export default async function OrchestratorPage() {
+export default async function OrchestratorPage({ searchParams }: { searchParams?: { notice?: string } }) {
   const [reqs, campaigns, pending, fb, connectors, tasks, postStates, pendingAdmin, contentBrain] = await Promise.all([
     listSoRecruitPostingRequests(),
     listCampaigns(),
@@ -130,7 +131,7 @@ export default async function OrchestratorPage() {
         id: `request:${request.id}`,
         kind: request.request_type,
         stage: 'intake',
-        title: request.erp_title || request.request_no,
+        title: operatorJobTitle({ position: requestFields.position, title: request.erp_title, requestNo: request.request_no }),
         requestNo: request.request_no,
         detail: request.reason || request.notes,
         requester: request.requested_by_name,
@@ -138,6 +139,7 @@ export default async function OrchestratorPage() {
         statusLabel: 'รออนุมัติรับงาน',
         createdAt: request.created_at,
         href: '/orchestrator/imports',
+        context: requestFields.location || request.requested_by_name,
         steps: intakeSteps(request.request_type),
         checklist,
         requestFields,
@@ -164,7 +166,7 @@ export default async function OrchestratorPage() {
         id: `content:${campaign.id}`,
         kind: 'content',
         stage: campaignStage(campaign.status, post?.status),
-        title: campaign.title || campaign.request_no || 'งานสร้างประกาศรับสมัคร',
+        title: operatorJobTitle({ position: campaign.title, title: campaign.title, requestNo: campaign.request_no }),
         requestNo: campaign.request_no,
         detail: postFailed ? (post.error || 'งานโพสต์หยุดก่อนสำเร็จ กดลองใหม่ได้') : (content?.caption || campaign.status_note),
         requester: campaign.created_by,
@@ -172,6 +174,7 @@ export default async function OrchestratorPage() {
         statusLabel,
         createdAt: campaign.created_at,
         href: `/orchestrator/${campaign.id}`,
+        context: campaign.province || campaign.created_by,
         content: content ? {
           id: content.id,
           campaignId: campaign.id,
@@ -197,18 +200,21 @@ export default async function OrchestratorPage() {
       if (task.status === 'error' || task.status === 'partial') stage = 'attention';
       else if (task.status === 'done' && task.review_status === 'pending') stage = 'review';
       else if (task.status === 'done') stage = 'completed';
+      const taskTitle = operatorJobTitle({ position: task.criteria.position || task.criteria.keyword, title: task.name, requestNo: task.source_request_no });
+      const taskError = humanizeOperatorError(task.last_error);
       return {
         id: `scraping:${task.id}`,
         kind: 'scraping',
         stage,
-        title: task.name,
+        title: taskTitle,
         requestNo: task.source_request_no,
-        detail: task.last_error || (task.criteria.job_description ? String(task.criteria.job_description) : null),
+        detail: taskError ? `${taskError.title} — ${taskError.next}` : null,
         requester: null,
-        connector: `${task.platform} · ${task.connector_label}`,
+        connector: `${task.platform === 'jobthai' ? 'JobThai' : task.platform === 'jobbkk' ? 'JobBKK' : task.platform} · ${task.connector_label}`,
         statusLabel: task.status === 'done' && task.review_status === 'pending' ? 'รอตรวจรับข้อมูล' : task.status === 'partial' ? 'ยังได้ Resume ไม่ครบ' : task.status === 'error' ? 'ค้นหาไม่สำเร็จ' : task.status === 'queued' ? 'รอเริ่มค้นหา' : task.status === 'running' ? 'กำลังค้นหาผู้สมัคร' : 'สำเร็จ',
         createdAt: task.created_at,
-        href: '/scraping',
+        href: `/scraping/${task.id}`,
+        context: [String(task.criteria.province || '').trim(), `${task.platform === 'jobthai' ? 'JobThai' : task.platform === 'jobbkk' ? 'JobBKK' : task.platform} · ${task.connector_label}`].filter(Boolean).join(' · ') || null,
         progress: {
           qualified: task.qualified_count,
           assessed: task.assessed_total,
@@ -224,11 +230,16 @@ export default async function OrchestratorPage() {
   return (
     <div className="space-y-4">
       <AutoRefresh seconds={8} />
-      <WorkerStatus />
-      <section className="rounded-2xl border border-violet-200 bg-violet-50 p-4 text-violet-950">
+      {typeof searchParams?.notice === 'string' && <div role="status" className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">{searchParams.notice}</div>}
+      <details className="rounded-2xl border border-line bg-white px-4 py-3">
+        <summary className="cursor-pointer text-sm font-medium text-ink">สถานะเครื่องและการตรวจระบบ <span className="font-normal text-subtle">(สำหรับผู้ดูแล)</span></summary>
+        <div className="mt-3"><WorkerStatus /></div>
+      </details>
+      <details className="rounded-2xl border border-violet-200 bg-violet-50 p-4 text-violet-950">
+        <summary className="cursor-pointer font-semibold">สมองเรียนรู้การสร้าง Content <span className="font-normal text-sm text-violet-800">— ดูเมื่ออยากตรวจหลักฐานการเรียนรู้</span></summary>
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
-            <h2 className="font-semibold">สมองเรียนรู้การสร้าง Content</h2>
+            <h2 className="mt-3 font-semibold">สมองเรียนรู้การสร้าง Content</h2>
             <p className="mt-1 text-sm text-violet-800">
               เก็บผลจริงจากข้อความ รูป เวลาโพสต์ และกลุ่ม Facebook — ต้องพบซ้ำอย่างน้อย 3 แคมเปญจึงนำมาเป็นสูตรแนะนำ
             </p>
@@ -240,10 +251,10 @@ export default async function OrchestratorPage() {
             <span className="rounded-full bg-emerald-100 px-3 py-1">ยืนยันแล้ว {contentBrain.proven_patterns}</span>
           </div>
         </div>
-      </section>
+      </details>
       <WorkCenter
         items={items}
-        connectors={connectors.map((connector) => ({ id: connector.id, label: `${connector.platform} · ${connector.label}` }))}
+        connectors={connectors.map((connector) => ({ id: connector.id, label: `${connector.platform === 'jobthai' ? 'JobThai' : connector.platform === 'jobbkk' ? 'JobBKK' : connector.platform} · ${connector.label}`, available: connector.available, blockReason: connector.block_reason }))}
         facebookAccounts={fb.map((account) => ({
           id: account.id,
           label: account.label,

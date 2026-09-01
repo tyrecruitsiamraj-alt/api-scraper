@@ -34,6 +34,7 @@ export type WorkCenterItem = {
   statusLabel: string;
   createdAt: string;
   href: string | null;
+  context?: string | null;
   progress?: { qualified: number; assessed: number; target: number; running: boolean } | null;
   content?: {
     id: string;
@@ -54,7 +55,7 @@ export type WorkCenterItem = {
   requestFields?: Record<string, string> | null;
 };
 
-type Option = { id: string; label: string };
+type Option = { id: string; label: string; available: boolean; blockReason: string | null };
 export type FbAccountOption = {
   id: string;
   label: string;
@@ -351,13 +352,13 @@ function WorkAction({ item, connectors, facebookAccounts }: {
           <div className="flex flex-wrap items-end gap-2">
             <div>
               <label className="label" htmlFor={`connector-${item.id}`}>เลือกบัญชีสำหรับค้นหา</label>
-              <select id={`connector-${item.id}`} name="connectorId" required defaultValue="" className="field">
+              <select id={`connector-${item.id}`} name="connectorId" required defaultValue={connectors.find((connector) => connector.available)?.id ?? ''} className="field">
                 <option value="" disabled>เลือกบัญชี JobBKK หรือ JobThai…</option>
-                {connectors.map((connector) => <option key={connector.id} value={connector.id}>{connector.label}</option>)}
+                {connectors.map((connector) => <option key={connector.id} value={connector.id} disabled={!connector.available}>{connector.label}{connector.available ? '' : ` — ยังใช้ไม่ได้: ${connector.blockReason}`}</option>)}
               </select>
             </div>
-            <button className="btn-primary" disabled={connectors.length === 0}>รับงานและเริ่มค้นหา</button>
-            {connectors.length === 0 && (
+            <button className="btn-primary" disabled={!connectors.some((connector) => connector.available)}>รับงานและเริ่มค้นหา</button>
+            {!connectors.some((connector) => connector.available) && (
               <Link href="/settings/connectors" className="text-xs text-accent hover:underline">เพิ่มบัญชีสำหรับค้นหาก่อน</Link>
             )}
           </div>
@@ -485,8 +486,8 @@ function WorkItemCard({ item, connectors, facebookAccounts }: {
             {item.title}<KindTag kind={item.kind} />
           </div>
           <div className="mt-1 text-[11px] uppercase tracking-[0.04em] text-subtle/80">
-            {item.requestNo || item.id.split(':')[1] || item.id}
-            {item.requester ? ` · ${item.requester}` : ''} · {fmtDate(item.createdAt)}
+          {item.requestNo || item.id.split(':')[1] || item.id}
+            {item.context ? ` · ${item.context}` : item.requester ? ` · ${item.requester}` : ''} · {fmtDate(item.createdAt)}
           </div>
         </div>
         <span className={`pill shrink-0 ${STAGE_PILL[item.stage]}`}>{item.statusLabel}</span>
@@ -596,7 +597,8 @@ export function WorkCenter({ items, connectors, facebookAccounts }: {
     [items],
   );
 
-  const active = sorted.filter((item) => item.stage !== 'completed');
+  const actionable = sorted.filter((item) => ['attention', 'review', 'intake'].includes(item.stage));
+  const working = sorted.filter((item) => item.stage === 'working');
   const done = sorted.filter((item) => item.stage === 'completed');
 
   const filtered = filter != null ? sorted.filter((item) => stepIndexOf(item) === filter) : [];
@@ -605,13 +607,24 @@ export function WorkCenter({ items, connectors, facebookAccounts }: {
     <div className="space-y-6">
       <div>
         <div className="eyebrow text-accent">SO Recruitment</div>
-        <h1 className="mt-1 text-[28px] font-medium tracking-tight">ศูนย์งาน</h1>
-        <p className="mt-1 text-sm text-subtle">งานจาก So Recruit ทุกใบ — รับงาน ตรวจ อนุมัติ และติดตามจนเสร็จ ในหน้าเดียว</p>
+        <h1 className="mt-1 text-[28px] font-medium tracking-tight">งานที่ฉันต้องทำวันนี้</h1>
+        <p className="mt-1 text-sm text-subtle">เปิดการ์ดงาน แล้วทำตามปุ่มหลักเพียงปุ่มเดียว ระบบจะพาไปขั้นถัดไปเอง</p>
       </div>
 
-      <Readiness facebookAccounts={facebookAccounts} />
+      <details className="rounded-2xl border border-line bg-white px-4 py-3">
+        <summary className="cursor-pointer text-sm font-medium text-ink">ตั้งค่าที่อาจทำให้งานเดินต่อไม่ได้ <span className="font-normal text-subtle">(สำหรับผู้ดูแล)</span></summary>
+        <div className="mt-3"><Readiness facebookAccounts={facebookAccounts} /></div>
+      </details>
 
-      <div className="grid grid-cols-3 gap-2.5 sm:grid-cols-6">
+      <div className="grid gap-3 sm:grid-cols-3">
+        <div className="rounded-2xl border border-red-100 bg-red-50 px-4 py-3"><div className="text-xs text-red-700">ต้องช่วยแก้หรือรอตรวจ</div><div className="mt-1 text-3xl font-semibold text-red-800">{actionable.length}</div></div>
+        <div className="rounded-2xl border border-blue-100 bg-blue-50 px-4 py-3"><div className="text-xs text-blue-700">ระบบกำลังทำงาน</div><div className="mt-1 text-3xl font-semibold text-blue-800">{working.length}</div></div>
+        <div className="rounded-2xl border border-emerald-100 bg-emerald-50 px-4 py-3"><div className="text-xs text-emerald-700">งานเสร็จแล้ว</div><div className="mt-1 text-3xl font-semibold text-emerald-800">{done.length}</div></div>
+      </div>
+
+      <details className="rounded-2xl border border-line bg-white px-4 py-3">
+        <summary className="cursor-pointer text-sm font-medium text-ink">ดูภาพรวมตามขั้นตอนงาน</summary>
+        <div className="mt-3 grid grid-cols-3 gap-2.5 sm:grid-cols-6">
         {STEP_BOXES.map((s, i) => {
           const n = stepStats.counts[i];
           const warn = stepStats.attention[i];
@@ -635,7 +648,8 @@ export function WorkCenter({ items, connectors, facebookAccounts }: {
             </button>
           );
         })}
-      </div>
+        </div>
+      </details>
 
       {filter != null ? (
         /* โหมดกรอง: โชว์เฉพาะกลุ่มที่กด */
@@ -655,15 +669,14 @@ export function WorkCenter({ items, connectors, facebookAccounts }: {
       ) : (
         /* โหมดปกติ: งานค้างเรียงตามด่วน + งานเสร็จยุบไว้ */
         <>
-          {active.length === 0 ? (
-            <div className="card px-5 py-16 text-center text-sm text-subtle">ไม่มีงานค้าง — ทุกอย่างเรียบร้อย</div>
-          ) : (
-            <div className="space-y-3">
-              {active.map((item) => (
-                <WorkItemCard key={item.id} item={item} connectors={connectors} facebookAccounts={facebookAccounts} />
-              ))}
-            </div>
-          )}
+          <section>
+            <div className="mb-3 flex items-center justify-between"><h2 className="text-base font-semibold">งานที่ต้องทำต่อ</h2><span className="text-xs text-subtle">{actionable.length} งาน</span></div>
+            {actionable.length === 0 ? <div className="card px-5 py-8 text-center text-sm text-subtle">ไม่มีงานที่รอคุณดำเนินการ</div> : <div className="space-y-3">{actionable.map((item) => <WorkItemCard key={item.id} item={item} connectors={connectors} facebookAccounts={facebookAccounts} />)}</div>}
+          </section>
+          <section>
+            <div className="mb-3 flex items-center justify-between"><h2 className="text-base font-semibold">ระบบกำลังทำงาน</h2><span className="text-xs text-subtle">{working.length} งาน</span></div>
+            {working.length === 0 ? <div className="card px-5 py-8 text-center text-sm text-subtle">ไม่มีงานที่ระบบกำลังประมวลผล</div> : <div className="space-y-3">{working.map((item) => <WorkItemCard key={item.id} item={item} connectors={connectors} facebookAccounts={facebookAccounts} />)}</div>}
+          </section>
           {done.length > 0 && (
             <button
               type="button"

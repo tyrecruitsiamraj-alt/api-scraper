@@ -3,6 +3,7 @@ import { notFound } from 'next/navigation';
 import { ScrapingNav } from '@/components/ScrapingNav';
 import { getCandidateJobGroup, listCandidateJobMatches } from '@/lib/repo';
 import { reassessCandidateJobAction } from '@/lib/actions';
+import { humanizeJobFamily, operatorJobTitle } from '@/lib/operator-copy';
 
 export const dynamic = 'force-dynamic';
 
@@ -49,6 +50,8 @@ function fmt(value: string | null) {
 export default async function CandidateJobDetailPage({ params, searchParams }: { params: { taskId: string }; searchParams?: { rescored?: string } }) {
   const [job, rows] = await Promise.all([getCandidateJobGroup(params.taskId), listCandidateJobMatches(params.taskId)]);
   if (!job) notFound();
+  const title = operatorJobTitle({ position: job.position, title: job.name, requestNo: job.source_request_no });
+  const family = humanizeJobFamily(job.job_family);
   let qualifiedRank = 0;
 
   return (
@@ -58,15 +61,15 @@ export default async function CandidateJobDetailPage({ params, searchParams }: {
       <header className="mt-3 flex flex-wrap items-start justify-between gap-4">
         <div>
           <p className="text-sm font-medium text-accent">{job.source_request_no || 'งานค้นหาที่สร้างเอง'}</p>
-          <h1 className="mt-1 text-[28px] font-semibold tracking-tight">{job.position}</h1>
-          <p className="mt-1 text-sm text-subtle">{job.job_family || `${PLATFORM[job.platform] || job.platform} · ${job.connector_label}`} · ผลล่าสุด {fmt(job.latest_matched_at)}</p>
+          <h1 className="mt-1 text-[28px] font-semibold tracking-tight">{title}</h1>
+          <p className="mt-1 text-sm text-subtle">{family || `${PLATFORM[job.platform] || job.platform} · ${job.connector_label}`} · ผลล่าสุด {fmt(job.latest_matched_at)}</p>
         </div>
         <div className="flex flex-wrap gap-2">
           <form action={reassessCandidateJobAction}>
             <input type="hidden" name="taskId" value={job.id} />
             <button className="btn-primary">วิเคราะห์และเรียงใหม่</button>
           </form>
-          <Link href="/scraping" className="btn-ghost">ดูสถานะงานค้นหา</Link>
+          <Link href={`/scraping/${job.id}`} className="btn-ghost">ดูสถานะงานค้นหา</Link>
         </div>
       </header>
 
@@ -80,7 +83,7 @@ export default async function CandidateJobDetailPage({ params, searchParams }: {
       </section>
 
       <div className="mt-5 rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-900">
-        <b>AI ช่วยอย่างไร:</b> AI แปลงเนื้องานเป็น Candidate Spec และ Job Family ก่อน จากนั้น Scorecard `candidate-fit-v1` ตรวจ Resume ด้วยหลักฐานที่ย้อนดูได้ คนที่ผ่าน Hard Gate มาก่อน แล้วเรียงคะแนนความตรงและความครบของหลักฐานจากมากไปน้อย หากคะแนนเท่ากันจะให้ Resume ที่ระบบพบล่าสุดอยู่ก่อน ข้อมูลที่ไม่ระบุจะแสดง “ต้องตรวจเพิ่ม” และไม่นับเป็นผ่าน
+        <b>AI ช่วยอย่างไร:</b> ระบบอ่านเกณฑ์จากใบงาน แล้วตรวจ Resume ทีละคนด้วยหลักฐานที่เปิดดูได้ คนที่ผ่านเงื่อนไขบังคับจะแสดงก่อน จากนั้นเรียงตามความเหมาะสมและความครบของข้อมูล หากคะแนนเท่ากัน จะให้ Resume ที่อัปเดตล่าสุดขึ้นก่อน ข้อมูลที่ Resume ไม่ระบุจะแสดงว่า “ต้องตรวจเพิ่ม” และไม่นับว่าผ่าน
       </div>
 
       <div className="mt-5 space-y-3">

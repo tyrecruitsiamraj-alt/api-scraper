@@ -537,11 +537,57 @@ export async function listAllConnectors() {
   );
 }
 
-/** Lightweight options for task-creation dropdown (enabled only). */
-export async function listConnectorOptions() {
-  return q<{ id: string; platform: string; label: string; scrape_limit: number }>(
-    `SELECT id, platform, label, scrape_limit FROM connectors WHERE enabled = true ORDER BY platform, label`,
+/** Connector ที่เลือกได้บนหน้าเจ้าหน้าที่ พร้อมเหตุผลเมื่อยังสั่งงานไม่ได้จริง. */
+export type ScrapeConnectorOption = {
+  id: string;
+  platform: string;
+  label: string;
+  scrape_limit: number;
+  available: boolean;
+  block_reason: string | null;
+};
+
+/**
+ * ห้ามให้ UI ชวนสั่ง JobBKK ซ้ำเมื่อหลักฐานล่าสุดยืนยันว่า account ไม่มี
+ * Resume Search Talent. ไม่ปิด connector ถาวร: เมื่อ error หมดอายุหรือแก้สิทธิ์
+ * แล้ว connector จะกลับมา selectable เอง.
+ */
+export async function listConnectorOptions(): Promise<ScrapeConnectorOption[]> {
+  return q<ScrapeConnectorOption>(
+    `SELECT c.id, c.platform, c.label, c.scrape_limit,
+            CASE
+              WHEN c.cooldown_until > now() THEN false
+              WHEN EXISTS (
+                SELECT 1 FROM scrape_tasks t
+                 WHERE t.connector_id=c.id
+                   AND t.status='error'
+                   AND t.updated_at > now() - interval '24 hours'
+                   AND (COALESCE(t.last_error,'') ILIKE '%Resume Search Talent premium page not ready%'
+                        OR COALESCE(t.last_error,'') ILIKE '%/resumes/premium%')
+              ) THEN false
+              ELSE true
+            END AS available,
+            CASE
+              WHEN c.cooldown_until > now() THEN 'บัญชีนี้พักการใช้งานชั่วคราวตามข้อจำกัดของแพลตฟอร์ม'
+              WHEN EXISTS (
+                SELECT 1 FROM scrape_tasks t
+                 WHERE t.connector_id=c.id
+                   AND t.status='error'
+                   AND t.updated_at > now() - interval '24 hours'
+                   AND (COALESCE(t.last_error,'') ILIKE '%Resume Search Talent premium page not ready%'
+                        OR COALESCE(t.last_error,'') ILIKE '%/resumes/premium%')
+              ) THEN 'บัญชีนี้ยังไม่มีสิทธิ์ Resume Search Talent — ใช้ JobThai หรือให้ผู้ดูแลตรวจแพ็กเกจ JobBKK'
+              ELSE NULL
+            END AS block_reason
+       FROM connectors c
+      WHERE c.enabled = true
+      ORDER BY CASE c.platform WHEN 'jobthai' THEN 0 WHEN 'jobbkk' THEN 1 ELSE 2 END, c.label`,
   );
+}
+
+export async function getConnectorOption(id: string): Promise<ScrapeConnectorOption | null> {
+  const options = await listConnectorOptions();
+  return options.find((option) => option.id === id) ?? null;
 }
 
 export async function insertConnector(c: {
@@ -1308,6 +1354,8 @@ export type TaskRow = {
   connector_id: string;
   connector_label: string;
   platform: string;
+  connector_available: boolean;
+  connector_block_reason: string | null;
   mode: 'count' | 'date_range';
   target_count: number | null;
   updated_since: string | null;
@@ -1339,6 +1387,27 @@ export type TaskRow = {
 export async function listTasks() {
   return q<TaskRow>(
     `SELECT t.*, c.label AS connector_label, c.platform,
+            CASE
+              WHEN c.cooldown_until > now() THEN false
+              WHEN EXISTS (
+                SELECT 1 FROM scrape_tasks recent
+                 WHERE recent.connector_id=c.id
+                   AND recent.status='error'
+                   AND recent.updated_at > now() - interval '24 hours'
+                   AND (COALESCE(recent.last_error,'') ILIKE '%Resume Search Talent premium page not ready%'
+                        OR COALESCE(recent.last_error,'') ILIKE '%/resumes/premium%')
+              ) THEN false ELSE true END AS connector_available,
+            CASE
+              WHEN c.cooldown_until > now() THEN 'บัญชีนี้พักการใช้งานชั่วคราวตามข้อจำกัดของแพลตฟอร์ม'
+              WHEN EXISTS (
+                SELECT 1 FROM scrape_tasks recent
+                 WHERE recent.connector_id=c.id
+                   AND recent.status='error'
+                   AND recent.updated_at > now() - interval '24 hours'
+                   AND (COALESCE(recent.last_error,'') ILIKE '%Resume Search Talent premium page not ready%'
+                        OR COALESCE(recent.last_error,'') ILIKE '%/resumes/premium%')
+              ) THEN 'บัญชีนี้ยังไม่มีสิทธิ์ Resume Search Talent — ใช้ JobThai หรือให้ผู้ดูแลตรวจแพ็กเกจ JobBKK'
+              ELSE NULL END AS connector_block_reason,
             COALESCE(s.qualified_count,0)::int AS qualified_count,
             COALESCE(s.needs_review_count,0)::int AS needs_review_count,
             COALESCE(s.rejected_count,0)::int AS rejected_count,
@@ -1360,6 +1429,12 @@ export async function listTasks() {
        ) w ON true
       ORDER BY t.created_at DESC`,
   );
+}
+
+/** Detail route ใช้ row เดียวกับหน้ารวม เพื่อไม่ให้สถานะ/สิทธิ์ Connector คนละความจริง. */
+export async function getTask(taskId: string): Promise<TaskRow | null> {
+  const tasks = await listTasks();
+  return tasks.find((task) => task.id === taskId) ?? null;
 }
 
 export async function insertTask(t: {
@@ -1421,6 +1496,17 @@ export async function enqueueScrapeForTask(taskId: string, ownerUser: string | n
   );
   if (!rows[0]) throw new Error(`task not found: ${taskId}`);
   const { connector_id, platform, criteria } = rows[0];
+  const connector = await getConnectorOption(connector_id);
+  if (!connector || !connector.available) {
+    const reason = connector?.block_reason || 'Connector นี้ยังไม่พร้อมใช้งาน';
+    await q(
+      `UPDATE scrape_tasks
+          SET status='idle', phase='idle', last_error=$2, updated_at=now()
+        WHERE id=$1 AND status <> 'running'`,
+      [taskId, `ยังไม่เริ่มค้นหา: ${reason}`],
+    );
+    return false;
+  }
   const readyWorkers = (await listWorkerHeartbeats()).filter((worker) => {
     if (!worker.online || worker.kind !== 'scraper') return false;
     const types = Array.isArray(worker.meta?.types) ? worker.meta.types.map(String) : [];
