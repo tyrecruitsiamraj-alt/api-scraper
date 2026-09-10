@@ -63,7 +63,31 @@ export function humanizeOperatorError(value: string | null | undefined): {
       technical,
     };
   }
-  if (lower.includes('ยังไม่มีเครื่องค้นหาผู้สมัคร') || lower.includes('ยังไม่มีเครื่อง') || lower.includes('worker')) {
+  if (lower.includes('jobbkk_filter_not_applied') || lower.includes('ไม่ยืนยันตำแหน่ง') || lower.includes('ไม่มีตำแหน่งหรือคำค้น')) {
+    return {
+      title: 'เกณฑ์ค้นหาบน JobBKK ใช้ไม่ได้',
+      detail: 'ชื่อตำแหน่ง/คำค้นยาวหรือไม่ตรงชิปบนเว็บ จึงค้นแบบกว้างไม่ได้',
+      next: 'แก้เกณฑ์เป็นคำสั้น ๆ เช่น พนักงานขาย หรือ เซลล์ แล้วกดเริ่มงานใหม่',
+      technical,
+    };
+  }
+  if (lower.includes('ยังไม่ครบเป้า')) {
+    return {
+      title: 'ค้นครบรอบนี้แล้วยังได้ Resume ไม่ครบเป้า',
+      detail: technical,
+      next: 'เปิดรายละเอียดดูคนที่ได้แล้ว หรือผ่อนเกณฑ์/เปลี่ยนคำค้นสั้น ๆ แล้วเริ่มงานใหม่',
+      technical,
+    };
+  }
+  if (lower.includes('ค้างนานเกิน') || lower.includes('stopped responding') || lower.includes('timeout')) {
+    return {
+      title: 'งานค้างหรือหมดเวลา',
+      detail: 'เครื่องค้นหาหยุดรายงานผลระหว่างทาง ข้อมูลก่อนหยุดยังอยู่',
+      next: 'ตรวจว่า Worker ยังเปิดอยู่ แล้วกดเริ่มงานอีกครั้ง',
+      technical,
+    };
+  }
+  if (lower.includes('ยังไม่มีเครื่องค้นหาผู้สมัคร') || lower.includes('ยังไม่มีเครื่องรับงาน') || lower.includes('ไม่มีเครื่องค้นหา')) {
     return {
       title: 'ยังไม่มีเครื่องรับงานค้นหา',
       detail: 'ระบบรับใบงานแล้ว แต่ยังไม่มีเครื่องค้นหาที่พร้อมเริ่มงาน',
@@ -81,8 +105,8 @@ export function humanizeOperatorError(value: string | null | undefined): {
   }
   return {
     title: 'ระบบหยุดระหว่างทำงาน',
-    detail: 'งานนี้ยังทำไม่จบ แต่ข้อมูลและผลที่ได้ก่อนหยุดยังอยู่ครบ',
-    next: 'เปิดรายละเอียดเพื่อตรวจเกณฑ์ แล้วลองเริ่มงานใหม่หรือส่งให้ผู้ดูแลตรวจสอบ',
+    detail: technical.length <= 160 ? technical : 'งานนี้ยังทำไม่จบ แต่ข้อมูลและผลที่ได้ก่อนหยุดยังอยู่ครบ',
+    next: 'เปิดรายละเอียดงาน → ดูข้อความผู้ดูแล → แก้เกณฑ์เป็นคำค้นสั้น ๆ แล้วเริ่มใหม่',
     technical,
   };
 }

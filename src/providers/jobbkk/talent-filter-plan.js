@@ -1,7 +1,13 @@
 /**
  * Plan JobBKK Normal Search filters from task criteria.
  * Only emits fields that the source actually provided — never invents values.
+ * Long prose "positions" (เนื้องาน) are expanded to short Job Family chips when known.
  */
+
+import { knownPositionsFromDescription } from '../../core/job-family.js';
+
+/** JobBKK chips reject long/English compound titles; keep terms resume-searchable. */
+const MAX_CHIP_LEN = 22;
 
 export function hasSearchValue(value) {
   return value !== undefined && value !== null && String(value).trim() !== '' && String(value).trim() !== 'ไม่ระบุ';
@@ -13,6 +19,42 @@ export function parseTerms(value) {
     .split(/[\n,|]/)
     .map((item) => item.trim())
     .filter((item) => hasSearchValue(item));
+}
+
+export function isChipSearchable(term) {
+  const text = String(term ?? '').trim();
+  if (!hasSearchValue(text)) return false;
+  if (text.length > MAX_CHIP_LEN) return false;
+  if (/[A-Za-z]/.test(text)) return false;
+  return true;
+}
+
+/** Drop Latin tokens from mixed titles like "เจ้าหน้าที่ IT" → "เจ้าหน้าที่". */
+export function sanitizeChipTerm(term) {
+  const text = String(term ?? '').trim();
+  if (!hasSearchValue(text)) return '';
+  if (isChipSearchable(text)) return text;
+  const thaiOnly = text.replace(/[A-Za-z0-9]+/g, ' ').replace(/\s+/g, ' ').trim();
+  if (isChipSearchable(thaiOnly)) return thaiOnly;
+  return '';
+}
+
+/** Prefer short chips; if criteria only has long เนื้องาน, use same-family dictionary terms. */
+export function searchablePositionTerms(criteria = {}) {
+  const raw = parseTerms(criteria.position);
+  const short = [...new Set(raw.map(sanitizeChipTerm).filter(Boolean))].slice(0, 3);
+  if (short.length) return short;
+  const prose = raw.join(' ') || String(criteria.position ?? '').trim();
+  if (!prose) return [];
+  const known = knownPositionsFromDescription(prose);
+  if (known?.positions?.length) {
+    return known.positions.map(sanitizeChipTerm).filter(Boolean).slice(0, 3);
+  }
+  return [];
+}
+
+export function searchableKeywordTerms(criteria = {}) {
+  return [...new Set(parseTerms(criteria.keyword).map(sanitizeChipTerm).filter(Boolean))].slice(0, 3);
 }
 
 export function parseEducationRange(raw) {
@@ -61,8 +103,8 @@ export function planTalentNormalFilters(criteria = {}) {
     plan.push({ field, value });
   };
 
-  add('position', parseTerms(criteria.position).slice(0, 3));
-  add('keyword', parseTerms(criteria.keyword).slice(0, 3));
+  add('position', searchablePositionTerms(criteria));
+  add('keyword', searchableKeywordTerms(criteria));
   add('jobTypes', occupationTerms(criteria).slice(0, 5));
   if (hasSearchValue(criteria.province)) add('province', String(criteria.province).trim());
 

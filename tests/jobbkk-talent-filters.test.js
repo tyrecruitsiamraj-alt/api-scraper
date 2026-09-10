@@ -24,6 +24,7 @@ test('Normal Search plan follows Talent form order and skips empty fields', () =
   assert.deepEqual(plan.map((step) => step.field), [
     'position', 'keyword', 'jobTypes', 'province', 'education', 'salary', 'age',
   ]);
+  assert.deepEqual(plan.find((step) => step.field === 'position').value, ['เจ้าหน้าที่']);
   assert.deepEqual(plan.find((step) => step.field === 'keyword').value, ['ขาย', 'การขายสินค้า']);
   assert.deepEqual(plan.find((step) => step.field === 'education').value, { min: 'ปริญญาตรี', max: 'ปริญญาเอก' });
   assert.equal(plan.some((step) => step.field === 'gender'), false);
@@ -68,4 +69,14 @@ test('AI query uses only factual criteria', () => {
   assert.match(query, /พนักงานขับรถ/);
   assert.match(query, /นนทบุรี/);
   assert.match(query, /25-45/);
+});
+
+test('long sales เนื้องาน expands to short Job Family chips', () => {
+  const plan = planTalentNormalFilters({
+    position: 'เน้นงานขาย โทรออกเพื่อไปเสนอขาย พวกระบบงาน It หรือ ขายระบบต่างๆ',
+  });
+  const position = plan.find((step) => step.field === 'position');
+  assert.ok(position);
+  assert.deepEqual(position.value.slice(0, 3), ['พนักงานขาย', 'เซลล์', 'เจ้าหน้าที่ฝ่ายขาย']);
+  assert.equal(position.value.every((term) => term.length <= 22 && !/[A-Za-z]/.test(term)), true);
 });
