@@ -118,12 +118,11 @@ async function main() {
         filledFields += 1;
       }
     }
-    // Also count education/work array fills
-    if ((!Array.isArray(before.education) || before.education.length === 0) && parsed.education?.length) {
+    if ((!Array.isArray(row.education) || row.education.length === 0) && parsed.education?.length) {
       changed.push('education');
       filledFields += 1;
     }
-    if ((!Array.isArray(before.work_experience) || before.work_experience.length === 0) && parsed.work_experience?.length) {
+    if ((!Array.isArray(row.work_experience) || row.work_experience.length === 0) && parsed.work_experience?.length) {
       changed.push('work_experience');
       filledFields += 1;
     }
