@@ -1,0 +1,27 @@
+{
+  "name": "SO Recruitment (scraper + web + autopost)",
+  "install": "bash .cursor/install.sh",
+  "start": "bash .cursor/start.sh",
+  "terminals": [
+    {
+      "name": "scraper-api",
+      "command": "npm run api",
+      "description": "Scraper control API (Node, http). GET /health, /connectors, /candidates on :8080."
+    },
+    {
+      "name": "autopost",
+      "command": "cd autopost && npm start",
+      "description": "Auto-post Express server + admin UI on :3100. GET /api/health, /api/config."
+    },
+    {
+      "name": "web",
+      "command": "cd web && npm run dev",
+      "description": "Next.js console (Azure AD login; Azure creds blank in dev) on :3000."
+    }
+  ],
+  "ports": [
+    { "name": "scraper-api", "port": 8080 },
+    { "name": "web", "port": 3000 },
+    { "name": "autopost", "port": 3100 }
+  ]
+}
