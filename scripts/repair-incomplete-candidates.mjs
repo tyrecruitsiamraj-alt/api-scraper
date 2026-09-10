@@ -10,14 +10,25 @@ import { existsSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 function say(message) {
-  process.stdout.write(`${message}\n`);
+  // ASCII-safe + explicit flush so Windows CMD never stays blank.
+  process.stdout.write(`${message}\r\n`);
+  if (typeof process.stdout.write === 'function' && process.stdout.writableNeedDrain) {
+    // no-op marker; real flush below
+  }
+  try {
+    if (typeof process.stdout._handle?.setBlocking === 'function') {
+      process.stdout._handle.setBlocking(true);
+    }
+  } catch {
+    // ignore
+  }
 }
 
-// Print BEFORE any heavy import so a hang is never silent on Windows.
-say('[repair] เริ่มซ่อม Resume ที่ไม่ครบ...');
+say('[repair] start');
+say('[repair] script loaded — preparing...');
 
 const dryRun = process.argv.includes('--dry-run');
-if (dryRun) say('[repair] โหมด dry-run — จะไม่เขียนลง DB');
+if (dryRun) say('[repair] dry-run mode (no DB writes)');
 
 const TEXT_FIELDS = [
   'prefix', 'first_name', 'last_name', 'full_name', 'phone', 'email', 'line_id', 'facebook',
@@ -76,42 +87,60 @@ async function patchCandidateById(client, stringifyForJsonb, id, parsed) {
 }
 
 async function main() {
-  say('[repair] กำลังโหลด dotenv / parser / db...');
-  const [{ default: dotenv }, parser, poolMod, repo] = await Promise.all([
-    import('dotenv'),
-    import('../src/providers/jobbkk/parser.js'),
-    import('../src/db/pool.js'),
-    import('../src/db/repositories.js'),
-  ]);
-  const { fillMissingFromRawText } = parser;
-  const { getPool, closePool, withTransaction } = poolMod;
-  const { stringifyForJsonb } = repo;
+  say('[repair] loading dotenv / parser / db ...');
+  const heartbeat = setInterval(() => {
+    say('[repair] still loading modules (cheerio/pg) ...');
+  }, 2000);
+
+  let dotenv;
+  let fillMissingFromRawText;
+  let getPool;
+  let closePool;
+  let withTransaction;
+  let stringifyForJsonb;
+  try {
+    const mods = await Promise.all([
+      import('dotenv'),
+      import('../src/providers/jobbkk/parser.js'),
+      import('../src/db/pool.js'),
+      import('../src/db/repositories.js'),
+    ]);
+    dotenv = mods[0].default;
+    fillMissingFromRawText = mods[1].fillMissingFromRawText;
+    getPool = mods[2].getPool;
+    closePool = mods[2].closePool;
+    withTransaction = mods[2].withTransaction;
+    stringifyForJsonb = mods[3].stringifyForJsonb;
+  } finally {
+    clearInterval(heartbeat);
+  }
+  say('[repair] modules loaded');
 
   const rootEnv = resolve(process.cwd(), '.env');
   const webEnv = resolve(process.cwd(), 'web/.env');
   if (existsSync(rootEnv)) {
     dotenv.config({ path: rootEnv, override: true });
-    say('[repair] โหลด .env ที่รากโปรเจกต์แล้ว');
+    say('[repair] loaded root .env');
   } else {
-    say('[repair] ไม่พบ .env ที่รากโปรเจกต์');
+    say('[repair] root .env NOT found');
   }
   if (existsSync(webEnv)) {
     dotenv.config({ path: webEnv });
-    say('[repair] โหลด web/.env แล้ว');
+    say('[repair] loaded web/.env');
   }
 
   const hasDb = Boolean(process.env.DATABASE_URL || (process.env.PGHOST && process.env.PGPASSWORD));
-  say(`[repair] การตั้งค่า DB: ${hasDb ? 'พบค่าเชื่อมต่อ' : 'ไม่ครบ'}`);
-  if (!hasDb) throw new Error('ต้องมี .env (PGHOST/PGPASSWORD หรือ DATABASE_URL)');
+  say(`[repair] DB config: ${hasDb ? 'ok' : 'MISSING'}`);
+  if (!hasDb) throw new Error('Need .env with PGHOST/PGPASSWORD or DATABASE_URL');
 
-  say(`[repair] เป้าหมาย DB: ${process.env.PGHOST || 'DATABASE_URL'} / schema=${process.env.DB_SCHEMA || 'so-candidate-data'}`);
-  say('[repair] กำลังเชื่อมต่อฐานข้อมูล (timeout 15 วินาที)...');
+  say(`[repair] target: ${process.env.PGHOST || 'DATABASE_URL'} schema=${process.env.DB_SCHEMA || 'so-candidate-data'}`);
+  say('[repair] connecting DB (15s timeout)...');
   const pool = getPool();
   await Promise.race([
     pool.query('SELECT 1 AS ok'),
-    new Promise((_, reject) => setTimeout(() => reject(new Error('ต่อ DB ไม่สำเร็จภายใน 15 วินาที — เช็กเน็ต/VPN/.env')), 15_000)),
+    new Promise((_, reject) => setTimeout(() => reject(new Error('DB connect timeout 15s — check VPN/network/.env')), 15_000)),
   ]);
-  say('[repair] เชื่อมต่อ DB ได้ กำลังค้น Resume ที่ไม่ครบ...');
+  say('[repair] DB connected — scanning incomplete resumes...');
 
   const { rows } = await pool.query(`
     SELECT c.*, s.raw_text, s.platform, s.source_url, s.external_id, s.parse_status
@@ -132,7 +161,7 @@ async function main() {
      ORDER BY c.last_updated_at DESC
      LIMIT 2000
   `);
-  say(`[repair] พบผู้สมัครที่เข้าข่าย ${rows.length} คน`);
+  say(`[repair] candidates to check: ${rows.length}`);
 
   let scanned = 0;
   let repaired = 0;
@@ -177,7 +206,7 @@ async function main() {
 
       repaired += 1;
       if (sample.length < 8) sample.push({ id: row.id, fields: changed });
-      if (repaired % 25 === 0) say(`[repair] ซ่อมแล้ว ${repaired} คน...`);
+      if (repaired % 25 === 0) say(`[repair] repaired ${repaired}...`);
 
       if (dryRun) continue;
       await withTransaction(async (client) => {
@@ -199,14 +228,13 @@ async function main() {
     }
 
     say(JSON.stringify({ dryRun, scanned, repaired, filledFields, sample }, null, 2));
-    say('[repair] เสร็จแล้ว');
+    say('[repair] done');
   } finally {
     await closePool();
   }
 }
 
-// Always run when invoked via `node scripts/...` (Windows path URL compare is unreliable).
 main().catch((error) => {
-  say(`[repair] ล้มเหลว: ${error.message}`);
+  say(`[repair] FAILED: ${error.message}`);
   process.exitCode = 1;
 });
