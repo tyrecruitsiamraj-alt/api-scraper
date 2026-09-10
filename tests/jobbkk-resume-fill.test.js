@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { fillMissingFromRawText, parseResumeHtml } from '../src/providers/jobbkk/parser.js';
+import { fillMissingFromRawText, isResumeProfileThin, parseResumeHtml } from '../src/providers/jobbkk/parser.js';
 
 test('fillMissingFromRawText recovers profile fields from collapsed JobBKK text', () => {
   const record = {
@@ -72,4 +72,9 @@ test('preview_new HTML parser fills gender/age/education before returning', () =
   assert.equal(parsed.education[0].degree, 'ปริญญาตรี');
   assert.equal(parsed.work_experience[0].position, 'เจ้าหน้าที่บัญชี');
   assert.equal(parsed.parse_status, 'success');
+  assert.equal(isResumeProfileThin(parsed), false);
+});
+
+test('name-only shell is treated as a thin JobBKK profile', () => {
+  assert.equal(isResumeProfileThin({ name: 'นายทดสอบ', raw_text: 'นายทดสอบ' }), true);
 });

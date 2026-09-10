@@ -2,7 +2,7 @@ import { resolveProvider } from './connectors/registry.js';
 import { RateLimiter } from './core/anti-ban.js';
 import { splitCriteria } from './core/candidate-match.js';
 import { evaluateResumeQualification } from './core/resume-qualification.js';
-import { envInt } from './config.js';
+import { envInt, sleep } from './config.js';
 import {
   countScrapedToday,
   finishRun,
@@ -270,6 +270,13 @@ export async function runConnector(connector, criteria, runtime, opts = {}) {
         const authBlocked = provider.isResumeAuthBlocked?.(html, url) ?? false;
         if (authBlocked) {
           await refreshSession(`resume ${id}: session expired (login page)`);
+          html = await provider.fetchResumeHtml(sess, id, runtime);
+          parsed = provider.parseResumeHtml(html, { sourceUrl: url, index: saved + 1, focusPosition: criteria.position || '-' });
+        }
+        // JobBKK บางครั้งวาดแค่ชื่อก่อน — เปิดใหม่ 1 ครั้งถ้าโปรไฟล์ยังบางเกินกว่าจะใช้
+        if (provider.isResumeProfileThin?.(parsed)) {
+          console.warn(`  ↻ resume ${id}: profile still thin — refetch once`);
+          await sleep(800);
           html = await provider.fetchResumeHtml(sess, id, runtime);
           parsed = provider.parseResumeHtml(html, { sourceUrl: url, index: saved + 1, focusPosition: criteria.position || '-' });
         }

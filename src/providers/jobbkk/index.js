@@ -1,7 +1,7 @@
 import { getJobbkkSession, logoutJobbkk } from './session.js';
 import { fetchResumeHtml, isResumeAuthBlocked, resumeDetailUrl } from './client.js';
 import { browserSearchResumeIds } from './browser-search.js';
-import { parseResumeHtml } from './parser.js';
+import { parseResumeHtml, isResumeProfileThin } from './parser.js';
 import { collectAssetsForDb } from './assets.js';
 
 export const jobbkkProvider = {
@@ -20,6 +20,7 @@ export const jobbkkProvider = {
   fetchResumeHtml,
   resumeDetailUrl,
   parseResumeHtml,
+  isResumeProfileThin,
   collectAssetsForDb,
 
   /** Stable external id for this platform = the resume data-id. */

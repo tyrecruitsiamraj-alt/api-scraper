@@ -247,6 +247,54 @@ function resumeSectionsPainted() {
   return ready;
 }
 
+/** True when the painted page has more than a name shell — contact/gender + education or work. */
+function resumeDetailComplete() {
+  const body = (document.body?.innerText || '').replace(/\s+/g, ' ').trim();
+  if (body.length < 80) return false;
+  const hasName =
+    !!(document.querySelector('h3.jobseeker-name')?.textContent?.trim())
+    || !!(document.querySelector('.rsm-name span')?.textContent?.trim());
+  if (!hasName) return false;
+  const hasContact = /(?:เบอร์โทร|อีเมล|Email)\s*[:：]?/.test(body) || /0\d[\d\-]{7,}\d/.test(body) || /@/.test(body);
+  const hasGenderOrAge = /เพศ\s*[:：]?\s*(?:ชาย|หญิง)/.test(body) || /อายุ\s*[:：]?\s*\d{1,2}/.test(body);
+  const hasEdu = /ประวัติการศึกษา/.test(body) && /(?:วุฒิ|มหาวิทยาลัย|วิทยาลัย|ปวช|ปวส|มัธยม|ปริญญา)/.test(body);
+  const hasWork = /ประวัติการทำงาน/.test(body) && /(?:ตำแหน่ง|บริษัท|ไม่มีประสบการณ์)/.test(body);
+  return (hasContact || hasGenderOrAge) && (hasEdu || hasWork);
+}
+
+async function settleResumePage(page) {
+  const populated = await page
+    .waitForFunction(resumeSettled, null, { timeout: RESUME_READY_TIMEOUT_MS(), polling: 300 })
+    .then(() => true)
+    .catch(() => false);
+
+  await page.waitForLoadState('networkidle', { timeout: 5_000 }).catch(() => {});
+  const masked = await page.locator('.ownerNoLogin').count().then((n) => n > 0).catch(() => false);
+  if (!populated || masked) {
+    await sleep(500);
+    return { populated, masked, complete: false };
+  }
+
+  // Scroll once so lazy timeline sections (education/work) paint before we snapshot.
+  await page.evaluate(async () => {
+    const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+    window.scrollTo(0, document.body.scrollHeight || 2000);
+    await pause(350);
+    window.scrollTo(0, Math.floor((document.body.scrollHeight || 2000) / 2));
+    await pause(250);
+    window.scrollTo(0, 0);
+    await pause(200);
+  }).catch(() => {});
+
+  await page.waitForFunction(resumeSectionsPainted, null, { timeout: 20_000, polling: 200 }).catch(() => {});
+  const complete = await page
+    .waitForFunction(resumeDetailComplete, null, { timeout: 12_000, polling: 250 })
+    .then(() => true)
+    .catch(() => false);
+  await sleep(complete ? 700 : 1200);
+  return { populated, masked, complete };
+}
+
 /**
  * Fetch a resume detail page as FULLY-RENDERED HTML.
  *
@@ -276,24 +324,12 @@ export async function fetchResumeHtml(session, id, runtime = {}) {
         // a modal/overlay, and the generic "press Escape / click .close" heuristics tear
         // it down before the data paints. A cookie banner doesn't block DOM extraction.
 
-        // Wait for the profile to be genuinely populated (name/contact has TEXT). The
-        // XHR that fills it lands after the shell paints. If it never populates (stale
-        // session), this times out and we snapshot anyway so isResumeAuthBlocked can
-        // trigger a relogin.
-        const populated = await page
-          .waitForFunction(resumeSettled, null, { timeout: RESUME_READY_TIMEOUT_MS(), polling: 300 })
-          .then(() => true)
-          .catch(() => false);
-
-        // let remaining sub-sections (skills / attachments) settle
-        await page.waitForLoadState('networkidle', { timeout: 5_000 }).catch(() => {});
-        const masked = await page.locator('.ownerNoLogin').count().then((n) => n > 0).catch(() => false);
-        if (populated && !masked) {
-          await page.waitForFunction(resumeSectionsPainted, null, { timeout: 20_000, polling: 200 }).catch(() => {});
-          // ให้หัวข้อประวัติ/งาน/ติดต่อวาดครบก่อน snapshot — กันบันทึกหน้าเปล่า
-          await sleep(900);
-        } else {
-          await sleep(500);
+        // Wait for name/contact, scroll to force education/work, then require a full paint.
+        // Snapshotting the shell too early is what produced blank phone/gender/education.
+        let settled = await settleResumePage(page);
+        if (settled.populated && !settled.masked && !settled.complete) {
+          await page.reload({ waitUntil: 'domcontentloaded', timeout: RESUME_GOTO_TIMEOUT_MS() }).catch(() => {});
+          settled = await settleResumePage(page);
         }
 
         const html = await page.content();

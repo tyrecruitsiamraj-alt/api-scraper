@@ -376,6 +376,23 @@ function parseStatus(record, rawText) {
   return 'partial';
 }
 
+/** True when the snapshot looks like a JobBKK shell — name only, missing profile body. */
+export function isResumeProfileThin(parsed = {}) {
+  const text = clean(parsed.raw_text);
+  const hasName = clean(parsed.name) || clean(parsed.full_name);
+  if (!hasName) return true;
+  const hasContact = clean(parsed.phone) || clean(parsed.email);
+  const hasGenderOrAge = clean(parsed.gender) || clean(parsed.age);
+  const hasEdu = (Array.isArray(parsed.education) && parsed.education.length > 0) || clean(parsed.education_summary);
+  const hasWork = (Array.isArray(parsed.work_experience) && parsed.work_experience.length > 0)
+    || clean(parsed.experience_summary)
+    || /ไม่มีประสบการณ์/u.test(text);
+  if (hasContact && (hasEdu || hasWork || hasGenderOrAge)) return false;
+  // Page text itself is still a shell
+  if (text.length < 120) return true;
+  return !(hasContact || hasGenderOrAge) || !(hasEdu || hasWork);
+}
+
 /**
  * Fill blank resume fields from stored / collapsed body text.
  * Safe to re-run on existing candidates — never overwrites a non-empty value.
