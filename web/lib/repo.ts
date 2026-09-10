@@ -2075,7 +2075,11 @@ export async function createCampaignFromRequest(
     fromSoRecruit = true;
     // ข้อมูลที่ So Recruit แนบมากับคำขอ (job_snapshot) — ตำแหน่ง/พื้นที่/รายได้ ฯลฯ
     // merge ค่าที่คนแก้บนการ์ดทับก่อน — title/detail/poster ทั้งสายใช้ค่าที่แก้แล้วอัตโนมัติ
-    const js = { ...hydrateJobSnapshot(p.job_snapshot ?? {}, (p as { job_row?: Record<string, unknown> }).job_row), ...ov };
+    const hydrated = hydrateJobSnapshot(
+      p.job_snapshot ?? {},
+      (p as { job_row?: Record<string, unknown> }).job_row,
+    ) as Record<string, unknown>;
+    const js: Record<string, unknown> = { ...hydrated, ...ov };
     const s = (k: string) => String(js[k] ?? '').trim();
     const position = s('position');
     title = position || p.request_no; // มีชื่อตำแหน่งจริง = ใช้เลย, ไม่มี = เลขใบขอ
