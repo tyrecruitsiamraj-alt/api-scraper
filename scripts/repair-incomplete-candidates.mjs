@@ -7,16 +7,37 @@
  *   node scripts/repair-incomplete-candidates.mjs --dry-run
  */
 import dotenv from 'dotenv';
+import { existsSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { fillMissingFromRawText } from '../src/providers/jobbkk/parser.js';
 import { getPool, closePool, withTransaction } from '../src/db/pool.js';
 import { upsertCandidate } from '../src/db/repositories.js';
 
-dotenv.config();
-dotenv.config({ path: resolve(process.cwd(), 'web/.env') });
+console.log('[repair] เริ่มซ่อม Resume ที่ไม่ครบ...');
+
+const rootEnv = resolve(process.cwd(), '.env');
+const webEnv = resolve(process.cwd(), 'web/.env');
+if (existsSync(rootEnv)) {
+  dotenv.config({ path: rootEnv });
+  console.log('[repair] โหลด .env ที่รากโปรเจกต์แล้ว');
+} else {
+  console.log('[repair] ไม่พบ .env ที่รากโปรเจกต์');
+}
+if (existsSync(webEnv)) {
+  dotenv.config({ path: webEnv });
+  console.log('[repair] โหลด web/.env แล้ว');
+}
+
+const hasDb = Boolean(process.env.DATABASE_URL || (process.env.PGHOST && process.env.PGPASSWORD));
+console.log(`[repair] การตั้งค่า DB: ${hasDb ? 'พบค่าเชื่อมต่อ' : 'ไม่ครบ — ต้องมี .env (PGHOST/PGPASSWORD หรือ DATABASE_URL)'}`);
+if (!hasDb) {
+  console.error('[repair] หยุด เพราะไม่มีค่าเชื่อมฐานข้อมูล');
+  process.exit(1);
+}
 
 const dryRun = process.argv.includes('--dry-run');
+if (dryRun) console.log('[repair] โหมด dry-run — จะไม่เขียนลง DB');
 
 const TEXT_FIELDS = [
   'prefix', 'first_name', 'last_name', 'full_name', 'phone', 'email', 'line_id', 'facebook',
@@ -37,7 +58,15 @@ function needsRepair(row) {
 }
 
 async function main() {
+  console.log('[repair] กำลังเชื่อมต่อฐานข้อมูล...');
   const pool = getPool();
+  // Fail fast if the office network / VPN cannot reach Postgres.
+  await Promise.race([
+    pool.query('SELECT 1 AS ok'),
+    new Promise((_, reject) => setTimeout(() => reject(new Error('ต่อ DB ไม่สำเร็จภายใน 15 วินาที — เช็กเน็ต/.env')), 15_000)),
+  ]);
+  console.log('[repair] เชื่อมต่อ DB ได้ กำลังค้น Resume ที่ไม่ครบ...');
+
   const { rows } = await pool.query(`
     SELECT c.*, s.raw_text, s.platform, s.source_url, s.external_id, s.parse_status
       FROM candidates c
@@ -57,6 +86,7 @@ async function main() {
      ORDER BY c.last_updated_at DESC
      LIMIT 2000
   `);
+  console.log(`[repair] พบผู้สมัครที่เข้าข่าย ${rows.length} คน`);
 
   let scanned = 0;
   let repaired = 0;
@@ -88,10 +118,20 @@ async function main() {
         filledFields += 1;
       }
     }
+    // Also count education/work array fills
+    if ((!Array.isArray(before.education) || before.education.length === 0) && parsed.education?.length) {
+      changed.push('education');
+      filledFields += 1;
+    }
+    if ((!Array.isArray(before.work_experience) || before.work_experience.length === 0) && parsed.work_experience?.length) {
+      changed.push('work_experience');
+      filledFields += 1;
+    }
     if (!changed.length) continue;
 
     repaired += 1;
     if (sample.length < 8) sample.push({ id: row.id, fields: changed });
+    if (repaired % 25 === 0) console.log(`[repair] ซ่อมแล้ว ${repaired} คน...`);
 
     if (dryRun) continue;
     await withTransaction(async (client) => {
@@ -119,13 +159,14 @@ async function main() {
     filledFields,
     sample,
   }, null, 2));
+  console.log('[repair] เสร็จแล้ว');
 }
 
 const isMain = process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href;
 if (isMain) {
   main()
     .catch((error) => {
-      console.error('[repair-incomplete-candidates]', error.message);
+      console.error('[repair] ล้มเหลว:', error.message);
       process.exitCode = 1;
     })
     .finally(() => closePool());
