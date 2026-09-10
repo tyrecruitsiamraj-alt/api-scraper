@@ -9,6 +9,7 @@ import { renderPoster } from '../../src/core/poster.js';
 import { withPosterTemplate } from '../../src/core/poster-template.js';
 import { evaluateResumeQualification } from '../../src/core/resume-qualification.js';
 import { selectPreferredScrapeWorker } from '../../src/core/worker-selection.js';
+import { assertAgeRange, buildScrapeCriteria } from './scrape-intake.js';
 
 // schema ของ autopost — แยกต่อ project ได้ผ่าน env (ไม่ตั้ง = so_autopost_jobs เดิม)
 // ใช้กับทุก query ข้าม schema ไปฝั่ง autopost. ค่าจาก env เราคุมเอง (ไม่ใช่ input ผู้ใช้)
@@ -1734,11 +1735,25 @@ function cleanOverrides(ov?: IntakeOverrides): Record<string, string> {
   return out;
 }
 
+export type ScrapeTaskOverrides = {
+  position?: string;
+  province?: string;
+  target?: number;
+  ageMin?: string;
+  ageMax?: string;
+  keyword?: string;
+  industry?: string;
+  education?: string;
+  gender?: string;
+  salaryMin?: string;
+  salaryMax?: string;
+};
+
 /** สร้าง Scraping task จากคำขอ So Recruit แบบ idempotent แล้วส่ง id กลับให้ action enqueue. */
 export async function createScrapeTaskFromSoRecruit(
   requestNo: string,
   connectorId: string,
-  overrides?: { position?: string; province?: string; target?: number; ageMin?: string; ageMax?: string },
+  overrides?: ScrapeTaskOverrides,
 ): Promise<string> {
   const existing = await q<{ id: string }>(
     `SELECT id FROM scrape_tasks WHERE source_request_no = $1 LIMIT 1`,
@@ -1778,34 +1793,16 @@ export async function createScrapeTaskFromSoRecruit(
   );
   if (!connector[0]) throw new Error('Connector ไม่พร้อมใช้งาน');
 
-  // คนแก้บนการ์ดก่อนกด = ใช้ค่าที่แก้; ไม่แก้ = ใช้ตามใบขอ
-  const position = (overrides?.position ?? '').trim() || req[0].erp_title || '';
-  const province = (overrides?.province ?? '').trim() || req[0].erp_province || '';
+  // คนแก้บนการ์ดก่อนกด = ใช้ค่าที่แก้; ไม่แก้ = ใช้ตามใบขอ — ช่องว่าง/ไม่ระบุไม่ถูกเดา
   const snapshot = req[0].job_snapshot ?? {};
-  const snapshotText = (...keys: string[]) => {
-    for (const key of keys) {
-      const value = String(snapshot[key] ?? '').trim();
-      if (value) return value;
-    }
-    return '';
-  };
-  const ageMin = (overrides?.ageMin ?? '').trim() || snapshotText('age_min', 'min_age', 'ageMin');
-  const ageMax = (overrides?.ageMax ?? '').trim() || snapshotText('age_max', 'max_age', 'ageMax');
-  const ageNumber = (value: string) => Number.parseInt(value.replace(/[^\d]/g, ''), 10);
-  const minAge = ageMin ? ageNumber(ageMin) : NaN;
-  const maxAge = ageMax ? ageNumber(ageMax) : NaN;
-  if ((ageMin && (!Number.isFinite(minAge) || minAge < 15 || minAge > 80))
-      || (ageMax && (!Number.isFinite(maxAge) || maxAge < 15 || maxAge > 80))) {
-    throw new Error('ช่วงอายุต้องอยู่ระหว่าง 15–80 ปี');
-  }
-  if (Number.isFinite(minAge) && Number.isFinite(maxAge) && minAge > maxAge) {
-    throw new Error('อายุต่ำสุดต้องไม่มากกว่าอายุสูงสุด');
-  }
-  const criteria: Record<string, string> = {};
-  if (position) criteria.position = position;
-  if (province) criteria.province = province;
-  if (Number.isFinite(minAge)) criteria.ageMin = String(minAge);
-  if (Number.isFinite(maxAge)) criteria.ageMax = String(maxAge);
+  const criteria = buildScrapeCriteria({
+    snapshot,
+    overrides: overrides ?? {},
+    erpTitle: req[0].erp_title || '',
+    erpProvince: req[0].erp_province || '',
+  });
+  assertAgeRange(criteria);
+  const position = criteria.position || req[0].erp_title || '';
   const target = Math.max(1, overrides?.target || req[0].erp_remaining || req[0].erp_qty || 20);
 
   const inserted = await q<{ id: string }>(

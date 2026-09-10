@@ -429,13 +429,23 @@ export async function startSoRecruitScrapeAction(formData: FormData) {
     redirect(`/orchestrator?notice=${encodeURIComponent(connector?.block_reason || 'บัญชี Connector นี้ยังไม่พร้อมใช้งาน')}`);
   }
   const owner = session.user?.email ?? session.user?.name ?? null;
-  // แผน scrape ที่คนเห็น/แก้บนการ์ดก่อนกด (ว่าง = ตามใบขอ)
+  const formField = (key: string) => {
+    if (!formData.has(key)) return undefined;
+    return String(formData.get(key) ?? '').trim();
+  };
+  // แผน scrape ที่คนเห็น/แก้บนการ์ดก่อนกด (ไม่มีช่อง = ตามใบขอ; ล้างช่อง = ไม่ใส่ตัวกรองนั้น)
   const taskId = await createScrapeTaskFromSoRecruit(requestNo, connectorId, {
-    position: String(formData.get('scrapePosition') ?? '').trim() || undefined,
-    province: String(formData.get('scrapeProvince') ?? '').trim() || undefined,
+    position: formField('scrapePosition'),
+    keyword: formField('scrapeKeyword'),
+    industry: formField('scrapeIndustry'),
+    province: formField('scrapeProvince'),
     target: Number(formData.get('scrapeTarget')) || undefined,
-    ageMin: String(formData.get('scrapeAgeMin') ?? '').trim() || undefined,
-    ageMax: String(formData.get('scrapeAgeMax') ?? '').trim() || undefined,
+    gender: formField('scrapeGender'),
+    education: formField('scrapeEducation'),
+    salaryMin: formField('scrapeSalaryMin'),
+    salaryMax: formField('scrapeSalaryMax'),
+    ageMin: formField('scrapeAgeMin'),
+    ageMax: formField('scrapeAgeMax'),
   });
   const queued = await enqueueScrapeForTask(taskId, owner);
   if (queued) kickWorker();

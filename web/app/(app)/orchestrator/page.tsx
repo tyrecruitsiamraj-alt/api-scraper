@@ -13,6 +13,7 @@ import { AutoRefresh } from '@/components/AutoRefresh';
 import { WorkerStatus } from '@/components/WorkerStatus';
 import { WorkCenter, type WorkCenterItem, type WorkCenterStage, type Step } from '@/components/WorkCenter';
 import { humanizeOperatorError, operatorJobTitle } from '@/lib/operator-copy';
+import { prefillScrapePlan } from '@/lib/scrape-intake.js';
 
 export const dynamic = 'force-dynamic';
 
@@ -113,20 +114,12 @@ export default async function OrchestratorPage({ searchParams }: { searchParams?
         { label: 'จำนวน', ok: has(js.qty) || has(request.erp_qty) },
         { label: 'เวลางาน', ok: has(js.work_schedule) },
       ];
-      // ข้อมูลใบขอเต็ม (snapshot + ERP fallback) — โชว์บนการ์ด + prefill ช่องแก้ไขก่อนรับงาน
-      const sv = (v: unknown) => String(v ?? '').trim();
-      const requestFields = {
-        position: sv(js.position) || (request.erp_title && request.erp_title !== request.request_no ? request.erp_title : ''),
-        location: sv(js.location) || request.erp_province || '',
-        income: sv(js.income),
-        qty: sv(js.qty) || (request.erp_qty ? String(request.erp_qty) : ''),
-        work_schedule: sv(js.work_schedule),
-        gender: sv(js.gender),
-        age_min: sv(js.age_min),
-        age_max: sv(js.age_max),
-        unit_name: sv(js.unit_name),
-        note: sv(js.note),
-      };
+      // ข้อมูลใบขอเต็ม (snapshot + ERP fallback) — โชว์บนการ์ด + prefill แผนการค้นก่อนรับงาน
+      const requestFields = prefillScrapePlan(js, {
+        position: request.erp_title && request.erp_title !== request.request_no ? request.erp_title : '',
+        location: request.erp_province || '',
+        qty: request.erp_qty ? String(request.erp_qty) : '',
+      });
       return {
         id: `request:${request.id}`,
         kind: request.request_type,

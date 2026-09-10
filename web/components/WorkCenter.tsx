@@ -14,6 +14,7 @@ import {
   startCampaignAction,
   startSoRecruitScrapeAction,
 } from '@/lib/actions';
+import { EDUCATION_LEVELS, GENDERS, PROVINCES, SALARY_LABELS, SALARY_STEPS } from '@/lib/filter-options';
 
 export type WorkCenterStage = 'intake' | 'working' | 'review' | 'completed' | 'attention';
 
@@ -123,6 +124,16 @@ function fmtDate(value: string) {
   } catch {
     return value;
   }
+}
+
+function salarySelectOptions(extra?: string) {
+  const value = String(extra ?? '').replace(/\D/g, '');
+  if (value && !(SALARY_STEPS as readonly string[]).includes(value)) return [value, ...SALARY_STEPS];
+  return [...SALARY_STEPS];
+}
+
+function salaryLabel(step: string) {
+  return SALARY_LABELS[step] ?? Number(step).toLocaleString('en-US');
 }
 
 function KindTag({ kind }: { kind: WorkCenterItem['kind'] }) {
@@ -325,29 +336,76 @@ function WorkAction({ item, connectors, facebookAccounts }: {
               🔎 แผนการค้น
               <span className="ml-1 font-normal text-subtle">— ระบบจะค้นหาตามนี้ แก้ได้ก่อนกด</span>
             </div>
-            <div className="mt-2 grid gap-x-3 gap-y-2 sm:grid-cols-5">
+            <div className="mt-2 grid gap-x-3 gap-y-2 sm:grid-cols-3">
               <div>
                 <label className="label" htmlFor={`sp-pos-${item.id}`}>ตำแหน่งที่ค้น</label>
                 <input id={`sp-pos-${item.id}`} name="scrapePosition" defaultValue={f.position ?? ''} placeholder="เช่น พนักงานขับรถ" className="field w-full" />
               </div>
               <div>
+                <label className="label" htmlFor={`sp-kw-${item.id}`}>คำค้น (Keyword)</label>
+                <input id={`sp-kw-${item.id}`} name="scrapeKeyword" defaultValue={f.keyword ?? ''} placeholder="ว่าง = ไม่ใส่ชิป" className="field w-full" />
+              </div>
+              <div>
+                <label className="label" htmlFor={`sp-ind-${item.id}`}>ประเภทงาน / สาขาอาชีพ</label>
+                <input id={`sp-ind-${item.id}`} name="scrapeIndustry" defaultValue={f.industry ?? ''} placeholder="ว่าง = ไม่ติ๊ก" className="field w-full" />
+              </div>
+              <div>
                 <label className="label" htmlFor={`sp-prov-${item.id}`}>จังหวัด</label>
-                <input id={`sp-prov-${item.id}`} name="scrapeProvince" defaultValue={f.location ?? ''} placeholder="ว่าง = ทุกจังหวัด" className="field w-full" />
+                <input id={`sp-prov-${item.id}`} name="scrapeProvince" list={`province-options-${item.id}`} defaultValue={f.location ?? ''} placeholder="ว่าง = ทุกจังหวัด" className="field w-full" />
+                <datalist id={`province-options-${item.id}`}>
+                  {PROVINCES.map((province) => (
+                    <option key={province} value={province} />
+                  ))}
+                </datalist>
               </div>
               <div>
                 <label className="label" htmlFor={`sp-target-${item.id}`}>เป้า (คน)</label>
                 <input id={`sp-target-${item.id}`} name="scrapeTarget" type="number" min={1} defaultValue={f.qty || ''} placeholder="20" className="field w-full" />
               </div>
               <div>
-                <label className="label" htmlFor={`sp-age-min-${item.id}`}>อายุต่ำสุด</label>
-                <input id={`sp-age-min-${item.id}`} name="scrapeAgeMin" type="number" min={15} max={80} defaultValue={f.age_min ?? ''} placeholder="เช่น 25" className="field w-full" />
+                <label className="label" htmlFor={`sp-gender-${item.id}`}>เพศ</label>
+                <select id={`sp-gender-${item.id}`} name="scrapeGender" defaultValue={f.gender || 'ไม่ระบุ'} className="field w-full">
+                  {GENDERS.map((gender) => (
+                    <option key={gender} value={gender}>{gender}</option>
+                  ))}
+                </select>
               </div>
               <div>
-                <label className="label" htmlFor={`sp-age-max-${item.id}`}>อายุสูงสุด</label>
-                <input id={`sp-age-max-${item.id}`} name="scrapeAgeMax" type="number" min={15} max={80} defaultValue={f.age_max ?? ''} placeholder="เช่น 45" className="field w-full" />
+                <label className="label" htmlFor={`sp-edu-${item.id}`}>วุฒิการศึกษา (ขั้นต่ำ)</label>
+                <select id={`sp-edu-${item.id}`} name="scrapeEducation" defaultValue={f.education || 'ไม่ระบุ'} className="field w-full">
+                  {EDUCATION_LEVELS.map((level) => (
+                    <option key={level} value={level}>{level}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="label">เงินเดือน (บาท/เดือน)</label>
+                <div className="flex items-center gap-2">
+                  <select name="scrapeSalaryMin" defaultValue={f.salary_min ?? ''} className="field w-full" aria-label="เงินเดือนต่ำสุด">
+                    <option value="">ต่ำสุด</option>
+                    {salarySelectOptions(f.salary_min).map((step) => (
+                      <option key={`min-${step}`} value={step}>{salaryLabel(step)}</option>
+                    ))}
+                  </select>
+                  <span className="text-subtle">–</span>
+                  <select name="scrapeSalaryMax" defaultValue={f.salary_max ?? ''} className="field w-full" aria-label="เงินเดือนสูงสุด">
+                    <option value="">สูงสุด</option>
+                    {salarySelectOptions(f.salary_max).map((step) => (
+                      <option key={`max-${step}`} value={step}>{salaryLabel(step)}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+              <div>
+                <label className="label">อายุ (ปี)</label>
+                <div className="flex items-center gap-2">
+                  <input name="scrapeAgeMin" type="number" min={15} max={80} defaultValue={f.age_min ?? ''} placeholder="ต่ำสุด" className="field w-full" aria-label="อายุต่ำสุด" />
+                  <span className="text-subtle">–</span>
+                  <input name="scrapeAgeMax" type="number" min={15} max={80} defaultValue={f.age_max ?? ''} placeholder="สูงสุด" className="field w-full" aria-label="อายุสูงสุด" />
+                </div>
               </div>
             </div>
-            <p className="mt-2 text-xs text-subtle">ระบบเริ่มตรวจจาก Resume ลำดับบนสุดของ JobBKK/JobThai ก่อน และนับเฉพาะคนที่มีหลักฐานว่าอายุอยู่ในช่วงนี้</p>
+            <p className="mt-2 text-xs text-subtle">ช่องว่างหรือ «ไม่ระบุ» จะไม่ถูกนำไปติ๊กบน JobBKK · ระบบค้นแบบ Normal Search ก่อน แล้วค่อยใช้ AI Search เติมจำนวนถ้ายังไม่ครบเป้า</p>
           </div>
           <div className="flex flex-wrap items-end gap-2">
             <div>
