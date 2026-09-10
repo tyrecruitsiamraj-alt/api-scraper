@@ -9,7 +9,7 @@ import { renderPoster } from '../../src/core/poster.js';
 import { withPosterTemplate } from '../../src/core/poster-template.js';
 import { evaluateResumeQualification } from '../../src/core/resume-qualification.js';
 import { selectPreferredScrapeWorker } from '../../src/core/worker-selection.js';
-import { assertAgeRange, buildScrapeCriteria } from './scrape-intake.js';
+import { assertAgeRange, buildScrapeCriteria, hydrateJobSnapshot } from './scrape-intake.js';
 
 // schema ของ autopost — แยกต่อ project ได้ผ่าน env (ไม่ตั้ง = so_autopost_jobs เดิม)
 // ใช้กับทุก query ข้าม schema ไปฝั่ง autopost. ค่าจาก env เราคุมเอง (ไม่ใช่ input ผู้ใช้)
@@ -1695,10 +1695,15 @@ export type PostingRequest = {
 
 export async function listSoRecruitPostingRequests(): Promise<PostingRequest[]> {
   try {
-    return await q<PostingRequest>(
+    const rows = await q<PostingRequest & {
+      erp_snapshot: Record<string, unknown> | null;
+      job_row: Record<string, unknown> | null;
+    }>(
       `SELECT r.id, r.request_no, r.job_id, r.reason, r.notes, r.requested_by_name, r.created_at,
               COALESCE(NULLIF(to_jsonb(r)->>'request_type', ''), 'content') AS request_type,
               (to_jsonb(r)->'job_snapshot') AS job_snapshot,
+              e.snapshot AS erp_snapshot,
+              to_jsonb(j) AS job_row,
               COALESCE(NULLIF(to_jsonb(r)->'job_snapshot'->>'position', ''),
                        e.title, NULLIF(to_jsonb(j)->>'job_description_code_1', ''),
                        NULLIF(to_jsonb(j)->>'staff_title_name', ''), j.job_type, j.unit_name) AS erp_title,
@@ -1714,6 +1719,10 @@ export async function listSoRecruitPostingRequests(): Promise<PostingRequest[]> 
         WHERE r.status = 'pending' AND c.id IS NULL AND st.id IS NULL
         ORDER BY r.created_at DESC`,
     );
+    return rows.map(({ erp_snapshot, job_row, ...row }) => ({
+      ...row,
+      job_snapshot: hydrateJobSnapshot(row.job_snapshot ?? {}, erp_snapshot, job_row),
+    }));
   } catch {
     return []; // สคีมา/สิทธิ์ไม่พร้อม — หน้า imports โชว์ empty state
   }
@@ -1769,10 +1778,14 @@ export async function createScrapeTaskFromSoRecruit(
     erp_qty: number | null;
     erp_remaining: number | null;
     job_snapshot: Record<string, unknown> | null;
+    erp_snapshot: Record<string, unknown> | null;
+    job_row: Record<string, unknown> | null;
   }>(
     `SELECT COALESCE(NULLIF(to_jsonb(r)->>'request_type', ''), 'content') AS request_type,
             r.reason,
             (to_jsonb(r)->'job_snapshot') AS job_snapshot,
+            e.snapshot AS erp_snapshot,
+            to_jsonb(j) AS job_row,
             COALESCE(e.title, NULLIF(to_jsonb(j)->>'job_description_code_1', ''),
                      NULLIF(to_jsonb(j)->>'staff_title_name', ''), j.job_type, j.unit_name) AS erp_title,
             COALESCE(e.province, j.location_address) AS erp_province,
@@ -1793,8 +1806,8 @@ export async function createScrapeTaskFromSoRecruit(
   );
   if (!connector[0]) throw new Error('Connector ไม่พร้อมใช้งาน');
 
-  // คนแก้บนการ์ดก่อนกด = ใช้ค่าที่แก้; ไม่แก้ = ใช้ตามใบขอ — ช่องว่าง/ไม่ระบุไม่ถูกเดา
-  const snapshot = req[0].job_snapshot ?? {};
+  // คนแก้บนการ์ดก่อนกด = ใช้ค่าที่แก้; ไม่แก้ = ใช้ตามใบขอที่ซ่อมจาก ERP/jobs แล้ว — ช่องว่างไม่ถูกเดา
+  const snapshot = hydrateJobSnapshot(req[0].job_snapshot ?? {}, req[0].erp_snapshot, req[0].job_row);
   const criteria = buildScrapeCriteria({
     snapshot,
     overrides: overrides ?? {},
@@ -2031,7 +2044,9 @@ export async function createCampaignFromRequest(
     const s = st[0];
     fromErp = true;
     // คนแก้บนการ์ด = ทับข้อมูล staging เฉพาะช่องที่กรอก (ไม่แก้ = ตามใบขอเป๊ะ)
-    snapshot = Object.keys(ov).length ? { ...(s.snapshot ?? {}), ...ov, user_edited: true } : (s.snapshot ?? {});
+    snapshot = Object.keys(ov).length
+      ? { ...hydrateJobSnapshot(s.snapshot ?? {}), ...ov, user_edited: true }
+      : hydrateJobSnapshot(s.snapshot ?? {});
     title = ov.position || s.title;
     province = ov.location || s.province;
     qty = (ov.qty ? Number(ov.qty) : null) || s.qty;
@@ -2040,12 +2055,15 @@ export async function createCampaignFromRequest(
     // ไม่มีใน ERP staging → ลองหยิบจากคำขอ So Recruit
     let pr: PostingRequest[] = [];
     try {
-      pr = await q<PostingRequest>(
-        `SELECT id, request_no, job_id, reason, notes, requested_by_name, created_at,
-                COALESCE(NULLIF(to_jsonb(job_posting_requests)->>'request_type', ''), 'content') AS request_type,
-                (to_jsonb(job_posting_requests)->'job_snapshot') AS job_snapshot,
+      pr = await q<PostingRequest & { job_row: Record<string, unknown> | null }>(
+        `SELECT r.id, r.request_no, r.job_id, r.reason, r.notes, r.requested_by_name, r.created_at,
+                COALESCE(NULLIF(to_jsonb(r)->>'request_type', ''), 'content') AS request_type,
+                (to_jsonb(r)->'job_snapshot') AS job_snapshot,
+                to_jsonb(j) AS job_row,
                 NULL::text AS erp_title, NULL::text AS erp_province, NULL::int AS erp_qty, NULL::int AS erp_remaining
-           FROM "jarvis_rm".job_posting_requests WHERE request_no = $1`,
+           FROM "jarvis_rm".job_posting_requests r
+           LEFT JOIN "jarvis_rm".jobs j ON j.id::text = r.job_id
+          WHERE r.request_no = $1`,
         [requestNo],
       );
     } catch {
@@ -2057,7 +2075,7 @@ export async function createCampaignFromRequest(
     fromSoRecruit = true;
     // ข้อมูลที่ So Recruit แนบมากับคำขอ (job_snapshot) — ตำแหน่ง/พื้นที่/รายได้ ฯลฯ
     // merge ค่าที่คนแก้บนการ์ดทับก่อน — title/detail/poster ทั้งสายใช้ค่าที่แก้แล้วอัตโนมัติ
-    const js = { ...((p.job_snapshot ?? {}) as Record<string, unknown>), ...ov };
+    const js = { ...hydrateJobSnapshot(p.job_snapshot ?? {}, (p as { job_row?: Record<string, unknown> }).job_row), ...ov };
     const s = (k: string) => String(js[k] ?? '').trim();
     const position = s('position');
     title = position || p.request_no; // มีชื่อตำแหน่งจริง = ใช้เลย, ไม่มี = เลขใบขอ

@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {
   assertAgeRange,
   buildScrapeCriteria,
+  hydrateJobSnapshot,
   normalizeScrapeEducation,
   normalizeScrapeGender,
   parseSalaryBounds,
@@ -138,6 +139,23 @@ test('intake criteria is what Talent Normal Search actually applies', () => {
   assert.deepEqual(plan.map((step) => step.field), [
     'position', 'keyword', 'jobTypes', 'province', 'education', 'salary', 'age',
   ]);
+});
+
+test('hydrate fills empty snapshot fields from ERP/jobs without inventing or overwriting', () => {
+  const hydrated = hydrateJobSnapshot(
+    { position: 'พนักงานขาย', gender: 'O', job_family: 'Sales' },
+    { request_name: 'ไม่ใช้ชื่อนี้', work_addr: 'สมุทรปราการ', request_qty: 4, income: '25000' },
+    { staff_title_name: 'เจ้าหน้าที่', education: 'ปริญญาตรี', work_schedule: 'จ-ศ 08.00-17.00', job_family: 'ไม่ใช่ประเภทงาน' },
+  );
+  assert.equal(hydrated.position, 'พนักงานขาย');
+  assert.equal(hydrated.location, 'สมุทรปราการ');
+  assert.equal(hydrated.qty, '4');
+  assert.equal(hydrated.income, '25000');
+  assert.equal(hydrated.education, 'ปริญญาตรี');
+  assert.equal(hydrated.work_schedule, 'จ-ศ 08.00-17.00');
+  assert.equal(hydrated.gender, 'O');
+  assert.equal(hydrated.industry, undefined);
+  assert.equal(hydrated.keyword, undefined);
 });
 
 test('age range is rejected when inverted', () => {

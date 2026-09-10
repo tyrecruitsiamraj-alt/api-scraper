@@ -161,6 +161,42 @@ export function assertAgeRange(criteria) {
   }
 }
 
+/**
+ * Fill empty snapshot fields from ERP staging / jobs row.
+ * Existing So Recruit values win. job_family is never copied into industry.
+ */
+const SNAPSHOT_ALIASES = {
+  position: ['position', 'request_name', 'staff_title_name', 'job_description_name', 'title'],
+  location: ['location', 'location_address', 'work_addr', 'site_name', 'province'],
+  income: ['income', 'salary'],
+  qty: ['qty', 'request_qty'],
+  work_schedule: ['work_schedule', 'work_time', 'work_hours', 'worktime'],
+  gender: ['gender', 'sex'],
+  age_min: ['age_min', 'min_age', 'ageMin'],
+  age_max: ['age_max', 'max_age', 'ageMax'],
+  education: ['education', 'degree', 'edu'],
+  unit_name: ['unit_name'],
+  note: ['note'],
+  keyword: ['keyword', 'keywords'],
+  industry: ['industry', 'occupation', 'job_types', 'jobTypes'],
+};
+
+export function hydrateJobSnapshot(snapshot = {}, ...sources) {
+  const bags = [snapshot, ...sources].filter((bag) => bag && typeof bag === 'object');
+  const merged = { ...snapshot };
+  for (const [key, aliases] of Object.entries(SNAPSHOT_ALIASES)) {
+    if (clean(merged[key])) continue;
+    for (const bag of bags) {
+      const value = snapshotText(bag, ...aliases);
+      if (value) {
+        merged[key] = value;
+        break;
+      }
+    }
+  }
+  return merged;
+}
+
 /** Prefill Orchestrator "แผนการค้น" selects without inventing missing fields. */
 export function prefillScrapePlan(snapshot = {}, extras = {}) {
   const salary = parseSalaryBounds(snapshot);
