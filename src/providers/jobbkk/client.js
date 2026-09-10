@@ -289,8 +289,9 @@ export async function fetchResumeHtml(session, id, runtime = {}) {
         await page.waitForLoadState('networkidle', { timeout: 5_000 }).catch(() => {});
         const masked = await page.locator('.ownerNoLogin').count().then((n) => n > 0).catch(() => false);
         if (populated && !masked) {
-          await page.waitForFunction(resumeSectionsPainted, null, { timeout: 12_000, polling: 200 }).catch(() => {});
-          await sleep(400);
+          await page.waitForFunction(resumeSectionsPainted, null, { timeout: 20_000, polling: 200 }).catch(() => {});
+          // ให้หัวข้อประวัติ/งาน/ติดต่อวาดครบก่อน snapshot — กันบันทึกหน้าเปล่า
+          await sleep(900);
         } else {
           await sleep(500);
         }

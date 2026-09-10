@@ -85,7 +85,7 @@ function extractPhoneFromText(text) {
   return firstMatch(text, [/(?:เบอร์|โทร|Tel|Phone)\s*[:.]?\s*([0-9\-]{9,15})/iu, /\b(0\d[\d\-]{8,12})\b/]);
 }
 function extractEmailFromText(text) {
-  const e = firstMatch(text, [/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i]);
+  const e = firstMatch(text, [/([A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,})/i]);
   return isSiteEmail(e) ? '' : e;
 }
 function extractLineFromText(text) {
@@ -377,6 +377,109 @@ function parseStatus(record, rawText) {
 }
 
 /**
+ * Fill blank resume fields from stored / collapsed body text.
+ * Safe to re-run on existing candidates — never overwrites a non-empty value.
+ */
+export function fillMissingFromRawText(record, rawText) {
+  const text = clean(rawText);
+  if (!record || !text) return record || emptyRecord();
+
+  const STOP = '(?=\\s*(?:ตำแหน่ง|พื้นที่ที่ต้องการ|เงินเดือน(?:ที่ต้องการ)?|ระยะเวลาเริ่มงาน|งานที่ต้องการ|ประวัติการศึกษา|ประวัติการทำงาน|เพศ|สถานภาพ|ส่วนสูง|น้ำหนัก|สัญชาติ|ศาสนา|Hard Skills|Soft Skills)|$)';
+  const set = (key, value) => {
+    if (clean(record[key])) return;
+    const next = clean(value);
+    if (next) record[key] = next;
+  };
+
+  set('phone', normalizePhone(extractPhoneFromText(text)));
+  set('email', validEmail(extractEmailFromText(text)));
+  if (!clean(record.line_id)) record.line_id = validLineId(extractLineFromText(text));
+  set('gender', firstMatch(text, [/เพศ\s*[:：]?\s*(ชาย|หญิง)/u]));
+  set('age', extractAge(text));
+  set('birth_date', extractBirthDate(text));
+  set('nationality', firstMatch(text, [new RegExp(`สัญชาติ\\s*[:：]?\\s*(.+?)${STOP}`, 'u')]));
+  set('religion', firstMatch(text, [new RegExp(`ศาสนา\\s*[:：]?\\s*(.+?)${STOP}`, 'u')]));
+  set('height', firstMatch(text, [/ส่วนสูง\s*[:：]?\s*([\d.]+)/u]));
+  set('weight', firstMatch(text, [/น้ำหนัก\s*[:：]?\s*([\d.]+)/u]));
+  set('marital_status', firstMatch(text, [new RegExp(`สถานะ(?:ภาพ)?(?:สมรส)?\\s*[:：]?\\s*(.+?)${STOP}`, 'u')]));
+  set('military_status', firstMatch(text, [new RegExp(`สถานภาพทางทหาร\\s*[:：]?\\s*(.+?)${STOP}`, 'u')]));
+  set('expected_salary', firstMatch(text, [/เงินเดือนที่ต้องการ\s*[:：]?\s*([\d,][\d,\s-]*\d)/u]));
+  set('desired_work_area', firstMatch(text, [new RegExp(`พื้นที่ที่ต้องการทำงาน\\s*[:：]?\\s*(.+?)${STOP}`, 'u')]));
+  set('available_start', firstMatch(text, [new RegExp(`ระยะเวลาเริ่มงาน\\s*[:：]?\\s*(.+?)${STOP}`, 'u')]));
+  set('address', firstMatch(text, [new RegExp(`ที่อยู่ปัจจุบัน\\s*[:：]?\\s*(.+?)${STOP}`, 'u')]));
+  set('job_type', firstMatch(text, [new RegExp(`(?:รูปแบบงาน|ประเภทงาน)\\s*[:：]?\\s*(.+?)${STOP}`, 'u')]));
+
+  if (!clean(record.desired_positions)) {
+    const sec = text.match(/งานที่ต้องการ([\s\S]*?)ประวัติการศึกษา/u);
+    if (sec?.[1]) {
+      const positions = [...sec[1].matchAll(new RegExp(`ตำแหน่ง\\s*[:：]\\s*(.+?)${STOP}`, 'gu'))]
+        .map((m) => clean(m[1]))
+        .filter(Boolean);
+      if (positions.length) record.desired_positions = [...new Set(positions)].join(', ');
+    }
+  }
+
+  if ((!Array.isArray(record.education) || !record.education.length) && !clean(record.education_summary)) {
+    const edu = firstMatch(text, [/ประวัติการศึกษา\s*([\s\S]*?)(?=ประวัติการทำงาน|ข้อมูลการฝึกอบรม|ทักษะ|$)/u]);
+    if (edu && edu.length >= 8) {
+      record.education_summary = edu;
+      const degree = firstMatch(edu, [/(ปริญญาเอก|ปริญญาโท|ปริญญาตรี|ปวส\.?\/?อนุปริญญา|ปวช\.?|มัธยมศึกษาตอนปลาย|มัธยมศึกษาตอนต้น)/u]);
+      record.education = [{
+        institution: firstMatch(edu, [/(มหาวิทยาลัย[^\s]+|วิทยาลัย[^\s]+|โรงเรียน[^\s]+)/u]) || '',
+        degree: degree || '',
+        major: firstMatch(edu, [/สาขา(?:วิชา)?\s*[:：]?\s*([^\s]+)/u]) || '',
+        faculty: '',
+        graduation_year: firstMatch(edu, [/(?:ปีที่จบ(?:การศึกษา)?|จบ)\s*[:：]?\s*(\d{4})/u]) || '',
+        gpa: '',
+      }].filter((item) => item.institution || item.degree);
+    }
+  }
+  if ((!Array.isArray(record.work_experience) || !record.work_experience.length) && !clean(record.experience_summary)) {
+    const work = firstMatch(text, [/ประวัติการทำงาน(?:\/ฝึกงาน)?\s*([\s\S]*?)(?=ข้อมูลการฝึกอบรม|ทักษะ|Hard Skills|Soft Skills|$)/u]);
+    if (work && work.length >= 8) {
+      record.experience_summary = work;
+      const position = firstMatch(work, [/ตำแหน่ง(?:งาน)?\s*[:：]?\s*([^\s]+(?:\s+[^\s]+){0,4})/u]);
+      const company = firstMatch(work, [/(?:ข้อมูลบริษัท|บริษัท)\s*[:：]?\s*([^\s]+(?:\s+[^\s]+){0,5})/u]);
+      if (position || company) {
+        record.work_experience = [{
+          year: firstMatch(work, [/\b(20\d{2}|25\d{2})\b/]) || '',
+          company: company || '',
+          position: position || '',
+          period: '',
+          salary: '',
+          business_type: '',
+          responsibilities: '',
+        }];
+      }
+    }
+  }
+
+  if (clean(record.address) && !clean(record.province)) {
+    record.province = extractProvinceFromAddress(record.address);
+  }
+  if (!clean(record.province) && clean(record.desired_work_area)) {
+    record.province = firstMatch(record.desired_work_area, [/([ก-๙]+มหานคร|[ก-๙]+)/u]);
+  }
+
+  return record;
+}
+
+function labeledHeaderValues($, root) {
+  const map = {};
+  root.find('h5, .label, dt, th').each((_, el) => {
+    const label = clean($(el).text()).replace(/:$/, '');
+    if (!label) return;
+    let value = stripLeadingDash($(el).nextAll('p, dd, td, span').first().text());
+    if (!value) {
+      const parentText = clean($(el).parent().text());
+      value = stripLeadingDash(parentText.replace(label, '').replace(/^[\s:：]+/, ''));
+    }
+    if (value && !map[label]) map[label] = value;
+  });
+  return map;
+}
+
+/**
  * Parse a JobBKK resume detail HTML into a candidate record.
  * Handles both the classic (.rsm-name) and preview_new (h3.jobseeker-name) layouts.
  */
@@ -422,20 +525,26 @@ export function parseResumeHtml(html, { sourceUrl, index, focusPosition = '-' })
     const jsName = clean($('h3.jobseeker-name').first().text());
     if (jsName) record.name = jsName;
     const header = $('.header-name').first();
-    const afterLabel = (label) => {
-      let val = '';
-      header.find('h5').each((_, h) => {
-        if (val) return;
-        if (clean($(h).text()).includes(label)) {
-          val = stripLeadingDash($(h).nextAll('p').first().text());
-        }
-      });
-      return val;
-    };
-    record.address = afterLabel('ที่อยู่ปัจจุบัน');
-    record.phone = normalizePhone(afterLabel('เบอร์โทรศัพท์'));
-    record.email = afterLabel('อีเมล');
-    record.line_id = afterLabel('Line');
+    const labeled = labeledHeaderValues($, header.length ? header : $('body'));
+    const pick = (...labels) => labels.map((label) => labeled[label]).find(Boolean) || '';
+    record.address = pick('ที่อยู่ปัจจุบัน') || record.address;
+    record.phone = normalizePhone(pick('เบอร์โทรศัพท์', 'โทรศัพท์')) || record.phone;
+    record.email = pick('อีเมล', 'Email') || record.email;
+    record.line_id = pick('Line', 'LINE', 'ไลน์') || record.line_id;
+    record.gender = pick('เพศ') || record.gender;
+    record.age = extractAge(pick('อายุ', 'วันเดือนปีเกิด') || '') || record.age;
+    record.birth_date = extractBirthDate(pick('วันเดือนปีเกิด') || '') || record.birth_date;
+    record.nationality = pick('สัญชาติ') || record.nationality;
+    record.religion = pick('ศาสนา') || record.religion;
+    record.height = pick('ส่วนสูง') || record.height;
+    record.weight = pick('น้ำหนัก') || record.weight;
+    record.marital_status = pick('สถานะ', 'สถานภาพ') || record.marital_status;
+    record.military_status = pick('สถานภาพทางทหาร') || record.military_status;
+    record.desired_work_area = pick('พื้นที่ที่ต้องการทำงาน') || record.desired_work_area;
+    record.expected_salary = pick('เงินเดือน', 'เงินเดือนที่ต้องการ') || record.expected_salary;
+    record.available_start = pick('ระยะเวลาเริ่มงาน') || record.available_start;
+    record.job_type = pick('รูปแบบงาน', 'ประเภทงาน') || record.job_type;
+    record.intro = clean($('.header-name .flex-column p.break_word, .introduce p').first().text()) || record.intro;
     record.profile_image_url = $('.pic-profile img, .main-name img').first().attr('src') ?? '';
     record.hard_skills = listText($, '.hard-skill li');
     record.soft_skills = listText($, '.soft-skill li');
@@ -474,27 +583,7 @@ export function parseResumeHtml(html, { sourceUrl, index, focusPosition = '-' })
     record.experience_summary = summarizeExperience(work);
   }
 
-  // Layout-agnostic text fallbacks — fill fields the preview_new branch (which
-  // lacks the classic #rsm-info / #rsm-request boxes) leaves empty. Only set when
-  // still missing, so the classic selector values always win.
-  // rawText has NO newlines (clean() collapses all whitespace), so bound each
-  // value at the NEXT known label instead of relying on \n.
-  const STOP = '(?=\\s*(?:ตำแหน่ง|พื้นที่ที่ต้องการ|เงินเดือน|ระยะเวลาเริ่มงาน|งานที่ต้องการ|ประวัติ|เพศ|สถานภาพ|ส่วนสูง|น้ำหนัก)|$)';
-  if (!record.gender) record.gender = firstMatch(rawText, [/เพศ\s*[:：]\s*(ชาย|หญิง)/u]);
-  if (!record.age) record.age = extractAge(rawText);
-  if (!record.expected_salary) record.expected_salary = firstMatch(rawText, [/เงินเดือนที่ต้องการ\s*[:：]?\s*([\d,][\d,\s-]*\d)/u]);
-  if (!record.desired_work_area) record.desired_work_area = firstMatch(rawText, [new RegExp(`พื้นที่ที่ต้องการทำงาน\\s*[:：]?\\s*(.+?)${STOP}`, 'u')]);
-  if (!record.available_start) record.available_start = firstMatch(rawText, [new RegExp(`ระยะเวลาเริ่มงาน\\s*[:：]?\\s*(.+?)${STOP}`, 'u')]);
-  if (!record.military_status) record.military_status = firstMatch(rawText, [new RegExp(`สถานภาพทางทหาร\\s*[:：]?\\s*(.+?)${STOP}`, 'u')]);
-  if (!record.desired_positions) {
-    const sec = rawText.match(/งานที่ต้องการ([\s\S]*?)ประวัติการศึกษา/u);
-    if (sec?.[1]) {
-      const positions = [...sec[1].matchAll(new RegExp(`ตำแหน่ง\\s*[:：]\\s*(.+?)${STOP}`, 'gu'))]
-        .map((m) => clean(m[1]))
-        .filter(Boolean);
-      if (positions.length) record.desired_positions = [...new Set(positions)].join(', ');
-    }
-  }
+  fillMissingFromRawText(record, rawText);
 
   record.attachments = extractAttachments($);
 
