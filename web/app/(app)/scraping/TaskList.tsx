@@ -353,7 +353,18 @@ export function TaskList({ initialTasks }: { initialTasks: TaskRow[] }) {
               </p>
             )}
             {status === 'partial' && humanError && <p className="mt-2 text-xs text-amber-700">{humanError.detail} · {humanError.next}</p>}
-            {status === 'error' && humanError && <div className="mt-3 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-800"><b>{humanError.title}</b><p className="mt-1">{humanError.detail}</p><p className="mt-1 font-medium">ทำต่อ: {humanError.next}</p><details className="mt-2 text-red-700/75"><summary className="cursor-pointer">รายละเอียดสำหรับผู้ดูแล</summary><p className="mt-1 break-words">{humanError.technical}</p></details></div>}
+            {status === 'error' && humanError && (
+              <div className="mt-3 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-800">
+                <b>{humanError.title}</b>
+                <p className="mt-1">{humanError.detail}</p>
+                <p className="mt-1 font-medium">ทำต่อ: {humanError.next}</p>
+                {humanError.technical && (
+                  <p className="mt-2 break-words rounded-lg bg-white/60 px-2 py-1.5 font-mono text-[11px] text-red-900/80">
+                    สาเหตุระบบ: {humanError.technical}
+                  </p>
+                )}
+              </div>
+            )}
 
             {/* แก้เกณฑ์การค้นหลังสร้าง — ปิดตอนกำลังวิ่ง (จะมีผลรอบถัดไปที่กดรัน) */}
             {!busy && (
