@@ -54,7 +54,11 @@ function validEmail(value) {
   return /^[^@\s]+@[^@\s]+\.[^@\s]{2,}$/.test(email) ? email : '';
 }
 
-/** Patch one existing candidate by id — never invents, never retargets another row. */
+/**
+ * Patch one existing candidate by id — never invents, never retargets another row.
+ * Intentionally does NOT change dedupe_key (unique) — filling phone/email from
+ * raw_text often collides with another candidate's phone:/email: key.
+ */
 async function patchCandidateById(client, stringifyForJsonb, id, parsed) {
   const phoneNorm = String(parsed.phone ?? '').replace(/\D/g, '');
   const emailNorm = validEmail(parsed.email);
@@ -74,13 +78,6 @@ async function patchCandidateById(client, stringifyForJsonb, id, parsed) {
   sets.push(`phone_norm = COALESCE(NULLIF($${params.length}, ''), phone_norm)`);
   params.push(emailNorm);
   sets.push(`email_norm = COALESCE(NULLIF($${params.length}, ''), email_norm)`);
-  if (phoneNorm) {
-    params.push(`phone:${phoneNorm}`);
-    sets.push(`dedupe_key = $${params.length}`);
-  } else if (emailNorm) {
-    params.push(`email:${emailNorm}`);
-    sets.push(`dedupe_key = CASE WHEN phone_norm = '' OR phone_norm IS NULL THEN $${params.length} ELSE dedupe_key END`);
-  }
   sets.push('last_updated_at = now()');
 
   await client.query(`UPDATE candidates SET ${sets.join(', ')} WHERE id = $1`, params);
@@ -166,7 +163,9 @@ async function main() {
   let scanned = 0;
   let repaired = 0;
   let filledFields = 0;
+  let failed = 0;
   const sample = [];
+  const errors = [];
 
   try {
     for (const row of rows) {
@@ -189,45 +188,52 @@ async function main() {
       for (const key of TEXT_FIELDS) {
         const target = key === 'full_name' ? 'name' : key;
         const next = parsed[target] ?? '';
-        if (blank(before[key]) && !blank(next)) {
-          changed.push(key);
-          filledFields += 1;
-        }
+        if (blank(before[key]) && !blank(next)) changed.push(key);
       }
       if ((!Array.isArray(row.education) || row.education.length === 0) && parsed.education?.length) {
         changed.push('education');
-        filledFields += 1;
       }
       if ((!Array.isArray(row.work_experience) || row.work_experience.length === 0) && parsed.work_experience?.length) {
         changed.push('work_experience');
-        filledFields += 1;
       }
       if (!changed.length) continue;
 
-      repaired += 1;
-      if (sample.length < 8) sample.push({ id: row.id, fields: changed });
-      if (repaired % 25 === 0) say(`[repair] repaired ${repaired}...`);
+      if (dryRun) {
+        repaired += 1;
+        filledFields += changed.length;
+        if (sample.length < 8) sample.push({ id: row.id, fields: changed });
+        continue;
+      }
 
-      if (dryRun) continue;
-      await withTransaction(async (client) => {
-        await patchCandidateById(client, stringifyForJsonb, row.id, parsed);
-        if (parsed.phone || parsed.email || (parsed.education?.length) || (parsed.work_experience?.length)
-            || parsed.gender || parsed.age || parsed.desired_positions) {
-          await client.query(
-            `UPDATE candidate_sources
-                SET parse_status = CASE
-                      WHEN $2 <> '' OR $3 <> '' THEN 'success'
-                      ELSE COALESCE(parse_status, 'partial')
-                    END,
-                    last_seen_at = now()
-              WHERE candidate_id = $1 AND platform = $4`,
-            [row.id, parsed.phone || '', parsed.email || '', row.platform],
-          );
-        }
-      });
+      try {
+        await withTransaction(async (client) => {
+          await patchCandidateById(client, stringifyForJsonb, row.id, parsed);
+          if (parsed.phone || parsed.email || (parsed.education?.length) || (parsed.work_experience?.length)
+              || parsed.gender || parsed.age || parsed.desired_positions) {
+            await client.query(
+              `UPDATE candidate_sources
+                  SET parse_status = CASE
+                        WHEN $2 <> '' OR $3 <> '' THEN 'success'
+                        ELSE COALESCE(parse_status, 'partial')
+                      END,
+                      last_seen_at = now()
+                WHERE candidate_id = $1 AND platform = $4`,
+              [row.id, parsed.phone || '', parsed.email || '', row.platform],
+            );
+          }
+        });
+        repaired += 1;
+        filledFields += changed.length;
+        if (sample.length < 8) sample.push({ id: row.id, fields: changed });
+        if (repaired % 25 === 0) say(`[repair] repaired ${repaired}...`);
+      } catch (error) {
+        failed += 1;
+        if (errors.length < 12) errors.push({ id: row.id, error: error.message });
+        say(`[repair] skip id=${row.id}: ${error.message}`);
+      }
     }
 
-    say(JSON.stringify({ dryRun, scanned, repaired, filledFields, sample }, null, 2));
+    say(JSON.stringify({ dryRun, scanned, repaired, failed, filledFields, sample, errors }, null, 2));
     say('[repair] done');
   } finally {
     await closePool();
