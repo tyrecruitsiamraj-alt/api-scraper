@@ -39,8 +39,8 @@ export async function WorkerStatus() {
       </details>
       {workerNeedsRefresh && (
         <div className="mt-2 rounded-lg border border-red-200 bg-white/70 px-3 py-2 text-red-800">
-          ที่ Mac Worker: ปิดแผงควบคุมเดิมก่อน แล้วเปิดไฟล์ <code>so-control.command</code> ใหม่และกด <b>R</b> “รีเฟรช” 1 ครั้ง
-          ระบบจะดึงโค้ดล่าสุด ปิด process เก่าทุกชั้น และไม่ยอมเปิด Worker เก่าถ้าดึงไม่สำเร็จ
+          ที่เครื่อง Windows: ดับเบิลคลิกไฟล์ <code>start-workers.bat</code> หนึ่งครั้ง
+          ระบบจะหยุดบอทเก่า ดึงโค้ด <code>main</code> แล้วเปิด Scraper + AutoPost ใหม่ — ไม่ยอมเปิดรุ่นเก่าถ้าดึงโค้ดไม่สำเร็จ
         </div>
       )}
       {workers.length > 0 && offline.length > 0 && (
