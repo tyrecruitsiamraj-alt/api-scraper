@@ -594,7 +594,9 @@ function WorkItemCard({ item, connectors, facebookAccounts }: {
             <div className={`min-w-0 flex-1 whitespace-pre-wrap text-[13px] leading-relaxed ${item.stage === 'attention' ? 'rounded-xl border-l-2 border-accent bg-red-50 px-3.5 py-2.5 text-red-700' : 'text-ink/70'}`}>
               {item.stage === 'review' && item.kind === 'content'
                 ? <CaptionViewer caption={item.content?.caption ?? item.detail} />
-                : (item.detail.length > 240 ? `${item.detail.slice(0, 240)}…` : item.detail)}
+                : (item.stage === 'attention' || item.detail.length <= 420
+                  ? item.detail
+                  : `${item.detail.slice(0, 420)}…`)}
             </div>
           )}
         </div>

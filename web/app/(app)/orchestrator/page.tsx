@@ -201,7 +201,14 @@ export default async function OrchestratorPage({ searchParams }: { searchParams?
         stage,
         title: taskTitle,
         requestNo: task.source_request_no,
-        detail: taskError ? `${taskError.title} — ${taskError.next}` : null,
+        detail: taskError
+          ? [
+            taskError.title,
+            taskError.detail,
+            `ทำต่อ: ${taskError.next}`,
+            taskError.technical ? `สาเหตุระบบ: ${taskError.technical}` : null,
+          ].filter(Boolean).join('\n')
+          : null,
         requester: null,
         connector: `${task.platform === 'jobthai' ? 'JobThai' : task.platform === 'jobbkk' ? 'JobBKK' : task.platform} · ${task.connector_label}`,
         statusLabel: task.status === 'done' && task.review_status === 'pending' ? 'รอตรวจรับข้อมูล' : task.status === 'partial' ? 'ยังได้ Resume ไม่ครบ' : task.status === 'error' ? 'ค้นหาไม่สำเร็จ' : task.status === 'queued' ? 'รอเริ่มค้นหา' : task.status === 'running' ? 'กำลังค้นหาผู้สมัคร' : 'สำเร็จ',
