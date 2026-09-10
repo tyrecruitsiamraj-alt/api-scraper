@@ -255,6 +255,7 @@ export async function createTaskAction(formData: FormData) {
   };
   const gender = filterVal('gender');
   const province = filterVal('province');
+  const industry = filterVal('industry');
   const education = filterVal('education');
   const salaryMin = filterVal('salaryMin');
   const salaryMax = filterVal('salaryMax');
@@ -271,6 +272,7 @@ export async function createTaskAction(formData: FormData) {
   }
   if (gender) criteria.gender = gender;
   if (province) criteria.province = province;
+  if (industry) criteria.industry = industry;
   if (education) criteria.education = education;
   if (salaryMin) criteria.salaryMin = salaryMin;
   if (salaryMax) criteria.salaryMax = salaryMax;

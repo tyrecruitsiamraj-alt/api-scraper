@@ -68,6 +68,7 @@ function filterChips(criteria: Record<string, unknown>): string[] {
   if (val('position')) chips.push(`ตำแหน่ง: ${val('position')}`);
   if (val('keyword')) chips.push(`คำค้น: ${val('keyword')}`);
   if (val('gender')) chips.push(`เพศ: ${val('gender')}`);
+  if (val('industry')) chips.push(`ประเภทงาน: ${val('industry')}`);
   if (val('province')) chips.push(`จังหวัด: ${val('province')}`);
   if (val('education')) chips.push(`วุฒิ: ${val('education')}`);
   const smin = val('salaryMin');

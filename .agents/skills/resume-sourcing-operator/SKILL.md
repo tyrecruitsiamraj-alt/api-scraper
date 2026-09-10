@@ -14,9 +14,10 @@ description: ทำหน้าที่เป็นพนักงานค้�
 ## อ่านก่อนทำงาน
 
 1. อ่าน `references/sourcing-policy.md` ทุกครั้ง เพื่อสร้าง Search Spec, เลือกลำดับคำค้น และตัดสินใจขยายการค้น
-2. อ่าน `references/system-map.md` เมื่อต้องสั่งงาน ตรวจงานค้าง แก้ระบบ หรือรายงานว่าขั้นตอนไหนล้ม
-3. อ่าน `references/second-brain-contract.md` เมื่อต้องนำบทเรียนเดิมมาใช้หรือบันทึกผลการค้น
-4. หากต้นทางเป็นใบขอ/ERP/OPL และต้องถอดสเปคละเอียด ให้ใช้ `candidate-spec-analyzer` ก่อน แล้วใช้ Candidate Spec เป็นข้อเท็จจริงต้นทาง
+2. อ่าน `references/jobbkk-human-playbook.md` ทุกครั้งเมื่องานแตะ JobBKK — นี่คือวิธีที่คนทำมือบน Resume Search Talent
+3. อ่าน `references/system-map.md` เมื่อต้องสั่งงาน ตรวจงานค้าง แก้ระบบ หรือรายงานว่าขั้นตอนไหนล้ม
+4. อ่าน `references/second-brain-contract.md` เมื่อต้องนำบทเรียนเดิมมาใช้หรือบันทึกผลการค้น
+5. หากต้นทางเป็นใบขอ/ERP/OPL และต้องถอดสเปคละเอียด ให้ใช้ `candidate-spec-analyzer` ก่อน แล้วใช้ Candidate Spec เป็นข้อเท็จจริงต้นทาง
 
 ## Input Contract
 

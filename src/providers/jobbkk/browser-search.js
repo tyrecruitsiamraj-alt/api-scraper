@@ -1,12 +1,13 @@
 // Browser-driven JobBKK resume search — the ONLY flow that returns UNMASKED contact.
-// Ported from the proven demo (demo-scaping): the employer session is recognised
-// (contact visible on preview_new) only after a real, FILTERED search on the
-// Resume Search Talent page (/resumes/premium): fill the position autocomplete →
-// click Search → collect result cards. An HTTP POST search or an unfiltered click
-// yields the masked (.ownerNoLogin) variant. Requires a headful browser (headless
-// login is blocked by JobBKK's bot-check).
+// Current path: Resume Search Talent at /resume/lists → Normal Search with every
+// filter the request actually has → AI Search only when that set is short.
+// /resumes/premium remains a verified fallback.
 import { applyJobBkkFilters, clickSearchButton, waitForSearchResults } from './browser/jobbkk-filters.js';
 import { ensureLatestUpdatedSort } from './latest-sort.js';
+import { isTalentNormalUi, openResumeSearchTalent } from './resume-talent-entry.js';
+import { runAiSearch } from './strategies/ai-search.js';
+import { runNormalSearch } from './strategies/normal-search.js';
+import { shouldSupplementWithAiSearch } from './talent-filter-plan.js';
 
 const SEARCH_URL = 'https://www.jobbkk.com/resumes/premium';
 const CARD_SELECTOR = 'article.bg-resume a.clickShowDetail[data-id], article.bg-resume a.read-profile[data-id]';
@@ -55,10 +56,8 @@ async function visibleCardIds(page) {
  * @param {{ context: import('playwright').BrowserContext, page: import('playwright').Page }} session
  * @returns {{ ids: string[], totalAvailable: number|null, pagesScanned: number }}
  */
-export async function browserSearchResumeIds(session, criteria, runtime = {}) {
-  const context = session?.context ?? session;
+async function runLegacyBrowserSearchResumeIds(page, criteria, runtime = {}) {
   const need = criteria.maxCandidates ?? 15;
-  const page = session?.page ?? (await context.newPage());
   const ids = [];
   const seen = new Set();
   let pagesScanned = 1;
@@ -93,4 +92,52 @@ export async function browserSearchResumeIds(session, criteria, runtime = {}) {
   }
 
   return { ids: ids.slice(0, need), totalAvailable: null, pagesScanned };
+}
+
+/**
+ * Same path as a recruiter: Resume Search Talent → Normal Search (all provided
+ * filters) → AI Search only when that result set is short of target.
+ */
+export async function browserSearchResumeIds(session, criteria, runtime = {}) {
+  const context = session?.context ?? session;
+  const need = criteria.maxCandidates ?? 15;
+  const page = session?.page ?? (await context.newPage());
+
+  const entry = await openResumeSearchTalent(page).catch(() => ({ profile: 'unknown' }));
+  if (entry.profile === 'current' || await isTalentNormalUi(page)) {
+    const normal = await runNormalSearch(page, criteria, { need });
+    let ai = { pool: [], warning: null };
+    if (shouldSupplementWithAiSearch(normal.pool.length, need)) {
+      console.log(`  [JobBKK] Normal Search ได้ ${normal.pool.length}/${need} — ใช้ AI Search เติมจำนวน`);
+      try {
+        ai = await runAiSearch(page, criteria);
+      } catch (error) {
+        ai.warning = error?.message || 'AI SEARCH unavailable';
+        console.warn(`  [JobBKK] AI SEARCH unavailable; continue with Normal Search: ${ai.warning}`);
+      }
+    }
+    const seen = new Set();
+    const ids = [];
+    for (const item of [...normal.pool, ...ai.pool]) {
+      if (!item?.id || seen.has(item.id) || ids.length >= need) continue;
+      seen.add(item.id);
+      ids.push(item.id);
+    }
+    if (runtime.debug) {
+      console.log(`  [JobBKK] Normal ${normal.pool.length} + AI ${ai.pool.length} → ${ids.length} unique Resume IDs`);
+    }
+    return {
+      ids,
+      totalAvailable: null,
+      pagesScanned: normal.pagesScanned,
+      contractVersion: entry.contractVersion,
+      strategies: {
+        ai: { resultCount: ai.pool.length, warning: ai.warning || null },
+        normal: { resultCount: normal.pool.length, applied: normal.report.applied, skipped: normal.report.skipped },
+      },
+    };
+  }
+
+  if (runtime.debug) console.log('  [JobBKK] Talent Normal Search UI not ready — falling back to premium page');
+  return runLegacyBrowserSearchResumeIds(page, criteria, runtime);
 }

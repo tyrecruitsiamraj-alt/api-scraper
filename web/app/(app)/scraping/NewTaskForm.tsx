@@ -101,6 +101,11 @@ export function NewTaskForm({ connectors }: { connectors: ConnectorOption[] }) {
         <div className="text-sm font-medium text-ink">ตัวกรอง (เลือกได้ตามต้องการ — ไม่บังคับ)</div>
         <div className="mt-4 grid gap-4 md:grid-cols-3">
           <div>
+            <label className="label">ประเภทงาน / สาขาอาชีพ</label>
+            <input name="industry" placeholder="เช่น การขาย, IT Support" className="field" />
+          </div>
+
+          <div>
             <label className="label">จังหวัด</label>
             <input name="province" list="province-options" placeholder="เช่น กรุงเทพมหานคร" className="field" />
             <datalist id="province-options">

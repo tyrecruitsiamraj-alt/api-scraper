@@ -228,9 +228,23 @@ function resumeSettled() {
   const populated =
     txt('.rsm-name span').length > 0 ||
     txt('h3.jobseeker-name').length > 0 ||
+    txt('.resume-card > h3.font-db-heavy').length > 0 ||
     document.querySelectorAll('.contact-detail .data-member-detail').length > 0;
   const masked = !!document.querySelector('.ownerNoLogin');
   return populated || masked;
+}
+
+function resumeSectionsPainted() {
+  const headingRe = /ประวัติการศึกษา|ประวัติการทำงาน|งานที่ต้องการ|ข้อมูลผู้สมัคร/u;
+  let ready = false;
+  for (const headingEl of document.querySelectorAll('h2, h3, h4, h5, th, dt')) {
+    const heading = (headingEl.textContent || '').replace(/\s+/g, ' ').trim();
+    if (!headingRe.test(heading)) continue;
+    const root = headingEl.closest('.resume-card, section, table, .header-name') || headingEl.parentElement;
+    const body = (root?.textContent || '').replace(headingRe, '').replace(/\s+/g, ' ').trim();
+    if (body.length >= 8 || /ไม่มีประสบการณ์/u.test(body)) ready = true;
+  }
+  return ready;
 }
 
 /**
@@ -273,7 +287,13 @@ export async function fetchResumeHtml(session, id, runtime = {}) {
 
         // let remaining sub-sections (skills / attachments) settle
         await page.waitForLoadState('networkidle', { timeout: 5_000 }).catch(() => {});
-        await sleep(populated ? 400 : 500);
+        const masked = await page.locator('.ownerNoLogin').count().then((n) => n > 0).catch(() => false);
+        if (populated && !masked) {
+          await page.waitForFunction(resumeSectionsPainted, null, { timeout: 12_000, polling: 200 }).catch(() => {});
+          await sleep(400);
+        } else {
+          await sleep(500);
+        }
 
         const html = await page.content();
         const finalUrl = page.url();

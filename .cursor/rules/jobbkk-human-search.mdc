@@ -1,0 +1,15 @@
+---
+description: JobBKK must follow the recruiter's Resume Search Talent workflow
+globs: src/providers/jobbkk/**,src/pipeline.js,.agents/skills/resume-sourcing-operator/**
+alwaysApply: true
+---
+
+# JobBKK ตามที่คนทำมือ
+
+ทำตาม `.agents/skills/resume-sourcing-operator/references/jobbkk-human-playbook.md`
+
+- ทางหลักคือ `/resume/lists` + **Normal Search** ไม่ใช่ AI-first และไม่ใช่หน้า premium เก่า
+- กรอกตัวกรองที่ใบขอมี (ตำแหน่ง Keyword ประเภทงาน จังหวัด วุฒิ เพศ เงินเดือน อายุ) ก่อนกดค้นหา
+- ค่าที่ใบขอไม่มีห้ามเดา
+- **AI SEARCH** ใช้ตอนจำนวนไม่พอเป้าเท่านั้น
+- เปิด Resume แล้วรอจนเนื้อหาวาดครบ แล้วค่อย parse

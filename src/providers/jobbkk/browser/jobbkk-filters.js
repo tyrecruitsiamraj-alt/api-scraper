@@ -10,6 +10,7 @@ import {
   waitForPremiumSearchResults,
 } from './resume-premium-search.js';
 import { clickWithoutNavigationWait } from './safe-click.js';
+import { mapCriteriaToPremiumFilters } from '../talent-filter-plan.js';
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -36,29 +37,7 @@ function recordError(report, field, value, message) {
 }
 
 function mapCriteriaToPremium(criteria) {
-  const drivingLicense =
-    criteria.drivingLicense === 'มี'
-      ? 'รถยนต์, รถจักรยานยนต์'
-      : criteria.drivingLicense === 'ไม่มี'
-        ? ''
-        : criteria.drivingLicense !== 'ไม่ระบุ'
-          ? criteria.drivingLicense
-          : '';
-
-  return {
-    position: criteria.position,
-    keyword: criteria.keyword,
-    areas: hasValue(criteria.province) ? [criteria.province] : [],
-    salaryMin: criteria.salaryMin,
-    salaryMax: criteria.salaryMax,
-    ageMin: criteria.ageMin,
-    ageMax: criteria.ageMax,
-    gender: criteria.gender !== 'ไม่ระบุ' ? criteria.gender : '',
-    education: criteria.education,
-    experience: criteria.experience,
-    availableStart: criteria.availableStart !== 'ไม่ระบุ' ? criteria.availableStart : '',
-    drivingLicense,
-  };
+  return mapCriteriaToPremiumFilters(criteria);
 }
 
 function premiumFieldMap() {
@@ -66,6 +45,9 @@ function premiumFieldMap() {
     position: { selector: '#autoComplete-position' },
     keyword: { selector: '#autoComplete-keyword' },
     province: { selector: 'popover:all-workplaces', field: 'areas' },
+    jobTypes: { selector: 'popover:occupation', field: 'jobTypes' },
+    industry: { selector: 'popover:occupation', field: 'jobTypes' },
+    workType: { selector: 'popover:work-format' },
     salaryMin: { selector: 'popover:salary#issalarymin' },
     salaryMax: { selector: 'popover:salary#issalarymax' },
     ageMin: { selector: 'popover:age#isagemin' },

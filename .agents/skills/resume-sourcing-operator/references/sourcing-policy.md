@@ -52,6 +52,6 @@ Job DNA คือแก่นของงาน เช่น งานขับ�
 
 ## Platform Execution
 
-JobBKK: ใช้ Browser หน้าเดิมเปิด `/resumes/premium` เลือกตำแหน่ง กด `button#btn-search` อ่าน Card และเปิด `/resumes/preview_new/{id}`
+JobBKK: ใช้ Browser หน้าเดิมเปิด Resume Search Talent ที่ `/resume/lists` ตาม `jobbkk-human-playbook.md` — แท็บ Normal Search ก่อน กรอกชิปตำแหน่ง/Keyword ประเภทงาน จังหวัด และตัวกรองที่ใบขอมี กด `ค้นหาผู้สมัครงาน` รอผล ใช้ AI SEARCH เฉพาะเมื่อจำนวนไม่พอเป้า แล้วเปิด `/resumes/preview_new/{id}` รอจนหน้า Resume วาดครบก่อนอ่าน หน้า `/resumes/premium` เป็น fallback ที่ตรวจแล้วเท่านั้น
 
 JobThai: ใช้ authenticated request เรียก `/findresume/resume_list.php` อ่าน ID เปิด `/resume/0,{id}.html` และเปิดเผยข้อมูลติดต่อหลังผ่านตัวกรองที่ตรวจได้
