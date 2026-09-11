@@ -63,6 +63,14 @@ export function humanizeOperatorError(value: string | null | undefined): {
       technical,
     };
   }
+  if (lower.includes('employer session') || lower.includes('jobbkk-postlogin') || lower.includes('employer_login')) {
+    return {
+      title: 'เข้า JobBKK นายจ้างไม่สำเร็จ',
+      detail: 'ระบบกรอกรหัสแล้ว แต่ยังไม่เข้าสู่หน้า Employer (/employer/) — มักเป็นรหัสผิด, บัญชีไม่มีสิทธิ์นายจ้าง, ติด CAPTCHA หรือบัญชีถูกล็อกอินซ้อน',
+      next: 'ตรวจ Connector JobBKK (user/pass) → ปิด Worker อื่นที่ใช้บัญชีเดียวกัน → ดูรูป .auth/jobbkk-postlogin.png → เปิด Worker ใหม่แล้วเริ่มงานอีกครั้ง',
+      technical,
+    };
+  }
   if (lower.includes('ไม่ยืนยันการเรียง') || lower.includes('วันที่แก้ไขล่าสุด') || lower.includes('ผิดลำดับ')) {
     return {
       title: 'ยืนยันการเรียง Resume ล่าสุดบน JobThai ไม่ได้',
