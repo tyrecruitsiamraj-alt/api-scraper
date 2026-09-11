@@ -9,6 +9,7 @@ const BASE = 'https://www.jobbkk.com';
 const STORAGE_PATH = join(AUTH_DIR, 'jobbkk.json');
 const LOGIN_URL = () => envString('JOBBKK_EMPLOYER_LOGIN_URL', 'https://www.jobbkk.com/login/employer_login');
 const DASHBOARD_URL = () => envString('JOBBKK_DASHBOARD_URL', 'https://www.jobbkk.com/employer/dashboard');
+const DASHBOARD_URL_ALT = () => envString('JOBBKK_DASHBOARD_URL_ALT', 'https://www.jobbkk.com/dashboard/employer');
 // Fail-fast: cap the fresh-login wait so a bot-check/CAPTCHA hang errors quickly (with a debug
 // screenshot) instead of freezing for minutes. Tunable via env; defaults 45s wait / 30s page-load.
 const LOGIN_TIMEOUT_MS = () => envInt('JOBBKK_LOGIN_TIMEOUT_MS', 45_000);
@@ -21,9 +22,11 @@ const CAPTCHA_TIMEOUT_MS = () => envInt('JOBBKK_CAPTCHA_TIMEOUT_MS', 30_000);
 export function isEmployerSessionUrl(value) {
   try {
     const url = new URL(String(value || ''));
-    return /(^|\.)jobbkk\.com$/i.test(url.hostname)
-      && /^\/employer\//i.test(url.pathname)
-      && !/noLogIn|login/i.test(`${url.pathname}${url.search}`);
+    if (!/(^|\.)jobbkk\.com$/i.test(url.hostname)) return false;
+    const path = url.pathname || '';
+    // Live JobBKK uses both /employer/... and /dashboard/employer after login.
+    const employerPath = /^\/employer\//i.test(path) || /^\/dashboard\/employer(?:\/|$)/i.test(path);
+    return employerPath && !/noLogIn|login/i.test(`${path}${url.search}`);
   } catch {
     return false;
   }
@@ -53,16 +56,30 @@ async function withOperationTimeout(promise, ms, message) {
  * Is this context's session still a valid logged-in employer session?
  * Cheap HTTP check via the request context (reuses cookies, no rendering).
  */
-async function isLoggedIn(context) {
+async function probeEmployerSession(context, url) {
   const res = await context.request
-    .get(DASHBOARD_URL(), { maxRedirects: 5, timeout: LOGIN_REQUEST_TIMEOUT_MS() })
+    .get(url, { maxRedirects: 5, timeout: LOGIN_REQUEST_TIMEOUT_MS() })
     .catch(() => null);
   if (!res) return false;
-  const finalUrl = res.url();
-  if (!isEmployerSessionUrl(finalUrl)) return false;
+  if (!isEmployerSessionUrl(res.url())) return false;
   const body = await res.text().catch(() => '');
   // logged-out pages bounce to the login form
   return !/name=["']?username_emp/i.test(body.slice(0, 8000));
+}
+
+async function isLoggedIn(context) {
+  if (await probeEmployerSession(context, DASHBOARD_URL())) return true;
+  return probeEmployerSession(context, DASHBOARD_URL_ALT());
+}
+
+/** Navigate to an employer landing page, trying both live JobBKK dashboard shapes. */
+async function gotoEmployerDashboard(page) {
+  for (const url of [DASHBOARD_URL(), DASHBOARD_URL_ALT()]) {
+    await page.goto(url, { waitUntil: 'domcontentloaded', timeout: LOGIN_GOTO_TIMEOUT_MS() }).catch(() => {});
+    await page.waitForLoadState('networkidle').catch(() => {});
+    if (isEmployerSessionUrl(page.url())) return true;
+  }
+  return isEmployerSessionUrl(page.url());
 }
 
 const USERNAME_SELECTORS = ['#username_emp', 'input[name="username_emp"]', 'input[name*="username" i]', 'input[type="email"]'];
@@ -120,36 +137,53 @@ async function waitForLoginFields(page, context, { debug, signal, timeoutMs = LO
   return null;
 }
 
+/** True when JobBKK is asking us to kick the other active session. */
+export function isSessionTakeoverPrompt(text) {
+  return /ถูกใช้งานอยู่ในระบบ|ใช้งานอยู่ในระบบ|logged[\s-]?in elsewhere|ยืนยันการเข้าใช้งาน|เข้าใช้งานซ้ำ|เซสชันอื่น|session.*elsewhere/i.test(String(text || ''));
+}
+
 /**
- * JobBKK shows a confirmation when the account is already logged in elsewhere:
- * "รหัสผู้ใช้งานนี้ได้ถูกใช้งานอยู่ในระบบ ... กดปุ่มยืนยัน". Clicking ยืนยัน
- * forces login and kicks the other session. Keeps us Human=0 on concurrent use.
+ * Always take over when JobBKK says the account is logged in elsewhere.
+ * Product rule: concurrent login is expected — click ตกลง/ยืนยัน immediately,
+ * never wait for a human and never treat the dialog as a hard failure.
  */
-async function handleAlreadyLoggedIn(page, debug) {
+async function confirmSessionTakeover(page, { debug = false } = {}) {
   const body = await page.locator('body').innerText().catch(() => '');
-  if (!/ถูกใช้งานอยู่ในระบบ|ใช้งานอยู่ในระบบ|logged in elsewhere/i.test(body)) return false;
-  if (debug) console.log('  [JobBKK] "already logged in elsewhere" dialog — confirming...');
+  const takeoverHint = isSessionTakeoverPrompt(body);
 
   const candidates = [
-    page.getByRole('button', { name: 'ตกลง', exact: true }),
-    page.getByRole('button', { name: 'ยืนยัน', exact: false }),
-    page.locator('button, a, input[type="button"], input[type="submit"]').filter({ hasText: /^(ตกลง|ยืนยัน)$/ }),
-    page.locator('.modal.show button, .swal2-confirm, .confirm').filter({ hasText: /ตกลง|ยืนยัน/ }),
+    page.getByRole('button', { name: /^\s*ตกลง\s*$/ }),
+    page.getByRole('button', { name: /ยืนยัน/ }),
+    page.getByRole('button', { name: /^\s*OK\s*$/i }),
+    page.getByText(/^\s*ตกลง\s*$/, { exact: true }),
+    page.getByText(/^\s*ยืนยัน\s*$/, { exact: true }),
+    page.locator('button, a, input[type="button"], input[type="submit"], .btn, [role="button"]')
+      .filter({ hasText: /^\s*(ตกลง|ยืนยัน|OK)\s*$/i }),
+    page.locator('.modal.show button, .modal button, .swal2-confirm, .confirm, .btn-confirm, .btn-danger, .btn-primary, .btn-success')
+      .filter({ hasText: /ตกลง|ยืนยัน|OK/i }),
+    page.locator('input[type="button"][value*="ตกลง"], input[type="submit"][value*="ตกลง"], input[value*="ยืนยัน"]'),
   ];
+
   for (const loc of candidates) {
     const n = await loc.count().catch(() => 0);
     for (let i = 0; i < n; i += 1) {
       const el = loc.nth(i);
-      if (await el.isVisible().catch(() => false)) {
-        await el.click({ timeout: 3000 }).catch(() => {});
-        await page.waitForLoadState('domcontentloaded').catch(() => {});
-        await sleep(1200);
-        if (debug) console.log('  [JobBKK] confirmed session takeover');
-        return true;
-      }
+      if (!(await el.isVisible().catch(() => false))) continue;
+      const label = ((await el.innerText().catch(() => '')) || (await el.getAttribute('value').catch(() => '')) || '').trim();
+      // Prefer an explicit takeover dialog; still click a lone ตกลง/ยืนยัน after submit.
+      if (!takeoverHint && !/^(ตกลง|ยืนยัน|OK)$/i.test(label)) continue;
+      console.log('  [JobBKK] บัญชีล็อกอินที่อื่นอยู่ — กดยืนยันแย่ง session ทันที');
+      await el.click({ timeout: 3000, force: true }).catch(() => {});
+      await page.waitForLoadState('domcontentloaded').catch(() => {});
+      await sleep(1200);
+      if (debug) console.log('  [JobBKK] session takeover confirmed');
+      return true;
     }
   }
-  if (debug) console.log('  [JobBKK] could not find confirm button on session dialog');
+
+  if (takeoverHint && debug) {
+    console.log('  [JobBKK] saw takeover prompt but no confirm button yet');
+  }
   return false;
 }
 
@@ -175,7 +209,7 @@ async function waitForLoginComplete(page, context, { debug, onHeartbeat, signal,
       console.log(`  [JobBKK] waiting for login… ${elapsed}s / ${Math.round(timeoutMs / 1000)}s`);
     }
 
-    await handleAlreadyLoggedIn(page, debug);
+    await confirmSessionTakeover(page, { debug });
     await dismissOverlays(page, { debug });
 
     const challenge = await detectCaptcha(page);
@@ -247,28 +281,20 @@ async function performLogin(context, { username, password, debug, onHeartbeat, s
       await fields.passField.press('Enter');
     }
 
-    // Robust login completion. JobBKK enforces ONE active session: a second login shows
-    // an "already logged in elsewhere" dialog (แจ้งเตือน) with a pink "ตกลง" button that
-    // must be clicked to kick the other session and finish login. An HTTP-only check
-    // false-positives here (cookies half-set) while the page is stuck on the dialog, so
-    // we drive the PAGE: confirm the dialog, solve captcha, and wait until the page
-    // actually reaches the employer area.
+    // Product rule: if JobBKK says the account is logged in elsewhere, always
+    // click ตกลง/ยืนยัน and take the session — never wait for a human.
     const isPageLoggedIn = () => isEmployerSessionUrl(page.url()) || /\/resumes\//i.test(page.url());
     const deadline = Date.now() + LOGIN_TIMEOUT_MS();
     let confirmedKick = false;
+    // First attempt right after submit — dialog often appears immediately.
+    if (await confirmSessionTakeover(page, { debug })) confirmedKick = true;
     while (Date.now() < deadline) {
       throwIfAborted(signal);
       if (onHeartbeat) await Promise.resolve(onHeartbeat()).catch(() => {});
       if (isPageLoggedIn()) break;
 
-      // confirm the single-session "logged in elsewhere" dialog (button text = ตกลง)
-      const okBtn = page.getByText('ตกลง', { exact: true }).first();
-      if (await okBtn.isVisible().catch(() => false)) {
-        if (debug) console.log('  [JobBKK] "logged in elsewhere" dialog — clicking ตกลง to take over...');
-        await okBtn.click({ timeout: 3000 }).catch(() => {});
+      if (await confirmSessionTakeover(page, { debug })) {
         confirmedKick = true;
-        await page.waitForLoadState('domcontentloaded').catch(() => {});
-        await sleep(1500);
         continue;
       }
 
@@ -288,15 +314,19 @@ async function performLogin(context, { username, password, debug, onHeartbeat, s
       // if the login form is gone but URL hasn't updated, nudge to the dashboard
       const fieldVisible = await page.locator('#username_emp').isVisible().catch(() => false);
       if (!fieldVisible && !isPageLoggedIn()) {
-        await page.goto(DASHBOARD_URL(), { waitUntil: 'domcontentloaded', timeout: LOGIN_GOTO_TIMEOUT_MS() }).catch(() => {});
-        await page.waitForLoadState('networkidle').catch(() => {});
+        await gotoEmployerDashboard(page);
+        if (await confirmSessionTakeover(page, { debug })) confirmedKick = true;
       }
       await sleep(600);
     }
 
     // Confirm the session is REAL by loading the dashboard (not the noLogIn bounce).
-    await page.goto(DASHBOARD_URL(), { waitUntil: 'domcontentloaded', timeout: LOGIN_GOTO_TIMEOUT_MS() }).catch(() => {});
-    await page.waitForLoadState('networkidle').catch(() => {});
+    await gotoEmployerDashboard(page);
+    // Dashboard bounce can re-show the takeover dialog — always click confirm again.
+    if (await confirmSessionTakeover(page, { debug })) {
+      confirmedKick = true;
+      await gotoEmployerDashboard(page);
+    }
     if (debug) console.log(`  [JobBKK] login result: url=${page.url()} (kickConfirmed=${confirmedKick})`);
     const finalEmployerUrl = page.url();
     const employerSessionReady = isEmployerSessionUrl(finalEmployerUrl)
