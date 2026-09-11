@@ -672,8 +672,10 @@ ORDER BY updated_at;
 - ต้องใช้ headful browser
 - ตรวจว่าบัญชีเดียวไม่ได้ login จากหลายเครื่อง
 - ตรวจ `.auth/` และ screenshot debug
-- Login ถือว่าสำเร็จต่อเมื่อ Dashboard จบที่ URL ใต้ `/employer/` จริงเท่านั้น; หาก Redirect ไป `/home` ให้ถือว่ายังไม่มี Employer Session แม้ไม่เห็นฟอร์ม Login
-- เมื่อเกิด `/home` ให้ตรวจสิทธิ์บัญชีนายจ้าง/แพ็กเกจ Resume และภาพ `.auth/jobbkk-postlogin.png`; ห้ามเดินต่อไป `/resumes/premium` เพราะจะวน Redirect และรายงาน Login ผ่านผิด
+- Login ถือว่าสำเร็จต่อเมื่อ Dashboard จบที่ URL ใต้ `/employer/` หรือ `/dashboard/employer` จริงเท่านั้น; หาก Redirect ไป `/home` หรือค้างที่ `/login/employer_login` ให้ถือว่ายังไม่มี Employer Session
+- หน้า login ปัจจุบันเป็น Ant Design (`#username` / `#password` + ปุ่ม「เข้าสู่ระบบ」นอก `<form>`) — worker เก่าที่กดแค่ `#sign_in_emp` หรือกด Enter จะค้างที่หน้า login; ต้องอัปเดตโค้ดแล้วรีสตาร์ท Worker
+- เมื่อเกิด `/home` หรือค้าง login ให้ตรวจสิทธิ์บัญชีนายจ้าง/แพ็กเกจ Resume และภาพ `.auth/jobbkk-postlogin.png`; ห้ามเดินต่อไป `/resumes/premium` เพราะจะวน Redirect และรายงาน Login ผ่านผิด
+- ถ้า JobBKK แจ้งบัญชีล็อกอินที่อื่น ให้กด「ยืนยัน」แย่ง session ทันที (ไม่รอคน)
 - เพิ่ม login timeout เฉพาะเมื่อหน้าเว็บช้า ไม่ใช่ใช้ซ่อน CAPTCHA
 - worker ควร logout ตอนจบ; ถ้า process ถูก kill อาจต้องรอหรือ login takeover
 
