@@ -17,6 +17,16 @@ const LOGIN_GOTO_TIMEOUT_MS = () => envInt('JOBBKK_LOGIN_GOTO_TIMEOUT_MS', 30_00
 const LOGIN_REQUEST_TIMEOUT_MS = () => envInt('JOBBKK_LOGIN_REQUEST_TIMEOUT_MS', 10_000);
 const CAPTCHA_TIMEOUT_MS = () => envInt('JOBBKK_CAPTCHA_TIMEOUT_MS', 30_000);
 
+/** True when HTML still shows the employer login form (legacy or Ant Design). */
+export function htmlHasEmployerLoginForm(html) {
+  const head = String(html || '').slice(0, 12_000);
+  if (/name=["']?username_emp\b/i.test(head) || /id=["']username_emp["']/i.test(head)) return true;
+  // 2026 Ant Design login: #username / #password + primary "เข้าสู่ระบบ" (button outside <form>).
+  if (/id=["']username["']/i.test(head) && /id=["']password["']/i.test(head)) return true;
+  if (/name=["']username["']/i.test(head) && /name=["']password["']/i.test(head) && /เข้าสู่ระบบ/i.test(head)) return true;
+  return false;
+}
+
 /** A public /home redirect is logged out even when it no longer contains the
  * old username_emp form in the first HTML chunk. */
 export function isEmployerSessionUrl(value) {
@@ -63,8 +73,8 @@ async function probeEmployerSession(context, url) {
   if (!res) return false;
   if (!isEmployerSessionUrl(res.url())) return false;
   const body = await res.text().catch(() => '');
-  // logged-out pages bounce to the login form
-  return !/name=["']?username_emp/i.test(body.slice(0, 8000));
+  // logged-out pages bounce to the login form (legacy or Ant Design)
+  return !htmlHasEmployerLoginForm(body);
 }
 
 async function isLoggedIn(context) {
@@ -82,8 +92,63 @@ async function gotoEmployerDashboard(page) {
   return isEmployerSessionUrl(page.url());
 }
 
-const USERNAME_SELECTORS = ['#username_emp', 'input[name="username_emp"]', 'input[name*="username" i]', 'input[type="email"]'];
-const PASSWORD_SELECTORS = ['#password_emp', 'input[name="password_emp"]', 'input[type="password"]'];
+// Prefer Ant Design ids first — live JobBKK (2026) no longer ships #username_emp.
+const USERNAME_SELECTORS = [
+  '#username',
+  'input[name="username"]',
+  '#username_emp',
+  'input[name="username_emp"]',
+  'input[placeholder*="ชื่อผู้ใช้" i]',
+  'input[name*="username" i]',
+  'input[type="email"]',
+];
+const PASSWORD_SELECTORS = [
+  '#password',
+  'input[name="password"]',
+  '#password_emp',
+  'input[name="password_emp"]',
+  'input[placeholder*="รหัสผ่าน" i]',
+  'input[type="password"]',
+];
+
+/** Click the employer login CTA. Ant Design puts type=button OUTSIDE <form>, so Enter does nothing. */
+async function clickEmployerLoginSubmit(page) {
+  const candidates = [
+    page.locator('#sign_in_emp, button[name="sign_in_emp"]').first(),
+    page.getByRole('button', { name: /^\s*เข้าสู่ระบบ\s*$/ }),
+    page.locator('button.ant-btn-primary').filter({ hasText: /^\s*เข้าสู่ระบบ\s*$/ }),
+    page.locator('button').filter({ hasText: /^\s*เข้าสู่ระบบ\s*$/ }),
+  ];
+  for (const loc of candidates) {
+    const n = await loc.count().catch(() => 0);
+    for (let i = 0; i < Math.min(n, 3); i += 1) {
+      const el = loc.nth(i);
+      if (!(await el.isVisible().catch(() => false))) continue;
+      const label = ((await el.innerText().catch(() => '')) || '').replace(/\s+/g, ' ').trim();
+      // Never click the seeker CTA ("เข้าสู่ระบบ สำหรับผู้สมัครงาน").
+      if (/ผู้สมัคร/i.test(label)) continue;
+      await el.click({ timeout: 5000 }).catch(() => {});
+      return true;
+    }
+  }
+  return false;
+}
+
+/** Surface on-page auth failures so operators see wrong-password vs takeover vs stuck form. */
+export function classifyLoginPageHint(text) {
+  const body = String(text || '');
+  if (/ชื่อผู้ใช้\s*หรือ\s*รหัสผ่าน\s*ไม่ถูกต้อง|รหัสผ่านไม่ถูกต้อง|username\s*or\s*password\s*(is\s*)?(incorrect|invalid)|wrong[_\s-]?password/i.test(body)) {
+    return 'ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง';
+  }
+  if (isSessionTakeoverPrompt(body)) return 'บัญชีล็อกอินซ้อน — ต้องกดยืนยันแย่ง session';
+  if (/captcha|recaptcha|ผมไม่ใช่หุ่นยนต์/i.test(body)) return 'ติด CAPTCHA/ยืนยันตัวตน';
+  return null;
+}
+
+async function readLoginFailureHint(page) {
+  const body = await page.locator('body').innerText().catch(() => '');
+  return classifyLoginPageHint(body);
+}
 
 async function findVisibleLoginFields(page) {
   for (const uSel of USERNAME_SELECTORS) {
@@ -139,7 +204,7 @@ async function waitForLoginFields(page, context, { debug, signal, timeoutMs = LO
 
 /** True when JobBKK is asking us to kick the other active session. */
 export function isSessionTakeoverPrompt(text) {
-  return /ถูกใช้งานอยู่ในระบบ|ใช้งานอยู่ในระบบ|logged[\s-]?in elsewhere|ยืนยันการเข้าใช้งาน|เข้าใช้งานซ้ำ|เซสชันอื่น|session.*elsewhere/i.test(String(text || ''));
+  return /ถูกใช้งานอยู่ในระบบ|ถูกใช้งานจากอุปกรณ์อื่น|ใช้งานอยู่ในระบบ|logged[\s-]?in elsewhere|ยืนยันการเข้าใช้งาน|เข้าใช้งานซ้ำ|เซสชันอื่น|session.*elsewhere|duplicate_login|duplicate_employer/i.test(String(text || ''));
 }
 
 /**
@@ -153,13 +218,15 @@ async function confirmSessionTakeover(page, { debug = false } = {}) {
 
   const candidates = [
     page.getByRole('button', { name: /^\s*ตกลง\s*$/ }),
+    page.getByRole('button', { name: /^\s*ยืนยัน\s*$/ }),
     page.getByRole('button', { name: /ยืนยัน/ }),
     page.getByRole('button', { name: /^\s*OK\s*$/i }),
     page.getByText(/^\s*ตกลง\s*$/, { exact: true }),
     page.getByText(/^\s*ยืนยัน\s*$/, { exact: true }),
     page.locator('button, a, input[type="button"], input[type="submit"], .btn, [role="button"]')
       .filter({ hasText: /^\s*(ตกลง|ยืนยัน|OK)\s*$/i }),
-    page.locator('.modal.show button, .modal button, .swal2-confirm, .confirm, .btn-confirm, .btn-danger, .btn-primary, .btn-success')
+    // Ant Design / SweetAlert / Bootstrap modals
+    page.locator('.ant-modal button, .ant-modal-confirm-btns button, .ant-btn-primary, .modal.show button, .modal button, .swal2-confirm, .confirm, .btn-confirm, .btn-danger, .btn-primary, .btn-success')
       .filter({ hasText: /ตกลง|ยืนยัน|OK/i }),
     page.locator('input[type="button"][value*="ตกลง"], input[type="submit"][value*="ตกลง"], input[value*="ยืนยัน"]'),
   ];
@@ -172,11 +239,24 @@ async function confirmSessionTakeover(page, { debug = false } = {}) {
       const label = ((await el.innerText().catch(() => '')) || (await el.getAttribute('value').catch(() => '')) || '').trim();
       // Prefer an explicit takeover dialog; still click a lone ตกลง/ยืนยัน after submit.
       if (!takeoverHint && !/^(ตกลง|ยืนยัน|OK)$/i.test(label)) continue;
+      if (/ยกเลิก|cancel|ปิด|close|ผู้สมัคร/i.test(label)) continue;
       console.log('  [JobBKK] บัญชีล็อกอินที่อื่นอยู่ — กดยืนยันแย่ง session ทันที');
       await el.click({ timeout: 3000, force: true }).catch(() => {});
       await page.waitForLoadState('domcontentloaded').catch(() => {});
       await sleep(1200);
       if (debug) console.log('  [JobBKK] session takeover confirmed');
+      return true;
+    }
+  }
+
+  // Last resort: click any visible Ant Design primary button inside a modal when
+  // the page text clearly asks to confirm a duplicate session.
+  if (takeoverHint) {
+    const modalPrimary = page.locator('.ant-modal-wrap:not([style*="display: none"]) button.ant-btn-primary, .ant-modal button.ant-btn-primary').first();
+    if (await modalPrimary.isVisible().catch(() => false)) {
+      console.log('  [JobBKK] บัญชีล็อกอินที่อื่นอยู่ — กดปุ่มหลักใน modal');
+      await modalPrimary.click({ timeout: 3000, force: true }).catch(() => {});
+      await sleep(1200);
       return true;
     }
   }
@@ -224,8 +304,9 @@ async function waitForLoginComplete(page, context, { debug, onHeartbeat, signal,
         'ระบบแก้ CAPTCHA ของ JobBKK ไม่ตอบกลับภายในเวลาที่กำหนด',
       );
       await injectCaptchaToken(page, token);
-      const submit = page.locator('#sign_in_emp, button[name="sign_in_emp"]').first();
-      if (await submit.isVisible().catch(() => false)) await submit.click().catch(() => {});
+      if (!(await clickEmployerLoginSubmit(page))) {
+        await page.locator('input[type="password"]').first().press('Enter').catch(() => {});
+      }
     }
 
     await sleep(600);
@@ -274,11 +355,9 @@ async function performLogin(context, { username, password, debug, onHeartbeat, s
     }
 
     console.log('  [JobBKK] submitting credentials...');
-    const submit = page.locator('#sign_in_emp, button[name="sign_in_emp"]').first();
-    if (await submit.count()) {
-      await submit.click();
-    } else {
-      await fields.passField.press('Enter');
+    if (!(await clickEmployerLoginSubmit(page))) {
+      // Legacy forms may still submit on Enter; Ant Design employer CTA will not.
+      await fields.passField.press('Enter').catch(() => {});
     }
 
     // Product rule: if JobBKK says the account is logged in elsewhere, always
@@ -286,6 +365,7 @@ async function performLogin(context, { username, password, debug, onHeartbeat, s
     const isPageLoggedIn = () => isEmployerSessionUrl(page.url()) || /\/resumes\//i.test(page.url());
     const deadline = Date.now() + LOGIN_TIMEOUT_MS();
     let confirmedKick = false;
+    let earlyFailHint = null;
     // First attempt right after submit — dialog often appears immediately.
     if (await confirmSessionTakeover(page, { debug })) confirmedKick = true;
     while (Date.now() < deadline) {
@@ -298,6 +378,12 @@ async function performLogin(context, { username, password, debug, onHeartbeat, s
         continue;
       }
 
+      const hint = await readLoginFailureHint(page);
+      if (hint && /รหัสผ่านไม่ถูกต้อง|ชื่อผู้ใช้หรือรหัสผ่าน/i.test(hint)) {
+        earlyFailHint = hint;
+        break;
+      }
+
       const challenge = await detectCaptcha(page);
       if (challenge?.present) {
         console.log('  [JobBKK] CAPTCHA on login — attempting automated solve...');
@@ -307,13 +393,14 @@ async function performLogin(context, { username, password, debug, onHeartbeat, s
           'ระบบแก้ CAPTCHA ของ JobBKK ไม่ตอบกลับภายในเวลาที่กำหนด',
         );
         await injectCaptchaToken(page, token);
-        const submitAgain = page.locator('#sign_in_emp, button[name="sign_in_emp"]').first();
-        if (await submitAgain.isVisible().catch(() => false)) await submitAgain.click().catch(() => {});
+        if (!(await clickEmployerLoginSubmit(page))) {
+          await page.locator('input[type="password"]').first().press('Enter').catch(() => {});
+        }
       }
 
       // if the login form is gone but URL hasn't updated, nudge to the dashboard
-      const fieldVisible = await page.locator('#username_emp').isVisible().catch(() => false);
-      if (!fieldVisible && !isPageLoggedIn()) {
+      const stillOnForm = await findVisibleLoginFields(page);
+      if (!stillOnForm && !isPageLoggedIn()) {
         await gotoEmployerDashboard(page);
         if (await confirmSessionTakeover(page, { debug })) confirmedKick = true;
       }
@@ -321,19 +408,24 @@ async function performLogin(context, { username, password, debug, onHeartbeat, s
     }
 
     // Confirm the session is REAL by loading the dashboard (not the noLogIn bounce).
-    await gotoEmployerDashboard(page);
-    // Dashboard bounce can re-show the takeover dialog — always click confirm again.
-    if (await confirmSessionTakeover(page, { debug })) {
-      confirmedKick = true;
+    if (!earlyFailHint) {
       await gotoEmployerDashboard(page);
+      // Dashboard bounce can re-show the takeover dialog — always click confirm again.
+      if (await confirmSessionTakeover(page, { debug })) {
+        confirmedKick = true;
+        await gotoEmployerDashboard(page);
+      }
     }
     if (debug) console.log(`  [JobBKK] login result: url=${page.url()} (kickConfirmed=${confirmedKick})`);
     const finalEmployerUrl = page.url();
-    const employerSessionReady = isEmployerSessionUrl(finalEmployerUrl)
+    const employerSessionReady = !earlyFailHint
+      && isEmployerSessionUrl(finalEmployerUrl)
       && await isLoggedIn(context).catch(() => false);
     if (!employerSessionReady) {
       await page.screenshot({ path: join(AUTH_DIR, 'jobbkk-postlogin.png'), fullPage: true }).catch(() => {});
-      throw new Error(`JobBKK Login ยังไม่สร้าง Employer Session (ไปที่ ${finalEmployerUrl}) โปรดตรวจบัญชี/สิทธิ์และภาพ .auth/jobbkk-postlogin.png`);
+      const hint = earlyFailHint || await readLoginFailureHint(page);
+      const hintPart = hint ? ` — ${hint}` : '';
+      throw new Error(`JobBKK Login ยังไม่สร้าง Employer Session (ไปที่ ${finalEmployerUrl})${hintPart} โปรดตรวจบัญชี/สิทธิ์และภาพ .auth/jobbkk-postlogin.png`);
     }
 
     // Keep this page OPEN and return it — the premium search must run on the same page.
@@ -455,7 +547,7 @@ export async function logoutJobbkk(context, { debug = false } = {}) {
       // logged out when the dashboard now bounces to the login form
       const res = await context.request.get(DASHBOARD_URL(), { maxRedirects: 5 }).catch(() => null);
       const body = res ? await res.text().catch(() => '') : '';
-      const loggedOut = !res || /employer_login|\/login\//i.test(res.url()) || /name=["']?username_emp/i.test(body.slice(0, 8000));
+      const loggedOut = !res || /employer_login|\/login\//i.test(res.url()) || htmlHasEmployerLoginForm(body);
       if (loggedOut) {
         if (debug) console.log(`  [JobBKK] logged out ✓ (${u})`);
         return true;

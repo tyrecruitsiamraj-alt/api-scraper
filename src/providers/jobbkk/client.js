@@ -153,7 +153,9 @@ export async function searchResumeIds(request, criteria, runtime) {
     }
     const finalUrl = firstRes.url();
     const head = firstHtml.slice(0, 12000);
-    const onLogin = /employer_login|\/login\//i.test(finalUrl) || /name=["']?username_emp/i.test(head);
+    const onLogin = /employer_login|\/login\//i.test(finalUrl)
+      || /name=["']?username_emp/i.test(head)
+      || (/id=["']username["']/i.test(head) && /id=["']password["']/i.test(head));
     const elsewhere = /ถูกใช้งานอยู่ในระบบ|ใช้งานอยู่ในระบบ/u.test(head);
     if (onLogin) {
       throw reloginError('search_not_authenticated: ได้หน้า login แทนผลค้นหา — จะ login สดแล้วลองใหม่');

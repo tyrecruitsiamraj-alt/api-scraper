@@ -48,7 +48,7 @@ export async function isEmployerLoggedIn(page) {
   if (/\/employer\//i.test(url) && !/\/login\//i.test(url)) return true;
   if (/\/resumes\//i.test(url)) return true;
 
-  const loginField = page.locator('#username_emp, input[name="username_emp"], #password_emp').first();
+  const loginField = page.locator('#username_emp, input[name="username_emp"], #password_emp, #username, #password, input[name="username"], input[name="password"]').first();
   if ((await loginField.count()) === 0) return true;
   return !(await loginField.isVisible().catch(() => false));
 }

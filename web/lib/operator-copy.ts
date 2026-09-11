@@ -63,11 +63,19 @@ export function humanizeOperatorError(value: string | null | undefined): {
       technical,
     };
   }
+  if (lower.includes('ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง') || lower.includes('wrong password') || lower.includes('password incorrect')) {
+    return {
+      title: 'รหัส JobBKK ไม่ถูกต้อง',
+      detail: 'ระบบเปิดหน้าเข้าสู่ระบบนายจ้างได้ แต่ชื่อผู้ใช้หรือรหัสผ่านใน Connector ไม่ตรงกับ JobBKK',
+      next: 'ไปตั้งค่า → Connectors แก้ user/pass ของ JobBKK ให้ตรงกับเว็บ แล้วเริ่มงานใหม่',
+      technical,
+    };
+  }
   if (lower.includes('employer session') || lower.includes('jobbkk-postlogin') || lower.includes('employer_login')) {
     return {
       title: 'เข้า JobBKK นายจ้างไม่สำเร็จ',
-      detail: 'ระบบกรอกรหัสแล้ว แต่ยังไม่เข้าสู่หน้า Employer (/employer/) — มักเป็นรหัสผิด, บัญชีไม่มีสิทธิ์นายจ้าง, ติด CAPTCHA หรือบัญชีถูกล็อกอินซ้อน',
-      next: 'ตรวจ Connector JobBKK (user/pass) → ปิด Worker อื่นที่ใช้บัญชีเดียวกัน → ดูรูป .auth/jobbkk-postlogin.png → เปิด Worker ใหม่แล้วเริ่มงานอีกครั้ง',
+      detail: 'ระบบกรอกรหัสแล้ว แต่ยังไม่เข้าสู่หน้า Employer — มักเป็นรหัสผิด, ปุ่มเข้าสู่ระบบใหม่ของ JobBKK, ติด CAPTCHA หรือบัญชีถูกล็อกอินซ้อน',
+      next: 'อัปเดต/รีสตาร์ท Worker → ตรวจ Connector JobBKK (user/pass) → ปิด Worker อื่นที่ใช้บัญชีเดียวกัน → ดูรูป .auth/jobbkk-postlogin.png → เริ่มงานอีกครั้ง',
       technical,
     };
   }
