@@ -1,6 +1,7 @@
 import * as cheerio from 'cheerio';
 import { sleep, requestGapMs } from '../../config.js';
 import { detectSoftBan, fatal, withRetry } from '../../core/anti-ban.js';
+import { isDescendingLatest } from '../jobbkk/latest-sort.js';
 import { regionCode } from './regions.js';
 
 export const BASE = 'https://www3.jobthai.com';
@@ -21,6 +22,7 @@ function assertAuthed(url, body = '') {
     throw reloginError('session_expired: login page in response');
   }
 }
+
 function hasValue(v) {
   return v !== undefined && v !== null && String(v).trim() !== '' && v !== 'ไม่ระบุ';
 }
@@ -30,7 +32,6 @@ function digits(v) {
   return d ? Number.parseInt(d, 10) : NaN;
 }
 
-// Advanced-search #level_adv codes: 1=ทุกระดับ, 2=สูงกว่าปริญญาตรี, 3=ปริญญาตรี, 4=ต่ำกว่าปริญญาตรี
 function mapLevel(education) {
   const t = String(education ?? '').toLowerCase();
   if (!hasValue(t)) return '';
@@ -40,7 +41,6 @@ function mapLevel(education) {
   return '';
 }
 
-// #salary_field brackets keyed by the desired monthly salary (baht).
 function mapSalary(salaryMin, salaryMax) {
   const min = digits(salaryMin);
   const max = digits(salaryMax);
@@ -55,7 +55,6 @@ function mapSalary(salaryMin, salaryMax) {
   return '7';
 }
 
-// #age_adv brackets: 1=<20, 2=20-25, 3=25-30, 4=30-35, 5=>35
 function mapAge(ageMin, ageMax) {
   const min = digits(ageMin);
   const max = digits(ageMax);
@@ -74,15 +73,97 @@ function mapGender(gender) {
   return '';
 }
 
-/** JobThai's official latest-updated sort uses an empty `sort` value. */
-export function isLatestUpdatedSortSelected(html) {
-  const $ = cheerio.load(html);
-  const selected = $('#mainsort option:selected, #mainsort2 option:selected').first();
-  return selected.length > 0 && /วันที่แก้ไขล่าสุด/u.test(cleanText(selected.text()));
-}
+const LATEST_SORT_LABEL_RE = /วันที่\s*(?:แก้ไข|อัปเดต|อัพเดต|อัพเดท|ปรับปรุง)\s*ล่าสุด|(?:แก้ไข|อัปเดต|อัพเดต|อัพเดท)\s*ล่าสุด/u;
 
 function cleanText(value) {
   return String(value ?? '').replace(/\s+/g, ' ').trim();
+}
+
+function sortSelects($) {
+  return $('#mainsort, #mainsort2, #MainSort, select[name="sort"], select#sort, select[id*="sort" i], select[name*="sort" i]');
+}
+
+function selectedOption($sel) {
+  const marked = $sel.find('option:selected').first();
+  return marked.length ? marked : $sel.find('option').first();
+}
+
+export function describeJobThaiSortState(html) {
+  const $ = cheerio.load(html);
+  const selects = sortSelects($);
+  if (!selects.length) return 'ไม่พบกล่องเรียงลำดับ (#mainsort/sort) ในหน้าผลค้นหา';
+  const parts = [];
+  selects.each((index, el) => {
+    const $sel = $(el);
+    const selected = selectedOption($sel);
+    parts.push(
+      `#${index + 1} id=${$sel.attr('id') || '-'} name=${$sel.attr('name') || '-'} `
+      + `selected="${cleanText(selected.text())}" value="${String(selected.attr('value') ?? '')}"`,
+    );
+  });
+  return parts.join(' · ');
+}
+
+export function isLatestUpdatedSortSelected(html) {
+  const $ = cheerio.load(html);
+  for (const el of sortSelects($).toArray()) {
+    const selected = selectedOption($(el));
+    if (!selected.length) continue;
+    if (LATEST_SORT_LABEL_RE.test(cleanText(selected.text()))) return true;
+  }
+  const hidden = $('input[name="sort"]').first();
+  if (hidden.length && String(hidden.attr('value') ?? '') === '') {
+    if ($('option').toArray().some((opt) => LATEST_SORT_LABEL_RE.test(cleanText($(opt).text())))) {
+      return true;
+    }
+  }
+  return false;
+}
+
+export function extractJobThaiUpdateLabels(html) {
+  const $ = cheerio.load(html);
+  const labels = [];
+  const seen = new Set();
+  $('a[href*="/resume/"]').each((_, el) => {
+    const $el = $(el);
+    const href = String($el.attr('href') || '');
+    const id = (href.match(/\/resume\/\d+,(\d+)/) || [])[1] || href;
+    if (!id || seen.has(id)) return;
+    seen.add(id);
+
+    // Prefer a card/row that contains exactly this resume link, so we do not
+    // collapse the whole result page into one label.
+    let scope = $el.closest('tr, li, article, .resume, .card');
+    if (!scope.length) {
+      let cur = $el.parent();
+      for (let i = 0; i < 6 && cur.length; i += 1) {
+        const links = cur.find('a[href*="/resume/"]').length;
+        if (links === 1) {
+          scope = cur;
+          break;
+        }
+        if (links > 1) break;
+        cur = cur.parent();
+      }
+    }
+    const text = cleanText((scope.length ? scope : $el).text());
+    const match = text.match(/(?:แก้ไข|อัปเดต|อัพเดท|ปรับปรุง)\s*[:：]?\s*[^\s].{0,40}/u)
+      || text.match(/\d{1,2}\s*[ก-๙.]+\.?\s*\d{2,4}/u)
+      || text.match(/\d{1,2}\/\d{1,2}\/\d{2,4}/);
+    if (match) labels.push(match[0]);
+  });
+  return labels;
+}
+
+export function listLooksNewestFirst(html) {
+  const labels = extractJobThaiUpdateLabels(html);
+  return labels.length >= 2 && isDescendingLatest(labels);
+}
+
+export function confirmLatestUpdatedOrder(html) {
+  if (isLatestUpdatedSortSelected(html)) return { ok: true, via: 'sort_control' };
+  if (listLooksNewestFirst(html)) return { ok: true, via: 'list_dates' };
+  return { ok: false, via: 'none', detail: describeJobThaiSortState(html) };
 }
 
 export function normalizeUpdatedSince(value) {
@@ -103,7 +184,6 @@ export function normalizeUpdatedSince(value) {
   return text;
 }
 
-/** Build the resume_list.php advanced-search URL from criteria. */
 export function buildSearchUrl(criteria, page = 1) {
   const updatedSince = normalizeUpdatedSince(criteria.updatedSince);
   const p = new URLSearchParams({
@@ -122,11 +202,9 @@ export function buildSearchUrl(criteria, page = 1) {
     amphoe: 'All',
     KeyWord: hasValue(criteria.keyword) ? String(criteria.keyword).trim() : '',
     KWType: '2',
-    // Verified against JobThai's #mainsort: sort= means "วันที่แก้ไขล่าสุด".
     sort: '',
   });
   if (updatedSince) {
-    // Verified against #selecttime + #lastUpdateValue on the live employer page.
     p.set('time', '65535');
     p.set('theDate', updatedSince);
   }
@@ -135,24 +213,21 @@ export function buildSearchUrl(criteria, page = 1) {
 }
 
 async function getText(request, url, runtime = {}) {
-  return withRetry(
-    async () => {
-      try {
-        const res = await request.get(url, { maxRedirects: 5, timeout: 60_000 });
-        const body = await res.text();
-        const ban = detectSoftBan({ status: res.status(), finalUrl: res.url(), body });
-        if (ban.banned) throw fatal(`soft_ban:${ban.reason}`);
-        if (!res.ok()) throw new Error(`HTTP ${res.status()} for ${url}`);
-        assertAuthed(res.url(), body);
-        return body;
-      } catch (e) {
-        if (e.needsRelogin || e.fatal) throw e;
-        if (/Max redirect/i.test(e.message)) throw reloginError('session_redirect_loop');
-        throw e;
-      }
-    },
-    { debug: runtime.debug, label: 'GET', retries: 3 },
-  );
+  return withRetry(async () => {
+    try {
+      const res = await request.get(url, { maxRedirects: 5, timeout: 60_000 });
+      const body = await res.text();
+      const ban = detectSoftBan({ status: res.status(), finalUrl: res.url(), body });
+      if (ban.banned) throw fatal(`soft_ban:${ban.reason}`);
+      if (!res.ok()) throw new Error(`HTTP ${res.status()} for ${url}`);
+      assertAuthed(res.url(), body);
+      return body;
+    } catch (e) {
+      if (e.needsRelogin || e.fatal) throw e;
+      if (/Max redirect/i.test(e.message)) throw reloginError('session_redirect_loop');
+      throw e;
+    }
+  }, { debug: runtime.debug, label: 'GET', retries: 3 });
 }
 
 function extractIdsFromList(html) {
@@ -182,9 +257,8 @@ function nextPageUrl(html) {
   return href.startsWith('http') ? href : new URL(href, BASE).href;
 }
 
-/** Search + paginate until we have enough resume ids. */
 export async function searchResumeIds(session, criteria, runtime) {
-  const request = session?.request ?? session; // accept a session object or a raw request context
+  const request = session?.request ?? session;
   const need = criteria.maxCandidates;
   const ids = [];
   const seen = new Set();
@@ -194,8 +268,16 @@ export async function searchResumeIds(session, criteria, runtime) {
   while (ids.length < need && url) {
     pagesScanned += 1;
     const html = await getText(request, url, runtime);
-    if (pagesScanned === 1 && !isLatestUpdatedSortSelected(html)) {
-      throw new Error('JobThai ไม่ยืนยันการเรียงวันที่แก้ไขล่าสุด — หยุดเพื่อไม่ดึง Resume ผิดลำดับ');
+    if (pagesScanned === 1) {
+      const order = confirmLatestUpdatedOrder(html);
+      if (!order.ok) {
+        throw new Error(
+          `JobThai ไม่ยืนยันการเรียงวันที่แก้ไขล่าสุด — หยุดเพื่อไม่ดึง Resume ผิดลำดับ (${order.detail})`,
+        );
+      }
+      if (order.via === 'list_dates' && runtime?.debug) {
+        console.warn('[jobthai] sort control unclear; accepted newest-first list dates');
+      }
     }
     for (const id of extractIdsFromList(html)) {
       if (!seen.has(id)) {
@@ -219,17 +301,10 @@ export function resumeDetailUrl(id) {
 }
 
 export async function fetchResumeHtml(session, id, runtime = {}) {
-  // JobThai serves the resume body in the HTTP response, so a plain GET via the
-  // request context is enough (no browser render needed). Accept a session object
-  // or a raw request context.
   const request = session?.request ?? session;
   return getText(request, resumeDetailUrl(id), runtime);
 }
 
-/**
- * Reveal a masked contact via the AJAX endpoint (plain-text response).
- * type: mobile | email | line. Costs view quota — call only for kept candidates.
- */
 export async function revealContact(request, resumecode, type) {
   try {
     const res = await request.get(`${BASE}/common/ajaxCheckViewStatusV2.php?resumecode=${resumecode}&type=${type}`, {
@@ -245,7 +320,15 @@ export async function revealContact(request, resumecode, type) {
 }
 
 export async function fetchAsset(request, url, referer = BASE) {
-  const res = await request.get(url, { timeout: 90_000, maxRedirects: 5, headers: { Referer: referer, Accept: '*/*' } });
+  const res = await request.get(url, {
+    timeout: 90_000,
+    maxRedirects: 5,
+    headers: { Referer: referer, Accept: '*/*' },
+  });
   if (!res.ok()) throw new Error(`HTTP ${res.status()}`);
-  return { buffer: await res.body(), contentType: res.headers()['content-type'] ?? '', disposition: res.headers()['content-disposition'] ?? '' };
+  return {
+    buffer: await res.body(),
+    contentType: res.headers()['content-type'] ?? '',
+    disposition: res.headers()['content-disposition'] ?? '',
+  };
 }

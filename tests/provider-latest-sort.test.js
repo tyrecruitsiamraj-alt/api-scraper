@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { buildSearchUrl, isLatestUpdatedSortSelected, normalizeUpdatedSince } from '../src/providers/jobthai/client.js';
+import { buildSearchUrl, confirmLatestUpdatedOrder, isLatestUpdatedSortSelected, normalizeUpdatedSince } from '../src/providers/jobthai/client.js';
 import { findLatestSortOption, isDescendingLatest, parseProviderUpdatedAt } from '../src/providers/jobbkk/latest-sort.js';
 
 test('JobThai บังคับเรียงวันที่แก้ไขล่าสุดและส่งวันที่เริ่มอัปเดตแบบ exact date', () => {
@@ -37,4 +37,19 @@ test('วันที่ไทยและปี พ.ศ. ใช้ตรวจ 
   assert.equal(parseProviderUpdatedAt('อัปเดต 30/08/2569', now), Date.UTC(2026, 7, 30));
   assert.equal(isDescendingLatest(['อัปเดตวันนี้', 'อัปเดตเมื่อวาน', 'อัปเดต 2 วันก่อน'], now), true);
   assert.equal(isDescendingLatest(['อัปเดต 2 วันก่อน', 'อัปเดตวันนี้'], now), false);
+});
+
+
+test('JobThai ยอมรับคำว่าวันที่อัปเดตล่าสุดและหลักฐานวันที่บนลิสต์', () => {
+  assert.equal(
+    isLatestUpdatedSortSelected('<select id="mainsort"><option selected value="">วันที่อัปเดตล่าสุด</option></select>'),
+    true,
+  );
+  const html = `
+    <div><a href="/resume/0,1.html">สมชาย แก้ไข 31 ส.ค. 69</a></div>
+    <div><a href="/resume/0,2.html">สมหญิง แก้ไข 30 ส.ค. 69</a></div>
+  `;
+  const order = confirmLatestUpdatedOrder(html);
+  assert.equal(order.ok, true);
+  assert.equal(order.via, 'list_dates');
 });

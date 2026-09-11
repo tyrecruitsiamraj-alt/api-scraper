@@ -63,6 +63,14 @@ export function humanizeOperatorError(value: string | null | undefined): {
       technical,
     };
   }
+  if (lower.includes('ไม่ยืนยันการเรียง') || lower.includes('วันที่แก้ไขล่าสุด') || lower.includes('ผิดลำดับ')) {
+    return {
+      title: 'ยืนยันการเรียง Resume ล่าสุดบน JobThai ไม่ได้',
+      detail: 'ระบบยังยืนยันไม่ได้ว่าผลค้นหาเรียงตามวันที่แก้ไขล่าสุด จึงหยุดเพื่อไม่ดึง Resume ผิดลำดับ',
+      next: 'เริ่มงานใหม่ได้เลย ถ้ายังไม่ได้ให้ผู้ดูแลตรวจ session JobThai หรือสลับไป JobBKK',
+      technical,
+    };
+  }
   if (lower.includes('daily cap reached') || lower.includes('provider daily cap')) {
     return {
       title: 'โควต้าค้นหาวันนี้เต็มแล้ว',
