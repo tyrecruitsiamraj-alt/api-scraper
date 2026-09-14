@@ -2,6 +2,7 @@ import { clickWithoutNavigationWait } from '../browser/safe-click.js';
 import { ensureLatestUpdatedSort } from '../latest-sort.js';
 import {
   dismissJobbkkOverlays,
+  firstEditableLocator,
   firstVisibleLocator,
   readResumeResultPool,
   sleep,
@@ -62,19 +63,26 @@ async function clickMatchingOption(page, labels) {
   return false;
 }
 
+async function findChipInput(page, field) {
+  const needle = field === 'position' ? 'ค้นหาชื่อตำแหน่งงาน' : 'ค้นหา Keyword';
+  const nearby = page.locator('.ant-select, .ant-select-selection-wrap, .ant-form-item').filter({
+    hasText: new RegExp(escapeRegExp(needle), 'u'),
+  });
+  return firstEditableLocator([
+    nearby.locator('input.ant-select-selection-search-input, input:not([readonly])'),
+    page.locator(`input[placeholder="${needle}"]`),
+    page.getByRole('combobox', { name: new RegExp(escapeRegExp(needle), 'u') }),
+  ]);
+}
+
 async function applyChipField(page, field, terms, report) {
-  const placeholder = field === 'position' ? /^ค้นหาชื่อตำแหน่งงาน$/u : /^ค้นหา Keyword$/iu;
   for (const term of terms) {
-    const wrap = page.locator('.ant-select-selection-wrap').filter({ has: page.getByText(placeholder) });
-    const input = await firstVisibleLocator([
-      wrap.locator('input'),
-      page.getByPlaceholder(field === 'position' ? /ชื่อตำแหน่ง/u : /Keyword|คำสำคัญ/iu),
-    ]);
+    const input = await findChipInput(page, field);
     if (!input) {
       if (!report.skipped.includes(field)) report.skipped.push(field);
       return;
     }
-    await input.click();
+    await clickWithoutNavigationWait(input);
     await input.fill(term);
     await sleep(250);
     const picked = await clickMatchingOption(page, [term]);
@@ -86,8 +94,9 @@ async function applyChipField(page, field, terms, report) {
 
 async function applySearchableChecks(page, openerPattern, values, field, report) {
   const opener = await firstVisibleLocator([
-    page.getByPlaceholder(openerPattern),
     page.getByRole('button', { name: openerPattern }),
+    page.getByRole('combobox', { name: openerPattern }),
+    page.locator('.ant-select, .ant-form-item').filter({ hasText: openerPattern }).locator('.ant-select-selector'),
     page.getByText(openerPattern),
   ]);
   if (!opener) {

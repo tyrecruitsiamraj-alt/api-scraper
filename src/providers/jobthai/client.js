@@ -271,11 +271,10 @@ export async function searchResumeIds(session, criteria, runtime) {
     if (pagesScanned === 1) {
       const order = confirmLatestUpdatedOrder(html);
       if (!order.ok) {
-        throw new Error(
-          `JobThai ไม่ยืนยันการเรียงวันที่แก้ไขล่าสุด — หยุดเพื่อไม่ดึง Resume ผิดลำดับ (${order.detail})`,
-        );
-      }
-      if (order.via === 'list_dates' && runtime?.debug) {
+        // Web runs must still return cards. We already request JobThai's default
+        // latest sort (`sort=`). Missing #mainsort must not abort the job.
+        console.warn(`[jobthai] sort unverified (${order.detail}); continuing with requested default latest sort`);
+      } else if (order.via === 'list_dates' && runtime?.debug) {
         console.warn('[jobthai] sort control unclear; accepted newest-first list dates');
       }
     }

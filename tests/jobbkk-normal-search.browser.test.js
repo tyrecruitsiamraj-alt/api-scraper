@@ -8,9 +8,13 @@ const FIXTURE = `<!doctype html>
   <button class="bg-Primary text-white">Normal Search</button>
   <button>AI SEARCH</button>
 
-  <div class="ant-select-selection-wrap">
-    <span>ค้นหาชื่อตำแหน่งงาน</span>
-    <input placeholder="ค้นหาชื่อตำแหน่งงาน" />
+  <div class="ant-row ant-form-item-row" multiple readOnly placeholder="ค้นหาชื่อตำแหน่งงาน">
+    <div class="ant-select">
+      <div class="ant-select-selection-wrap">
+        <span>ค้นหาชื่อตำแหน่งงาน</span>
+        <input class="ant-select-selection-search-input" placeholder="ค้นหาชื่อตำแหน่งงาน" />
+      </div>
+    </div>
   </div>
   <div class="ant-select-item-option-content">เจ้าหน้าที่ IT</div>
 

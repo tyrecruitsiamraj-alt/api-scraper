@@ -18,6 +18,32 @@ export async function firstVisibleLocator(candidates) {
   return null;
 }
 
+/** True for a real typeable control — not Ant Design's readOnly placeholder wrapper div. */
+export async function isEditableLocator(item) {
+  return item.evaluate((el) => {
+    if (!el) return false;
+    const tag = String(el.tagName || '').toLowerCase();
+    if (el.matches?.('div, span, p, label')) return false;
+    if (el.disabled || el.readOnly) return false;
+    if (el.getAttribute('aria-disabled') === 'true') return false;
+    if (el.getAttribute('readonly') != null && tag !== 'select') return false;
+    return tag === 'input' || tag === 'textarea' || el.isContentEditable === true;
+  }).catch(() => false);
+}
+
+export async function firstEditableLocator(candidates) {
+  for (const locator of candidates) {
+    if (!locator) continue;
+    const count = await locator.count().catch(() => 0);
+    for (let i = 0; i < count; i += 1) {
+      const item = locator.nth(i);
+      if (!(await item.isVisible().catch(() => false))) continue;
+      if (await isEditableLocator(item)) return item;
+    }
+  }
+  return null;
+}
+
 export async function dismissJobbkkOverlays(page) {
   await page.getByRole('button', { name: /ยอมรับ|ตกลง|ปิด/u }).click({ timeout: 1500 }).catch(() => {});
   const close = page.locator('[aria-label="Close"], button.close, .ant-modal-close').first();

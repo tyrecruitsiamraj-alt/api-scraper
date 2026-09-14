@@ -9,5 +9,12 @@ export async function clickWithoutNavigationWait(locator, timeout = 15_000) {
   if (!locator || typeof locator.click !== 'function') {
     throw new TypeError('A Playwright locator is required');
   }
-  await locator.click({ noWaitAfter: true, timeout });
+  try {
+    await locator.click({ noWaitAfter: true, timeout });
+  } catch (error) {
+    // Ant Design wrappers look clickable but stay disabled/readOnly — force the hit.
+    await locator.click({ noWaitAfter: true, force: true, timeout: Math.min(timeout, 5_000) }).catch(() => {
+      throw error;
+    });
+  }
 }

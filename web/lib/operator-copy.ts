@@ -79,6 +79,14 @@ export function humanizeOperatorError(value: string | null | undefined): {
       technical,
     };
   }
+  if (lower.includes('locator.click') || lower.includes('timeout 15000ms')) {
+    return {
+      title: 'กรอกตัวกรองบน JobBKK ไม่สำเร็จ',
+      detail: 'ระบบเข้าบัญชีได้ แต่คลิกช่องค้นหาตำแหน่ง/Keyword ไม่ครบ จึงยังดึง Resume ไม่ได้',
+      next: 'เริ่มงานใหม่ได้เลย หลังอัปเดต Worker แล้ว',
+      technical,
+    };
+  }
   if (lower.includes('ไม่ยืนยันการเรียง') || lower.includes('วันที่แก้ไขล่าสุด') || lower.includes('ผิดลำดับ')) {
     return {
       title: 'ยืนยันการเรียง Resume ล่าสุดบน JobThai ไม่ได้',

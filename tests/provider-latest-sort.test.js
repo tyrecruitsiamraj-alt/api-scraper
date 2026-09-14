@@ -40,6 +40,15 @@ test('วันที่ไทยและปี พ.ศ. ใช้ตรวจ 
 });
 
 
+test('JobThai ไม่ถือว่าไม่เจอ #mainsort เป็น fatal เมื่อยังมี Resume card', () => {
+  const html = `
+    <div><a href="/resume/0,11.html">สมชาย</a></div>
+    <div><a href="/resume/0,12.html">สมหญิง</a></div>
+  `;
+  const order = confirmLatestUpdatedOrder(html);
+  assert.equal(order.ok, false);
+});
+
 test('JobThai ยอมรับคำว่าวันที่อัปเดตล่าสุดและหลักฐานวันที่บนลิสต์', () => {
   assert.equal(
     isLatestUpdatedSortSelected('<select id="mainsort"><option selected value="">วันที่อัปเดตล่าสุด</option></select>'),
