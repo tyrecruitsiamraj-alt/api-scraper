@@ -20,6 +20,8 @@ const nextConfig = {
     },
     outputFileTracingIncludes: {
       '/api/candidates/[id]/pdf': ['./node_modules/@sparticuz/chromium-min/**/*'],
+      '/orchestrator/[id]/page': ['./node_modules/@sparticuz/chromium-min/**/*'],
+      '/(app)/orchestrator/[id]/page': ['./node_modules/@sparticuz/chromium-min/**/*'],
     },
   },
   webpack(config) {

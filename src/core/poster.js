@@ -1,18 +1,16 @@
-import { chromium } from 'playwright';
 import fs from 'node:fs';
 import path from 'node:path';
 import { buildPosterSvg, withPosterTemplate } from './poster-template.js';
 
 /**
  * สร้างโปสเตอร์รับสมัครงาน SO WORK! (1080×1080) จากข้อมูล structured + รูปฉากงานจริงจาก AI
- * โดยเรนเดอร์ HTML → PNG ด้วย Playwright chromium (worker มี playwright อยู่แล้ว).
+ * โดยเรนเดอร์ HTML → PNG ด้วย Chromium.
  * ตัวหนังสือไทยคมชัด 100% เพราะเป็น text จริงบน template ไม่ใช่ AI วาด.
  *
- * ไม่มีรูปคน (personDataUri = null) ก็ได้ — เลย์เอาต์จะขยายข้อความเต็มแทน (fail-soft).
- * ต้องมีฟอนต์ไทยบนเครื่อง worker (Mac มี Thonburi/Sukhumvit; scraper เรนเดอร์หน้าไทยได้อยู่แล้ว).
+ * บนเครื่อง local/worker ใช้ Playwright. บน Vercel ใช้ชุดเดียวกับสร้าง PDF
+ * เพราะ Playwright ไม่มีไฟล์เบราว์เซอร์ใน serverless.
  *
- * รูปต้นฉบับไม่ถูกฝัง data URI ซ้ำใน SVG — เลเยอร์เพิ่มรูปชี้ URL สั้นชุดเดียว
- * แล้ว Playwright เป็นคนป้อนไฟล์ จึงประกอบบน Vercel ได้แม้มีรูปเพิ่ม.
+ * รูปต้นฉบับไม่ถูกฝัง data URI ซ้ำใน SVG — เลเยอร์เพิ่มรูปชี้ URL สั้นชุดเดียว.
  */
 
 const PERSON_HREF = 'https://so-poster.invalid/person';
@@ -36,6 +34,37 @@ function decodeDataUri(dataUri) {
   };
 }
 
+async function launchPosterBrowser() {
+  const serverless = Boolean(process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME);
+  if (serverless) {
+    const puppeteer = await import('puppeteer-core');
+    const chromiumMod = await import('@sparticuz/chromium-min');
+    const chromium = chromiumMod.default;
+    const packUrl = process.env.CHROMIUM_PACK_URL
+      || 'https://github.com/Sparticuz/chromium/releases/download/v133.0.0/chromium-v133.0.0-pack.tar';
+    return puppeteer.default.launch({
+      args: [...chromium.args, '--disable-dev-shm-usage', '--font-render-hinting=none'],
+      defaultViewport: { width: 1080, height: 1080 },
+      executablePath: await chromium.executablePath(packUrl),
+      headless: true,
+    });
+  }
+  const { chromium } = await import('playwright');
+  return chromium.launch({
+    headless: true,
+    args: ['--no-sandbox', '--disable-dev-shm-usage', '--disable-gpu', '--font-render-hinting=none'],
+  });
+}
+
+function composeError(error) {
+  const raw = error instanceof Error ? error.message : String(error || '');
+  console.warn(`  [poster] เรนเดอร์ไม่สำเร็จ: ${raw}`);
+  if (/Executable doesn't exist|lib64|Failed to launch/i.test(raw)) {
+    return new Error('ประกอบโปสเตอร์ไม่สำเร็จ ระบบกำลังเปิดเครื่องประกอบรูป กรุณาลองอีกครั้ง');
+  }
+  return new Error('ประกอบโปสเตอร์ไม่สำเร็จ กรุณาลองใหม่');
+}
+
 /**
  * @param {object} fields ข้อมูลโปสเตอร์ (title, salaryTotal, qualifications[], ...)
  * @param {string|null} personDataUri  data:image/png;base64,... (พื้นหลังทึบหรือใสก็ได้) หรือ null
@@ -50,11 +79,13 @@ export async function renderPoster(fields, personDataUri = null) {
     const sourceLogo = logoPath();
     const logoBytes = sourceLogo ? fs.readFileSync(sourceLogo) : null;
     const logoMime = sourceLogo?.endsWith('.png') ? 'image/png' : 'image/webp';
-    browser = await chromium.launch({
-      headless: true,
-      args: ['--no-sandbox', '--disable-dev-shm-usage', '--disable-gpu', '--font-render-hinting=none'],
-    });
-    const page = await browser.newPage({ viewport: { width: 1080, height: 1080 }, deviceScaleFactor: 1 });
+    browser = await launchPosterBrowser();
+    const page = await browser.newPage();
+    if (typeof page.setViewportSize === 'function') {
+      await page.setViewportSize({ width: 1080, height: 1080 });
+    } else if (typeof page.setViewport === 'function') {
+      await page.setViewport({ width: 1080, height: 1080, deviceScaleFactor: 1 });
+    }
     await page.route('https://so-poster.invalid/**', async (route) => {
       const url = route.request().url();
       if (url.startsWith(PERSON_HREF) && person) {
@@ -81,9 +112,8 @@ export async function renderPoster(fields, personDataUri = null) {
     if (!el) throw new Error('ไม่พบโปสเตอร์บนหน้าเรนเดอร์');
     const bytes = await el.screenshot({ type: 'png' });
     return { bytes, mime: 'image/png' };
-  } catch (e) {
-    console.warn(`  [poster] เรนเดอร์ไม่สำเร็จ: ${e.message}`);
-    throw new Error(`ประกอบโปสเตอร์ไม่สำเร็จ กรุณาลองใหม่ (${String(e.message || '').slice(0, 80)})`);
+  } catch (error) {
+    throw composeError(error);
   } finally {
     if (browser) await browser.close().catch(() => {});
   }
