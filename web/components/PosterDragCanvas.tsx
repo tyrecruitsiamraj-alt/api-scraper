@@ -86,7 +86,7 @@ export function PosterDragCanvas({
             <button
               key={layer.id}
               type="button"
-              data-poster-layer={layer.id}
+              data-poster-handle={layer.id}
               aria-label={`ลาก${layer.label}`}
               className={`absolute rounded-md border-2 ${active ? 'z-20 border-[#0d5fb8] bg-[#0d5fb8]/15' : 'z-10 border-white/80 hover:border-[#0d5fb8] hover:bg-[#0d5fb8]/10'}`}
               style={{
