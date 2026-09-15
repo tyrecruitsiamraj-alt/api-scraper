@@ -32,6 +32,8 @@ const nextConfig = {
     config.resolve.alias = {
       ...(config.resolve.alias ?? {}),
       playwright: require.resolve('playwright'),
+      'puppeteer-core': require.resolve('puppeteer-core'),
+      '@sparticuz/chromium-min': require.resolve('@sparticuz/chromium-min'),
     };
     return config;
   },
