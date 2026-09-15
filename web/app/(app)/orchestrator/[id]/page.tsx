@@ -15,6 +15,7 @@ const ContentReviewWorkspace = nextDynamic(
 );
 
 export const dynamic = 'force-dynamic';
+export const maxDuration = 60;
 
 const humanText = (value: unknown) => String(value ?? '').replace(/โรงงาร/g, 'โรงงาน');
 

@@ -152,3 +152,21 @@ test('เพิ่มข้อความแล้วลากได้ แล�
   assert.equal(extras[0].provenance.origin, 'operator_text');
   assert.match(buildPosterSvg({ ...fields, extras }, null, null), /ข้อความใหม่/);
 });
+
+test('ประกอบ PNG จากรูปเพิ่มและข้อความเพิ่มได้โดยไม่ทำสำเนาภาพต้นฉบับ', async () => {
+  const { renderPoster } = await import('../src/core/poster.js');
+  const { createPosterImageExtra } = await import('../src/core/poster-template.js');
+  const pixel = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
+  const fields = withPosterTemplate({
+    ...sample,
+    extras: [
+      createPosterTextExtra({ text: 'ข้อความใหม่', x: 64, y: 620 }),
+      createPosterImageExtra({ origin: 'campaign_source', x: 72, y: 200, w: 180, h: 220 }),
+      createPosterImageExtra({ src: pixel, origin: 'operator_upload', filename: 'mark.png', x: 80, y: 90, w: 120, h: 120 }),
+    ],
+  });
+  const rendered = await renderPoster(fields, pixel);
+  assert.ok(rendered, 'renderPoster should return png bytes');
+  assert.equal(rendered.mime, 'image/png');
+  assert.ok(rendered.bytes.length > 1000);
+});

@@ -32,11 +32,18 @@ export async function renderPoster(fields, personDataUri = null) {
   let browser = null;
   try {
     const normalized = withPosterTemplate(fields);
-    browser = await chromium.launch({ headless: true });
+    browser = await chromium.launch({
+      headless: true,
+      args: ['--no-sandbox', '--disable-dev-shm-usage', '--disable-gpu', '--font-render-hinting=none'],
+    });
     const page = await browser.newPage({ viewport: { width: 1080, height: 1080 }, deviceScaleFactor: 1 });
     const svg = buildPosterSvg(normalized, personDataUri, logoDataUri());
-    await page.setContent(`<!doctype html><html><head><meta charset="utf-8"><style>html,body{margin:0;width:1080px;height:1080px;overflow:hidden}</style></head><body>${svg}</body></html>`, { waitUntil: 'networkidle', timeout: 30_000 });
-    const el = await page.$('#poster');
+    await page.setContent(
+      `<!doctype html><html><head><meta charset="utf-8"><style>html,body{margin:0;width:1080px;height:1080px;overflow:hidden}</style></head><body>${svg}</body></html>`,
+      { waitUntil: 'domcontentloaded', timeout: 20_000 },
+    );
+    const el = await page.$('#poster') || await page.$('svg');
+    if (!el) throw new Error('ไม่พบโปสเตอร์บนหน้าเรนเดอร์');
     const bytes = await el.screenshot({ type: 'png' });
     return { bytes, mime: 'image/png' };
   } catch (e) {

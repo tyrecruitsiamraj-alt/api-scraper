@@ -378,9 +378,12 @@ export function buildPosterSvg(rawFields = {}, personUri = null, logoUri = null)
   try {
     extrasSvg = (Array.isArray(f.extras) ? f.extras : []).map((item) => {
     if (item.kind === 'image') {
-      const href = item.src === POSTER_CAMPAIGN_SOURCE ? personUri : item.src;
+      const fromBrief = item.src === POSTER_CAMPAIGN_SOURCE || item.provenance?.origin === 'campaign_source';
+      const href = fromBrief ? personUri : item.src;
       const inner = href
-        ? `<image href="${esc(href)}" width="${item.w}" height="${item.h}" preserveAspectRatio="xMidYMid slice"/>
+        ? `<svg width="${item.w}" height="${item.h}" viewBox="0 0 ${item.w} ${item.h}" overflow="hidden">
+             <image href="${esc(href)}" width="${item.w}" height="${item.h}" preserveAspectRatio="xMidYMid slice"/>
+           </svg>
            <rect width="${item.w}" height="${item.h}" fill="none" stroke="#ffffff" stroke-width="6"/>`
         : `<rect width="${item.w}" height="${item.h}" fill="#dbe7f3"/>`;
       return layerGroup(extraHandleId(item.id), { x: item.x, y: item.y }, inner);
