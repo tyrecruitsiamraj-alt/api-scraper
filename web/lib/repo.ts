@@ -2543,7 +2543,7 @@ export async function updateContentPoster(id: string, input: Partial<PosterField
       researchGate,
     });
     const editedAt = new Date().toISOString();
-    const extraNotes = fields.extras.map((extra) => ({
+    const extraNotes = (fields.extras ?? []).map((extra) => ({
       id: extra.id,
       kind: extra.kind,
       origin: extra.provenance.origin,
