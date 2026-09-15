@@ -32,6 +32,7 @@ import { runConnector } from './pipeline.js';
 import { extractAttachment } from './core/ollama.js';
 import { contactsFromText } from './core/contacts.js';
 import { suggestAdjacentPositions, positionsFromDescription } from './core/job-family.js';
+import { resolveSearchIdentityFromDescription } from '../web/lib/scrape-intake.js';
 
 /**
  * Tasks worker — runs queued/due tasks as a full auto pipeline with live phases:
@@ -83,14 +84,17 @@ export async function runTask(t, runtime) {
   const resumeFrom = 0;
 
   // ---- โหมดเนื้องาน: แปลง "เนื้องาน" → ชุดคำค้นตำแหน่ง ก่อนเริ่ม scrape ----
-  // ผู้ใช้กรอกเนื้องาน (criteria.job_description) แทนตำแหน่ง → AI เดาว่าควรค้นตำแหน่งอะไรบ้าง
-  // แล้ว scrape วนตำแหน่งเหล่านั้นจนครบ target (ตำแหน่งไหนก็ได้ที่เนื้องานใกล้เคียงกัน)
+  // วางแผนจากเนื้องานเมื่อยังไม่มีตำแหน่งจริง หรือ keyword/position ไม่ grounded ในเนื้องาน
+  // (เช่น คำค้น "ไฟฟ้า" กับงานระบบสุขาภิบาล) — แล้ววนค้นจนครบ target
   let descPositions = null;
   let qualificationSpec = t.adjacent_plan?.sourcing_spec || {};
   let jobFamily = t.adjacent_plan?.family || '';
-  const jobDesc = String((t.criteria || {}).job_description || '').trim();
-  const hasPosition = String((t.criteria || {}).position || '').trim() || String((t.criteria || {}).keyword || '').trim();
-  if (jobDesc && !hasPosition) {
+  const searchIdentity = resolveSearchIdentityFromDescription(t.criteria || {});
+  const jobDesc = searchIdentity.jobDesc;
+  if (!searchIdentity.searchTitle && criteria.position) {
+    delete criteria.position;
+  }
+  if (searchIdentity.planFromDescription) {
     await setTaskPhase(t.id, 'planning', 0);
     console.log(`  🧠 แปลงเนื้องาน → ตำแหน่ง: "${jobDesc.slice(0, 60)}${jobDesc.length > 60 ? '…' : ''}"`);
     let dp = null;
@@ -151,6 +155,10 @@ export async function runTask(t, runtime) {
     } else {
       criteria.position = jobDesc; // AI ปิด/ล้ม → ใช้เนื้องานเป็นคำค้นตรง ๆ กันงานล้มเปล่า
       console.warn('  ⚠️ แปลงเนื้องานไม่ได้ (AI ปิด/ล้ม) — ใช้เนื้องานเป็นคำค้นตรง ๆ');
+    }
+    if (!searchIdentity.grounded && criteria.keyword) {
+      console.log(`  🧠 ไม่ใช้คำค้น "${searchIdentity.keyword}" เพราะไม่ตรงเนื้องาน`);
+      delete criteria.keyword;
     }
   }
 

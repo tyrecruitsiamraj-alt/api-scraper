@@ -155,6 +155,16 @@ const KNOWN_DESCRIPTION_PLANS = [
     trendAnchors: ['แม่บ้าน', 'ทำความสะอาด'],
   },
   {
+    // Must sit before the generic electrician/ซ่อมบำรุง plan so ระบบสุขาภิบาล
+    // is not searched as ช่างไฟฟ้า.
+    match: /สุขาภิบาล|ประปา|ท่อ/u,
+    family: 'B',
+    familyLabel: '🔧 Technical-Skilled',
+    positions: ['ช่างประปา', 'ช่างสุขาภิบาล', 'ช่างท่อ', 'ช่างอาคาร'],
+    jobDna: 'ตรวจสอบ ซ่อมแซม และแก้ไขปรับปรุงระบบสุขาภิบาล ประปา หรือท่อ',
+    trendAnchors: ['ช่างประปา', 'ช่างสุขาภิบาล', 'ช่างท่อ'],
+  },
+  {
     match: /ช่างไฟ|ช่างซ่อม|ซ่อมบำรุง|ช่างเทคนิค|ช่างอาคาร/u,
     family: 'B',
     familyLabel: '🔧 Technical-Skilled',

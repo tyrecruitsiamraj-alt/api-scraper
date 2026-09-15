@@ -102,6 +102,48 @@ function pickOverrideOrSnapshot(overrides, key, snapshot, ...snapKeys) {
   return snapshotText(snapshot, ...snapKeys);
 }
 
+/** ERP/job titles that are only a headcount, e.g. 「1 อัตรา」— not a search term. */
+export function isHeadcountOnlyTitle(value) {
+  return /^\d+\s*อัตรา$/u.test(clean(value));
+}
+
+/**
+ * True when every token of keyword/position actually appears in เนื้องาน.
+ * 「ไฟฟ้า」 vs 「ระบบสุขาภิบาล」 is not grounded; 「ช่างไฟฟ้า」 vs electrical duties is.
+ */
+export function keywordGroundedInDescription(keyword, jobDesc) {
+  const kw = clean(keyword).toLocaleLowerCase('th-TH');
+  const desc = clean(jobDesc).toLocaleLowerCase('th-TH');
+  if (!kw || !desc) return false;
+  if (desc.includes(kw)) return true;
+  const stripped = kw.replace(/^(?:ช่าง|พนักงาน|เจ้าหน้าที่|นัก)/u, '').trim();
+  if (stripped.length >= 2 && desc.includes(stripped)) return true;
+  const tokens = kw.split(/[\s,./+|&\-_|]+/u).map((token) => token.trim()).filter((token) => token.length >= 2);
+  return tokens.length > 0 && tokens.every((token) => desc.includes(token));
+}
+
+/**
+ * Decide whether stored position/keyword should drive search, or เนื้องาน should.
+ * Headcount-only titles are not a search identity.
+ */
+export function resolveSearchIdentityFromDescription(criteria = {}) {
+  const jobDesc = clean(criteria.job_description);
+  const rawPosition = clean(criteria.position);
+  const keyword = clean(criteria.keyword);
+  const searchTitle = rawPosition && !isHeadcountOnlyTitle(rawPosition) ? rawPosition : '';
+  const hasPosition = Boolean(searchTitle || keyword);
+  const identity = searchTitle || keyword;
+  const grounded = hasPosition && keywordGroundedInDescription(identity, jobDesc);
+  return {
+    jobDesc,
+    searchTitle,
+    keyword,
+    hasPosition,
+    grounded,
+    planFromDescription: Boolean(jobDesc && (!hasPosition || !grounded)),
+  };
+}
+
 /**
  * Criteria keys the JobBKK worker already reads:
  * position, keyword, industry, province, education, gender, salaryMin/Max, ageMin/Max.
@@ -112,10 +154,21 @@ export function buildScrapeCriteria({
   erpTitle = '',
   erpProvince = '',
 } = {}) {
-  const position = pickOverrideOrSnapshot(overrides, 'position', snapshot, 'position') || clean(erpTitle);
+  const rawPosition = pickOverrideOrSnapshot(overrides, 'position', snapshot, 'position') || clean(erpTitle);
+  const position = isHeadcountOnlyTitle(rawPosition) ? '' : rawPosition;
   const province = pickOverrideOrSnapshot(overrides, 'province', snapshot, 'location', 'province') || clean(erpProvince);
   const keyword = pickOverrideOrSnapshot(overrides, 'keyword', snapshot, 'keyword', 'keywords');
   const industry = pickOverrideOrSnapshot(overrides, 'industry', snapshot, 'industry', 'occupation', 'job_types', 'jobTypes');
+  const jobDescription = pickOverrideOrSnapshot(
+    overrides,
+    'job_description',
+    snapshot,
+    'job_description',
+    'job_detail',
+    'duties',
+    'responsibilities',
+    'detail',
+  );
   const gender = normalizeScrapeGender(pickOverrideOrSnapshot(overrides, 'gender', snapshot, 'gender'));
   const education = normalizeScrapeEducation(pickOverrideOrSnapshot(overrides, 'education', snapshot, 'education', 'degree', 'edu'));
 
@@ -138,6 +191,7 @@ export function buildScrapeCriteria({
   const criteria = {};
   if (position) criteria.position = position;
   if (keyword) criteria.keyword = keyword;
+  if (jobDescription) criteria.job_description = jobDescription;
   if (industry) criteria.industry = industry;
   if (province) criteria.province = province;
   if (education) criteria.education = education;
@@ -179,6 +233,7 @@ const SNAPSHOT_ALIASES = {
   note: ['note'],
   keyword: ['keyword', 'keywords'],
   industry: ['industry', 'occupation', 'job_types', 'jobTypes'],
+  job_description: ['job_description', 'job_detail', 'duties', 'responsibilities', 'detail'],
 };
 
 export function hydrateJobSnapshot(snapshot = {}, ...sources) {
@@ -203,7 +258,10 @@ export function prefillScrapePlan(snapshot = {}, extras = {}) {
   const gender = normalizeScrapeGender(snapshotText(snapshot, 'gender')) || 'ไม่ระบุ';
   const education = normalizeScrapeEducation(snapshotText(snapshot, 'education', 'degree', 'edu')) || 'ไม่ระบุ';
   return {
-    position: snapshotText(snapshot, 'position') || clean(extras.position),
+    position: (() => {
+      const title = snapshotText(snapshot, 'position') || clean(extras.position);
+      return isHeadcountOnlyTitle(title) ? '' : title;
+    })(),
     location: snapshotText(snapshot, 'location', 'province') || clean(extras.location),
     income: snapshotText(snapshot, 'income'),
     qty: snapshotText(snapshot, 'qty') || clean(extras.qty),

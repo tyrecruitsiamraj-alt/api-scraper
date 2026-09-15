@@ -4,10 +4,13 @@ import {
   assertAgeRange,
   buildScrapeCriteria,
   hydrateJobSnapshot,
+  isHeadcountOnlyTitle,
+  keywordGroundedInDescription,
   normalizeScrapeEducation,
   normalizeScrapeGender,
   parseSalaryBounds,
   prefillScrapePlan,
+  resolveSearchIdentityFromDescription,
 } from '../web/lib/scrape-intake.js';
 import { planTalentNormalFilters } from '../src/providers/jobbkk/talent-filter-plan.js';
 
@@ -161,4 +164,68 @@ test('hydrate fills empty snapshot fields from ERP/jobs without inventing or ove
 test('age range is rejected when inverted', () => {
   assert.throws(() => assertAgeRange({ ageMin: '45', ageMax: '25' }), /อายุต่ำสุด/);
   assert.doesNotThrow(() => assertAgeRange({ ageMin: '25', ageMax: '45' }));
+});
+
+test('ERP title ที่เป็นแค่จำนวนอัตราไม่ถูกใช้เป็นคำค้น', () => {
+  assert.equal(isHeadcountOnlyTitle('1 อัตรา'), true);
+  assert.equal(isHeadcountOnlyTitle('10อัตรา'), true);
+  assert.equal(isHeadcountOnlyTitle('พนักงาน 1 อัตรา'), false);
+  const criteria = buildScrapeCriteria({
+    snapshot: {
+      keyword: 'ไฟฟ้า',
+      job_description: 'ตรวจสอบ ซ่อมแซม แก้ไขปรับปรุง ระบบสุขาภิบาล',
+    },
+    erpTitle: '1 อัตรา',
+    erpProvince: 'กรุงเทพมหานคร',
+  });
+  assert.equal('position' in criteria, false);
+  assert.equal(criteria.keyword, 'ไฟฟ้า');
+  assert.equal(criteria.job_description, 'ตรวจสอบ ซ่อมแซม แก้ไขปรับปรุง ระบบสุขาภิบาล');
+  assert.equal(criteria.province, 'กรุงเทพมหานคร');
+  const plan = prefillScrapePlan({
+    position: '1 อัตรา',
+    job_description: 'ตรวจสอบ ซ่อมแซม แก้ไขปรับปรุง ระบบสุขาภิบาล',
+  });
+  assert.equal(plan.position, '');
+});
+
+test('keyword ไฟฟ้า ไม่ grounded ในเนื้องานสุขาภิบาล แต่ช่างไฟฟ้า grounded ในงานไฟ', () => {
+  assert.equal(
+    keywordGroundedInDescription('ไฟฟ้า', 'ตรวจสอบ ซ่อมแซม แก้ไขปรับปรุง ระบบสุขาภิบาล'),
+    false,
+  );
+  assert.equal(
+    keywordGroundedInDescription('ช่างไฟฟ้า', 'ซ่อมระบบไฟฟ้าและวงจร'),
+    true,
+  );
+});
+
+test('มีเนื้องานสุขาภิบาลแล้วคำค้นไฟฟ้าไม่ตรง ต้องวางแผนจากเนื้องาน', () => {
+  const identity = resolveSearchIdentityFromDescription({
+    position: '1 อัตรา',
+    keyword: 'ไฟฟ้า',
+    job_description: 'ตรวจสอบ ซ่อมแซม แก้ไขปรับปรุง ระบบสุขาภิบาล',
+  });
+  assert.equal(identity.searchTitle, '');
+  assert.equal(identity.grounded, false);
+  assert.equal(identity.planFromDescription, true);
+});
+
+test('ตำแหน่งช่างไฟฟ้าที่ grounded ในเนื้องานไฟ ไม่ถูกแทนด้วยแผนจากเนื้องาน', () => {
+  const identity = resolveSearchIdentityFromDescription({
+    position: 'ช่างไฟฟ้า',
+    keyword: 'ไฟฟ้า',
+    job_description: 'ตรวจซ่อมระบบไฟฟ้าในอาคาร',
+  });
+  assert.equal(identity.searchTitle, 'ช่างไฟฟ้า');
+  assert.equal(identity.grounded, true);
+  assert.equal(identity.planFromDescription, false);
+});
+
+test('hydrate copies duties into job_description without inventing filters', () => {
+  const hydrated = hydrateJobSnapshot(
+    { position: '1 อัตรา' },
+    { detail: 'ตรวจสอบ ซ่อมแซม แก้ไขปรับปรุง ระบบสุขาภิบาล' },
+  );
+  assert.equal(hydrated.job_description, 'ตรวจสอบ ซ่อมแซม แก้ไขปรับปรุง ระบบสุขาภิบาล');
 });

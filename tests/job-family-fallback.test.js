@@ -21,3 +21,27 @@ test('ชื่อตำแหน่งขายแบบสั้นใช้�
 test('คำที่ไม่รู้จักไม่เดา Job Family เอง', () => {
   assert.equal(knownPositionsFromDescription('ตำแหน่งเฉพาะที่ไม่รู้จัก'), null);
 });
+
+test('เนื้องานระบบสุขาภิบาลค้นช่างประปา ไม่ใช่ช่างไฟฟ้า', () => {
+  const plan = knownPositionsFromDescription('ตรวจสอบ ซ่อมแซม แก้ไขปรับปรุง ระบบสุขาภิบาล');
+  assert.equal(plan?.family, 'B');
+  assert.equal(plan?.positions[0], 'ช่างประปา');
+  assert.ok(plan?.positions.includes('ช่างสุขาภิบาล'));
+  assert.ok(plan?.positions.includes('ช่างท่อ'));
+  assert.ok(plan?.positions.includes('ช่างอาคาร'));
+  assert.equal(plan?.positions.includes('ช่างไฟฟ้า'), false);
+  assert.deepEqual(plan?.hardFilters, []);
+});
+
+test('เนื้องานประปา/ท่อใช้แผนสุขาภิบาลก่อนแผนช่างไฟ', () => {
+  const plumbing = knownPositionsFromDescription('ซ่อมระบบประปาและท่อน้ำทิ้ง');
+  assert.equal(plumbing?.positions[0], 'ช่างประปา');
+  assert.equal(plumbing?.positions.includes('ช่างไฟฟ้า'), false);
+});
+
+test('เนื้องานช่างไฟฟ้ายังใช้แผนช่างไฟ', () => {
+  const plan = knownPositionsFromDescription('ช่างไฟฟ้า ตรวจซ่อมระบบไฟฟ้า');
+  assert.equal(plan?.family, 'B');
+  assert.ok(plan?.positions.includes('ช่างไฟฟ้า'));
+  assert.notEqual(plan?.positions[0], 'ช่างประปา');
+});
