@@ -2,9 +2,10 @@
 
 import { PointerEvent, useRef, useState } from 'react';
 import type { PosterFields } from '@/lib/repo';
+import type { PosterExtra } from '../../src/core/poster-template.js';
 import type { PosterLayout } from '../../src/core/poster-template.js';
 import {
-  applyPosterLayoutDelta,
+  applyPosterFieldsDelta,
   buildPosterSvg,
   emptyPosterLayout,
   getPosterLayerBoxes,
@@ -18,6 +19,7 @@ type Props = {
   enabled?: boolean;
   className?: string;
   onLayoutChange: (layout: PosterLayout) => void;
+  onExtrasChange?: (extras: PosterExtra[]) => void;
 };
 
 export function PosterDragCanvas({
@@ -27,9 +29,10 @@ export function PosterDragCanvas({
   enabled = true,
   className = 'overflow-hidden rounded-3xl bg-white shadow-[0_20px_50px_rgba(11,42,85,0.18)]',
   onLayoutChange,
+  onExtrasChange,
 }: Props) {
   const rootRef = useRef<HTMLDivElement>(null);
-  const dragRef = useRef<{ id: string; startX: number; startY: number; layout: PosterLayout } | null>(null);
+  const dragRef = useRef<{ id: string; startX: number; startY: number; fields: PosterFields } | null>(null);
   const [activeId, setActiveId] = useState<string | null>(null);
   const svg = buildPosterSvg(fields, sourceUrl, logoUrl);
   const layers = getPosterLayerBoxes(fields);
@@ -48,7 +51,11 @@ export function PosterDragCanvas({
       id,
       startX: event.clientX,
       startY: event.clientY,
-      layout: fields.layout ?? emptyPosterLayout(),
+      fields: {
+        ...fields,
+        layout: fields.layout ?? emptyPosterLayout(),
+        extras: fields.extras ?? [],
+      },
     };
     setActiveId(id);
   };
@@ -56,12 +63,14 @@ export function PosterDragCanvas({
   const onPointerMove = (event: PointerEvent<HTMLButtonElement>) => {
     const drag = dragRef.current;
     if (!drag) return;
-    onLayoutChange(applyPosterLayoutDelta(
-      drag.layout,
+    const next = applyPosterFieldsDelta(
+      drag.fields,
       drag.id,
       (event.clientX - drag.startX) * scale(),
       (event.clientY - drag.startY) * scale(),
-    ));
+    );
+    onLayoutChange(next.layout);
+    onExtrasChange?.(next.extras);
   };
 
   const endDrag = () => {
@@ -82,13 +91,14 @@ export function PosterDragCanvas({
         />
         {enabled && layers.map((layer) => {
           const active = activeId === layer.id;
+          const extra = String(layer.id).startsWith('extra:');
           return (
             <button
               key={layer.id}
               type="button"
               data-poster-handle={layer.id}
               aria-label={`ลาก${layer.label}`}
-              className={`absolute rounded-md border-2 ${active ? 'z-20 border-[#0d5fb8] bg-[#0d5fb8]/15' : 'z-10 border-white/80 hover:border-[#0d5fb8] hover:bg-[#0d5fb8]/10'}`}
+              className={`absolute rounded-md border-2 ${active ? 'z-30 border-[#0d5fb8] bg-[#0d5fb8]/15' : extra ? 'z-20 border-amber-300/90 hover:border-[#0d5fb8] hover:bg-[#0d5fb8]/10' : 'z-10 border-white/80 hover:border-[#0d5fb8] hover:bg-[#0d5fb8]/10'}`}
               style={{
                 left: `${(layer.x / POSTER_CANVAS) * 100}%`,
                 top: `${(layer.y / POSTER_CANVAS) * 100}%`,
@@ -101,7 +111,7 @@ export function PosterDragCanvas({
               onPointerUp={endDrag}
               onPointerCancel={endDrag}
             >
-              <span className={`pointer-events-none absolute left-1 top-1 rounded-full px-2 py-0.5 text-[10px] font-medium shadow-sm ${active ? 'bg-[#0d5fb8] text-white' : 'bg-black/60 text-white'}`}>
+              <span className={`pointer-events-none absolute left-1 top-1 rounded-full px-2 py-0.5 text-[10px] font-medium shadow-sm ${active ? 'bg-[#0d5fb8] text-white' : extra ? 'bg-amber-700 text-white' : 'bg-black/60 text-white'}`}>
                 {layer.label}
               </span>
             </button>
@@ -109,7 +119,7 @@ export function PosterDragCanvas({
         })}
       </div>
       {enabled && (
-        <p className="mt-3 text-xs leading-5 text-subtle">ลากรูปหรือข้อความไปวางตำแหน่งใหม่ · บันทึกแล้วตำแหน่งนี้จะติดไปกับรูปโพสต์ · ภาพต้นฉบับไม่ถูกสลับ</p>
+        <p className="mt-3 text-xs leading-5 text-subtle">ลากรูปหรือข้อความไปวางตำแหน่งใหม่ · เพิ่มรูปหรือข้อความบนโปสเตอร์ชุดนี้ได้ · บันทึกแล้วตำแหน่งนี้จะติดไปกับรูปโพสต์ · ภาพต้นฉบับไม่ถูกสลับ</p>
       )}
     </div>
   );

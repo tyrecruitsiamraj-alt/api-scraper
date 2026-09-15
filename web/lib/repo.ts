@@ -6,7 +6,7 @@ import type { ContentQualityResult } from '../../src/core/content-quality.js';
 import { evaluateWorkflowReadiness } from '../../src/core/workflow-readiness.js';
 import type { WorkflowReadiness } from '../../src/core/workflow-readiness.js';
 import { renderPoster } from '../../src/core/poster.js';
-import { normalizePosterLayout, withPosterTemplate } from '../../src/core/poster-template.js';
+import { normalizePosterLayout, posterFieldsForQuality, withPosterTemplate } from '../../src/core/poster-template.js';
 import type { PosterLayout } from '../../src/core/poster-template.js';
 import { evaluateResumeQualification } from '../../src/core/resume-qualification.js';
 import { selectPreferredScrapeWorker } from '../../src/core/worker-selection.js';
@@ -2187,6 +2187,7 @@ export type PosterFields = {
   brandRuleVersion?: number;
   logoVariant?: 'people-navy' | 'so-red';
   layout?: PosterLayout;
+  extras?: import('../../src/core/poster-template.js').PosterExtra[];
 };
 
 export type ContentRow = {
@@ -2520,6 +2521,13 @@ export async function updateContentPoster(id: string, input: Partial<PosterField
       imageSide: input.imageSide === 'left' ? 'left' : 'right',
       logoVariant: input.logoVariant === 'so-red' ? 'so-red' : 'people-navy',
       layout: normalizePosterLayout(input.layout ?? row.poster_fields?.layout),
+      extras: (input.extras ?? row.poster_fields?.extras ?? []).map((extra) => ({
+        ...extra,
+        provenance: {
+          ...(extra.provenance ?? { origin: extra.kind === 'text' ? 'operator_text' : 'operator_upload', addedAt: new Date().toISOString() }),
+          addedBy: extra.provenance?.addedBy || editor || undefined,
+        },
+      })),
     });
     if (!fields.title) throw new Error('กรุณาระบุตำแหน่งบนรูป');
 
@@ -2535,6 +2543,14 @@ export async function updateContentPoster(id: string, input: Partial<PosterField
       researchGate,
     });
     const editedAt = new Date().toISOString();
+    const extraNotes = fields.extras.map((extra) => ({
+      id: extra.id,
+      kind: extra.kind,
+      origin: extra.provenance.origin,
+      filename: extra.provenance.filename || null,
+      addedAt: extra.provenance.addedAt,
+      addedBy: extra.provenance.addedBy || editor,
+    }));
     await client.query(
       `UPDATE campaign_contents
           SET image_bytes=$2, image_mime=$3, poster_fields=$4::jsonb,
@@ -2542,7 +2558,8 @@ export async function updateContentPoster(id: string, input: Partial<PosterField
               gen_notes=COALESCE(gen_notes,'{}'::jsonb) || $8::jsonb
         WHERE id=$1`,
       [id, rendered.bytes, rendered.mime, JSON.stringify(fields), quality.status, quality.score,
-        JSON.stringify(quality), JSON.stringify({ poster_edited_at: editedAt, poster_edited_by: editor })],
+        JSON.stringify({ ...quality, posterFields: posterFieldsForQuality(fields) }),
+        JSON.stringify({ poster_edited_at: editedAt, poster_edited_by: editor, poster_extras: extraNotes })],
     );
     await client.query('COMMIT');
     return quality;

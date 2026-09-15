@@ -2,8 +2,10 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { chromium } from 'playwright';
 import {
+  applyPosterFieldsDelta,
   applyPosterLayoutDelta,
   buildPosterSvg,
+  createPosterTextExtra,
   emptyPosterLayout,
   getPosterLayerBoxes,
   POSTER_CANVAS,
@@ -49,9 +51,10 @@ function editorHtml(fields) {
     <div id="handles">${handlesHtml(layers)}</div>
   </div>
   <input id="layout" value='${JSON.stringify(fields.layout)}' />
+  <input id="extras" value='${JSON.stringify(fields.extras ?? [])}' />
   <script>
     const CANVAS = ${POSTER_CANVAS};
-    let layout = ${JSON.stringify(fields.layout)};
+    let fields = ${JSON.stringify(fields)};
     const stage = document.getElementById('stage');
     let drag = null;
     stage.addEventListener('pointerdown', (event) => {
@@ -59,7 +62,7 @@ function editorHtml(fields) {
       if (!handle) return;
       event.preventDefault();
       handle.setPointerCapture(event.pointerId);
-      drag = { id: handle.dataset.posterHandle, x: event.clientX, y: event.clientY, layout };
+      drag = { id: handle.dataset.posterHandle, x: event.clientX, y: event.clientY, fields };
     });
     stage.addEventListener('pointermove', async (event) => {
       if (!drag) return;
@@ -68,11 +71,12 @@ function editorHtml(fields) {
       const dx = (event.clientX - drag.x) * scale;
       const dy = (event.clientY - drag.y) * scale;
       window.__pending = { id: drag.id, dx, dy };
-      const painted = await window.soPaint(drag.layout, drag.id, dx, dy);
-      layout = painted.layout;
+      const painted = await window.soPaint(drag.fields, drag.id, dx, dy);
+      fields = painted.fields;
       document.getElementById('art').innerHTML = painted.svg;
       document.getElementById('handles').innerHTML = painted.handles;
-      document.getElementById('layout').value = JSON.stringify(painted.layout);
+      document.getElementById('layout').value = JSON.stringify(painted.fields.layout);
+      document.getElementById('extras').value = JSON.stringify(painted.fields.extras);
     });
     stage.addEventListener('pointerup', () => { drag = null; });
   </script>
@@ -85,11 +89,10 @@ test('ลากชื่อตำแหน่งบนพรีวิวแล�
     await browser.close().catch(() => {});
   });
   const page = await browser.newPage({ viewport: { width: 900, height: 800 } });
-  await page.exposeFunction('soPaint', (layout, key, dx, dy) => {
-    const nextLayout = applyPosterLayoutDelta(layout, key, dx, dy);
-    const next = withPosterTemplate({ ...sample, layout: nextLayout });
+  await page.exposeFunction('soPaint', (fields, key, dx, dy) => {
+    const next = applyPosterFieldsDelta(fields, key, dx, dy);
     return {
-      layout: next.layout,
+      fields: next,
       svg: buildPosterSvg(next, null, null),
       handles: handlesHtml(getPosterLayerBoxes(next)),
     };
@@ -117,4 +120,35 @@ test('ลากชื่อตำแหน่งบนพรีวิวแล�
   assert.match(persisted, new RegExp(`data-poster-layer="title"[^>]*translate\\(${saved.title.x} ${saved.title.y}\\)`));
   const after = await title.boundingBox();
   assert.ok(after.x > before.x + 10);
+});
+
+test('เพิ่มข้อความแล้วลากได้ และตำแหน่งติดไปกับ extras ที่จะบันทึก', async (t) => {
+  const note = createPosterTextExtra({ text: 'ข้อความใหม่', x: 80, y: 620, w: 280, h: 80 });
+  const fields = withPosterTemplate({ ...sample, extras: [note] });
+  const browser = await chromium.launch({ headless: true });
+  t.after(async () => {
+    await browser.close().catch(() => {});
+  });
+  const page = await browser.newPage({ viewport: { width: 900, height: 800 } });
+  await page.exposeFunction('soPaint', (current, key, dx, dy) => {
+    const next = applyPosterFieldsDelta(current, key, dx, dy);
+    return {
+      fields: next,
+      svg: buildPosterSvg(next, null, null),
+      handles: handlesHtml(getPosterLayerBoxes(next)),
+    };
+  });
+  await page.setContent(editorHtml(fields), { waitUntil: 'domcontentloaded' });
+  const handle = page.locator(`[data-poster-handle="extra:${note.id}"]`);
+  const before = await handle.boundingBox();
+  assert.ok(before);
+  await handle.hover();
+  await page.mouse.down();
+  await page.mouse.move(before.x + before.width / 2 + 56, before.y + before.height / 2 + 24, { steps: 8 });
+  await page.mouse.up();
+  await page.waitForFunction(() => Boolean(window.__pending));
+  const extras = JSON.parse(await page.inputValue('#extras'));
+  assert.ok(extras[0].x > note.x + 10);
+  assert.equal(extras[0].provenance.origin, 'operator_text');
+  assert.match(buildPosterSvg({ ...fields, extras }, null, null), /ข้อความใหม่/);
 });

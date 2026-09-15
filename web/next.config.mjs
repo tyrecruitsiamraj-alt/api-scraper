@@ -15,6 +15,9 @@ const nextConfig = {
       'puppeteer-core',
       '@sparticuz/chromium-min',
     ],
+    serverActions: {
+      bodySizeLimit: '4mb',
+    },
     outputFileTracingIncludes: {
       '/api/candidates/[id]/pdf': ['./node_modules/@sparticuz/chromium-min/**/*'],
     },

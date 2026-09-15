@@ -4,8 +4,9 @@ import { useState } from 'react';
 import { useFormStatus } from 'react-dom';
 import { approveContentAction, editCaptionAction, editPosterAction, rejectContentAction, regenerateContentImageAction, runFacebookPreflightAction } from '@/lib/actions';
 import type { PosterFields } from '@/lib/repo';
-import { emptyPosterLayout } from '../../src/core/poster-template.js';
+import { emptyPosterExtras, emptyPosterLayout } from '../../src/core/poster-template.js';
 import { PosterDragCanvas } from '@/components/PosterDragCanvas';
+import { PosterExtrasBar } from '@/components/PosterExtrasBar';
 
 type QualityCheck = { code: string; label: string; message: string; status: 'pass' | 'warning' | 'fail' | 'not_applicable' };
 
@@ -38,7 +39,7 @@ const COPY = {
   quantity: 'จำนวนที่รับ',
 } as const;
 
-function PosterPreview({ fields, content, onLayoutChange }: { fields: PosterFields; content: Props['content']; onLayoutChange: (layout: NonNullable<PosterFields['layout']>) => void }) {
+function PosterPreview({ fields, content, onLayoutChange, onExtrasChange }: { fields: PosterFields; content: Props['content']; onLayoutChange: (layout: NonNullable<PosterFields['layout']>) => void; onExtrasChange: (extras: NonNullable<PosterFields['extras']>) => void }) {
   const source = `/api/campaign-content/${content.id}/source-image`;
   const finalImage = `/api/campaign-content/${content.id}/image`;
   if (!content.hasSourceImage) {
@@ -56,6 +57,7 @@ function PosterPreview({ fields, content, onLayoutChange }: { fields: PosterFiel
       sourceUrl={source}
       enabled
       onLayoutChange={onLayoutChange}
+      onExtrasChange={onExtrasChange}
     />
   );
 }
@@ -79,13 +81,16 @@ export function CampaignContentWorkspace({ campaignId, content, initialPoster, i
   return (
     <section className="overflow-hidden rounded-2xl border border-hairline bg-white">
       <div className="flex flex-wrap items-start justify-between gap-3 border-b border-hairline bg-black/[0.015] px-5 py-4">
-        <div><p className="eyebrow">ขั้นที่ 3 · ทำและแก้สื่อ</p><h2 className="mt-1 text-lg font-semibold">แก้รูปและ Caption ได้จากหน้าเดียว</h2><p className="mt-1 text-xs text-subtle">ลากรูปหรือข้อความไปวางตำแหน่งใหม่ได้ทันที · Preview และ PNG ใช้ Template SO PEOPLE ชุดเดียวกัน</p></div>
+        <div><p className="eyebrow">ขั้นที่ 3 · ทำและแก้สื่อ</p><h2 className="mt-1 text-lg font-semibold">แก้รูปและ Caption ได้จากหน้าเดียว</h2><p className="mt-1 text-xs text-subtle">ลากเลเยอร์เดิมได้ และเพิ่มรูปหรือข้อความบนโปสเตอร์ชุดนี้ได้ · นี่ไม่ใช่ Canva เต็ม</p></div>
         <span className="pill bg-blue-50 text-blue-700">ยังไม่โพสต์จริง</span>
       </div>
 
       <div className="grid items-start gap-6 p-5 xl:grid-cols-[minmax(360px,45fr)_minmax(460px,55fr)]">
         <div className="xl:sticky xl:top-5">
-          <PosterPreview fields={poster} content={content} onLayoutChange={(layout) => update('layout', layout)} />
+          <PosterPreview fields={poster} content={content} onLayoutChange={(layout) => update('layout', layout)} onExtrasChange={(extras) => update('extras', extras)} />
+          {content.hasSourceImage && (
+            <PosterExtrasBar extras={poster.extras ?? []} hasSourceImage={content.hasSourceImage} onChange={(extras) => update('extras', extras)} />
+          )}
           {!content.hasSourceImage && (
             <p className="mt-3 text-xs leading-5 text-subtle">สิ่งที่เห็นคือองค์ประกอบเดียวกับไฟล์ PNG จริง แก้ข้อความได้จากฟอร์ม หรือกดให้ AI เปลี่ยนเฉพาะคนและสถานที่</p>
           )}
@@ -106,6 +111,7 @@ export function CampaignContentWorkspace({ campaignId, content, initialPoster, i
             <div className="flex items-start justify-between gap-3"><div><h3 className="font-semibold">ข้อความบนภาพ</h3><p className="mt-1 text-xs text-subtle">ข้อมูลทุกช่องต้องตรงกับใบขอ ระบบจะตรวจอีกครั้งตอนบันทึก</p></div><button type="button" className="btn-ghost btn-sm" onClick={() => setPoster(initialPoster)}>คืนค่าเดิม</button></div>
             <input type="hidden" name="posterBadge" value={poster.badge} />
             <input type="hidden" name="posterLayout" value={JSON.stringify(poster.layout ?? emptyPosterLayout())} />
+            <input type="hidden" name="posterExtras" value={JSON.stringify(poster.extras ?? emptyPosterExtras())} />
             <div className="mt-4 grid gap-3 sm:grid-cols-2">
               <TextField name="title" label={COPY.title} value={poster.title} onChange={(value) => update('title', value)} />
               <TextField name="location" label={COPY.location} value={poster.location} onChange={(value) => update('location', value)} />

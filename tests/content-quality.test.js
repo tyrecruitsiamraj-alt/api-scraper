@@ -189,6 +189,45 @@ test('จัดวางเลเยอร์ใหม่ไม่ทำให�
   assert.equal(result.blocking, false);
 });
 
+test('ข้อความที่เพิ่มบนโปสเตอร์ยังถูก Quality Gate ตรวจ และไฟล์รูปไม่ไปปนตัวเลขรายได้', () => {
+  const poster = withPosterTemplate({
+    ...goodPoster,
+    extras: [
+      {
+        id: 'note1',
+        kind: 'text',
+        x: 80,
+        y: 640,
+        w: 300,
+        h: 80,
+        text: 'งานมั่นคง',
+        provenance: { origin: 'operator_text', addedAt: '2026-09-15T00:00:00.000Z' },
+      },
+    ],
+  });
+  const failed = evaluateContentQuality({ campaign, caption: goodCaption, posterFields: poster, imageReady: true });
+  assert.equal(failed.blocking, true);
+  assert.equal(failed.checks.find((item) => item.code === 'benefits')?.status, 'fail');
+
+  const imageOnly = withPosterTemplate({
+    ...goodPoster,
+    extras: [{
+      id: 'pic1',
+      kind: 'image',
+      x: 40,
+      y: 40,
+      w: 120,
+      h: 120,
+      src: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
+      provenance: { origin: 'operator_upload', filename: 'site.jpg', addedAt: '2026-09-15T00:00:00.000Z' },
+    }],
+  });
+  const passed = evaluateContentQuality({ campaign, caption: goodCaption, posterFields: imageOnly, imageReady: true });
+  assert.equal(passed.checks.find((item) => item.code === 'income')?.status, 'pass');
+  assert.equal(passed.checks.find((item) => item.code === 'visual_extra_layers')?.status, 'pass');
+  assert.equal(passed.posterFields?.extras?.[0]?.src, '[operator-image]');
+});
+
 test('ร่างที่มีหลักฐาน Google และ Facebook ผ่านด่านวิจัย', () => {
   const result = evaluateContentQuality({
     campaign,

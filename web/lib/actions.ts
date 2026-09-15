@@ -6,8 +6,8 @@ import { getServerSession } from 'next-auth';
 import { authOptions } from './auth';
 import { encryptSecret } from './crypto';
 import { kickWorker } from './worker-kick';
-import { normalizePosterLayout } from '../../src/core/poster-template.js';
-import type { PosterLayout } from '../../src/core/poster-template.js';
+import { normalizePosterExtras, normalizePosterLayout } from '../../src/core/poster-template.js';
+import type { PosterExtra, PosterLayout } from '../../src/core/poster-template.js';
 import {
   createAdjacentTask,
   createScrapeTaskFromSoRecruit,
@@ -617,6 +617,16 @@ function readPosterLayout(formData: FormData): PosterLayout | undefined {
   }
 }
 
+function readPosterExtras(formData: FormData): PosterExtra[] | undefined {
+  const raw = String(formData.get('posterExtras') ?? '').trim();
+  if (!raw) return undefined;
+  try {
+    return normalizePosterExtras(JSON.parse(raw));
+  } catch {
+    return undefined;
+  }
+}
+
 function posterFieldsFromForm(formData: FormData) {
   const list = (name: string) => String(formData.get(name) ?? '')
     .split(/\r?\n/).map((value) => value.trim()).filter(Boolean);
@@ -634,6 +644,7 @@ function posterFieldsFromForm(formData: FormData) {
     imageSide: String(formData.get('posterImageSide') ?? '') === 'left' ? 'left' as const : 'right' as const,
     logoVariant: String(formData.get('posterLogoVariant') ?? '') === 'so-red' ? 'so-red' as const : 'people-navy' as const,
     layout: readPosterLayout(formData),
+    extras: readPosterExtras(formData),
   };
 }
 

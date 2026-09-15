@@ -6,7 +6,7 @@
  */
 
 import { extractCampaignFacts, normalizedGenderRequirement } from './campaign-facts.js';
-import { evaluatePosterVisual } from './poster-template.js';
+import { evaluatePosterVisual, posterFieldsForQuality } from './poster-template.js';
 
 const AMBIGUOUS_TITLES = new Set(['งาน', 'พนักงาน', 'เจ้าหน้าที่', 'ช่าง', 'พนักงานทั่วไป', 'รับสมัครงาน', 'ไม่ระบุ']);
 const BENEFIT_CLAIMS = [
@@ -87,7 +87,8 @@ function check(code, label, status, message, expected = null, actual = null) {
  */
 export function evaluateContentQuality({ campaign = {}, caption = '', posterFields = null, imageReady = null, researchGate = null } = {}) {
   const facts = extractCampaignFacts(campaign);
-  const combinedRaw = [caption, posterFields ? JSON.stringify(posterFields, null, 2) : ''].join('\n');
+  const posterForText = posterFields ? posterFieldsForQuality(posterFields) : null;
+  const combinedRaw = [caption, posterForText ? JSON.stringify(posterForText, null, 2) : ''].join('\n');
   const text = clean(caption);
   const combined = clean(combinedRaw);
   const checks = [];
@@ -218,8 +219,8 @@ export function evaluateContentQuality({ campaign = {}, caption = '', posterFiel
       ? `ผ่านจุดสำคัญแล้ว แต่ควรตรวจเพิ่ม: ${warnings.map((item) => item.label).join(', ')}`
       : 'ข้อมูลสำคัญตรงกับใบขอ พร้อมให้คนตรวจและอนุมัติ';
   // เก็บข้อมูลที่ใช้ทำโปสเตอร์ไว้กับผลตรวจ เพื่อให้ตอนแก้ caption/อนุมัติสามารถ
-  // ตรวจรูปเดิมซ้ำได้โดยไม่ทำข้อมูลต้นทางของรูปหาย.
-  return { status, score, blocking: failures.length > 0, summary, checks, posterFields: posterFields ?? null };
+  // ตรวจรูปเดิมซ้ำได้โดยไม่ทำข้อมูลต้นทางของรูปหาย. ตัด data URI ของรูปที่เพิ่มออก
+  return { status, score, blocking: failures.length > 0, summary, checks, posterFields: posterFields ? posterFieldsForQuality(posterFields) : null };
 }
 
 export function qualityFailureMessages(result) {

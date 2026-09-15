@@ -8,8 +8,9 @@ import {
   saveContentWorkspaceAction,
 } from '@/lib/actions';
 import type { PosterFields } from '@/lib/repo';
-import { emptyPosterLayout } from '../../src/core/poster-template.js';
+import { emptyPosterExtras, emptyPosterLayout } from '../../src/core/poster-template.js';
 import { PosterDragCanvas } from '@/components/PosterDragCanvas';
+import { PosterExtrasBar } from '@/components/PosterExtrasBar';
 
 type Props = {
   campaignId: string;
@@ -54,7 +55,11 @@ export function ContentReviewWorkspace({ campaignId, content, initialPoster, ini
           enabled={content.hasSourceImage}
           className="overflow-hidden rounded-xl border border-[#d6dce4] bg-white shadow-[0_2px_9px_rgba(16,41,72,0.08)]"
           onLayoutChange={(layout) => update('layout', layout)}
+          onExtrasChange={(extras) => update('extras', extras)}
         />
+        {content.hasSourceImage && (
+          <PosterExtrasBar extras={poster.extras ?? []} hasSourceImage={content.hasSourceImage} onChange={(extras) => update('extras', extras)} tone="pixel" />
+        )}
         <div className="mt-auto flex items-center gap-4 pt-6">
           <button type="button" onClick={() => { setPoster(initialPoster); setCaption(initialCaption); }} className="inline-flex h-14 min-w-44 items-center justify-center gap-3 rounded-md border border-[#0a3970] bg-white px-6 text-[16px] font-medium text-[#082b62] transition hover:bg-blue-50">
             <span className="text-2xl">↶</span>คืนค่าเดิม
@@ -75,6 +80,7 @@ export function ContentReviewWorkspace({ campaignId, content, initialPoster, ini
         <input type="hidden" name="posterBadge" value={poster.badge} />
         <input type="hidden" name="posterSalaryBreakdown" value={poster.salaryBreakdown} />
         <input type="hidden" name="posterLayout" value={JSON.stringify(poster.layout ?? emptyPosterLayout())} />
+        <input type="hidden" name="posterExtras" value={JSON.stringify(poster.extras ?? emptyPosterExtras())} />
 
         <div className="grid gap-x-12 gap-y-5 md:grid-cols-2">
           <PixelField label="ตำแหน่ง" name="posterTitle" value={poster.title} onChange={(value) => update('title', value)} />

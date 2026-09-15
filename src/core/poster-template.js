@@ -17,6 +17,13 @@ export const POSTER_LAYER_LABELS = {
   footer: 'สวัสดิการ',
   cta: 'ปุ่มสมัคร',
 };
+export const POSTER_CAMPAIGN_SOURCE = '__campaign_source__';
+export const POSTER_MAX_EXTRAS = 6;
+export const POSTER_EXTRA_ORIGINS = {
+  operator_upload: 'รูปที่อัปโหลด',
+  campaign_source: 'รูปจากใบงาน',
+  operator_text: 'ข้อความที่เพิ่ม',
+};
 
 const esc = (value) => String(value ?? '')
   .replace(/&/g, '&amp;')
@@ -98,6 +105,152 @@ export function applyPosterLayoutDelta(layout, key, dx, dy) {
   return next;
 }
 
+function clampSize(value, min, max) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return min;
+  return Math.max(min, Math.min(max, Math.round(n)));
+}
+
+function clampOnCanvas(value, size) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return 0;
+  return Math.max(-size + 40, Math.min(POSTER_CANVAS - 40, Math.round(n)));
+}
+
+function extraHandleId(id) {
+  return `extra:${id}`;
+}
+
+function extraIdFromHandle(key) {
+  return String(key || '').startsWith('extra:') ? String(key).slice(6) : '';
+}
+
+const DATA_URI_RE = /^data:image\/(png|jpe?g|webp);base64,[A-Za-z0-9+/=\s]+$/i;
+
+function sanitizeExtraSrc(raw, origin) {
+  const src = String(raw ?? '').trim();
+  if (origin === 'campaign_source' || src === POSTER_CAMPAIGN_SOURCE) return POSTER_CAMPAIGN_SOURCE;
+  if (!DATA_URI_RE.test(src) || src.length > 450_000) return '';
+  return src.replace(/\s+/g, '');
+}
+
+function normalizeExtraProvenance(raw, kind) {
+  if (!raw || typeof raw !== 'object') return null;
+  const origin = kind === 'text'
+    ? 'operator_text'
+    : raw.origin === 'campaign_source' ? 'campaign_source' : raw.origin === 'operator_upload' ? 'operator_upload' : '';
+  if (!origin) return null;
+  const addedAt = String(raw.addedAt || raw.added_at || '').trim();
+  const addedBy = compact(raw.addedBy || raw.added_by).slice(0, 120);
+  const filename = compact(raw.filename).slice(0, 120);
+  return {
+    origin,
+    addedAt: addedAt || new Date().toISOString(),
+    ...(addedBy ? { addedBy } : {}),
+    ...(filename ? { filename } : {}),
+  };
+}
+
+function extraLabel(item) {
+  if (item.kind === 'text') return compact(item.text).slice(0, 16) || POSTER_EXTRA_ORIGINS.operator_text;
+  return POSTER_EXTRA_ORIGINS[item.provenance?.origin] || 'รูปที่เพิ่ม';
+}
+
+export function emptyPosterExtras() {
+  return [];
+}
+
+/** รับเฉพาะรูป/ข้อความที่คนเพิ่มเอง พร้อมที่มา ห้าม URL สต็อกหรือไฟล์ไม่มีที่มา */
+export function normalizePosterExtras(raw) {
+  if (!Array.isArray(raw)) return [];
+  const extras = [];
+  const seen = new Set();
+  for (const item of raw) {
+    if (!item || typeof item !== 'object' || extras.length >= POSTER_MAX_EXTRAS) continue;
+    const kind = item.kind === 'text' ? 'text' : item.kind === 'image' ? 'image' : '';
+    if (!kind) continue;
+    const provenance = normalizeExtraProvenance(item.provenance, kind);
+    if (!provenance) continue;
+    const id = compact(item.id).replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 40) || `e${extras.length + 1}`;
+    if (seen.has(id)) continue;
+    const extra = {
+      id,
+      kind,
+      x: clampOnCanvas(item.x, clampSize(item.w, 80, 720)),
+      y: clampOnCanvas(item.y, clampSize(item.h, 48, 720)),
+      w: clampSize(item.w, kind === 'text' ? 120 : 80, kind === 'text' ? 900 : 720),
+      h: clampSize(item.h, kind === 'text' ? 48 : 80, kind === 'text' ? 420 : 720),
+      provenance,
+    };
+    if (kind === 'image') {
+      extra.src = sanitizeExtraSrc(item.src, provenance.origin);
+      if (!extra.src) continue;
+      if (provenance.origin === 'campaign_source' && extra.src !== POSTER_CAMPAIGN_SOURCE) continue;
+      if (provenance.origin === 'operator_upload' && extra.src === POSTER_CAMPAIGN_SOURCE) continue;
+    } else {
+      extra.text = compact(item.text).slice(0, 180);
+      if (!extra.text) continue;
+    }
+    seen.add(id);
+    extras.push(extra);
+  }
+  return extras;
+}
+
+export function createPosterImageExtra({ src, origin, filename, addedBy, x = 64, y = 64, w = 240, h = 240 } = {}) {
+  return normalizePosterExtras([{
+    id: `e${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`,
+    kind: 'image',
+    x, y, w, h,
+    src: origin === 'campaign_source' ? POSTER_CAMPAIGN_SOURCE : src,
+    provenance: { origin, filename, addedBy, addedAt: new Date().toISOString() },
+  }])[0] || null;
+}
+
+export function createPosterTextExtra({ text = 'ข้อความใหม่', addedBy, x = 72, y = 620, w = 360, h = 88 } = {}) {
+  return normalizePosterExtras([{
+    id: `t${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`,
+    kind: 'text',
+    x, y, w, h,
+    text,
+    provenance: { origin: 'operator_text', addedBy, addedAt: new Date().toISOString() },
+  }])[0] || null;
+}
+
+/** ลากได้ทั้งเลเยอร์เทมเพลตและรูป/ข้อความที่คนเพิ่ม */
+export function applyPosterFieldsDelta(rawFields, key, dx, dy) {
+  const fields = withPosterTemplate(rawFields);
+  if (POSTER_LAYOUT_KEYS.includes(key)) {
+    return { ...fields, layout: applyPosterLayoutDelta(fields.layout, key, dx, dy) };
+  }
+  const extraId = extraIdFromHandle(key);
+  if (!extraId) return fields;
+  return {
+    ...fields,
+    extras: fields.extras.map((item) => {
+      if (item.id !== extraId) return item;
+      return {
+        ...item,
+        x: clampOnCanvas(item.x + dx, item.w),
+        y: clampOnCanvas(item.y + dy, item.h),
+      };
+    }),
+  };
+}
+
+/** ตัด data URI ออกก่อนตรวจคุณภาพ/เก็บผลตรวจ กันตัวเลขในไฟล์รูปไปปนกับเงินเดือน */
+export function posterFieldsForQuality(rawFields = {}) {
+  const fields = withPosterTemplate(rawFields);
+  return {
+    ...fields,
+    extras: fields.extras.map((item) => (
+      item.kind === 'image'
+        ? { ...item, src: item.src === POSTER_CAMPAIGN_SOURCE ? POSTER_CAMPAIGN_SOURCE : '[operator-image]' }
+        : item
+    )),
+  };
+}
+
 function posterLayerBases(fields) {
   const imageOnLeft = fields.imageSide === 'left';
   const contentX = imageOnLeft ? 584 : 64;
@@ -119,7 +272,15 @@ export function getPosterLayerBoxes(rawFields = {}) {
   const fields = withPosterTemplate(rawFields);
   const layout = fields.layout;
   const bases = posterLayerBases(fields);
-  return POSTER_LAYOUT_KEYS.map((id) => {
+  const extras = fields.extras.map((item) => ({
+    id: extraHandleId(item.id),
+    label: extraLabel(item),
+    x: item.x,
+    y: item.y,
+    w: item.w,
+    h: item.h,
+  }));
+  return [...POSTER_LAYOUT_KEYS.map((id) => {
     const base = bases[id];
     return {
       id,
@@ -129,7 +290,7 @@ export function getPosterLayerBoxes(rawFields = {}) {
       w: base.w,
       h: base.h,
     };
-  });
+  }), ...extras];
 }
 
 export function withPosterTemplate(fields = {}) {
@@ -137,6 +298,7 @@ export function withPosterTemplate(fields = {}) {
     ...fields,
     logoVariant: fields.logoVariant === 'so-red' ? 'so-red' : 'people-navy',
     layout: normalizePosterLayout(fields.layout),
+    extras: normalizePosterExtras(fields.extras),
     templateId: POSTER_TEMPLATE_ID,
     templateVersion: POSTER_TEMPLATE_VERSION,
     brandRuleVersion: POSTER_BRAND_RULE_VERSION,
@@ -211,6 +373,23 @@ export function buildPosterSvg(rawFields = {}, personUri = null, logoUri = null)
       ${textLines(salaryLines, 0, 66, 58, 'fill="#082b62" font-size="58" font-weight="800" letter-spacing="-1"')}
       ${quantity ? `<line x1="0" y1="165" x2="390" y2="165" stroke="#cad6e2" stroke-width="3"/><circle cx="28" cy="216" r="28" fill="#0d5fb8"/><path d="M15 216h26M28 203v26" stroke="#fff" stroke-width="5" stroke-linecap="round"/><text x="75" y="229" fill="#082b62" font-size="39" font-weight="800">${esc(quantity)}</text>` : ''}`;
 
+  const extrasSvg = f.extras.map((item) => {
+    if (item.kind === 'image') {
+      const href = item.src === POSTER_CAMPAIGN_SOURCE ? personUri : item.src;
+      const inner = href
+        ? `<image href="${esc(href)}" width="${item.w}" height="${item.h}" preserveAspectRatio="xMidYMid slice"/>
+           <rect width="${item.w}" height="${item.h}" fill="none" stroke="#ffffff" stroke-width="6"/>`
+        : `<rect width="${item.w}" height="${item.h}" fill="#dbe7f3"/>`;
+      return layerGroup(extraHandleId(item.id), { x: item.x, y: item.y }, inner);
+    }
+    const maxChars = Math.max(8, Math.floor(item.w / 18));
+    const lines = splitThai(item.text, maxChars, 4);
+    const lineHeight = lines.length > 2 ? 28 : 34;
+    const inner = `<rect width="${item.w}" height="${item.h}" rx="14" fill="#ffffff" fill-opacity="0.94" stroke="#082b62" stroke-width="4"/>
+      ${textLines(lines, item.w / 2, 36, lineHeight, 'text-anchor="middle" fill="#082b62" font-size="28" font-weight="800"')}`;
+    return layerGroup(extraHandleId(item.id), { x: item.x, y: item.y }, inner);
+  }).join('');
+
   return `<svg id="poster" xmlns="http://www.w3.org/2000/svg" width="1080" height="1080" viewBox="0 0 1080 1080" role="img" aria-label="โปสเตอร์รับสมัคร ${esc(f.title || '')}">
     <defs>
       <linearGradient id="photoFade" x1="${imageOnLeft ? '1' : '0'}" y1="0" x2="${imageOnLeft ? '0' : '1'}" y2="0">
@@ -233,17 +412,24 @@ export function buildPosterSvg(rawFields = {}, personUri = null, logoUri = null)
     </g>
     ${layerGroup('footer', layout.footer, `<rect y="810" width="1080" height="270" fill="#082b62"/><rect y="810" width="1080" height="8" fill="#0d5fb8"/>${benefits}${noBenefits}`)}
     ${layerGroup('cta', layout.cta, `<rect x="64" y="1018" width="952" height="44" rx="22" fill="#ffffff"/><text x="88" y="1048" fill="#082b62" font-size="22" font-weight="600">สนใจสมัคร ทักเลย</text><text x="992" y="1048" text-anchor="end" fill="#082b62" font-size="22" font-weight="700">${esc(contact)}</text>`)}
-    <metadata>${esc(JSON.stringify({ templateId: f.templateId, templateVersion: f.templateVersion, brandRuleVersion: f.brandRuleVersion, layout }))}</metadata>
+    ${extrasSvg}
+    <metadata>${esc(JSON.stringify({ templateId: f.templateId, templateVersion: f.templateVersion, brandRuleVersion: f.brandRuleVersion, layout, extras: posterFieldsForQuality(f).extras }))}</metadata>
   </svg>`;
 }
 
 export function evaluatePosterVisual(fields = {}) {
-  const f = fields ?? {};
+  const f = withPosterTemplate(fields ?? {});
+  const extras = f.extras;
+  const unlabeled = extras.filter((item) => !item.provenance?.origin);
+  const extraNote = extras.length
+    ? extras.map((item) => extraLabel(item)).join(' · ')
+    : 'ยังไม่มีรูปหรือข้อความเพิ่มนอกเทมเพลต';
   const checks = [
     { code: 'visual_template', label: 'Template งานออกแบบ', status: f.templateId === POSTER_TEMPLATE_ID && Number(f.templateVersion) === POSTER_TEMPLATE_VERSION ? 'pass' : 'fail', message: `ใช้ ${POSTER_TEMPLATE_ID} v${POSTER_TEMPLATE_VERSION}` },
     { code: 'visual_title_fit', label: 'ขนาดชื่อตำแหน่ง', status: compact(f.title).length <= 38 ? 'pass' : 'fail', message: compact(f.title).length <= 38 ? 'อยู่ในพื้นที่ปลอดภัย' : 'ชื่อตำแหน่งยาวเกินพื้นที่บนภาพ' },
     { code: 'visual_location_fit', label: 'ขนาดสถานที่', status: compact(f.location).length <= 62 ? 'pass' : 'warning', message: compact(f.location).length <= 62 ? 'อยู่ในพื้นที่ปลอดภัย' : 'สถานที่ยาว อาจถูกย่อบนภาพ' },
     { code: 'visual_layers', label: 'Layer ที่แก้ไขได้', status: 'pass', message: 'รูปคน โลโก้ ข้อความ และปุ่มสมัครแยกเลเยอร์ ลากย้ายตำแหน่งได้โดยไม่เปลี่ยนภาพต้นฉบับ' },
+    { code: 'visual_extra_layers', label: 'รูปและข้อความที่เพิ่ม', status: unlabeled.length ? 'fail' : 'pass', message: unlabeled.length ? 'พบรูปหรือข้อความที่ไม่มีที่มา ห้ามใช้รูปสต็อกโดยไม่ระบุแหล่ง' : extraNote },
   ];
   return checks;
 }
