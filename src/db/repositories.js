@@ -1,5 +1,6 @@
 import { query, withTransaction } from './pool.js';
 import { decryptSecret, encryptSecret } from './crypto.js';
+import { POSTER_TEMPLATE_ID, normalizePosterStandard } from '../core/poster-template.js';
 
 // ---------------------------------------------------------------------------
 // Connectors
@@ -728,6 +729,58 @@ export async function listScrapeFailureLessons() {
       ORDER BY occurrence_count DESC, updated_at DESC`,
   );
   return rows;
+}
+
+const POSTER_STANDARD_TABLE_SQL = `
+CREATE TABLE IF NOT EXISTS poster_layout_standards (
+  template_id        text PRIMARY KEY,
+  template_version   integer NOT NULL DEFAULT 2,
+  layout             jsonb NOT NULL DEFAULT '{}'::jsonb,
+  extras             jsonb NOT NULL DEFAULT '[]'::jsonb,
+  image_side         text NOT NULL DEFAULT 'right',
+  logo_variant       text NOT NULL DEFAULT 'people-navy',
+  source_content_id  uuid REFERENCES campaign_contents(id) ON DELETE SET NULL,
+  updated_by         text,
+  updated_at         timestamptz NOT NULL DEFAULT now()
+)`;
+
+function isMissingRelation(error) {
+  return error?.code === '42P01' || /does not exist/i.test(String(error?.message || ''));
+}
+
+async function ensurePosterLayoutStandardsTable() {
+  await query(POSTER_STANDARD_TABLE_SQL);
+}
+
+export async function getPosterLayoutStandard(templateId = POSTER_TEMPLATE_ID) {
+  const read = async () => {
+    const { rows } = await query(
+      `SELECT template_id, template_version, layout, extras, image_side, logo_variant, updated_at, updated_by
+         FROM poster_layout_standards WHERE template_id = $1`,
+      [templateId],
+    );
+    const row = rows[0];
+    if (!row) return null;
+    return normalizePosterStandard({
+      templateId: row.template_id,
+      templateVersion: row.template_version,
+      layout: row.layout,
+      extras: row.extras,
+      imageSide: row.image_side,
+      logoVariant: row.logo_variant,
+    });
+  };
+  try {
+    return await read();
+  } catch (error) {
+    if (!isMissingRelation(error)) throw error;
+    try {
+      await ensurePosterLayoutStandardsTable();
+      return await read();
+    } catch {
+      return null;
+    }
+  }
 }
 
 export { withTransaction };

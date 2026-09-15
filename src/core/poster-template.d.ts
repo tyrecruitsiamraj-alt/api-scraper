@@ -70,6 +70,29 @@ export function withPosterTemplate<T extends Record<string, unknown>>(fields: T)
   layout: PosterLayout;
   extras: PosterExtra[];
 };
+export type PosterStandardExtra =
+  | { kind: 'text'; x: number; y: number; w: number; h: number; text: string }
+  | { kind: 'source_photo_slot'; x: number; y: number; w: number; h: number }
+  | { kind: 'upload_slot'; x: number; y: number; w: number; h: number };
+export type PosterStandard = {
+  templateId: string;
+  templateVersion: number;
+  layout: PosterLayout;
+  imageSide: 'left' | 'right';
+  logoVariant: 'people-navy' | 'so-red';
+  extras: PosterStandardExtra[];
+};
+export function posterStandardFromFields(fields?: Record<string, unknown>): PosterStandard;
+export function normalizePosterStandard(raw: unknown): PosterStandard | null;
+export function applyPosterStandard<T extends Record<string, unknown>>(fields: T, standard: unknown): T & {
+  templateId: string;
+  templateVersion: number;
+  brandRuleVersion: number;
+  logoVariant: 'people-navy' | 'so-red';
+  layout: PosterLayout;
+  extras: PosterExtra[];
+};
+export function posterStandardFingerprint(standard: unknown): string;
 export function buildPosterSvg(fields: Record<string, unknown>, personUri?: string | null, logoUri?: string | null): string;
 export function evaluatePosterVisual(fields: Record<string, unknown>): Array<{
   code: string;

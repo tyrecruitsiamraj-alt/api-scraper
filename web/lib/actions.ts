@@ -27,6 +27,7 @@ import {
   recordContentFeedback,
   updateContentCaption,
   updateContentPoster,
+  clearPosterLayoutStandard,
   confirmCampaignContactPhone,
   syncContentContactPhone,
   refreshContentQuality,
@@ -590,13 +591,21 @@ export async function editPosterAction(formData: FormData) {
   const contentId = String(formData.get('contentId') ?? '').trim();
   const campaignId = String(formData.get('campaignId') ?? '').trim();
   if (!contentId || !campaignId) throw new Error('ข้อมูล Content ไม่ครบ');
+  let standardSaved = false;
   try {
     const contactLine = String(formData.get('posterContactLine') ?? '').trim();
     if (contactLine) {
       const confirmedPhone = await confirmCampaignContactPhone(campaignId, contactLine);
       await syncContentContactPhone(contentId, confirmedPhone);
     }
-    await updateContentPoster(contentId, posterFieldsFromForm(formData), session.user?.email ?? session.user?.name ?? null);
+    const saveAsStandard = String(formData.get('saveAsStandard') ?? '') === '1';
+    const result = await updateContentPoster(
+      contentId,
+      posterFieldsFromForm(formData),
+      session.user?.email ?? session.user?.name ?? null,
+      { saveAsStandard },
+    );
+    standardSaved = result.standardSaved;
     revalidatePath(`/orchestrator/${campaignId}`);
   } catch (error) {
     // Server Action ต้องไม่โยน error จนผู้ใช้เห็นหน้า Application error; กลับไปหน้าเดิมพร้อมคำที่แก้ได้.
@@ -604,7 +613,7 @@ export async function editPosterAction(formData: FormData) {
     redirect(`/orchestrator/${campaignId}?contentError=${encodeURIComponent(message)}`);
   }
   // ผลสำเร็จต้องเห็นได้บนหน้าเดียวกัน ไม่ปล่อยให้ผู้ใช้เดาว่าปุ่มทำงานหรือไม่.
-  redirect(`/orchestrator/${campaignId}?contentSaved=poster`);
+  redirect(`/orchestrator/${campaignId}?contentSaved=poster&standard=${standardSaved ? '1' : '0'}`);
 }
 
 function readPosterLayout(formData: FormData): PosterLayout | undefined {
@@ -659,7 +668,12 @@ async function saveContentWorkspace(formData: FormData, editor: string | null) {
     const confirmedPhone = await confirmCampaignContactPhone(campaignId, contactLine);
     await syncContentContactPhone(contentId, confirmedPhone);
   }
-  await updateContentPoster(contentId, posterFieldsFromForm(formData), editor);
+  await updateContentPoster(
+    contentId,
+    posterFieldsFromForm(formData),
+    editor,
+    { saveAsStandard: String(formData.get('saveAsStandard') ?? '') === '1' },
+  );
   return { campaignId, contentId };
 }
 
@@ -675,7 +689,8 @@ export async function saveContentWorkspaceAction(formData: FormData) {
     redirect(`/orchestrator/${campaignId}?contentError=${encodeURIComponent(message)}`);
   }
   revalidatePath(`/orchestrator/${campaignId}`);
-  redirect(`/orchestrator/${campaignId}?contentSaved=workspace`);
+  const standardSaved = String(formData.get('saveAsStandard') ?? '') === '1';
+  redirect(`/orchestrator/${campaignId}?contentSaved=workspace&standard=${standardSaved ? '1' : '0'}`);
 }
 
 /** บันทึกรูป+Caption แล้วอนุมัติสื่อไปหน้าสรุป โดยยังไม่สร้างคิว Facebook. */
@@ -693,6 +708,19 @@ export async function saveAndApproveContentWorkspaceAction(formData: FormData) {
     const message = error instanceof Error ? error.message : 'อนุมัติสื่อไม่สำเร็จ กรุณาตรวจข้อมูลอีกครั้ง';
     redirect(`/orchestrator/${campaignId}?contentError=${encodeURIComponent(message)}`);
   }
+}
+
+/** ล้างแบบมาตรฐานการจัดวาง งานใหม่จะกลับไปใช้ต้นฉบับ SO PEOPLE */
+export async function resetPosterStandardAction(formData: FormData) {
+  const session = await getServerSession(authOptions);
+  if (!session) throw new Error('unauthorized');
+  const campaignId = String(formData.get('campaignId') ?? '').trim();
+  await clearPosterLayoutStandard();
+  if (campaignId) {
+    revalidatePath(`/orchestrator/${campaignId}`);
+    redirect(`/orchestrator/${campaignId}?contentSaved=standard-reset`);
+  }
+  revalidatePath('/orchestrator');
 }
 
 /** สั่งวัดผล engagement ของ campaign (อ่านจาก post_logs → verdict → regen/บันทึกแนวที่เวิร์ค). */

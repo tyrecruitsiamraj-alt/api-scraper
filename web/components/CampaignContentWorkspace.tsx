@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { useFormStatus } from 'react-dom';
-import { approveContentAction, editCaptionAction, editPosterAction, rejectContentAction, regenerateContentImageAction, runFacebookPreflightAction } from '@/lib/actions';
+import { approveContentAction, editCaptionAction, editPosterAction, rejectContentAction, regenerateContentImageAction, resetPosterStandardAction, runFacebookPreflightAction } from '@/lib/actions';
 import type { PosterFields } from '@/lib/repo';
 import { emptyPosterExtras, emptyPosterLayout } from '../../src/core/poster-template.js';
 import { PosterDragCanvas } from '@/components/PosterDragCanvas';
@@ -27,6 +27,9 @@ type Props = {
   initialCaption: string;
   preflightAccounts: { id: string; label: string }[];
   posterSaved?: boolean;
+  standardSaved?: boolean;
+  hasStandard?: boolean;
+  standardReset?: boolean;
 };
 
 const COPY = {
@@ -71,7 +74,7 @@ function PosterSaveButton({ disabled }: { disabled: boolean }) {
   return <button className="btn-primary btn-sm" disabled={disabled || pending}>{pending ? 'กำลังประกอบรูป…' : 'บันทึกและประกอบรูปใหม่'}</button>;
 }
 
-export function CampaignContentWorkspace({ campaignId, content, initialPoster, initialCaption, preflightAccounts, posterSaved = false }: Props) {
+export function CampaignContentWorkspace({ campaignId, content, initialPoster, initialCaption, preflightAccounts, posterSaved = false, standardSaved = false, hasStandard = false, standardReset = false }: Props) {
   const [poster, setPoster] = useState<PosterFields>(initialPoster);
   const [caption, setCaption] = useState(initialCaption);
   const update = <K extends keyof PosterFields>(key: K, value: PosterFields[K]) => setPoster((current) => ({ ...current, [key]: value }));
@@ -81,7 +84,7 @@ export function CampaignContentWorkspace({ campaignId, content, initialPoster, i
   return (
     <section className="overflow-hidden rounded-2xl border border-hairline bg-white">
       <div className="flex flex-wrap items-start justify-between gap-3 border-b border-hairline bg-black/[0.015] px-5 py-4">
-        <div><p className="eyebrow">ขั้นที่ 3 · ทำและแก้สื่อ</p><h2 className="mt-1 text-lg font-semibold">แก้รูปและ Caption ได้จากหน้าเดียว</h2><p className="mt-1 text-xs text-subtle">ลากเลเยอร์เดิมได้ และเพิ่มรูปหรือข้อความบนโปสเตอร์ชุดนี้ได้ · นี่ไม่ใช่ Canva เต็ม</p></div>
+        <div><p className="eyebrow">ขั้นที่ 3 · ทำและแก้สื่อ</p><h2 className="mt-1 text-lg font-semibold">แก้รูปและ Caption ได้จากหน้าเดียว</h2><p className="mt-1 text-xs text-subtle">ลากเลเยอร์เดิมได้ และเพิ่มรูปหรือข้อความบนโปสเตอร์ชุดนี้ได้ · นี่ไม่ใช่ Canva เต็ม · บันทึกพร้อมติ๊กใช้เป็นแบบมาตรฐาน งานชุดนี้ต่อไปจะจัดวางแบบนี้โดยไม่ย้ายรูปคนจากงานอื่น</p></div>
         <span className="pill bg-blue-50 text-blue-700">ยังไม่โพสต์จริง</span>
       </div>
 
@@ -125,8 +128,29 @@ export function CampaignContentWorkspace({ campaignId, content, initialPoster, i
               <label><span className="label">ตำแหน่งคนในภาพ</span><select name="posterImageSide" className="field w-full" value={poster.imageSide} onChange={(event) => update('imageSide', event.target.value === 'left' ? 'left' : 'right')}><option value="right">ขวา — ข้อความอยู่ซ้าย</option><option value="left">ซ้าย — ข้อความอยู่ขวา</option></select></label>
               <label><span className="label">โลโก้บนภาพ</span><select name="posterLogoVariant" className="field w-full" value={poster.logoVariant ?? 'people-navy'} onChange={(event) => update('logoVariant', event.target.value === 'so-red' ? 'so-red' : 'people-navy')}><option value="people-navy">SO PEOPLE สีน้ำเงิน</option><option value="so-red">SO สีแดง</option></select></label>
             </div>
-            <div className="mt-4 flex flex-wrap items-center gap-2"><PosterSaveButton disabled={!content.hasSourceImage} />{content.hasSourceImage && <button type="button" className="btn-ghost btn-sm" onClick={() => update('layout', emptyPosterLayout())}>จัดวางตามต้นฉบับ</button>}<span className="text-xs text-subtle">{content.hasSourceImage ? 'มีภาพต้นฉบับพร้อมแก้ไข' : 'ร่างนี้ไม่มีภาพต้นฉบับ จึงต้องให้ AI สร้างร่างใหม่ก่อน'}</span></div>
-            {posterSaved && <div role="status" className="mt-3 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-900"><b>✓ บันทึกรูปใหม่แล้ว</b><span className="ml-1 text-emerald-800">PNG ถูกประกอบใหม่และตรวจข้อมูลสำคัญเรียบร้อย</span></div>}
+            <div className="mt-4 space-y-3">
+              <label className="flex items-start gap-2 rounded-xl border border-blue-200 bg-white/70 px-3 py-2 text-sm text-ink">
+                <input type="checkbox" name="saveAsStandard" value="1" defaultChecked className="mt-0.5" />
+                <span>
+                  <b>ใช้เป็นแบบมาตรฐานต่อไป</b>
+                  <span className="mt-0.5 block text-xs text-subtle">เก็บตำแหน่งเลเยอร์และกล่องข้อความ · ไม่เอาภาพคนหรือไฟล์ที่อัปโหลดจากงานนี้ไปงานอื่น</span>
+                </span>
+              </label>
+              <div className="flex flex-wrap items-center gap-2">
+                <PosterSaveButton disabled={!content.hasSourceImage} />
+                {content.hasSourceImage && <button type="button" className="btn-ghost btn-sm" onClick={() => update('layout', emptyPosterLayout())}>จัดวางตามต้นฉบับ</button>}
+                <span className="text-xs text-subtle">{content.hasSourceImage ? 'มีภาพต้นฉบับพร้อมแก้ไข' : 'ร่างนี้ไม่มีภาพต้นฉบับ จึงต้องให้ AI สร้างร่างใหม่ก่อน'}</span>
+              </div>
+            </div>
+            {posterSaved && standardSaved && <div role="status" className="mt-3 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-900"><b>✓ บันทึกแล้ว งานโปสเตอร์ชุดนี้ต่อไปจะจัดวางแบบนี้</b><span className="ml-1 text-emerald-800">PNG ของร่างนี้ถูกประกอบใหม่แล้ว และงานใหม่ที่ใช้เทมเพลตเดียวกันจะตามการจัดวางนี้</span></div>}
+            {posterSaved && !standardSaved && <div role="status" className="mt-3 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-900"><b>✓ บันทึกรูปใหม่แล้ว</b><span className="ml-1 text-emerald-800">เฉพาะร่างนี้ · ยังไม่ได้เปลี่ยนแบบมาตรฐาน</span></div>}
+            {standardReset && <div role="status" className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-950"><b>กลับไปใช้แบบต้นฉบับ SO แล้ว</b><span className="ml-1">งานโปสเตอร์ชุดนี้ต่อไปจะจัดวางตามเทมเพลต SO PEOPLE เดิม</span></div>}
+            {hasStandard && !standardReset && (
+              <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-blue-200 bg-white px-3 py-2 text-xs text-ink/80">
+                <span>ตอนนี้งานใหม่จะจัดวางตามแบบมาตรฐานที่บันทึกไว้</span>
+                <button type="submit" formAction={resetPosterStandardAction} formNoValidate className="btn-ghost btn-sm">กลับไปใช้แบบต้นฉบับ SO</button>
+              </div>
+            )}
           </form>
 
           <form action={editCaptionAction} className="rounded-2xl border border-hairline p-4">

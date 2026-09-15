@@ -1,10 +1,10 @@
 import { query } from '../db/pool.js';
-import { activeContentTrends } from '../db/repositories.js';
+import { activeContentTrends, getPosterLayoutStandard } from '../db/repositories.js';
 import { buildGroundedCaption, generateContent, generatePosterFields } from './content-gen.js';
 import { researchContentAngles } from './content-research.js';
 import { generateImage } from './ai-image.js';
 import { renderPoster } from './poster.js';
-import { withPosterTemplate } from './poster-template.js';
+import { applyPosterStandard, POSTER_TEMPLATE_ID, withPosterTemplate } from './poster-template.js';
 import { evaluateContentQuality } from './content-quality.js';
 import { applyTrustedPosterFacts, preflightCampaign, visualBriefFromFacts } from './campaign-facts.js';
 import { assessMarketResearch, collectCampaignMarketResearch } from './market-research.js';
@@ -208,6 +208,12 @@ export async function generateDraftForCampaign(campaignId, { researchMode = 'pro
   // The model may summarize presentation text, but the fields below are facts
   // and always come from ERP.  In particular it cannot turn 12,000 into 120.
   if (posterFields) posterFields = withPosterTemplate(applyTrustedPosterFacts(posterFields, c));
+  const posterStandard = await getPosterLayoutStandard(POSTER_TEMPLATE_ID).catch(() => null);
+  const posterStandardApplied = Boolean(posterFields && posterStandard);
+  if (posterStandardApplied) {
+    posterFields = applyPosterStandard(posterFields, posterStandard);
+    console.log('  [draft] ใช้แบบมาตรฐานการจัดวางโปสเตอร์ที่คนบันทึกไว้ — ไม่ย้ายรูปคนจากงานอื่น');
+  }
   // Repair factual failures before paying for image generation. Creative copy
   // is kept only when it passes; otherwise a deterministic ERP-only caption
   // replaces it, so the user never has to discover invented claims by eye.
@@ -308,6 +314,7 @@ export async function generateDraftForCampaign(campaignId, { researchMode = 'pro
       used_feedback: preferredExamples.length,
       used_losing: losingExamples.length,
       caption_repaired: Boolean(v.captionRepaired),
+      poster_standard_applied: posterStandardApplied,
       image_generation: {
         ok: true,
         provider: imageSources[i]?.provider ?? null,

@@ -6,8 +6,8 @@ import type { ContentQualityResult } from '../../src/core/content-quality.js';
 import { evaluateWorkflowReadiness } from '../../src/core/workflow-readiness.js';
 import type { WorkflowReadiness } from '../../src/core/workflow-readiness.js';
 import { renderPoster } from '../../src/core/poster.js';
-import { normalizePosterLayout, posterFieldsForQuality, withPosterTemplate } from '../../src/core/poster-template.js';
-import type { PosterLayout } from '../../src/core/poster-template.js';
+import { normalizePosterLayout, normalizePosterStandard, posterFieldsForQuality, posterStandardFromFields, POSTER_TEMPLATE_ID, withPosterTemplate } from '../../src/core/poster-template.js';
+import type { PosterLayout, PosterStandard } from '../../src/core/poster-template.js';
 import { evaluateResumeQualification } from '../../src/core/resume-qualification.js';
 import { selectPreferredScrapeWorker } from '../../src/core/worker-selection.js';
 import { assertAgeRange, buildScrapeCriteria, hydrateJobSnapshot } from './scrape-intake.js';
@@ -2483,8 +2483,178 @@ export async function syncContentContactPhone(contentId: string, phone: string) 
 
 const cleanPosterText = (value: unknown, max: number) => String(value ?? '').replace(/\s+/g, ' ').trim().slice(0, max);
 
+const POSTER_STANDARD_TABLE_SQL = `
+CREATE TABLE IF NOT EXISTS poster_layout_standards (
+  template_id        text PRIMARY KEY,
+  template_version   integer NOT NULL DEFAULT 2,
+  layout             jsonb NOT NULL DEFAULT '{}'::jsonb,
+  extras             jsonb NOT NULL DEFAULT '[]'::jsonb,
+  image_side         text NOT NULL DEFAULT 'right',
+  logo_variant       text NOT NULL DEFAULT 'people-navy',
+  source_content_id  uuid REFERENCES campaign_contents(id) ON DELETE SET NULL,
+  updated_by         text,
+  updated_at         timestamptz NOT NULL DEFAULT now()
+)`;
+
+function isMissingRelation(error: unknown) {
+  const err = error as { code?: string; message?: string };
+  return err?.code === '42P01' || /does not exist/i.test(String(err?.message || ''));
+}
+
+type PgClient = { query: (text: string, params?: unknown[]) => Promise<{ rows: any[] }> };
+
+async function ensurePosterLayoutStandardsTable(client?: PgClient) {
+  if (client) {
+    await client.query(POSTER_STANDARD_TABLE_SQL);
+    return;
+  }
+  await q(POSTER_STANDARD_TABLE_SQL);
+}
+
+function rowToPosterStandard(row: {
+  template_id: string;
+  template_version: number;
+  layout: unknown;
+  extras: unknown;
+  image_side: string;
+  logo_variant: string;
+}): PosterStandard | null {
+  return normalizePosterStandard({
+    templateId: row.template_id,
+    templateVersion: row.template_version,
+    layout: row.layout,
+    extras: row.extras,
+    imageSide: row.image_side,
+    logoVariant: row.logo_variant,
+  });
+}
+
+export type PosterLayoutStandardMeta = {
+  exists: boolean;
+  updatedAt: string | null;
+  updatedBy: string | null;
+};
+
+export async function getPosterLayoutStandard(templateId = POSTER_TEMPLATE_ID): Promise<PosterStandard | null> {
+  const read = async () => {
+    const rows = await q<{
+      template_id: string;
+      template_version: number;
+      layout: unknown;
+      extras: unknown;
+      image_side: string;
+      logo_variant: string;
+    }>(
+      `SELECT template_id, template_version, layout, extras, image_side, logo_variant
+         FROM poster_layout_standards WHERE template_id = $1`,
+      [templateId],
+    );
+    return rows[0] ? rowToPosterStandard(rows[0]) : null;
+  };
+  try {
+    return await read();
+  } catch (error) {
+    if (!isMissingRelation(error)) throw error;
+    try {
+      await ensurePosterLayoutStandardsTable();
+      return await read();
+    } catch {
+      return null;
+    }
+  }
+}
+
+export async function getPosterLayoutStandardMeta(templateId = POSTER_TEMPLATE_ID): Promise<PosterLayoutStandardMeta> {
+  const read = async () => {
+    const rows = await q<{ updated_at: string; updated_by: string | null }>(
+      `SELECT updated_at, updated_by FROM poster_layout_standards WHERE template_id = $1`,
+      [templateId],
+    );
+    const row = rows[0];
+    return { exists: Boolean(row), updatedAt: row?.updated_at ?? null, updatedBy: row?.updated_by ?? null };
+  };
+  try {
+    return await read();
+  } catch (error) {
+    if (!isMissingRelation(error)) throw error;
+    try {
+      await ensurePosterLayoutStandardsTable();
+      return await read();
+    } catch {
+      return { exists: false, updatedAt: null, updatedBy: null };
+    }
+  }
+}
+
+async function upsertPosterLayoutStandardWithClient(
+  client: PgClient,
+  fields: PosterFields,
+  contentId: string,
+  editor: string | null,
+) {
+  const standard = posterStandardFromFields(fields);
+  const packed = JSON.stringify(standard);
+  if (/data:image/i.test(packed)) return false;
+  const write = async () => {
+    await client.query(
+      `INSERT INTO poster_layout_standards
+         (template_id, template_version, layout, extras, image_side, logo_variant, source_content_id, updated_by, updated_at)
+       VALUES ($1,$2,$3::jsonb,$4::jsonb,$5,$6,$7,$8,now())
+       ON CONFLICT (template_id) DO UPDATE SET
+         template_version=EXCLUDED.template_version,
+         layout=EXCLUDED.layout,
+         extras=EXCLUDED.extras,
+         image_side=EXCLUDED.image_side,
+         logo_variant=EXCLUDED.logo_variant,
+         source_content_id=EXCLUDED.source_content_id,
+         updated_by=EXCLUDED.updated_by,
+         updated_at=now()`,
+      [
+        standard.templateId,
+        standard.templateVersion,
+        JSON.stringify(standard.layout),
+        JSON.stringify(standard.extras),
+        standard.imageSide,
+        standard.logoVariant,
+        contentId,
+        editor,
+      ],
+    );
+  };
+  try {
+    await write();
+    return true;
+  } catch (error) {
+    if (!isMissingRelation(error)) {
+      console.warn('[poster-standard] บันทึกแบบมาตรฐานไม่สำเร็จ:', error instanceof Error ? error.message : error);
+      return false;
+    }
+    try {
+      await ensurePosterLayoutStandardsTable(client);
+      await write();
+      return true;
+    } catch (retryError) {
+      console.warn('[poster-standard] สร้างตารางแบบมาตรฐานไม่สำเร็จ:', retryError instanceof Error ? retryError.message : retryError);
+      return false;
+    }
+  }
+}
+
+export async function clearPosterLayoutStandard(templateId = POSTER_TEMPLATE_ID) {
+  try {
+    await q(`DELETE FROM poster_layout_standards WHERE template_id = $1`, [templateId]);
+  } catch (error) {
+    if (!isMissingRelation(error)) throw error;
+  }
+}
+
 /** แก้ structured text แล้วประกอบ PNG ใหม่จากภาพต้นฉบับเดิม โดยตรวจ ERP ซ้ำทุกครั้ง. */
-export async function updateContentPoster(id: string, input: Partial<PosterFields>, editor: string | null = null) {
+export async function updateContentPoster(
+  id: string,
+  input: Partial<PosterFields>,
+  editor: string | null = null,
+  options: { saveAsStandard?: boolean } = {},
+) {
   const client = await pool().connect();
   try {
     await client.query('BEGIN');
@@ -2555,6 +2725,11 @@ export async function updateContentPoster(id: string, input: Partial<PosterField
       addedAt: extra.provenance.addedAt,
       addedBy: extra.provenance.addedBy || editor,
     }));
+    const saveAsStandard = options.saveAsStandard !== false;
+    let standardSaved = false;
+    if (saveAsStandard) {
+      standardSaved = await upsertPosterLayoutStandardWithClient(client, fields, id, editor);
+    }
     await client.query(
       `UPDATE campaign_contents
           SET image_bytes=$2, image_mime=$3, poster_fields=$4::jsonb,
@@ -2563,10 +2738,15 @@ export async function updateContentPoster(id: string, input: Partial<PosterField
         WHERE id=$1`,
       [id, rendered.bytes, rendered.mime, JSON.stringify(fields), quality.status, quality.score,
         JSON.stringify({ ...quality, posterFields: posterFieldsForQuality(fields) }),
-        JSON.stringify({ poster_edited_at: editedAt, poster_edited_by: editor, poster_extras: extraNotes })],
+        JSON.stringify({
+          poster_edited_at: editedAt,
+          poster_edited_by: editor,
+          poster_extras: extraNotes,
+          poster_standard_saved: standardSaved,
+        })],
     );
     await client.query('COMMIT');
-    return quality;
+    return { quality, standardSaved };
   } catch (error) {
     await client.query('ROLLBACK').catch(() => {});
     throw error;

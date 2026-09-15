@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { useFormStatus } from 'react-dom';
 import {
   regenerateContentImageAction,
+  resetPosterStandardAction,
   saveAndApproveContentWorkspaceAction,
   saveContentWorkspaceAction,
 } from '@/lib/actions';
@@ -23,6 +24,9 @@ type Props = {
   initialPoster: PosterFields;
   initialCaption: string;
   saved?: boolean;
+  standardSaved?: boolean;
+  hasStandard?: boolean;
+  standardReset?: boolean;
 };
 
 function ActionButtons({ canApprove }: { canApprove: boolean }) {
@@ -39,7 +43,7 @@ function ActionButtons({ canApprove }: { canApprove: boolean }) {
   );
 }
 
-export function ContentReviewWorkspace({ campaignId, content, initialPoster, initialCaption, saved = false }: Props) {
+export function ContentReviewWorkspace({ campaignId, content, initialPoster, initialCaption, saved = false, standardSaved = false, hasStandard = false, standardReset = false }: Props) {
   const [poster, setPoster] = useState(initialPoster);
   const [caption, setCaption] = useState(initialCaption);
   const update = <K extends keyof PosterFields>(key: K, value: PosterFields[K]) => setPoster((current) => ({ ...current, [key]: value }));
@@ -118,9 +122,23 @@ export function ContentReviewWorkspace({ campaignId, content, initialPoster, ini
         </label>
 
         <div className="mt-auto flex items-end justify-between gap-4 pt-7">
-          <div className="text-sm">
-            {saved && <span className="text-emerald-700">✓ บันทึกรูปและ Caption แล้ว</span>}
-            {!canApprove && <span className="text-red-700">ยังอนุมัติไม่ได้ กรุณาตรวจข้อมูลสำคัญ</span>}
+          <div className="space-y-2 text-sm">
+            <label className="flex items-start gap-2 text-[#222]">
+              <input type="checkbox" name="saveAsStandard" value="1" defaultChecked className="mt-1" />
+              <span>
+                <b>ใช้เป็นแบบมาตรฐานต่อไป</b>
+                <span className="mt-0.5 block text-[13px] text-[#6b7280]">เก็บตำแหน่งเลเยอร์และกล่องข้อความ · ไม่เอาภาพคนจากงานนี้ไปงานอื่น</span>
+              </span>
+            </label>
+            {saved && standardSaved && <span className="block text-emerald-700">✓ บันทึกแล้ว งานโปสเตอร์ชุดนี้ต่อไปจะจัดวางแบบนี้</span>}
+            {saved && !standardSaved && <span className="block text-emerald-700">✓ บันทึกรูปและ Caption แล้ว (เฉพาะร่างนี้)</span>}
+            {standardReset && <span className="block text-amber-800">กลับไปใช้แบบต้นฉบับ SO แล้ว</span>}
+            {hasStandard && !standardReset && (
+              <button type="submit" formAction={resetPosterStandardAction} formNoValidate className="text-[13px] text-[#0a3970] underline-offset-2 hover:underline">
+                กลับไปใช้แบบต้นฉบับ SO
+              </button>
+            )}
+            {!canApprove && <span className="block text-red-700">ยังอนุมัติไม่ได้ กรุณาตรวจข้อมูลสำคัญ</span>}
           </div>
           <ActionButtons canApprove={canApprove} />
         </div>

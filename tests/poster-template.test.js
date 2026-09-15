@@ -9,6 +9,9 @@ import {
   getPosterLayerBoxes,
   normalizePosterExtras,
   normalizePosterLayout,
+  normalizePosterStandard,
+  posterStandardFromFields,
+  applyPosterStandard,
   POSTER_CAMPAIGN_SOURCE,
   POSTER_TEMPLATE_ID,
   POSTER_TEMPLATE_VERSION,
@@ -108,4 +111,64 @@ test('รูปสต็อกหรือไฟล์ไม่มีที่�
   assert.equal(extras.length, 1);
   assert.equal(extras[0].id, 'ok');
   assert.equal(extras[0].provenance.origin, 'operator_upload');
+});
+
+test('แบบมาตรฐานเก็บตำแหน่งและข้อความ แต่ไม่เก็บรูปคนจากงานอื่น', () => {
+  const uploaded = createPosterImageExtra({ src: PIXEL, origin: 'operator_upload', filename: 'face-job-a.jpg', x: 80, y: 90, w: 160, h: 120 });
+  const fromBrief = createPosterImageExtra({ origin: 'campaign_source', x: 400, y: 200, w: 180, h: 220 });
+  const note = createPosterTextExtra({ text: 'รอบด่วนวันนี้', x: 70, y: 640, w: 300, h: 80 });
+  const jobA = withPosterTemplate({
+    ...sample,
+    title: 'พนักงานขับรถงาน A',
+    salaryTotal: '15,000',
+    layout: { title: { x: 24, y: -12 }, photo: { x: -40, y: 8 }, cta: { x: 0, y: 16 } },
+    extras: [uploaded, fromBrief, note],
+  });
+  const standard = posterStandardFromFields(jobA);
+  const packed = JSON.stringify(standard);
+  assert.equal(/data:image/i.test(packed), false);
+  assert.equal(packed.includes('face-job-a'), false);
+  assert.equal(packed.includes(PIXEL), false);
+  assert.equal(standard.layout.title.x, 24);
+  assert.equal(standard.layout.photo.x, -40);
+  assert.equal(standard.extras.some((item) => item.kind === 'text' && item.text === 'รอบด่วนวันนี้'), true);
+  assert.equal(standard.extras.some((item) => item.kind === 'source_photo_slot'), true);
+  assert.equal(standard.extras.some((item) => item.kind === 'upload_slot'), true);
+
+  const jobB = applyPosterStandard({
+    ...sample,
+    title: 'แม่บ้านงาน B',
+    salaryTotal: '12,000',
+    location: 'โรงงานชลบุรี',
+  }, {
+    ...standard,
+    extras: [
+      ...standard.extras,
+      { kind: 'image', src: PIXEL, provenance: { origin: 'operator_upload' }, x: 10, y: 10, w: 100, h: 100 },
+    ],
+  });
+  assert.equal(jobB.title, 'แม่บ้านงาน B');
+  assert.equal(jobB.salaryTotal, '12,000');
+  assert.equal(jobB.location, 'โรงงานชลบุรี');
+  assert.equal(jobB.layout.title.x, 24);
+  assert.equal(jobB.layout.photo.x, -40);
+  assert.equal(jobB.extras.some((item) => item.kind === 'text' && item.text === 'รอบด่วนวันนี้'), true);
+  assert.equal(jobB.extras.some((item) => item.src === POSTER_CAMPAIGN_SOURCE), true);
+  assert.equal(jobB.extras.some((item) => String(item.src || '').includes('data:image')), false);
+  assert.equal(JSON.stringify(jobB.extras).includes(PIXEL), false);
+});
+
+test('แบบมาตรฐานที่ถูกฉีด data URI จะถูกตัดทิ้ง', () => {
+  const cleaned = normalizePosterStandard({
+    layout: { title: { x: 8, y: 0 } },
+    extras: [
+      { kind: 'text', x: 20, y: 30, w: 200, h: 60, text: `data:image/png;base64,${PIXEL}` },
+      { kind: 'image', x: 40, y: 40, w: 120, h: 120, src: PIXEL, provenance: { origin: 'operator_upload' } },
+      { kind: 'text', x: 50, y: 700, w: 240, h: 64, text: 'ทักเลย' },
+    ],
+  });
+  assert.ok(cleaned);
+  assert.equal(cleaned.extras.some((item) => item.kind === 'text' && item.text === 'ทักเลย'), true);
+  assert.equal(cleaned.extras.some((item) => /data:image/i.test(JSON.stringify(item))), false);
+  assert.equal(applyPosterStandard(sample, cleaned).extras.some((item) => item.kind === 'image' && item.src !== POSTER_CAMPAIGN_SOURCE), false);
 });

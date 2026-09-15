@@ -306,6 +306,133 @@ export function withPosterTemplate(fields = {}) {
   };
 }
 
+/**
+ * แบบมาตรฐานของชุดโปสเตอร์ (templateId) — เก็บการจัดวางและช่องข้อความ
+ * ห้ามเก็บ data URI / ไฟล์รูปคนจากงานอื่น ห้ามย้ายข้อเท็จจริงใบขอ
+ */
+export function posterStandardFromFields(rawFields = {}) {
+  const fields = withPosterTemplate(rawFields);
+  const extras = [];
+  for (const item of fields.extras) {
+    if (extras.length >= POSTER_MAX_EXTRAS) break;
+    const box = {
+      x: item.x,
+      y: item.y,
+      w: item.w,
+      h: item.h,
+    };
+    if (item.kind === 'text' && compact(item.text)) {
+      extras.push({ kind: 'text', ...box, text: compact(item.text).slice(0, 180) });
+      continue;
+    }
+    if (item.kind === 'image' && item.provenance?.origin === 'campaign_source') {
+      extras.push({ kind: 'source_photo_slot', ...box });
+      continue;
+    }
+    if (item.kind === 'image' && item.provenance?.origin === 'operator_upload') {
+      extras.push({ kind: 'upload_slot', ...box });
+    }
+  }
+  return normalizePosterStandard({
+    templateId: fields.templateId,
+    templateVersion: fields.templateVersion,
+    layout: fields.layout,
+    imageSide: fields.imageSide,
+    logoVariant: fields.logoVariant,
+    extras,
+  }) ?? {
+    templateId: POSTER_TEMPLATE_ID,
+    templateVersion: POSTER_TEMPLATE_VERSION,
+    layout: emptyPosterLayout(),
+    imageSide: 'right',
+    logoVariant: 'people-navy',
+    extras: [],
+  };
+}
+
+/** รับเฉพาะโครงเลเยอร์ ตัด src/data URI และของที่ไม่รู้จักออกทุกครั้งก่อนเก็บ */
+export function normalizePosterStandard(raw) {
+  if (!raw || typeof raw !== 'object') return null;
+  const extras = [];
+  if (Array.isArray(raw.extras)) {
+    for (const item of raw.extras) {
+      if (!item || typeof item !== 'object' || extras.length >= POSTER_MAX_EXTRAS) continue;
+      const w = clampSize(item.w, item.kind === 'text' ? 120 : 80, item.kind === 'text' ? 900 : 720);
+      const h = clampSize(item.h, item.kind === 'text' ? 48 : 80, item.kind === 'text' ? 420 : 720);
+      const box = { x: clampOnCanvas(item.x, w), y: clampOnCanvas(item.y, h), w, h };
+      if (item.kind === 'text') {
+        const text = compact(item.text).slice(0, 180);
+        if (!text || /data:image/i.test(text)) continue;
+        extras.push({ kind: 'text', ...box, text });
+        continue;
+      }
+      if (item.kind === 'source_photo_slot' || (item.kind === 'image' && (item.src === POSTER_CAMPAIGN_SOURCE || item.provenance?.origin === 'campaign_source'))) {
+        extras.push({ kind: 'source_photo_slot', ...box });
+        continue;
+      }
+      if (item.kind === 'upload_slot' || (item.kind === 'image' && item.provenance?.origin === 'operator_upload')) {
+        extras.push({ kind: 'upload_slot', ...box });
+      }
+    }
+  }
+  return {
+    templateId: POSTER_TEMPLATE_ID,
+    templateVersion: POSTER_TEMPLATE_VERSION,
+    layout: normalizePosterLayout(raw.layout),
+    imageSide: raw.imageSide === 'left' ? 'left' : 'right',
+    logoVariant: raw.logoVariant === 'so-red' ? 'so-red' : 'people-navy',
+    extras,
+  };
+}
+
+/** งานใหม่ได้ตำแหน่งเลเยอร์และกล่องข้อความ — รูปคนยังเป็นภาพต้นฉบับของงานนั้นเอง */
+export function applyPosterStandard(rawFields = {}, rawStandard) {
+  const fields = withPosterTemplate(rawFields);
+  const standard = normalizePosterStandard(rawStandard);
+  if (!standard) return fields;
+  const extras = [];
+  for (const item of standard.extras) {
+    if (item.kind === 'text') {
+      extras.push({
+        id: `stdt${extras.length + 1}`,
+        kind: 'text',
+        x: item.x,
+        y: item.y,
+        w: item.w,
+        h: item.h,
+        text: item.text,
+        provenance: { origin: 'operator_text', addedAt: new Date().toISOString() },
+      });
+      continue;
+    }
+    if (item.kind === 'source_photo_slot') {
+      extras.push({
+        id: `stds${extras.length + 1}`,
+        kind: 'image',
+        x: item.x,
+        y: item.y,
+        w: item.w,
+        h: item.h,
+        src: POSTER_CAMPAIGN_SOURCE,
+        provenance: { origin: 'campaign_source', addedAt: new Date().toISOString() },
+      });
+    }
+  }
+  return withPosterTemplate({
+    ...fields,
+    layout: standard.layout,
+    imageSide: standard.imageSide,
+    logoVariant: standard.logoVariant,
+    extras: normalizePosterExtras(extras),
+  });
+}
+
+export function posterStandardFingerprint(standard) {
+  const normalized = normalizePosterStandard(standard);
+  if (!normalized) return '';
+  return JSON.stringify(normalized);
+}
+
 function layerGroup(id, offset, inner) {
   return `<g data-poster-layer="${id}" transform="translate(${offset.x} ${offset.y})">${inner}</g>`;
 }

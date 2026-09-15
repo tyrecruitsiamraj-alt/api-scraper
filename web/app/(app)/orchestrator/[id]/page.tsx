@@ -1,7 +1,7 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import nextDynamic from 'next/dynamic';
-import { contentGenIngredients, getCampaign, getCampaignAutopostProgress, getCampaignDraftQueueState, getCampaignPostQueueState, listCampaignContents, listCampaignPosts, listFacebookAccounts, soRecruitCheck } from '@/lib/repo';
+import { contentGenIngredients, getCampaign, getCampaignAutopostProgress, getCampaignDraftQueueState, getCampaignPostQueueState, getPosterLayoutStandardMeta, listCampaignContents, listCampaignPosts, listFacebookAccounts, soRecruitCheck } from '@/lib/repo';
 import type { CampaignDraftQueueState, CampaignPostRow } from '@/lib/repo';
 import { approveContentAction, rejectContentAction, editCaptionAction, editPosterAction, measureCampaignAction, reopenContentForEditingAction, retryCampaignDraftAction, runFacebookPreflightAction } from '@/lib/actions';
 import { CaptionViewer } from '@/components/CaptionViewer';
@@ -189,7 +189,7 @@ function aggregateByContent(posts: CampaignPostRow[]): Map<string, Engagement> {
   return map;
 }
 
-export default async function CampaignDetail({ params, searchParams }: { params: { id: string }; searchParams?: { contentError?: string; contentSaved?: string } }) {
+export default async function CampaignDetail({ params, searchParams }: { params: { id: string }; searchParams?: { contentError?: string; contentSaved?: string; standard?: string } }) {
   try {
     return await renderCampaignDetail({ params, searchParams });
   } catch (error) {
@@ -204,11 +204,14 @@ export default async function CampaignDetail({ params, searchParams }: { params:
   }
 }
 
-async function renderCampaignDetail({ params, searchParams }: { params: { id: string }; searchParams?: { contentError?: string; contentSaved?: string } }) {
+async function renderCampaignDetail({ params, searchParams }: { params: { id: string }; searchParams?: { contentError?: string; contentSaved?: string; standard?: string } }) {
   const c = await getCampaign(params.id);
   if (!c) notFound();
   const contentError = typeof searchParams?.contentError === 'string' ? searchParams.contentError : null;
   const posterSaved = searchParams?.contentSaved === 'poster' || searchParams?.contentSaved === 'workspace';
+  const standardSaved = searchParams?.standard === '1';
+  const standardReset = searchParams?.contentSaved === 'standard-reset';
+  const standardMeta = await getPosterLayoutStandardMeta().catch(() => ({ exists: false, updatedAt: null, updatedBy: null }));
   const snap = (c.request_snapshot ?? {}) as Record<string, any>;
   const contents = await listCampaignContents(params.id);
   const approvedContent = contents.find((item) => item.status === 'approved') ?? null;
@@ -293,6 +296,9 @@ async function renderCampaignDetail({ params, searchParams }: { params: { id: st
             initialPoster={JSON.parse(JSON.stringify(posterFields))}
             initialCaption={focusedContent.caption ?? ''}
             saved={posterSaved}
+            standardSaved={standardSaved}
+            hasStandard={standardMeta.exists}
+            standardReset={standardReset}
           />
         </div>
       </div>
@@ -353,7 +359,14 @@ async function renderCampaignDetail({ params, searchParams }: { params: { id: st
         )}
         {posterSaved && (
           <div role="status" className="mt-4 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-900">
-            <b>บันทึกรูปใหม่แล้ว</b> ระบบประกอบ PNG จากภาพต้นฉบับและตรวจข้อมูลสำคัญเรียบร้อยแล้ว
+            {standardSaved
+              ? <><b>บันทึกแล้ว งานโปสเตอร์ชุดนี้ต่อไปจะจัดวางแบบนี้</b> ระบบประกอบ PNG ของร่างนี้แล้ว และจะจำการจัดวางสำหรับงานใหม่ที่ใช้เทมเพลตเดียวกัน โดยไม่ย้ายรูปคนจากงานนี้</>
+              : <><b>บันทึกรูปใหม่แล้ว</b> ระบบประกอบ PNG จากภาพต้นฉบับและตรวจข้อมูลสำคัญเรียบร้อยแล้ว · เฉพาะร่างนี้</>}
+          </div>
+        )}
+        {standardReset && (
+          <div role="status" className="mt-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-950">
+            <b>กลับไปใช้แบบต้นฉบับ SO แล้ว</b> งานโปสเตอร์ชุดนี้ต่อไปจะจัดวางตามเทมเพลต SO PEOPLE เดิม
           </div>
         )}
         </div>
@@ -574,6 +587,9 @@ async function renderCampaignDetail({ params, searchParams }: { params: { id: st
                       initialCaption={ct.caption ?? ''}
                       preflightAccounts={preflightAccounts.map((account) => ({ id: account.id, label: account.label }))}
                       posterSaved={posterSaved}
+                      standardSaved={standardSaved}
+                      hasStandard={standardMeta.exists}
+                      standardReset={standardReset}
                     />
                   ) : (
                     <>
