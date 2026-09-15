@@ -189,6 +189,21 @@ function aggregateByContent(posts: CampaignPostRow[]): Map<string, Engagement> {
 }
 
 export default async function CampaignDetail({ params, searchParams }: { params: { id: string }; searchParams?: { contentError?: string; contentSaved?: string } }) {
+  try {
+    return await renderCampaignDetail({ params, searchParams });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'ไม่ทราบสาเหตุ';
+    return (
+      <div className="p-8">
+        <Link href="/orchestrator" className="text-sm text-[#0d5fb8]">← ศูนย์งาน</Link>
+        <h1 className="mt-4 text-xl font-semibold">เปิดใบงานไม่สำเร็จ</h1>
+        <p className="mt-2 text-sm text-red-800">{message}</p>
+      </div>
+    );
+  }
+}
+
+async function renderCampaignDetail({ params, searchParams }: { params: { id: string }; searchParams?: { contentError?: string; contentSaved?: string } }) {
   const c = await getCampaign(params.id);
   if (!c) notFound();
   const contentError = typeof searchParams?.contentError === 'string' ? searchParams.contentError : null;
