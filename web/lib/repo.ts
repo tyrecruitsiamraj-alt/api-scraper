@@ -2247,14 +2247,18 @@ export async function listCampaignContents(campaignId: string) {
     // factual gate รุ่นใหม่ มิฉะนั้นร่างเก่าที่แต่งสวัสดิการ/LINE อาจยังโชว์ 100/100.
     return rows.map((row) => {
       if (!campaign) return row;
-      const quality = evaluateContentQuality({
-        campaign,
-        caption: row.caption,
-        posterFields: row.poster_fields ?? row.quality_checks?.posterFields ?? null,
-        imageReady: row.has_image && row.image_generation_ok,
-        researchGate: row.gen_notes?.research_gate ?? { ready: false, issues: ['ร่างนี้ไม่มีหลักฐานสำรวจตลาดก่อนสร้าง'] },
-      });
-      return { ...row, quality_status: quality.status, quality_score: quality.score, quality_checks: quality };
+      try {
+        const quality = evaluateContentQuality({
+          campaign,
+          caption: row.caption,
+          posterFields: row.poster_fields ?? row.quality_checks?.posterFields ?? null,
+          imageReady: row.has_image && row.image_generation_ok,
+          researchGate: row.gen_notes?.research_gate ?? { ready: false, issues: ['ร่างนี้ไม่มีหลักฐานสำรวจตลาดก่อนสร้าง'] },
+        });
+        return { ...row, quality_status: quality.status, quality_score: quality.score, quality_checks: quality };
+      } catch {
+        return row;
+      }
     });
   } catch {
     // schema-015 (gen_notes) ยังไม่ migrate — query แบบไม่มีคอลัมน์นั้น

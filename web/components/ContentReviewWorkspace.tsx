@@ -8,7 +8,7 @@ import {
   saveContentWorkspaceAction,
 } from '@/lib/actions';
 import type { PosterFields } from '@/lib/repo';
-import { emptyPosterExtras, emptyPosterLayout } from '../../src/core/poster-template.js';
+import { emptyPosterLayout } from '../../src/core/poster-template.js';
 import { PosterDragCanvas } from '@/components/PosterDragCanvas';
 import { PosterExtrasBar } from '@/components/PosterExtrasBar';
 
@@ -49,6 +49,9 @@ export function ContentReviewWorkspace({ campaignId, content, initialPoster, ini
   return (
     <section className="grid min-h-[724px] overflow-hidden rounded-xl border border-[#d6dce4] bg-white lg:grid-cols-[565px_minmax(0,1fr)]">
       <div className="flex min-w-0 flex-col border-r border-[#d6dce4] p-4">
+        {content.hasSourceImage && (
+          <PosterExtrasBar extras={poster.extras ?? []} hasSourceImage={content.hasSourceImage} onChange={(extras) => update('extras', extras)} tone="pixel" />
+        )}
         <PosterDragCanvas
           fields={poster}
           sourceUrl={content.hasSourceImage ? source : null}
@@ -57,9 +60,6 @@ export function ContentReviewWorkspace({ campaignId, content, initialPoster, ini
           onLayoutChange={(layout) => update('layout', layout)}
           onExtrasChange={(extras) => update('extras', extras)}
         />
-        {content.hasSourceImage && (
-          <PosterExtrasBar extras={poster.extras ?? []} hasSourceImage={content.hasSourceImage} onChange={(extras) => update('extras', extras)} tone="pixel" />
-        )}
         <div className="mt-auto flex items-center gap-4 pt-6">
           <button type="button" onClick={() => { setPoster(initialPoster); setCaption(initialCaption); }} className="inline-flex h-14 min-w-44 items-center justify-center gap-3 rounded-md border border-[#0a3970] bg-white px-6 text-[16px] font-medium text-[#082b62] transition hover:bg-blue-50">
             <span className="text-2xl">↶</span>คืนค่าเดิม
@@ -80,17 +80,17 @@ export function ContentReviewWorkspace({ campaignId, content, initialPoster, ini
         <input type="hidden" name="posterBadge" value={poster.badge} />
         <input type="hidden" name="posterSalaryBreakdown" value={poster.salaryBreakdown} />
         <input type="hidden" name="posterLayout" value={JSON.stringify(poster.layout ?? emptyPosterLayout())} />
-        <input type="hidden" name="posterExtras" value={JSON.stringify(poster.extras ?? emptyPosterExtras())} />
+        <input type="hidden" name="posterExtras" value={JSON.stringify(poster.extras ?? [])} />
 
         <div className="grid gap-x-12 gap-y-5 md:grid-cols-2">
           <PixelField label="ตำแหน่ง" name="posterTitle" value={poster.title} onChange={(value) => update('title', value)} />
           <PixelField label="สถานที่ทำงาน" name="posterLocation" value={poster.location} onChange={(value) => update('location', value)} />
-          <PixelField label="รายได้" name="posterSalaryTotal" value={poster.salaryTotal} suffix="บาท/เดือน" onChange={(value) => update('salaryTotal', value)} />
-          <PixelField label="จำนวนรับ" name="posterQuantity" value={poster.quantity.replace(/\s*อัตรา\s*$/, '')} suffix="อัตรา" onChange={(value) => update('quantity', value.trim() ? `${value.trim()} อัตรา` : '')} />
-          <PixelArea label="คุณสมบัติ" name="posterQualifications" value={poster.qualifications.join('\n')} className="h-[168px]" onChange={(value) => update('qualifications', value.split(/\r?\n/).map((item) => item.trim()).filter(Boolean))} />
+          <PixelField label="รายได้" name="posterSalaryTotal" value={poster.salaryTotal ?? ''} suffix="บาท/เดือน" onChange={(value) => update('salaryTotal', value)} />
+          <PixelField label="จำนวนรับ" name="posterQuantity" value={String(poster.quantity ?? '').replace(/\s*อัตรา\s*$/, '')} suffix="อัตรา" onChange={(value) => update('quantity', value.trim() ? `${value.trim()} อัตรา` : '')} />
+          <PixelArea label="คุณสมบัติ" name="posterQualifications" value={(poster.qualifications ?? []).join('\n')} className="h-[168px]" onChange={(value) => update('qualifications', value.split(/\r?\n/).map((item) => item.trim()).filter(Boolean))} />
           <div className="space-y-5">
             <PixelArea label="เวลาทำงาน" name="posterWorktime" value={poster.worktime} className="h-10 py-2" onChange={(value) => update('worktime', value)} />
-            <PixelArea label="สวัสดิการ (แสดงในสื่อ)" name="posterBenefits" value={poster.benefits.join('\n')} className="h-[62px]" onChange={(value) => update('benefits', value.split(/\r?\n/).map((item) => item.trim()).filter(Boolean))} />
+            <PixelArea label="สวัสดิการ (แสดงในสื่อ)" name="posterBenefits" value={(poster.benefits ?? []).join('\n')} className="h-[62px]" onChange={(value) => update('benefits', value.split(/\r?\n/).map((item) => item.trim()).filter(Boolean))} />
           </div>
           <PixelField label="เบอร์โทรที่ยืนยันแล้ว" name="posterContactLine" value={poster.contactLine} onChange={(value) => update('contactLine', value)} />
           <label>

@@ -87,7 +87,12 @@ function check(code, label, status, message, expected = null, actual = null) {
  */
 export function evaluateContentQuality({ campaign = {}, caption = '', posterFields = null, imageReady = null, researchGate = null } = {}) {
   const facts = extractCampaignFacts(campaign);
-  const posterForText = posterFields ? posterFieldsForQuality(posterFields) : null;
+  let posterForText = null;
+  try {
+    posterForText = posterFields ? posterFieldsForQuality(posterFields) : null;
+  } catch {
+    posterForText = posterFields && typeof posterFields === 'object' ? { title: posterFields.title } : null;
+  }
   const combinedRaw = [caption, posterForText ? JSON.stringify(posterForText, null, 2) : ''].join('\n');
   const text = clean(caption);
   const combined = clean(combinedRaw);

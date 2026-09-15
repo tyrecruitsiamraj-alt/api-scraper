@@ -152,6 +152,7 @@ function normalizeExtraProvenance(raw, kind) {
 }
 
 function extraLabel(item) {
+  if (!item || typeof item !== 'object') return 'เลเยอร์ที่เพิ่ม';
   if (item.kind === 'text') return compact(item.text).slice(0, 16) || POSTER_EXTRA_ORIGINS.operator_text;
   return POSTER_EXTRA_ORIGINS[item.provenance?.origin] || 'รูปที่เพิ่ม';
 }
@@ -272,14 +273,14 @@ export function getPosterLayerBoxes(rawFields = {}) {
   const fields = withPosterTemplate(rawFields);
   const layout = fields.layout;
   const bases = posterLayerBases(fields);
-  const extras = fields.extras.map((item) => ({
+  const extras = Array.isArray(fields.extras) ? fields.extras.map((item) => ({
     id: extraHandleId(item.id),
     label: extraLabel(item),
     x: item.x,
     y: item.y,
     w: item.w,
     h: item.h,
-  }));
+  })) : [];
   return [...POSTER_LAYOUT_KEYS.map((id) => {
     const base = bases[id];
     return {
@@ -373,7 +374,9 @@ export function buildPosterSvg(rawFields = {}, personUri = null, logoUri = null)
       ${textLines(salaryLines, 0, 66, 58, 'fill="#082b62" font-size="58" font-weight="800" letter-spacing="-1"')}
       ${quantity ? `<line x1="0" y1="165" x2="390" y2="165" stroke="#cad6e2" stroke-width="3"/><circle cx="28" cy="216" r="28" fill="#0d5fb8"/><path d="M15 216h26M28 203v26" stroke="#fff" stroke-width="5" stroke-linecap="round"/><text x="75" y="229" fill="#082b62" font-size="39" font-weight="800">${esc(quantity)}</text>` : ''}`;
 
-  const extrasSvg = f.extras.map((item) => {
+  let extrasSvg = '';
+  try {
+    extrasSvg = (Array.isArray(f.extras) ? f.extras : []).map((item) => {
     if (item.kind === 'image') {
       const href = item.src === POSTER_CAMPAIGN_SOURCE ? personUri : item.src;
       const inner = href
@@ -388,7 +391,10 @@ export function buildPosterSvg(rawFields = {}, personUri = null, logoUri = null)
     const inner = `<rect width="${item.w}" height="${item.h}" rx="14" fill="#ffffff" fill-opacity="0.94" stroke="#082b62" stroke-width="4"/>
       ${textLines(lines, item.w / 2, 36, lineHeight, 'text-anchor="middle" fill="#082b62" font-size="28" font-weight="800"')}`;
     return layerGroup(extraHandleId(item.id), { x: item.x, y: item.y }, inner);
-  }).join('');
+    }).join('');
+  } catch {
+    extrasSvg = '';
+  }
 
   return `<svg id="poster" xmlns="http://www.w3.org/2000/svg" width="1080" height="1080" viewBox="0 0 1080 1080" role="img" aria-label="โปสเตอร์รับสมัคร ${esc(f.title || '')}">
     <defs>
@@ -413,7 +419,17 @@ export function buildPosterSvg(rawFields = {}, personUri = null, logoUri = null)
     ${layerGroup('footer', layout.footer, `<rect y="810" width="1080" height="270" fill="#082b62"/><rect y="810" width="1080" height="8" fill="#0d5fb8"/>${benefits}${noBenefits}`)}
     ${layerGroup('cta', layout.cta, `<rect x="64" y="1018" width="952" height="44" rx="22" fill="#ffffff"/><text x="88" y="1048" fill="#082b62" font-size="22" font-weight="600">สนใจสมัคร ทักเลย</text><text x="992" y="1048" text-anchor="end" fill="#082b62" font-size="22" font-weight="700">${esc(contact)}</text>`)}
     ${extrasSvg}
-    <metadata>${esc(JSON.stringify({ templateId: f.templateId, templateVersion: f.templateVersion, brandRuleVersion: f.brandRuleVersion, layout, extras: posterFieldsForQuality(f).extras }))}</metadata>
+    <metadata>${esc(JSON.stringify({
+      templateId: f.templateId,
+      templateVersion: f.templateVersion,
+      brandRuleVersion: f.brandRuleVersion,
+      layout,
+      extras: (f.extras || []).map((item) => ({
+        id: item.id,
+        kind: item.kind,
+        origin: item.provenance?.origin || null,
+      })),
+    }))}</metadata>
   </svg>`;
 }
 
