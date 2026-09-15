@@ -45,7 +45,7 @@ async function launchPosterBrowser() {
 function composeError(error) {
   const raw = error instanceof Error ? error.message : String(error || '');
   console.warn(`  [poster] เรนเดอร์ไม่สำเร็จ: ${raw}`);
-  return new Error(`ประกอบโปสเตอร์ไม่สำเร็จ กรุณาลองใหม่ (${raw.slice(0, 90)})`);
+  return new Error('ประกอบโปสเตอร์ไม่สำเร็จ กรุณาลองใหม่');
 }
 
 /**
