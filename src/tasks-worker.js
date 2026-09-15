@@ -17,6 +17,7 @@ import {
   getConnector,
   markTaskRunning,
   pendingExtractionsForRuns,
+  listZeroYieldSearchTerms,
   recommendedSourcingTerms,
   recoverStaleRunningTasks,
   saveCachedFamilyPlan,
@@ -135,6 +136,12 @@ export async function runTask(t, runtime) {
           descPositions = [...descPositions, ...learnedTerms];
           console.log(`  🧠 Second Brain เพิ่มคำค้นที่มี Qualified Yield ดี: ${learnedTerms.join(', ')}`);
         }
+        descPositions = await skipZeroYieldExpansionTerms(descPositions, {
+          jobFamily,
+          platform: connector.platform,
+          location: (t.criteria || {}).province || '',
+          keepTerms: [descPositions[0]],
+        });
       } catch { /* fail-soft */ }
       // Do not append family-wide trend terms automatically. A broad family can
       // contain roles that share a technical/service gate but are not valid
@@ -312,6 +319,27 @@ function chunk(arr, n) {
   return out;
 }
 
+/** Skip expansion terms that already opened many resumes and qualified none. Keep the original search term. */
+async function skipZeroYieldExpansionTerms(positions, { jobFamily, platform, location, keepTerms = [] }) {
+  const list = (Array.isArray(positions) ? positions : []).map((item) => String(item || '').trim()).filter(Boolean);
+  if (!list.length || !jobFamily || !platform) return list;
+  const dead = await listZeroYieldSearchTerms({ jobFamily, platform, location }).catch(() => []);
+  if (!dead.length) return list;
+  const deadSet = new Set(dead.map((term) => term.toLocaleLowerCase('th-TH')));
+  const keepSet = new Set(keepTerms.map((term) => String(term || '').trim().toLocaleLowerCase('th-TH')).filter(Boolean));
+  const kept = [];
+  const skipped = [];
+  for (const term of list) {
+    const key = term.toLocaleLowerCase('th-TH');
+    if (!keepSet.has(key) && deadSet.has(key)) skipped.push(term);
+    else kept.push(term);
+  }
+  if (skipped.length) {
+    console.log(`  [lesson] ข้ามคำค้นที่เปิดมากแล้วผ่าน 0: ${skipped.join(', ')}`);
+  }
+  return kept.length ? kept : list;
+}
+
 /**
  * วน scrape ตามรายชื่อตำแหน่ง (positions) จนครบ target / หมดตำแหน่ง / เจอ daily cap.
  * ใช้ร่วมกันทั้งโหมดขยายตำแหน่งใกล้เคียง (expandAdjacent) และโหมดเนื้องาน.
@@ -319,7 +347,16 @@ function chunk(arr, n) {
  * @returns {Promise<{ savedTotal:number, used:string[] }>}
  */
 async function scrapePositionList({ t, connector, target, savedTotal, runtime, runIds, positions, platform, base, maxRounds, qualificationSpec = {}, jobFamily = '' }) {
-  const list = Array.isArray(positions) ? positions.filter(Boolean) : [];
+  const original = String((t.criteria || {}).position || (t.criteria || {}).keyword || '').trim();
+  const list = await skipZeroYieldExpansionTerms(
+    Array.isArray(positions) ? positions.filter(Boolean) : [],
+    {
+      jobFamily,
+      platform,
+      location: (t.criteria || {}).province || '',
+      keepTerms: [original, positions?.[0]].filter(Boolean),
+    },
+  );
   const batches = platform === 'jobbkk' ? chunk(list, 3) : list.map((g) => [g]);
   const cap = maxRounds ?? batches.length;
   const used = [];

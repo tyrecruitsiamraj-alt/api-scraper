@@ -90,8 +90,16 @@ export function humanizeOperatorError(value: string | null | undefined): {
   if (lower.includes('ไม่ยืนยันการเรียง') || lower.includes('วันที่แก้ไขล่าสุด') || lower.includes('ผิดลำดับ')) {
     return {
       title: 'ยืนยันการเรียง Resume ล่าสุดบน JobThai ไม่ได้',
-      detail: 'ระบบยังยืนยันไม่ได้ว่าผลค้นหาเรียงตามวันที่แก้ไขล่าสุด จึงหยุดเพื่อไม่ดึง Resume ผิดลำดับ',
-      next: 'เริ่มงานใหม่ได้เลย ถ้ายังไม่ได้ให้ผู้ดูแลตรวจ session JobThai หรือสลับไป JobBKK',
+      detail: 'บางหน้า JobThai ไม่มีกล่องเรียงวันที่แก้ไขล่าสุด แต่ยังมี Resume ให้ดึง',
+      next: 'อัปเดต Worker แล้วเริ่มใหม่ — ระบบจะดึง Resume ต่อแม้ไม่มีกล่องเรียง ห้าม abort ทั้งงาน',
+      technical,
+    };
+  }
+  if (lower.includes('ถูกคัดออกทั้งหมดด้วยเงื่อนไข') || lower.includes('ผ่านเกณฑ์ 0')) {
+    return {
+      title: 'เปิด Resume แล้วยังไม่มีคนผ่านเกณฑ์',
+      detail: 'ระบบดึงรายการได้ แต่คนที่เปิดแล้วยังไม่ผ่าน Hard Filter/Job Family ของใบขอนี้',
+      next: 'อย่าวนคำค้นเดิมที่เปิดมากแล้วผ่าน 0 — ขยายตำแหน่งในสายงานเดียวกัน หรือผ่อนเฉพาะเกณฑ์ที่ใบขอไม่มี',
       technical,
     };
   }
