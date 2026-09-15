@@ -1,13 +1,18 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
+import nextDynamic from 'next/dynamic';
 import { contentGenIngredients, getCampaign, getCampaignAutopostProgress, getCampaignDraftQueueState, getCampaignPostQueueState, listCampaignContents, listCampaignPosts, listFacebookAccounts, soRecruitCheck } from '@/lib/repo';
 import type { CampaignDraftQueueState, CampaignPostRow } from '@/lib/repo';
 import { approveContentAction, rejectContentAction, editCaptionAction, editPosterAction, measureCampaignAction, reopenContentForEditingAction, retryCampaignDraftAction, runFacebookPreflightAction } from '@/lib/actions';
 import { CaptionViewer } from '@/components/CaptionViewer';
 import { AutopostSummaryForm } from '@/components/AutopostSummaryForm';
 import { CampaignContentWorkspace } from '@/components/CampaignContentWorkspace';
-import { ContentReviewWorkspace } from '@/components/ContentReviewWorkspace';
 import { AutoRefresh } from '@/components/AutoRefresh';
+
+const ContentReviewWorkspace = nextDynamic(
+  () => import('@/components/ContentReviewWorkspace').then((mod) => mod.ContentReviewWorkspace),
+  { ssr: false, loading: () => <div className="rounded-xl border border-[#d6dce4] bg-white p-6 text-sm text-[#667]">กำลังเปิดตัวแก้รูป…</div> },
+);
 
 export const dynamic = 'force-dynamic';
 
@@ -268,8 +273,8 @@ export default async function CampaignDetail({ params, searchParams }: { params:
           {contentError && <div role="alert" className="rounded-md border border-red-200 bg-red-50 px-4 py-2 text-sm text-red-800">{contentError}</div>}
           <ContentReviewWorkspace
             campaignId={c.id}
-            content={{ id: focusedContent.id, hasSourceImage: focusedContent.has_source_image, qualityStatus: focusedContent.quality_status, isPreview }}
-            initialPoster={posterFields}
+            content={{ id: focusedContent.id, hasSourceImage: Boolean(focusedContent.has_source_image), qualityStatus: focusedContent.quality_status, isPreview }}
+            initialPoster={JSON.parse(JSON.stringify(posterFields))}
             initialCaption={focusedContent.caption ?? ''}
             saved={posterSaved}
           />
