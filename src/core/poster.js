@@ -74,15 +74,16 @@ export async function renderPoster(fields, personDataUri = null) {
     );
     await page.setContent(
       `<!doctype html><html><head><meta charset="utf-8"><style>html,body{margin:0;width:1080px;height:1080px;overflow:hidden}</style></head><body>${svg}</body></html>`,
-      { waitUntil: 'load', timeout: 20_000 },
+      { waitUntil: 'domcontentloaded', timeout: 20_000 },
     );
+    await new Promise((resolve) => setTimeout(resolve, 800));
     const el = await page.$('#poster') || await page.$('svg');
     if (!el) throw new Error('ไม่พบโปสเตอร์บนหน้าเรนเดอร์');
     const bytes = await el.screenshot({ type: 'png' });
     return { bytes, mime: 'image/png' };
   } catch (e) {
     console.warn(`  [poster] เรนเดอร์ไม่สำเร็จ: ${e.message}`);
-    return null;
+    throw new Error(`ประกอบโปสเตอร์ไม่สำเร็จ กรุณาลองใหม่ (${String(e.message || '').slice(0, 80)})`);
   } finally {
     if (browser) await browser.close().catch(() => {});
   }
