@@ -6,7 +6,8 @@ import type { ContentQualityResult } from '../../src/core/content-quality.js';
 import { evaluateWorkflowReadiness } from '../../src/core/workflow-readiness.js';
 import type { WorkflowReadiness } from '../../src/core/workflow-readiness.js';
 import { renderPoster } from '../../src/core/poster.js';
-import { withPosterTemplate } from '../../src/core/poster-template.js';
+import { normalizePosterLayout, withPosterTemplate } from '../../src/core/poster-template.js';
+import type { PosterLayout } from '../../src/core/poster-template.js';
 import { evaluateResumeQualification } from '../../src/core/resume-qualification.js';
 import { selectPreferredScrapeWorker } from '../../src/core/worker-selection.js';
 import { assertAgeRange, buildScrapeCriteria, hydrateJobSnapshot } from './scrape-intake.js';
@@ -2185,6 +2186,7 @@ export type PosterFields = {
   templateVersion?: number;
   brandRuleVersion?: number;
   logoVariant?: 'people-navy' | 'so-red';
+  layout?: PosterLayout;
 };
 
 export type ContentRow = {
@@ -2488,9 +2490,10 @@ export async function updateContentPoster(id: string, input: Partial<PosterField
       source_image_mime: string | null;
       campaign: CampaignRow;
       gen_notes: Record<string, any> | null;
+      poster_fields: PosterFields | null;
     }>(
       `SELECT cc.status, cc.caption, cc.source_image_bytes, cc.source_image_mime, cc.gen_notes,
-              to_jsonb(c.*) AS campaign
+              cc.poster_fields, to_jsonb(c.*) AS campaign
          FROM campaign_contents cc
          JOIN recruit_campaigns c ON c.id=cc.campaign_id
         WHERE cc.id=$1 FOR UPDATE OF cc`,
@@ -2516,6 +2519,7 @@ export async function updateContentPoster(id: string, input: Partial<PosterField
       contactLine: cleanPosterText(input.contactLine, 80),
       imageSide: input.imageSide === 'left' ? 'left' : 'right',
       logoVariant: input.logoVariant === 'so-red' ? 'so-red' : 'people-navy',
+      layout: normalizePosterLayout(input.layout ?? row.poster_fields?.layout),
     });
     if (!fields.title) throw new Error('กรุณาระบุตำแหน่งบนรูป');
 

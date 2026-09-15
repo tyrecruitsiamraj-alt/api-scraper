@@ -7,6 +7,16 @@
 export const POSTER_TEMPLATE_ID = 'so-people-recruitment';
 export const POSTER_TEMPLATE_VERSION = 2;
 export const POSTER_BRAND_RULE_VERSION = 1;
+export const POSTER_CANVAS = 1080;
+export const POSTER_LAYOUT_KEYS = ['photo', 'logo', 'title', 'salary', 'footer', 'cta'];
+export const POSTER_LAYER_LABELS = {
+  photo: 'รูปคน',
+  logo: 'โลโก้',
+  title: 'ชื่อตำแหน่ง',
+  salary: 'รายได้',
+  footer: 'สวัสดิการ',
+  cta: 'ปุ่มสมัคร',
+};
 
 const esc = (value) => String(value ?? '')
   .replace(/&/g, '&amp;')
@@ -56,14 +66,85 @@ function benefitIcon(index, cx, cy) {
   return `<circle cx="${cx}" cy="${cy}" r="31" ${common}/><path d="M${cx} ${cy - 18}v20l15 10" ${common}/>`;
 }
 
+function clampOffset(value) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return 0;
+  return Math.max(-900, Math.min(900, Math.round(n)));
+}
+
+export function emptyPosterLayout() {
+  return Object.fromEntries(POSTER_LAYOUT_KEYS.map((key) => [key, { x: 0, y: 0 }]));
+}
+
+/** รับเฉพาะ offset ของ layer ที่ระบบรู้จัก กันค่าแปลกจากฟอร์มหรือร่างเก่า */
+export function normalizePosterLayout(raw) {
+  const layout = emptyPosterLayout();
+  if (!raw || typeof raw !== 'object') return layout;
+  for (const key of POSTER_LAYOUT_KEYS) {
+    const item = raw[key];
+    if (!item || typeof item !== 'object') continue;
+    layout[key] = { x: clampOffset(item.x), y: clampOffset(item.y) };
+  }
+  return layout;
+}
+
+export function applyPosterLayoutDelta(layout, key, dx, dy) {
+  const next = normalizePosterLayout(layout);
+  if (!POSTER_LAYOUT_KEYS.includes(key)) return next;
+  next[key] = {
+    x: clampOffset(next[key].x + dx),
+    y: clampOffset(next[key].y + dy),
+  };
+  return next;
+}
+
+function posterLayerBases(fields) {
+  const imageOnLeft = fields.imageSide === 'left';
+  const contentX = imageOnLeft ? 584 : 64;
+  const photoX = imageOnLeft ? 0 : 500;
+  const logoX = imageOnLeft ? 824 : 64;
+  const titleX = imageOnLeft ? 520 : 0;
+  return {
+    photo: { x: photoX, y: 0, w: 580, h: 810 },
+    logo: { x: logoX, y: 28, w: 200, h: 100 },
+    title: { x: titleX, y: 150, w: 560, h: 330 },
+    salary: { x: contentX, y: 500, w: 430, h: 280 },
+    footer: { x: 0, y: 810, w: 1080, h: 200 },
+    cta: { x: 64, y: 1010, w: 952, h: 56 },
+  };
+}
+
+/** กล่องเลเยอร์บนแคนวาส 1080 เพื่อให้พรีวิวลากกับไฟล์ PNG ใช้พิกัดชุดเดียวกัน */
+export function getPosterLayerBoxes(rawFields = {}) {
+  const fields = withPosterTemplate(rawFields);
+  const layout = fields.layout;
+  const bases = posterLayerBases(fields);
+  return POSTER_LAYOUT_KEYS.map((id) => {
+    const base = bases[id];
+    return {
+      id,
+      label: POSTER_LAYER_LABELS[id],
+      x: base.x + layout[id].x,
+      y: base.y + layout[id].y,
+      w: base.w,
+      h: base.h,
+    };
+  });
+}
+
 export function withPosterTemplate(fields = {}) {
   return {
     ...fields,
     logoVariant: fields.logoVariant === 'so-red' ? 'so-red' : 'people-navy',
+    layout: normalizePosterLayout(fields.layout),
     templateId: POSTER_TEMPLATE_ID,
     templateVersion: POSTER_TEMPLATE_VERSION,
     brandRuleVersion: POSTER_BRAND_RULE_VERSION,
   };
+}
+
+function layerGroup(id, offset, inner) {
+  return `<g data-poster-layer="${id}" transform="translate(${offset.x} ${offset.y})">${inner}</g>`;
 }
 
 /**
@@ -96,6 +177,7 @@ export function buildPosterSvg(rawFields = {}, personUri = null, logoUri = null)
     : 'M0 150 H570 Q630 315 570 475 H0Z';
   const logoX = imageOnLeft ? 824 : 64;
   const roleSize = titleLines.join('').length > 24 ? 58 : titleLines.length > 1 ? 68 : 78;
+  const layout = f.layout;
 
   const benefits = displayItems.map((item, index) => {
     const x = 80 + (index * itemWidth);
@@ -109,9 +191,28 @@ export function buildPosterSvg(rawFields = {}, personUri = null, logoUri = null)
        <text x="540" y="950" text-anchor="middle" class="footerText">${esc(contact)}</text>`
     : '';
 
+  const photoInner = `<clipPath id="photoClip"><rect x="${photoX}" y="0" width="580" height="810"/></clipPath>
+    ${personUri
+    ? `<image href="${esc(personUri)}" x="${photoX}" y="0" width="580" height="810" preserveAspectRatio="xMidYMid slice" clip-path="url(#photoClip)"/>`
+    : `<rect x="${photoX}" width="580" height="810" fill="#e8eff6"/>`}
+    <rect x="${photoX}" y="0" width="580" height="810" fill="url(#photoFade)"/>`;
+
+  const logoInner = f.logoVariant === 'so-red' && logoUri
+    ? `<image href="${esc(logoUri)}" x="${logoX}" y="34" width="190" height="88" preserveAspectRatio="xMinYMid meet"/>`
+    : `<text x="${logoX}" y="86" fill="#082b62" font-size="64" font-weight="800">SO</text><text x="${logoX + 5}" y="116" fill="#082b62" font-size="18" font-weight="700" letter-spacing="6">PEOPLE</text>`;
+
+  const titleInner = `<path d="${titlePath}" fill="#082b62"/>
+    <rect x="${contentX}" y="182" width="220" height="46" rx="23" fill="#ffffff" fill-opacity="0.13"/>
+    <text x="${contentX + 110}" y="213" text-anchor="middle" fill="#ffffff" font-size="23" font-weight="600">${esc(badge)}</text>
+    ${textLines(titleLines, contentX, 302, 76, `fill="#ffffff" font-size="${roleSize}" font-weight="800" letter-spacing="-2"`)}
+    ${locationLines.length ? `<circle cx="${contentX + 15}" cy="429" r="13" fill="#ffffff"/><circle cx="${contentX + 15}" cy="429" r="5" fill="#082b62"/>${textLines(locationLines, contentX + 42, 421, 31, 'fill="#ffffff" font-size="26" font-weight="500"')}` : ''}`;
+
+  const salaryInner = `<text x="0" y="0" fill="#58708a" font-size="23" font-weight="600">รายได้</text>
+      ${textLines(salaryLines, 0, 66, 58, 'fill="#082b62" font-size="58" font-weight="800" letter-spacing="-1"')}
+      ${quantity ? `<line x1="0" y1="165" x2="390" y2="165" stroke="#cad6e2" stroke-width="3"/><circle cx="28" cy="216" r="28" fill="#0d5fb8"/><path d="M15 216h26M28 203v26" stroke="#fff" stroke-width="5" stroke-linecap="round"/><text x="75" y="229" fill="#082b62" font-size="39" font-weight="800">${esc(quantity)}</text>` : ''}`;
+
   return `<svg id="poster" xmlns="http://www.w3.org/2000/svg" width="1080" height="1080" viewBox="0 0 1080 1080" role="img" aria-label="โปสเตอร์รับสมัคร ${esc(f.title || '')}">
     <defs>
-      <clipPath id="photoClip"><rect x="${photoX}" y="0" width="580" height="810"/></clipPath>
       <linearGradient id="photoFade" x1="${imageOnLeft ? '1' : '0'}" y1="0" x2="${imageOnLeft ? '0' : '1'}" y2="0">
         <stop offset="0" stop-color="#ffffff" stop-opacity="0.92"/><stop offset="0.26" stop-color="#ffffff" stop-opacity="0.08"/><stop offset="1" stop-color="#ffffff" stop-opacity="0"/>
       </linearGradient>
@@ -123,33 +224,16 @@ export function buildPosterSvg(rawFields = {}, personUri = null, logoUri = null)
       </style>
     </defs>
     <rect width="1080" height="1080" fill="#ffffff"/>
-    ${personUri ? `<image href="${esc(personUri)}" x="${photoX}" y="0" width="580" height="810" preserveAspectRatio="xMidYMid slice" clip-path="url(#photoClip)"/>` : `<rect x="${photoX}" width="580" height="810" fill="#e8eff6"/>`}
-    <rect x="${photoX}" y="0" width="580" height="810" fill="url(#photoFade)"/>
-
+    ${layerGroup('photo', layout.photo, photoInner)}
     <rect x="${imageOnLeft ? 520 : 0}" y="0" width="560" height="150" fill="#fff"/>
-    ${f.logoVariant === 'so-red' && logoUri
-      ? `<image href="${esc(logoUri)}" x="${logoX}" y="34" width="190" height="88" preserveAspectRatio="xMinYMid meet"/>`
-      : `<text x="${logoX}" y="86" fill="#082b62" font-size="64" font-weight="800">SO</text><text x="${logoX + 5}" y="116" fill="#082b62" font-size="18" font-weight="700" letter-spacing="6">PEOPLE</text>`}
-
-    <path d="${titlePath}" fill="#082b62"/>
-    <rect x="${contentX}" y="182" width="220" height="46" rx="23" fill="#ffffff" fill-opacity="0.13"/>
-    <text x="${contentX + 110}" y="213" text-anchor="middle" fill="#ffffff" font-size="23" font-weight="600">${esc(badge)}</text>
-    ${textLines(titleLines, contentX, 302, 76, `fill="#ffffff" font-size="${roleSize}" font-weight="800" letter-spacing="-2"`)}
-    ${locationLines.length ? `<circle cx="${contentX + 15}" cy="429" r="13" fill="#ffffff"/><circle cx="${contentX + 15}" cy="429" r="5" fill="#082b62"/>${textLines(locationLines, contentX + 42, 421, 31, 'fill="#ffffff" font-size="26" font-weight="500"')}` : ''}
-
-    <g transform="translate(${contentX} 520)">
-      <text x="0" y="0" fill="#58708a" font-size="23" font-weight="600">รายได้</text>
-      ${textLines(salaryLines, 0, 66, 58, 'fill="#082b62" font-size="58" font-weight="800" letter-spacing="-1"')}
-      ${quantity ? `<line x1="0" y1="165" x2="390" y2="165" stroke="#cad6e2" stroke-width="3"/><circle cx="28" cy="216" r="28" fill="#0d5fb8"/><path d="M15 216h26M28 203v26" stroke="#fff" stroke-width="5" stroke-linecap="round"/><text x="75" y="229" fill="#082b62" font-size="39" font-weight="800">${esc(quantity)}</text>` : ''}
+    ${layerGroup('logo', layout.logo, logoInner)}
+    ${layerGroup('title', layout.title, titleInner)}
+    <g data-poster-layer="salary" transform="translate(${contentX + layout.salary.x} ${520 + layout.salary.y})">
+      ${salaryInner}
     </g>
-
-    <rect y="810" width="1080" height="270" fill="#082b62"/>
-    <rect y="810" width="1080" height="8" fill="#0d5fb8"/>
-    ${benefits}${noBenefits}
-    <rect x="64" y="1018" width="952" height="44" rx="22" fill="#ffffff"/>
-    <text x="88" y="1048" fill="#082b62" font-size="22" font-weight="600">สนใจสมัคร ทักเลย</text>
-    <text x="992" y="1048" text-anchor="end" fill="#082b62" font-size="22" font-weight="700">${esc(contact)}</text>
-    <metadata>${esc(JSON.stringify({ templateId: f.templateId, templateVersion: f.templateVersion, brandRuleVersion: f.brandRuleVersion }))}</metadata>
+    ${layerGroup('footer', layout.footer, `<rect y="810" width="1080" height="270" fill="#082b62"/><rect y="810" width="1080" height="8" fill="#0d5fb8"/>${benefits}${noBenefits}`)}
+    ${layerGroup('cta', layout.cta, `<rect x="64" y="1018" width="952" height="44" rx="22" fill="#ffffff"/><text x="88" y="1048" fill="#082b62" font-size="22" font-weight="600">สนใจสมัคร ทักเลย</text><text x="992" y="1048" text-anchor="end" fill="#082b62" font-size="22" font-weight="700">${esc(contact)}</text>`)}
+    <metadata>${esc(JSON.stringify({ templateId: f.templateId, templateVersion: f.templateVersion, brandRuleVersion: f.brandRuleVersion, layout }))}</metadata>
   </svg>`;
 }
 
@@ -159,7 +243,7 @@ export function evaluatePosterVisual(fields = {}) {
     { code: 'visual_template', label: 'Template งานออกแบบ', status: f.templateId === POSTER_TEMPLATE_ID && Number(f.templateVersion) === POSTER_TEMPLATE_VERSION ? 'pass' : 'fail', message: `ใช้ ${POSTER_TEMPLATE_ID} v${POSTER_TEMPLATE_VERSION}` },
     { code: 'visual_title_fit', label: 'ขนาดชื่อตำแหน่ง', status: compact(f.title).length <= 38 ? 'pass' : 'fail', message: compact(f.title).length <= 38 ? 'อยู่ในพื้นที่ปลอดภัย' : 'ชื่อตำแหน่งยาวเกินพื้นที่บนภาพ' },
     { code: 'visual_location_fit', label: 'ขนาดสถานที่', status: compact(f.location).length <= 62 ? 'pass' : 'warning', message: compact(f.location).length <= 62 ? 'อยู่ในพื้นที่ปลอดภัย' : 'สถานที่ยาว อาจถูกย่อบนภาพ' },
-    { code: 'visual_layers', label: 'Layer ที่แก้ไขได้', status: 'pass', message: 'ภาพคนและข้อความถูกแยกคนละ Layer' },
+    { code: 'visual_layers', label: 'Layer ที่แก้ไขได้', status: 'pass', message: 'รูปคน โลโก้ ข้อความ และปุ่มสมัครแยกเลเยอร์ ลากย้ายตำแหน่งได้โดยไม่เปลี่ยนภาพต้นฉบับ' },
   ];
   return checks;
 }

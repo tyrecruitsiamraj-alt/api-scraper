@@ -177,6 +177,18 @@ test('ร่างที่ไม่มีหลักฐานสำรวจ�
   assert.equal(result.checks.find((item) => item.code === 'market_research')?.status, 'fail');
 });
 
+test('จัดวางเลเยอร์ใหม่ไม่ทำให้ Quality Gate มองว่าสลับภาพต้นฉบับ', () => {
+  const poster = withPosterTemplate({
+    ...goodPoster,
+    layout: { photo: { x: -40, y: 12 }, title: { x: 24, y: -8 } },
+  });
+  const result = evaluateContentQuality({ campaign, caption: goodCaption, posterFields: poster, imageReady: true });
+  assert.equal(result.checks.find((item) => item.code === 'visual')?.status, 'pass');
+  assert.equal(result.checks.find((item) => item.code === 'visual_template')?.status, 'pass');
+  assert.equal(result.checks.find((item) => item.code === 'visual_layers')?.status, 'pass');
+  assert.equal(result.blocking, false);
+});
+
 test('ร่างที่มีหลักฐาน Google และ Facebook ผ่านด่านวิจัย', () => {
   const result = evaluateContentQuality({
     campaign,

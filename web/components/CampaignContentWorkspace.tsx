@@ -4,7 +4,8 @@ import { useState } from 'react';
 import { useFormStatus } from 'react-dom';
 import { approveContentAction, editCaptionAction, editPosterAction, rejectContentAction, regenerateContentImageAction, runFacebookPreflightAction } from '@/lib/actions';
 import type { PosterFields } from '@/lib/repo';
-import { buildPosterSvg } from '../../src/core/poster-template.js';
+import { emptyPosterLayout } from '../../src/core/poster-template.js';
+import { PosterDragCanvas } from '@/components/PosterDragCanvas';
 
 type QualityCheck = { code: string; label: string; message: string; status: 'pass' | 'warning' | 'fail' | 'not_applicable' };
 
@@ -37,7 +38,7 @@ const COPY = {
   quantity: 'จำนวนที่รับ',
 } as const;
 
-function PosterPreview({ fields, content }: { fields: PosterFields; content: Props['content'] }) {
+function PosterPreview({ fields, content, onLayoutChange }: { fields: PosterFields; content: Props['content']; onLayoutChange: (layout: NonNullable<PosterFields['layout']>) => void }) {
   const source = `/api/campaign-content/${content.id}/source-image`;
   const finalImage = `/api/campaign-content/${content.id}/image`;
   if (!content.hasSourceImage) {
@@ -49,9 +50,13 @@ function PosterPreview({ fields, content }: { fields: PosterFields; content: Pro
     );
   }
 
-  const svg = buildPosterSvg(fields, source, '/logo-SO.webp');
   return (
-    <div className="aspect-square overflow-hidden rounded-3xl bg-white shadow-[0_20px_50px_rgba(11,42,85,0.18)] [&>svg]:block [&>svg]:h-full [&>svg]:w-full" aria-label={`ตัวอย่างโปสเตอร์ ${fields.title}`} dangerouslySetInnerHTML={{ __html: svg }} />
+    <PosterDragCanvas
+      fields={fields}
+      sourceUrl={source}
+      enabled
+      onLayoutChange={onLayoutChange}
+    />
   );
 }
 
@@ -74,14 +79,16 @@ export function CampaignContentWorkspace({ campaignId, content, initialPoster, i
   return (
     <section className="overflow-hidden rounded-2xl border border-hairline bg-white">
       <div className="flex flex-wrap items-start justify-between gap-3 border-b border-hairline bg-black/[0.015] px-5 py-4">
-        <div><p className="eyebrow">ขั้นที่ 3 · ทำและแก้สื่อ</p><h2 className="mt-1 text-lg font-semibold">แก้รูปและ Caption ได้จากหน้าเดียว</h2><p className="mt-1 text-xs text-subtle">แก้ข้อความด้านขวาแล้วโปสเตอร์ด้านซ้ายเปลี่ยนทันที · Preview และ PNG ใช้ Template SO PEOPLE ชุดเดียวกัน</p></div>
+        <div><p className="eyebrow">ขั้นที่ 3 · ทำและแก้สื่อ</p><h2 className="mt-1 text-lg font-semibold">แก้รูปและ Caption ได้จากหน้าเดียว</h2><p className="mt-1 text-xs text-subtle">ลากรูปหรือข้อความไปวางตำแหน่งใหม่ได้ทันที · Preview และ PNG ใช้ Template SO PEOPLE ชุดเดียวกัน</p></div>
         <span className="pill bg-blue-50 text-blue-700">ยังไม่โพสต์จริง</span>
       </div>
 
       <div className="grid items-start gap-6 p-5 xl:grid-cols-[minmax(360px,45fr)_minmax(460px,55fr)]">
         <div className="xl:sticky xl:top-5">
-          <PosterPreview fields={poster} content={content} />
-          <p className="mt-3 text-xs leading-5 text-subtle">สิ่งที่เห็นคือองค์ประกอบเดียวกับไฟล์ PNG จริง แก้ข้อความได้จากฟอร์ม หรือกดให้ AI เปลี่ยนเฉพาะคนและสถานที่</p>
+          <PosterPreview fields={poster} content={content} onLayoutChange={(layout) => update('layout', layout)} />
+          {!content.hasSourceImage && (
+            <p className="mt-3 text-xs leading-5 text-subtle">สิ่งที่เห็นคือองค์ประกอบเดียวกับไฟล์ PNG จริง แก้ข้อความได้จากฟอร์ม หรือกดให้ AI เปลี่ยนเฉพาะคนและสถานที่</p>
+          )}
           <div className="mt-4 grid grid-cols-2 gap-3">
             <button type="button" className="btn-ghost justify-center" onClick={() => { setPoster(initialPoster); setCaption(initialCaption); }}>↻ คืนค่าเดิม</button>
             <form action={regenerateContentImageAction}>
@@ -98,6 +105,7 @@ export function CampaignContentWorkspace({ campaignId, content, initialPoster, i
             <input type="hidden" name="contentId" value={content.id} /><input type="hidden" name="campaignId" value={campaignId} />
             <div className="flex items-start justify-between gap-3"><div><h3 className="font-semibold">ข้อความบนภาพ</h3><p className="mt-1 text-xs text-subtle">ข้อมูลทุกช่องต้องตรงกับใบขอ ระบบจะตรวจอีกครั้งตอนบันทึก</p></div><button type="button" className="btn-ghost btn-sm" onClick={() => setPoster(initialPoster)}>คืนค่าเดิม</button></div>
             <input type="hidden" name="posterBadge" value={poster.badge} />
+            <input type="hidden" name="posterLayout" value={JSON.stringify(poster.layout ?? emptyPosterLayout())} />
             <div className="mt-4 grid gap-3 sm:grid-cols-2">
               <TextField name="title" label={COPY.title} value={poster.title} onChange={(value) => update('title', value)} />
               <TextField name="location" label={COPY.location} value={poster.location} onChange={(value) => update('location', value)} />
@@ -111,7 +119,7 @@ export function CampaignContentWorkspace({ campaignId, content, initialPoster, i
               <label><span className="label">ตำแหน่งคนในภาพ</span><select name="posterImageSide" className="field w-full" value={poster.imageSide} onChange={(event) => update('imageSide', event.target.value === 'left' ? 'left' : 'right')}><option value="right">ขวา — ข้อความอยู่ซ้าย</option><option value="left">ซ้าย — ข้อความอยู่ขวา</option></select></label>
               <label><span className="label">โลโก้บนภาพ</span><select name="posterLogoVariant" className="field w-full" value={poster.logoVariant ?? 'people-navy'} onChange={(event) => update('logoVariant', event.target.value === 'so-red' ? 'so-red' : 'people-navy')}><option value="people-navy">SO PEOPLE สีน้ำเงิน</option><option value="so-red">SO สีแดง</option></select></label>
             </div>
-            <div className="mt-4 flex flex-wrap items-center gap-2"><PosterSaveButton disabled={!content.hasSourceImage} /><span className="text-xs text-subtle">{content.hasSourceImage ? 'มีภาพต้นฉบับพร้อมแก้ไข' : 'ร่างนี้ไม่มีภาพต้นฉบับ จึงต้องให้ AI สร้างร่างใหม่ก่อน'}</span></div>
+            <div className="mt-4 flex flex-wrap items-center gap-2"><PosterSaveButton disabled={!content.hasSourceImage} />{content.hasSourceImage && <button type="button" className="btn-ghost btn-sm" onClick={() => update('layout', emptyPosterLayout())}>จัดวางตามต้นฉบับ</button>}<span className="text-xs text-subtle">{content.hasSourceImage ? 'มีภาพต้นฉบับพร้อมแก้ไข' : 'ร่างนี้ไม่มีภาพต้นฉบับ จึงต้องให้ AI สร้างร่างใหม่ก่อน'}</span></div>
             {posterSaved && <div role="status" className="mt-3 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-900"><b>✓ บันทึกรูปใหม่แล้ว</b><span className="ml-1 text-emerald-800">PNG ถูกประกอบใหม่และตรวจข้อมูลสำคัญเรียบร้อย</span></div>}
           </form>
 

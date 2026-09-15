@@ -733,6 +733,7 @@ export default async function CampaignDetail({ params, searchParams }: { params:
                                 <option value="left">ซ้าย — ข้อความอยู่ขวา</option>
                               </select>
                             </label>
+                            <input type="hidden" name="posterLayout" value={JSON.stringify(posterFields.layout ?? {})} />
                             <div className="sm:col-span-2 flex flex-wrap items-center gap-2">
                               <button className="btn-secondary btn-sm" disabled={!ct.has_source_image}>บันทึกและประกอบรูปใหม่</button>
                               {ct.has_source_image ? (

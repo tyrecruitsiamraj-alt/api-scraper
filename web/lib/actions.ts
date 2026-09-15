@@ -6,6 +6,8 @@ import { getServerSession } from 'next-auth';
 import { authOptions } from './auth';
 import { encryptSecret } from './crypto';
 import { kickWorker } from './worker-kick';
+import { normalizePosterLayout } from '../../src/core/poster-template.js';
+import type { PosterLayout } from '../../src/core/poster-template.js';
 import {
   createAdjacentTask,
   createScrapeTaskFromSoRecruit,
@@ -594,22 +596,7 @@ export async function editPosterAction(formData: FormData) {
       const confirmedPhone = await confirmCampaignContactPhone(campaignId, contactLine);
       await syncContentContactPhone(contentId, confirmedPhone);
     }
-    const list = (name: string) => String(formData.get(name) ?? '')
-      .split(/\r?\n/).map((value) => value.trim()).filter(Boolean);
-    await updateContentPoster(contentId, {
-      title: String(formData.get('posterTitle') ?? ''),
-      badge: String(formData.get('posterBadge') ?? ''),
-      location: String(formData.get('posterLocation') ?? ''),
-      worktime: String(formData.get('posterWorktime') ?? ''),
-      salaryTotal: String(formData.get('posterSalaryTotal') ?? ''),
-      salaryBreakdown: String(formData.get('posterSalaryBreakdown') ?? ''),
-      quantity: String(formData.get('posterQuantity') ?? ''),
-      qualifications: list('posterQualifications'),
-      benefits: list('posterBenefits'),
-      contactLine,
-      imageSide: String(formData.get('posterImageSide') ?? '') === 'left' ? 'left' : 'right',
-      logoVariant: String(formData.get('posterLogoVariant') ?? '') === 'so-red' ? 'so-red' : 'people-navy',
-    }, session.user?.email ?? session.user?.name ?? null);
+    await updateContentPoster(contentId, posterFieldsFromForm(formData), session.user?.email ?? session.user?.name ?? null);
     revalidatePath(`/orchestrator/${campaignId}`);
   } catch (error) {
     // Server Action ต้องไม่โยน error จนผู้ใช้เห็นหน้า Application error; กลับไปหน้าเดิมพร้อมคำที่แก้ได้.
@@ -618,6 +605,36 @@ export async function editPosterAction(formData: FormData) {
   }
   // ผลสำเร็จต้องเห็นได้บนหน้าเดียวกัน ไม่ปล่อยให้ผู้ใช้เดาว่าปุ่มทำงานหรือไม่.
   redirect(`/orchestrator/${campaignId}?contentSaved=poster`);
+}
+
+function readPosterLayout(formData: FormData): PosterLayout | undefined {
+  const raw = String(formData.get('posterLayout') ?? '').trim();
+  if (!raw) return undefined;
+  try {
+    return normalizePosterLayout(JSON.parse(raw));
+  } catch {
+    return undefined;
+  }
+}
+
+function posterFieldsFromForm(formData: FormData) {
+  const list = (name: string) => String(formData.get(name) ?? '')
+    .split(/\r?\n/).map((value) => value.trim()).filter(Boolean);
+  return {
+    title: String(formData.get('posterTitle') ?? ''),
+    badge: String(formData.get('posterBadge') ?? ''),
+    location: String(formData.get('posterLocation') ?? ''),
+    worktime: String(formData.get('posterWorktime') ?? ''),
+    salaryTotal: String(formData.get('posterSalaryTotal') ?? ''),
+    salaryBreakdown: String(formData.get('posterSalaryBreakdown') ?? ''),
+    quantity: String(formData.get('posterQuantity') ?? ''),
+    qualifications: list('posterQualifications'),
+    benefits: list('posterBenefits'),
+    contactLine: String(formData.get('posterContactLine') ?? '').trim(),
+    imageSide: String(formData.get('posterImageSide') ?? '') === 'left' ? 'left' as const : 'right' as const,
+    logoVariant: String(formData.get('posterLogoVariant') ?? '') === 'so-red' ? 'so-red' as const : 'people-navy' as const,
+    layout: readPosterLayout(formData),
+  };
 }
 
 async function saveContentWorkspace(formData: FormData, editor: string | null) {
@@ -631,22 +648,7 @@ async function saveContentWorkspace(formData: FormData, editor: string | null) {
     const confirmedPhone = await confirmCampaignContactPhone(campaignId, contactLine);
     await syncContentContactPhone(contentId, confirmedPhone);
   }
-  const list = (name: string) => String(formData.get(name) ?? '')
-    .split(/\r?\n/).map((value) => value.trim()).filter(Boolean);
-  await updateContentPoster(contentId, {
-    title: String(formData.get('posterTitle') ?? ''),
-    badge: String(formData.get('posterBadge') ?? ''),
-    location: String(formData.get('posterLocation') ?? ''),
-    worktime: String(formData.get('posterWorktime') ?? ''),
-    salaryTotal: String(formData.get('posterSalaryTotal') ?? ''),
-    salaryBreakdown: String(formData.get('posterSalaryBreakdown') ?? ''),
-    quantity: String(formData.get('posterQuantity') ?? ''),
-    qualifications: list('posterQualifications'),
-    benefits: list('posterBenefits'),
-    contactLine,
-    imageSide: String(formData.get('posterImageSide') ?? '') === 'left' ? 'left' : 'right',
-    logoVariant: String(formData.get('posterLogoVariant') ?? '') === 'so-red' ? 'so-red' : 'people-navy',
-  }, editor);
+  await updateContentPoster(contentId, posterFieldsFromForm(formData), editor);
   return { campaignId, contentId };
 }
 
