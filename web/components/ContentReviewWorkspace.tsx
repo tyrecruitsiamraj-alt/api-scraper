@@ -47,7 +47,7 @@ export function ContentReviewWorkspace({ campaignId, content, initialPoster, ini
   const canApprove = !content.isPreview && content.hasSourceImage && content.qualityStatus !== 'fail';
 
   return (
-    <section className="grid min-h-[724px] overflow-hidden rounded-xl border border-[#d6dce4] bg-white lg:grid-cols-[565px_minmax(0,1fr)]">
+    <section className="grid min-h-[724px] overflow-auto rounded-xl border border-[#d6dce4] bg-white lg:grid-cols-[565px_minmax(0,1fr)]">
       <div className="flex min-w-0 flex-col border-r border-[#d6dce4] p-4">
         {content.hasSourceImage && (
           <PosterExtrasBar extras={poster.extras ?? []} hasSourceImage={content.hasSourceImage} onChange={(extras) => update('extras', extras)} tone="pixel" />
