@@ -698,4 +698,36 @@ export async function getAsset(id) {
   return rows[0] ?? null;
 }
 
+export async function recordScrapeFailureLesson({
+  key, category, lesson, prevention, signature = '', taskId = null, runId = null, platform = '', evidence = {},
+}) {
+  if (!key) return;
+  await query(
+    `INSERT INTO scrape_failure_lessons
+       (lesson_key, category, lesson, prevention, last_error_signature, last_task_id, last_run_id, last_platform, evidence)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb)
+     ON CONFLICT (lesson_key) DO UPDATE SET
+       category=EXCLUDED.category,
+       lesson=EXCLUDED.lesson,
+       prevention=EXCLUDED.prevention,
+       last_error_signature=EXCLUDED.last_error_signature,
+       last_task_id=EXCLUDED.last_task_id,
+       last_run_id=EXCLUDED.last_run_id,
+       last_platform=EXCLUDED.last_platform,
+       occurrence_count=scrape_failure_lessons.occurrence_count + 1,
+       evidence=EXCLUDED.evidence,
+       updated_at=now()`,
+    [key, category, lesson, prevention, String(signature || '').slice(0, 240), taskId, runId, platform, JSON.stringify(evidence || {})],
+  );
+}
+
+export async function listScrapeFailureLessons() {
+  const { rows } = await query(
+    `SELECT lesson_key, category, lesson, prevention, occurrence_count, last_platform, updated_at
+       FROM scrape_failure_lessons
+      ORDER BY occurrence_count DESC, updated_at DESC`,
+  );
+  return rows;
+}
+
 export { withTransaction };
