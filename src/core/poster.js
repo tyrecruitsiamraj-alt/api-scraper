@@ -59,10 +59,7 @@ async function launchPosterBrowser() {
 function composeError(error) {
   const raw = error instanceof Error ? error.message : String(error || '');
   console.warn(`  [poster] เรนเดอร์ไม่สำเร็จ: ${raw}`);
-  if (/Executable doesn't exist|lib64|Failed to launch/i.test(raw)) {
-    return new Error('ประกอบโปสเตอร์ไม่สำเร็จ ระบบกำลังเปิดเครื่องประกอบรูป กรุณาลองอีกครั้ง');
-  }
-  return new Error('ประกอบโปสเตอร์ไม่สำเร็จ กรุณาลองใหม่');
+  return new Error(`ประกอบโปสเตอร์ไม่สำเร็จ กรุณาลองใหม่ (${raw.slice(0, 90)})`);
 }
 
 /**
@@ -86,7 +83,7 @@ export async function renderPoster(fields, personDataUri = null) {
     } else if (typeof page.setViewport === 'function') {
       await page.setViewport({ width: 1080, height: 1080, deviceScaleFactor: 1 });
     }
-    await page.route('https://so-poster.invalid/**', async (route) => {
+    await page.route('**/*so-poster.invalid*', async (route) => {
       const url = route.request().url();
       if (url.startsWith(PERSON_HREF) && person) {
         await route.fulfill({ status: 200, contentType: person.mime, body: person.bytes });
@@ -109,9 +106,13 @@ export async function renderPoster(fields, personDataUri = null) {
     );
     await new Promise((resolve) => setTimeout(resolve, 800));
     const el = await page.$('#poster') || await page.$('svg');
-    if (!el) throw new Error('ไม่พบโปสเตอร์บนหน้าเรนเดอร์');
-    const bytes = await el.screenshot({ type: 'png' });
-    return { bytes, mime: 'image/png' };
+    let bytes;
+    try {
+      bytes = el ? await el.screenshot({ type: 'png' }) : await page.screenshot({ type: 'png', clip: { x: 0, y: 0, width: 1080, height: 1080 } });
+    } catch {
+      bytes = await page.screenshot({ type: 'png', clip: { x: 0, y: 0, width: 1080, height: 1080 } });
+    }
+    return { bytes: Buffer.from(bytes), mime: 'image/png' };
   } catch (error) {
     throw composeError(error);
   } finally {
