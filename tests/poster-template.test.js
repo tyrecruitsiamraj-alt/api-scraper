@@ -69,6 +69,21 @@ test('โปสเตอร์รุ่นเก่าจัดวางให�
   assert.doesNotMatch(svg, /data-poster-layer="title"[^>]*translate\(80 -40\)/);
 });
 
+test('แบบมาตรฐานรุ่นเก่าไม่ถูกยัดข้อความทดลองหรือเลเยอร์ซ้ำลงงานใหม่', () => {
+  const applied = applyPosterStandard({
+    ...sample,
+    title: 'คนสวน',
+    salaryTotal: '14,000',
+  }, {
+    templateVersion: 2,
+    layout: { title: { x: 80, y: -40 } },
+    extras: [{ kind: 'text', x: 70, y: 640, w: 200, h: 60, text: 'ข้อความใหม่' }],
+  });
+  assert.equal(applied.title, 'คนสวน');
+  assert.equal(applied.layout.title.x, 0);
+  assert.equal(applied.extras.some((item) => item.text === 'ข้อความใหม่'), false);
+});
+
 test('เลเยอร์โปสเตอร์ลากได้และตำแหน่งที่บันทึกติดไปกับ SVG ชุดถัดไป', () => {
   const moved = withPosterTemplate({
     ...sample,

@@ -336,9 +336,7 @@ export function withPosterTemplate(fields = {}) {
     ...fields,
     logoVariant: fields.logoVariant === 'so-red' ? 'so-red' : 'people-navy',
     layout: stale ? emptyPosterLayout() : normalizePosterLayout(fields.layout),
-    extras: stale
-      ? extras.filter((item) => item.kind !== 'text' || compact(item.text) !== 'ข้อความใหม่')
-      : extras,
+    extras: stale ? [] : extras,
     templateId: POSTER_TEMPLATE_ID,
     templateVersion: POSTER_TEMPLATE_VERSION,
     brandRuleVersion: POSTER_BRAND_RULE_VERSION,
@@ -401,7 +399,7 @@ export function normalizePosterStandard(raw) {
       const box = { x: clampOnCanvas(item.x, w), y: clampOnCanvas(item.y, h), w, h };
       if (item.kind === 'text') {
         const text = compact(item.text).slice(0, 180);
-        if (!text || /data:image/i.test(text)) continue;
+        if (!text || text === 'ข้อความใหม่' || /data:image/i.test(text)) continue;
         extras.push({ kind: 'text', ...box, text });
         continue;
       }
@@ -427,6 +425,9 @@ export function normalizePosterStandard(raw) {
 /** งานใหม่ได้ตำแหน่งเลเยอร์และกล่องข้อความ — รูปคนยังเป็นภาพต้นฉบับของงานนั้นเอง */
 export function applyPosterStandard(rawFields = {}, rawStandard) {
   const fields = withPosterTemplate(rawFields);
+  if (Number(rawStandard?.templateVersion) !== POSTER_TEMPLATE_VERSION) {
+    return fields;
+  }
   const standard = normalizePosterStandard(rawStandard);
   if (!standard) return fields;
   const extras = [];
