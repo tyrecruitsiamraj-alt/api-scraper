@@ -64,6 +64,19 @@ export function extractCampaignFacts(campaign = {}) {
     ageMax: Number(snap.age_max) || null,
     education: pick(snap.education),
     contactPhone: pick(snap.contact_phone, snap.phone, snap.tel, snap.mobile, snap.contact_tel),
+    benefits: (() => {
+      for (const value of [snap.welfare, snap.benefits, snap.benefit, snap.welfare_text, snap.benefits_text]) {
+        if (Array.isArray(value)) {
+          const items = value.map(clean).filter(Boolean);
+          if (items.length) return items.slice(0, 4);
+        }
+        const raw = String(value ?? '');
+        if (!raw.trim()) continue;
+        const items = raw.split(/[\n•|;]+/).map(clean).filter(Boolean);
+        if (items.length) return items.slice(0, 4);
+      }
+      return [];
+    })(),
     sourceText: clean([campaign.title, campaign.province, campaign.qty, campaign.positions, ...Object.values(snap)]
       .filter((value) => typeof value !== 'object').join(' · ')),
   };
@@ -138,5 +151,8 @@ export function applyTrustedPosterFacts(fields = {}, campaign = {}) {
     quantity: facts.qty ? `${facts.qty} อัตรา` : clean(fields.quantity),
     contactLine: facts.contactPhone || clean(fields.contactLine),
     qualifications: [...new Set(qualifications)].slice(0, 6),
+    benefits: (Array.isArray(fields.benefits) && fields.benefits.map(clean).filter(Boolean).length
+      ? fields.benefits.map(clean).filter(Boolean)
+      : (facts.benefits || [])).slice(0, 4),
   };
 }

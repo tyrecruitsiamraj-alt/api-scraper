@@ -597,7 +597,7 @@ async function renderCampaignDetail({ params, searchParams }: { params: { id: st
                     {ct.has_image ? (
                       // คลิกเปิดรูปเต็ม (แท็บใหม่ — ซูม/เซฟได้)
                       <a
-                        href={`/api/campaign-content/${ct.id}/image`}
+                        href={`/api/campaign-content/${ct.id}/poster`}
                         target="_blank"
                         rel="noreferrer"
                         className="group relative block"
@@ -605,7 +605,7 @@ async function renderCampaignDetail({ params, searchParams }: { params: { id: st
                       >
                         {/* eslint-disable-next-line @next/next/no-img-element */}
                          <img
-                           src={`/api/campaign-content/${ct.id}/image`}
+                           src={`/api/campaign-content/${ct.id}/poster`}
                            alt="รูปคอนเทนต์ที่ AI สร้าง"
                            className="aspect-square w-full rounded-lg border border-hairline object-cover transition group-hover:opacity-90"
                          />

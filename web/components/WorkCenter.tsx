@@ -577,14 +577,14 @@ function WorkItemCard({ item, connectors, facebookAccounts }: {
           {showImage && item.content && (
             // คลิกเปิดรูปเต็มในแท็บใหม่ (ดูก่อนอนุมัติ)
             <a
-              href={`/api/campaign-content/${item.content.id}/image`}
+              href={`/api/campaign-content/${item.content.id}/poster`}
               target="_blank"
               rel="noreferrer"
               title="คลิกดูรูปเต็ม"
               className="shrink-0 transition hover:opacity-85"
             >
               <img
-                src={`/api/campaign-content/${item.content.id}/image`}
+                src={`/api/campaign-content/${item.content.id}/poster`}
                 alt="รูป Content"
                 className="h-16 w-16 border border-line object-cover"
               />

@@ -37,6 +37,36 @@ test('Template กลางเก็บ Version และแสดงเวล�
   assert.match(svg, /17\.00 น\./);
   assert.match(svg, />SO<\/text>/);
   assert.match(svg, />PEOPLE<\/text>/);
+  assert.match(svg, /WE MAKE IT EASY/);
+  assert.match(svg, />บาท</);
+  assert.doesNotMatch(svg, /เปิดรับสมัครด่วน/);
+  assert.doesNotMatch(svg, /สนใจสมัคร ทักเลย/);
+});
+
+test('โปสเตอร์รุ่นเก่าจัดวางใหม่ตามแบบ SO PEOPLE ไม่เอาคุณสมบัติไปแทนสวัสดิการ', () => {
+  const svg = buildPosterSvg({
+    ...sample,
+    templateVersion: 2,
+    badge: 'เปิดรับสมัครด่วน',
+    qualifications: ['เพศชาย', 'อายุ 25-45 ปี'],
+    benefits: ['ประกันสังคม', 'โบนัสประจำปี'],
+    layout: { title: { x: 80, y: -40 } },
+    extras: [{
+      id: 't1',
+      kind: 'text',
+      x: 70,
+      y: 640,
+      w: 200,
+      h: 60,
+      text: 'ข้อความใหม่',
+      provenance: { origin: 'operator_text', addedAt: '2026-09-15T00:00:00.000Z' },
+    }],
+  });
+  assert.match(svg, /ประกันสังคม/);
+  assert.match(svg, /โบนัสประจำปี/);
+  assert.doesNotMatch(svg, /เพศชาย/);
+  assert.doesNotMatch(svg, /ข้อความใหม่/);
+  assert.doesNotMatch(svg, /data-poster-layer="title"[^>]*translate\(80 -40\)/);
 });
 
 test('เลเยอร์โปสเตอร์ลากได้และตำแหน่งที่บันทึกติดไปกับ SVG ชุดถัดไป', () => {

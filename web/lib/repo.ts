@@ -6,7 +6,7 @@ import type { ContentQualityResult } from '../../src/core/content-quality.js';
 import { evaluateWorkflowReadiness } from '../../src/core/workflow-readiness.js';
 import type { WorkflowReadiness } from '../../src/core/workflow-readiness.js';
 import { renderPoster } from '../../src/core/poster.js';
-import { normalizePosterLayout, normalizePosterStandard, posterFieldsForQuality, posterStandardFromFields, POSTER_TEMPLATE_ID, withPosterTemplate } from '../../src/core/poster-template.js';
+import { normalizePosterLayout, normalizePosterStandard, posterFieldsForQuality, posterStandardFromFields, POSTER_TEMPLATE_ID, POSTER_TEMPLATE_VERSION, withPosterTemplate, buildPosterSvg } from '../../src/core/poster-template.js';
 import type { PosterLayout, PosterStandard } from '../../src/core/poster-template.js';
 import { evaluateResumeQualification } from '../../src/core/resume-qualification.js';
 import { selectPreferredScrapeWorker } from '../../src/core/worker-selection.js';
@@ -2694,6 +2694,7 @@ export async function updateContentPoster(
       contactLine: cleanPosterText(input.contactLine, 80),
       imageSide: input.imageSide === 'left' ? 'left' : 'right',
       logoVariant: input.logoVariant === 'so-red' ? 'so-red' : 'people-navy',
+      templateVersion: row.poster_fields?.templateVersion,
       layout: normalizePosterLayout(input.layout ?? row.poster_fields?.layout),
       extras: (input.extras ?? row.poster_fields?.extras ?? []).map((extra) => ({
         ...extra,
@@ -2820,12 +2821,79 @@ export async function enqueueDraftForCampaign(campaignId: string, ownerUser: str
 }
 
 /** image bytes ของร่างคอนเทนต์ (สตรีมผ่าน API route) — null ถ้าไม่มี. */
-export async function getContentImageBytes(id: string) {
-  const rows = await q<{ image_bytes: Buffer | null; image_mime: string | null }>(
-    `SELECT image_bytes, image_mime FROM campaign_contents WHERE id = $1`,
+let posterRefreshChain: Promise<unknown> = Promise.resolve();
+
+function enqueuePosterRefresh<T>(work: () => Promise<T>): Promise<T> {
+  const run = posterRefreshChain.then(work, work);
+  posterRefreshChain = run.then(() => undefined, () => undefined);
+  return run;
+}
+
+/** SVG ไลฟ์ตามเทมเพลตปัจจุบัน — ใช้โชว์ตัวอย่างโดยไม่ต้องรอประกอบ PNG */
+export async function getContentPosterPreview(id: string) {
+  const rows = await q<{ poster_fields: PosterFields | null; has_source: boolean }>(
+    `SELECT poster_fields, (source_image_bytes IS NOT NULL) AS has_source FROM campaign_contents WHERE id = $1`,
     [id],
   );
-  return rows[0] ?? null;
+  const row = rows[0];
+  if (!row) return null;
+  return buildPosterSvg(
+    withPosterTemplate({ ...(row.poster_fields ?? {}), templateVersion: row.poster_fields?.templateVersion }),
+    row.has_source ? `/api/campaign-content/${id}/source-image` : null,
+    '/logo-SO.webp',
+  );
+}
+
+async function recomposeStoredDraftPoster(id: string, row: {
+  poster_fields: PosterFields | null;
+  source_image_bytes: Buffer;
+  source_image_mime: string | null;
+}) {
+  const fields = withPosterTemplate({
+    ...(row.poster_fields ?? {}),
+    templateVersion: row.poster_fields?.templateVersion,
+  });
+  const sourceUri = `data:${row.source_image_mime || 'image/png'};base64,${row.source_image_bytes.toString('base64')}`;
+  const rendered = await renderPoster(fields, sourceUri);
+  if (!rendered) throw new Error('ประกอบโปสเตอร์ไม่สำเร็จ กรุณาลองใหม่');
+  await q(
+    `UPDATE campaign_contents
+        SET image_bytes=$2, image_mime=$3, poster_fields=$4::jsonb
+      WHERE id=$1 AND status='draft'`,
+    [id, rendered.bytes, rendered.mime, JSON.stringify(fields)],
+  );
+  return { image_bytes: rendered.bytes, image_mime: rendered.mime };
+}
+
+export async function getContentImageBytes(id: string) {
+  const rows = await q<{
+    image_bytes: Buffer | null;
+    image_mime: string | null;
+    poster_fields: PosterFields | null;
+    source_image_bytes: Buffer | null;
+    source_image_mime: string | null;
+    status: string;
+  }>(
+    `SELECT image_bytes, image_mime, poster_fields, source_image_bytes, source_image_mime, status
+       FROM campaign_contents WHERE id = $1`,
+    [id],
+  );
+  const row = rows[0];
+  if (!row?.image_bytes) return row ?? null;
+  const storedVersion = Number(row.poster_fields?.templateVersion) || 0;
+  if (storedVersion === POSTER_TEMPLATE_VERSION || !row.source_image_bytes || row.status !== 'draft') {
+    return { image_bytes: row.image_bytes, image_mime: row.image_mime };
+  }
+  try {
+    return await enqueuePosterRefresh(() => recomposeStoredDraftPoster(id, {
+      poster_fields: row.poster_fields,
+      source_image_bytes: row.source_image_bytes,
+      source_image_mime: row.source_image_mime,
+    }));
+  } catch (error) {
+    console.warn(`  [poster] ประกอบร่าง ${id} ตามเทมเพลตใหม่ไม่สำเร็จ: ${error instanceof Error ? error.message : error}`);
+    return { image_bytes: row.image_bytes, image_mime: row.image_mime };
+  }
 }
 
 /** ร่างคอนเทนต์ 1 แถว (caption + มีรูปไหม) สำหรับตอนอนุมัติ→โพสต์. */

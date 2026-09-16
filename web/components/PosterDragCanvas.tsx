@@ -98,7 +98,7 @@ export function PosterDragCanvas({
               type="button"
               data-poster-handle={layer.id}
               aria-label={`ลาก${layer.label}`}
-              className={`absolute rounded-md border-2 ${active ? 'z-30 border-[#0d5fb8] bg-[#0d5fb8]/15' : extra ? 'z-20 border-amber-300/90 hover:border-[#0d5fb8] hover:bg-[#0d5fb8]/10' : 'z-10 border-white/80 hover:border-[#0d5fb8] hover:bg-[#0d5fb8]/10'}`}
+              className={`group absolute rounded-md border-2 transition ${active ? 'z-30 border-[#0d5fb8] bg-[#0d5fb8]/15' : extra ? 'z-20 border-transparent hover:border-amber-300 hover:bg-amber-50/20' : 'z-10 border-transparent hover:border-white/80 hover:bg-[#0d5fb8]/10'}`}
               style={{
                 left: `${(layer.x / POSTER_CANVAS) * 100}%`,
                 top: `${(layer.y / POSTER_CANVAS) * 100}%`,
@@ -111,7 +111,7 @@ export function PosterDragCanvas({
               onPointerUp={endDrag}
               onPointerCancel={endDrag}
             >
-              <span className={`pointer-events-none absolute left-1 top-1 rounded-full px-2 py-0.5 text-[10px] font-medium shadow-sm ${active ? 'bg-[#0d5fb8] text-white' : extra ? 'bg-amber-700 text-white' : 'bg-black/60 text-white'}`}>
+              <span className={`pointer-events-none absolute left-1 top-1 rounded-full px-2 py-0.5 text-[10px] font-medium shadow-sm ${active ? 'bg-[#0d5fb8] text-white' : extra ? 'bg-amber-700 text-white opacity-0 group-hover:opacity-100' : 'bg-black/60 text-white opacity-0 group-hover:opacity-100'} ${active ? 'opacity-100' : ''}`}>
                 {layer.label}
               </span>
             </button>

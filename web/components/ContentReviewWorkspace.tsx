@@ -53,9 +53,6 @@ export function ContentReviewWorkspace({ campaignId, content, initialPoster, ini
   return (
     <section className="grid min-h-[724px] overflow-auto rounded-xl border border-[#d6dce4] bg-white lg:grid-cols-[565px_minmax(0,1fr)]">
       <div className="flex min-w-0 flex-col border-r border-[#d6dce4] p-4">
-        {content.hasSourceImage && (
-          <PosterExtrasBar extras={poster.extras ?? []} hasSourceImage={content.hasSourceImage} onChange={(extras) => update('extras', extras)} tone="pixel" />
-        )}
         <PosterDragCanvas
           fields={poster}
           sourceUrl={content.hasSourceImage ? source : null}
@@ -64,6 +61,9 @@ export function ContentReviewWorkspace({ campaignId, content, initialPoster, ini
           onLayoutChange={(layout) => update('layout', layout)}
           onExtrasChange={(extras) => update('extras', extras)}
         />
+        {content.hasSourceImage && (
+          <PosterExtrasBar extras={poster.extras ?? []} hasSourceImage={content.hasSourceImage} onChange={(extras) => update('extras', extras)} tone="pixel" />
+        )}
         <div className="mt-auto flex items-center gap-4 pt-6">
           <button type="button" onClick={() => { setPoster(initialPoster); setCaption(initialCaption); }} className="inline-flex h-14 min-w-44 items-center justify-center gap-3 rounded-md border border-[#0a3970] bg-white px-6 text-[16px] font-medium text-[#082b62] transition hover:bg-blue-50">
             <span className="text-2xl">↶</span>คืนค่าเดิม

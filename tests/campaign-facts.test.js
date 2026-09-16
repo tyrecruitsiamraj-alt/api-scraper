@@ -67,6 +67,15 @@ test('แก้คำสะกดสถานที่ที่ผิดชั�
   assert.equal(extractCampaignFacts(campaign).location, 'โรงงานคูโบต้า นวนคร');
 });
 
+test('สวัสดิการจากใบขอย้ายขึ้นโปสเตอร์โดยไม่แต่งเพิ่ม', () => {
+  const campaign = {
+    ...driverCampaign,
+    request_snapshot: { ...driverCampaign.request_snapshot, welfare: 'ประกันสังคม\nโบนัสประจำปี' },
+  };
+  const poster = applyTrustedPosterFacts({ benefits: [] }, campaign);
+  assert.deepEqual(poster.benefits, ['ประกันสังคม', 'โบนัสประจำปี']);
+});
+
 test('โปสเตอร์ดึงจำนวนรับและเบอร์จาก ERP โดยไม่เดาเอง', () => {
   const campaign = {
     ...driverCampaign,
