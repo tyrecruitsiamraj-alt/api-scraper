@@ -9,15 +9,20 @@ export async function GET(_req: Request, { params }: { params: { id: string } })
   if (!session) return new Response('Unauthorized', { status: 401 });
 
   if (!/^[0-9a-f-]{36}$/i.test(params.id)) return new Response('Bad id', { status: 400 });
-  const row = await getContentImageBytes(params.id);
-  if (!row || !row.image_bytes) return new Response('Not found', { status: 404 });
+  try {
+    const row = await getContentImageBytes(params.id);
+    if (!row || !row.image_bytes) return new Response('Not found', { status: 404 });
 
-  return new Response(row.image_bytes as unknown as BodyInit, {
-    headers: {
-      'Content-Type': row.image_mime || 'image/png',
-      'Content-Disposition': `inline; filename="campaign-${params.id}.png"`,
-      // รูปนี้แก้และประกอบใหม่จากหน้าเดียวกันได้ จึงห้าม Browser ค้างไฟล์รุ่นก่อน.
-      'Cache-Control': 'private, no-store, max-age=0',
-    },
-  });
+    return new Response(row.image_bytes as unknown as BodyInit, {
+      headers: {
+        'Content-Type': row.image_mime || 'image/png',
+        'Content-Disposition': `inline; filename="campaign-${params.id}.png"`,
+        // รูปนี้แก้และประกอบใหม่จากหน้าเดียวกันได้ จึงห้าม Browser ค้างไฟล์รุ่นก่อน.
+        'Cache-Control': 'private, no-store, max-age=0',
+      },
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'ประกอบโปสเตอร์ไม่สำเร็จ ห้ามใช้รูปเก่า';
+    return new Response(message, { status: 409 });
+  }
 }

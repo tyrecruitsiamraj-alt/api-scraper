@@ -151,8 +151,19 @@ export function applyTrustedPosterFacts(fields = {}, campaign = {}) {
     quantity: facts.qty ? `${facts.qty} อัตรา` : clean(fields.quantity),
     contactLine: facts.contactPhone || clean(fields.contactLine),
     qualifications: [...new Set(qualifications)].slice(0, 6),
-    benefits: (Array.isArray(fields.benefits) && fields.benefits.map(clean).filter(Boolean).length
-      ? fields.benefits.map(clean).filter(Boolean)
-      : (facts.benefits || [])).slice(0, 4),
+    benefits: groundedBenefits(fields.benefits, facts.benefits),
   };
+}
+
+function groundedBenefits(incoming, allowedRaw) {
+  const allowed = (Array.isArray(allowedRaw) ? allowedRaw : []).map(clean).filter(Boolean);
+  const requested = (Array.isArray(incoming) ? incoming : []).map(clean).filter(Boolean);
+  if (!allowed.length) return [];
+  if (!requested.length) return allowed.slice(0, 4);
+  const kept = requested.filter((item) => allowed.some((allowedItem) => {
+    const a = compact(allowedItem);
+    const b = compact(item);
+    return a === b || a.includes(b) || b.includes(a);
+  }));
+  return (kept.length ? kept : allowed).slice(0, 4);
 }

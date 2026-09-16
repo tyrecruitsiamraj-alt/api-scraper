@@ -48,6 +48,26 @@ function composeError(error) {
   return new Error('ประกอบโปสเตอร์ไม่สำเร็จ กรุณาลองใหม่');
 }
 
+async function waitForPosterPaint(page) {
+  try {
+    await Promise.race([
+      page.evaluate(async () => {
+        if (document.fonts?.ready) await document.fonts.ready;
+        await Promise.all([...document.images].map((img) => {
+          if (img.complete) return null;
+          return new Promise((resolve) => {
+            img.addEventListener('load', resolve, { once: true });
+            img.addEventListener('error', resolve, { once: true });
+          });
+        }));
+      }),
+      new Promise((resolve) => setTimeout(resolve, 2500)),
+    ]);
+  } catch {
+    /* screenshot still attempted */
+  }
+}
+
 /**
  * @param {object} fields ข้อมูลโปสเตอร์ (title, salaryTotal, qualifications[], ...)
  * @param {string|null} personDataUri  data:image/png;base64,... หรือ null
@@ -70,7 +90,7 @@ export async function renderPoster(fields, personDataUri = null) {
       `<!doctype html><html><head><meta charset="utf-8"><style>html,body{margin:0;width:1080px;height:1080px;overflow:hidden}</style></head><body>${svg}</body></html>`,
       { waitUntil: 'domcontentloaded', timeout: 20_000 },
     );
-    await new Promise((resolve) => setTimeout(resolve, 400));
+    await waitForPosterPaint(page);
     const el = await page.$('#poster') || await page.$('svg');
     let bytes;
     try {

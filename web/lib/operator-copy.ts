@@ -79,6 +79,14 @@ export function humanizeOperatorError(value: string | null | undefined): {
       technical,
     };
   }
+  if (lower.includes('captcha') || lower.includes('checkpoint') || lower.includes('ยืนยันตัวตนของแพลตฟอร์ม')) {
+    return {
+      title: 'เจอหน้ายืนยันตัวตนของแพลตฟอร์ม',
+      detail: 'ระบบหยุดบัญชีนี้แล้ว ไม่เดาคลิกต่อ เพราะคลิกผิดจะทำให้งานพังหรือบัญชีถูกล็อก',
+      next: 'ให้คนเข้าเว็บตรวจบัญชีนั้น แล้วค่อยเริ่มงานใหม่',
+      technical,
+    };
+  }
   if (lower.includes('locator.click') || lower.includes('timeout 15000ms')) {
     return {
       title: 'กรอกตัวกรองบน JobBKK ไม่สำเร็จ',
@@ -100,6 +108,30 @@ export function humanizeOperatorError(value: string | null | undefined): {
       title: 'โควต้าค้นหาวันนี้เต็มแล้ว',
       detail: 'บัญชี Connector ใช้โควต้ารายวันครบ จึงยังเริ่มงานค้นหาต่อไม่ได้ (ไม่เกี่ยวกับคำค้น)',
       next: 'รอรีเซ็ตหลังเที่ยงคืน (เวลาไทย) หรือไปตั้งค่า → Connectors เพิ่ม daily cap / ใช้บัญชีอื่น แล้วเริ่มงานใหม่',
+      technical,
+    };
+  }
+  if (lower.includes('ถูกคัดออกทั้งหมดด้วยเงื่อนไข') || lower.includes('ผ่านเกณฑ์ 0')) {
+    return {
+      title: 'เปิด Resume แล้วยังไม่มีคนผ่านเกณฑ์',
+      detail: 'ระบบดึงรายการได้ แต่คนที่เปิดแล้วยังไม่ผ่าน Hard Filter/Job Family ของใบขอนี้',
+      next: 'อย่าวนคำค้นเดิมที่เปิดมากแล้วผ่าน 0 — ขยายตำแหน่งในสายงานเดียวกัน หรือผ่อนเฉพาะเกณฑ์ที่ใบขอไม่มี',
+      technical,
+    };
+  }
+  if (lower.includes('ประกอบโปสเตอร์') || lower.includes('รุ่นเก่า')) {
+    return {
+      title: 'โปสเตอร์ยังไม่พร้อมโพสต์',
+      detail: 'ระบบห้ามใช้รูปเก่าหรือรูปที่ประกอบไม่สำเร็จ เพราะหน้าจออาจดูถูกแล้วแต่ไฟล์ที่โพสต์จะผิด',
+      next: 'กดบันทึกรูปเพื่อประกอบใหม่ ถ้ายังไม่ได้ให้สั่งสร้างรูปใหม่จากภาพต้นฉบับ',
+      technical,
+    };
+  }
+  if (lower.includes('ไม่ยืนยันจังหวัด')) {
+    return {
+      title: 'ยังกรอกจังหวัดบน JobBKK ไม่ได้',
+      detail: 'ใบขอกำหนดจังหวัดแล้ว ระบบจะไม่ค้นทั้งประเทศแทน',
+      next: 'เริ่มงานใหม่หลังอัปเดต Worker หรือแก้ชื่อจังหวัดให้ตรงชิป JobBKK',
       technical,
     };
   }

@@ -12,6 +12,7 @@ import {
   normalizePosterStandard,
   posterStandardFromFields,
   applyPosterStandard,
+  evaluatePosterVisual,
   POSTER_CAMPAIGN_SOURCE,
   POSTER_TEMPLATE_ID,
   POSTER_TEMPLATE_VERSION,
@@ -82,6 +83,13 @@ test('แบบมาตรฐานรุ่นเก่าไม่ถูก�
   assert.equal(applied.title, 'คนสวน');
   assert.equal(applied.layout.title.x, 0);
   assert.equal(applied.extras.some((item) => item.text === 'ข้อความใหม่'), false);
+});
+
+test('โปสเตอร์รุ่นเก่าห้ามผ่านด่าน visual จนกว่าจะประกอบใหม่', () => {
+  const stale = evaluatePosterVisual({ ...sample, templateVersion: 2 });
+  assert.equal(stale.find((item) => item.code === 'visual_template')?.status, 'fail');
+  const current = evaluatePosterVisual(withPosterTemplate(sample));
+  assert.equal(current.find((item) => item.code === 'visual_template')?.status, 'pass');
 });
 
 test('เลเยอร์โปสเตอร์ลากได้และตำแหน่งที่บันทึกติดไปกับ SVG ชุดถัดไป', () => {

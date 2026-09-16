@@ -47,9 +47,7 @@ export async function solveCaptcha(challenge) {
 
   if (!provider || !apiKey) {
     throw new Error(
-      'CAPTCHA detected during login but no solver configured. ' +
-        'Set CAPTCHA_PROVIDER + CAPTCHA_API_KEY to keep this fully automated, ' +
-        'or re-run later (sessions are reused, so CAPTCHA is rare).',
+      'CAPTCHA: เจอหน้ายืนยันตัวตนของแพลตฟอร์ม ระบบหยุดบัญชีนี้แล้ว ไม่เดาคลิกต่อ — ให้คนตรวจบัญชีแล้วเริ่มใหม่',
     );
   }
 

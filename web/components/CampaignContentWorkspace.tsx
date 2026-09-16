@@ -130,7 +130,7 @@ export function CampaignContentWorkspace({ campaignId, content, initialPoster, i
             </div>
             <div className="mt-4 space-y-3">
               <label className="flex items-start gap-2 rounded-xl border border-blue-200 bg-white/70 px-3 py-2 text-sm text-ink">
-                <input type="checkbox" name="saveAsStandard" value="1" defaultChecked className="mt-0.5" />
+                <input type="checkbox" name="saveAsStandard" value="1" className="mt-0.5" />
                 <span>
                   <b>ใช้เป็นแบบมาตรฐานต่อไป</b>
                   <span className="mt-0.5 block text-xs text-subtle">เก็บตำแหน่งเลเยอร์และกล่องข้อความ · ไม่เอาภาพคนหรือไฟล์ที่อัปโหลดจากงานนี้ไปงานอื่น</span>

@@ -86,3 +86,17 @@ test('โปสเตอร์ดึงจำนวนรับและเบ�
   assert.equal(poster.quantity, '2 อัตรา');
   assert.equal(poster.contactLine, '081-234-5678');
 });
+
+test('สวัสดิการที่คนหรือโมเดลพิมพ์เพิ่มโดยไม่มีในใบขอถูกตัดทิ้ง', () => {
+  const campaign = {
+    ...driverCampaign,
+    request_snapshot: { ...driverCampaign.request_snapshot, welfare: 'ประกันสังคม' },
+  };
+  const poster = applyTrustedPosterFacts({ benefits: ['ประกันสังคม', 'รถรับส่ง', 'โบนัส'] }, campaign);
+  assert.deepEqual(poster.benefits, ['ประกันสังคม']);
+});
+
+test('ใบขอไม่มีสวัสดิการ ห้ามเอาสวัสดิการที่พิมพ์เองขึ้นโปสเตอร์', () => {
+  const poster = applyTrustedPosterFacts({ benefits: ['โบนัสประจำปี'] }, driverCampaign);
+  assert.deepEqual(poster.benefits, []);
+});

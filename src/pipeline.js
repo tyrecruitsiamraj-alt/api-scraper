@@ -1,7 +1,7 @@
 import { resolveProvider } from './connectors/registry.js';
 import { RateLimiter } from './core/anti-ban.js';
 import { splitCriteria } from './core/candidate-match.js';
-import { classifyScrapeFailure, rememberedPreventionLog, SCRAPE_FAILURE_LESSONS } from './core/scrape-failure-learning.js';
+import { classifyScrapeOutcome, lessonRowsToLogHits, rememberedPreventionLog } from './core/scrape-failure-learning.js';
 import { evaluateResumeQualification } from './core/resume-qualification.js';
 import { envInt, sleep } from './config.js';
 import {
@@ -13,6 +13,7 @@ import {
   saveConnectorSession,
   linkCandidateToTask,
   recordResumeSearchAttempt,
+  listScrapeFailureLessons,
   recordScrapeFailureLesson,
   setConnectorCooldown,
   startRun,
@@ -76,10 +77,8 @@ export async function runConnector(connector, criteria, runtime, opts = {}) {
   const provider = resolveProvider(connector.platform);
   const limiter = new RateLimiter({ minMs: runtime.delayMin, maxMs: runtime.delayMax });
   const runId = await startRun(connector.id, connector.platform, criteria, opts.taskId ?? null);
-  console.log(rememberedPreventionLog(SCRAPE_FAILURE_LESSONS.map((lesson) => ({
-    key: lesson.key,
-    prevention: lesson.prevention,
-  }))));
+  const remembered = await listScrapeFailureLessons().catch(() => []);
+  console.log(rememberedPreventionLog(lessonRowsToLogHits(remembered)));
   // A provider can spend minutes in login or loading a browser page.  Persist a
   // small, independent heartbeat so recovery can distinguish a live slow run
   // from an abandoned process.  It also keeps the task's UI timestamp fresh.
@@ -406,18 +405,16 @@ export async function runConnector(connector, criteria, runtime, opts = {}) {
       unique: Math.max(0, opened - duplicate), qualified, needsReview, rejected, duplicate,
       quotaUsed: opened, durationSeconds: Math.max(0, Math.round((Date.now() - runStartedAt) / 1000)), reasonCounts,
     }).catch((e) => console.warn(`  [second-brain] บันทึก Search Attempt ไม่สำเร็จ: ${e.message}`));
-    if (error) {
-      const hit = classifyScrapeFailure(error);
-      if (hit) {
-        await recordScrapeFailureLesson({
-          ...hit,
-          taskId: opts.taskId ?? null,
-          runId,
-          platform: connector.platform,
-          evidence: { status, qualified, opened, rejected },
-        }).catch((e) => console.warn(`  [lesson] บันทึกบทเรียนความล้มเหลวไม่สำเร็จ: ${e.message}`));
-        console.log(`  [lesson] จำแล้ว ${hit.key}: ${hit.prevention}`);
-      }
+    const hit = classifyScrapeOutcome({ error, opened, qualified, rejected });
+    if (hit) {
+      await recordScrapeFailureLesson({
+        ...hit,
+        taskId: opts.taskId ?? null,
+        runId,
+        platform: connector.platform,
+        evidence: { status, qualified, opened, rejected },
+      }).catch((e) => console.warn(`  [lesson] บันทึกบทเรียนความล้มเหลวไม่สำเร็จ: ${e.message}`));
+      console.log(`  [lesson] จำแล้ว ${hit.key}: ${hit.prevention}`);
     }
     return { runId, status, found, newCount, updatedCount, failed, error, opened, qualified, needsReview, rejected, duplicate, reasonCounts };
   }

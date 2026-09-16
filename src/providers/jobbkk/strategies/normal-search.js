@@ -8,7 +8,7 @@ import {
   sleep,
   waitForResultChange,
 } from '../resume-talent-entry.js';
-import { planTalentNormalFilters } from '../talent-filter-plan.js';
+import { missingRequiredNormalFilters, planTalentNormalFilters } from '../talent-filter-plan.js';
 
 function escapeRegExp(value) {
   return String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -253,8 +253,12 @@ export async function runNormalSearch(page, criteria, { need = 15 } = {}) {
     await applyPlannedFilter(page, step, report);
     await dismissJobbkkOverlays(page);
   }
-  if (!report.applied.includes('position') && !report.applied.includes('keyword')) {
+  const missing = missingRequiredNormalFilters(plan, report);
+  if (missing.includes('position')) {
     throw new Error('JOBBKK_FILTER_NOT_APPLIED: Normal Search ไม่ยืนยันตำแหน่งหรือ Keyword จึงไม่รับผลค้นหาแบบกว้าง');
+  }
+  if (missing.includes('province')) {
+    throw new Error('JOBBKK_FILTER_NOT_APPLIED: Normal Search ไม่ยืนยันจังหวัดตามใบขอ จึงไม่รับผลค้นหาทั้งประเทศ');
   }
 
   const before = await readResumeResultPool(page);

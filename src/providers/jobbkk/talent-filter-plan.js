@@ -135,6 +135,15 @@ export function planTalentNormalFilters(criteria = {}) {
   return plan;
 }
 
+/** Fail-closed: do not search the whole country or with no position chip when the request had those filters. */
+export function missingRequiredNormalFilters(plan = [], report = { applied: [] }) {
+  const applied = new Set(report?.applied || []);
+  const missing = [];
+  if (!applied.has('position') && !applied.has('keyword')) missing.push('position');
+  if (plan.some((step) => step.field === 'province') && !applied.has('province')) missing.push('province');
+  return missing;
+}
+
 export function mapCriteriaToPremiumFilters(criteria = {}) {
   const drivingLicense = criteria.drivingLicense === 'มี'
     ? 'รถยนต์, รถจักรยานยนต์'

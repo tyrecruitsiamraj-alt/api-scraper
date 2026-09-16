@@ -9,7 +9,7 @@ import * as path from 'path';
  *   - 'campaign-content:<uuid>' → ดึง bytes จาก "so-candidate-data".campaign_contents (DB เดียวกัน)
  *   - path ไฟล์ที่มีอยู่แล้ว → คืนตามเดิม
  *
- * ล้มเหลว/ไม่พบ = คืน null (โพสต์เป็นข้อความล้วนต่อได้ ไม่ทำให้ทั้งงานพัง).
+ * ล้มเหลวของ campaign-content ห้ามโพสต์ข้อความล้วนแทนรูป เพราะจะได้ประกาศผิด.
  */
 export async function resolveJobImage(imageRef?: string | null): Promise<string | null> {
   const ref = String(imageRef || '').trim();
@@ -29,7 +29,9 @@ export async function resolveJobImage(imageRef?: string | null): Promise<string 
   try {
     const db = require('../../server/db');
     const img = await db.getCampaignContentImage(m[1]);
-    if (!img || !img.bytes) return null;
+    if (!img || !img.bytes) {
+      throw new Error('ไม่พบรูปโปสเตอร์ของงานนี้ ห้ามโพสต์ข้อความล้วนแทน');
+    }
     const ext = img.mime === 'image/jpeg' ? 'jpg' : img.mime === 'image/webp' ? 'webp' : 'png';
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'autopost-img-'));
     const file = path.join(dir, `campaign-${m[1]}.${ext}`);
@@ -37,6 +39,6 @@ export async function resolveJobImage(imageRef?: string | null): Promise<string 
     return file;
   } catch (e) {
     console.warn(`[resolveJobImage] ดึงรูปไม่สำเร็จ: ${(e as Error).message}`);
-    return null;
+    throw e;
   }
 }

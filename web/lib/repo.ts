@@ -6,6 +6,7 @@ import type { ContentQualityResult } from '../../src/core/content-quality.js';
 import { evaluateWorkflowReadiness } from '../../src/core/workflow-readiness.js';
 import type { WorkflowReadiness } from '../../src/core/workflow-readiness.js';
 import { renderPoster } from '../../src/core/poster.js';
+import { applyTrustedPosterFacts } from '../../src/core/campaign-facts.js';
 import { normalizePosterLayout, normalizePosterStandard, posterFieldsForQuality, posterStandardFromFields, POSTER_TEMPLATE_ID, POSTER_TEMPLATE_VERSION, withPosterTemplate, buildPosterSvg } from '../../src/core/poster-template.js';
 import type { PosterLayout, PosterStandard } from '../../src/core/poster-template.js';
 import { evaluateResumeQualification } from '../../src/core/resume-qualification.js';
@@ -2358,10 +2359,11 @@ export async function approveContentForSummary(opts: {
       gen_notes: Record<string, any> | null;
       has_image: boolean;
       image_generation_ok: boolean;
+      poster_fields: PosterFields | null;
     }>(
       `SELECT c.status AS campaign_status, cc.status AS content_status,
               to_jsonb(c.*) AS campaign, cc.caption, cc.quality_checks, cc.gen_notes,
-              (cc.image_bytes IS NOT NULL) AS has_image,
+              cc.poster_fields, (cc.image_bytes IS NOT NULL) AS has_image,
               COALESCE((cc.gen_notes->'image_generation'->>'ok')::boolean, false) AS image_generation_ok
          FROM recruit_campaigns c
          JOIN campaign_contents cc ON cc.id = $2 AND cc.campaign_id = c.id
@@ -2379,7 +2381,7 @@ export async function approveContentForSummary(opts: {
     const quality = evaluateContentQuality({
       campaign: row.campaign,
       caption: row.caption,
-      posterFields: row.quality_checks?.posterFields ?? null,
+      posterFields: row.poster_fields ?? row.quality_checks?.posterFields ?? null,
       imageReady: row.has_image && row.image_generation_ok,
       researchGate: row.gen_notes?.research_gate ?? { ready: false, issues: ['ร่างนี้ไม่มีหลักฐานสำรวจตลาดก่อนสร้าง'] },
     });
@@ -2681,9 +2683,9 @@ export async function updateContentPoster(
       throw new Error('ร่างเก่านี้ไม่มีภาพต้นฉบับ กรุณาสั่งสร้างรูปใหม่หนึ่งครั้งก่อนแก้ข้อความบนรูป');
     }
 
-    const fields: PosterFields = withPosterTemplate({
+    const fields = withPosterTemplate(applyTrustedPosterFacts({
       title: cleanPosterText(input.title, 80),
-      badge: cleanPosterText(input.badge || 'เปิดรับสมัครด่วน', 40),
+      badge: cleanPosterText(input.badge || '', 40),
       location: cleanPosterText(input.location, 140),
       worktime: cleanPosterText(input.worktime, 140),
       salaryTotal: cleanPosterText(input.salaryTotal, 40),
@@ -2703,7 +2705,7 @@ export async function updateContentPoster(
           addedBy: extra.provenance?.addedBy || editor || undefined,
         },
       })),
-    });
+    }, row.campaign)) as PosterFields;
     if (!fields.title) throw new Error('กรุณาระบุตำแหน่งบนรูป');
 
     const sourceUri = `data:${row.source_image_mime};base64,${row.source_image_bytes.toString('base64')}`;
@@ -2717,6 +2719,10 @@ export async function updateContentPoster(
       imageReady: true,
       researchGate,
     });
+    const factFailures = (quality.checks || []).filter((item) => item.status === 'fail' && item.code !== 'market_research');
+    if (factFailures.length) {
+      throw new Error(`ยังบันทึกไม่ได้ กรุณาแก้ข้อมูลเหล่านี้ก่อน: ${factFailures.map((item) => item.message).join(' · ')}`);
+    }
     const editedAt = new Date().toISOString();
     const extraNotes = (fields.extras ?? []).map((extra) => ({
       id: extra.id,
@@ -2726,7 +2732,7 @@ export async function updateContentPoster(
       addedAt: extra.provenance.addedAt,
       addedBy: extra.provenance.addedBy || editor,
     }));
-    const saveAsStandard = options.saveAsStandard !== false;
+    const saveAsStandard = options.saveAsStandard === true;
     let standardSaved = false;
     if (saveAsStandard) {
       standardSaved = await upsertPosterLayoutStandardWithClient(client, fields, id, editor);
@@ -2882,8 +2888,14 @@ export async function getContentImageBytes(id: string) {
   if (!row?.image_bytes) return row ?? null;
   const sourceBytes = row.source_image_bytes;
   const storedVersion = Number(row.poster_fields?.templateVersion) || 0;
-  if (storedVersion === POSTER_TEMPLATE_VERSION || !sourceBytes || row.status !== 'draft') {
+  if (storedVersion === POSTER_TEMPLATE_VERSION) {
     return { image_bytes: row.image_bytes, image_mime: row.image_mime };
+  }
+  if (!sourceBytes) {
+    throw new Error('โปสเตอร์ยังเป็นรุ่นเก่า และไม่มีภาพต้นฉบับให้ประกอบใหม่ กรุณาสั่งสร้างรูปใหม่');
+  }
+  if (row.status !== 'draft') {
+    throw new Error('โปสเตอร์ที่อนุมัติแล้วยังเป็นรุ่นเก่า ห้ามส่งรูปเก่าไปโพสต์ กรุณากลับไปแก้แล้วประกอบใหม่');
   }
   try {
     return await enqueuePosterRefresh(() => recomposeStoredDraftPoster(id, {
@@ -2893,7 +2905,7 @@ export async function getContentImageBytes(id: string) {
     }));
   } catch (error) {
     console.warn(`  [poster] ประกอบร่าง ${id} ตามเทมเพลตใหม่ไม่สำเร็จ: ${error instanceof Error ? error.message : error}`);
-    return { image_bytes: row.image_bytes, image_mime: row.image_mime };
+    throw new Error('ประกอบโปสเตอร์รุ่นใหม่ไม่สำเร็จ ห้ามใช้รูปเก่า กรุณาลองใหม่');
   }
 }
 

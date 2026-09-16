@@ -124,7 +124,7 @@ export function ContentReviewWorkspace({ campaignId, content, initialPoster, ini
         <div className="mt-auto flex items-end justify-between gap-4 pt-7">
           <div className="space-y-2 text-sm">
             <label className="flex items-start gap-2 text-[#222]">
-              <input type="checkbox" name="saveAsStandard" value="1" defaultChecked className="mt-1" />
+              <input type="checkbox" name="saveAsStandard" value="1" className="mt-1" />
               <span>
                 <b>ใช้เป็นแบบมาตรฐานต่อไป</b>
                 <span className="mt-0.5 block text-[13px] text-[#6b7280]">เก็บตำแหน่งเลเยอร์และกล่องข้อความ · ไม่เอาภาพคนจากงานนี้ไปงานอื่น</span>

@@ -731,6 +731,21 @@ export async function listScrapeFailureLessons() {
   return rows;
 }
 
+/** Search terms that opened many resumes and qualified none — skip on expansion only. */
+export async function listZeroYieldSearchTerms({ jobFamily = '', platform, location = '' }) {
+  if (!jobFamily || !platform) return [];
+  const { rows } = await query(
+    `SELECT search_term
+       FROM resume_sourcing_patterns
+      WHERE job_family=$1 AND platform=$2
+        AND (location=$3 OR location='')
+        AND opened_count >= 20 AND qualified_count = 0
+      ORDER BY opened_count DESC, last_observed_at DESC`,
+    [jobFamily, platform, location ?? ''],
+  );
+  return rows.map((row) => String(row.search_term || '').trim()).filter(Boolean);
+}
+
 const POSTER_STANDARD_TABLE_SQL = `
 CREATE TABLE IF NOT EXISTS poster_layout_standards (
   template_id        text PRIMARY KEY,

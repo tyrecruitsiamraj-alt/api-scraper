@@ -963,13 +963,20 @@ async function getCampaignContentImage(contentId) {
   const scraperSchema = process.env.SCRAPER_DB_SCHEMA || 'so-candidate-data';
   const tbl = scraperSchema.includes('-') ? `"${scraperSchema}".campaign_contents` : `${scraperSchema}.campaign_contents`;
   try {
-    const { rows } = await query(`SELECT image_bytes, image_mime FROM ${tbl} WHERE id = $1`, [id]);
+    const { rows } = await query(
+      `SELECT image_bytes, image_mime, poster_fields FROM ${tbl} WHERE id = $1`,
+      [id],
+    );
     const r = rows[0];
     if (!r || !r.image_bytes) return null;
+    const storedVersion = Number(r.poster_fields?.templateVersion) || 0;
+    if (storedVersion !== 3) {
+      throw new Error('โปสเตอร์ยังเป็นรุ่นเก่า ห้ามส่งรูปเก่าไปโพสต์ กรุณากลับไปประกอบใหม่ก่อนเผยแพร่');
+    }
     return { bytes: r.image_bytes, mime: r.image_mime || 'image/png' };
   } catch (e) {
     console.error('getCampaignContentImage:', e?.message || e);
-    return null;
+    throw e;
   }
 }
 

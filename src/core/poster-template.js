@@ -608,14 +608,16 @@ export function buildPosterSvg(rawFields = {}, personUri = null, logoUri = null)
 }
 
 export function evaluatePosterVisual(fields = {}) {
+  const storedVersion = Number(fields.templateVersion);
   const f = withPosterTemplate(fields ?? {});
   const extras = f.extras;
   const unlabeled = extras.filter((item) => !item.provenance?.origin);
   const extraNote = extras.length
     ? extras.map((item) => extraLabel(item)).join(' · ')
     : 'ยังไม่มีรูปหรือข้อความเพิ่มนอกเทมเพลต';
+  const versionOk = storedVersion === POSTER_TEMPLATE_VERSION;
   const checks = [
-    { code: 'visual_template', label: 'Template งานออกแบบ', status: f.templateId === POSTER_TEMPLATE_ID && Number(f.templateVersion) === POSTER_TEMPLATE_VERSION ? 'pass' : 'fail', message: `ใช้ ${POSTER_TEMPLATE_ID} v${POSTER_TEMPLATE_VERSION}` },
+    { code: 'visual_template', label: 'Template งานออกแบบ', status: f.templateId === POSTER_TEMPLATE_ID && versionOk ? 'pass' : 'fail', message: versionOk ? `ใช้ ${POSTER_TEMPLATE_ID} v${POSTER_TEMPLATE_VERSION}` : 'โปสเตอร์ยังเป็นรุ่นเก่า ต้องประกอบใหม่ก่อนอนุมัติ' },
     { code: 'visual_title_fit', label: 'ขนาดชื่อตำแหน่ง', status: compact(f.title).length <= 38 ? 'pass' : 'fail', message: compact(f.title).length <= 38 ? 'อยู่ในพื้นที่ปลอดภัย' : 'ชื่อตำแหน่งยาวเกินพื้นที่บนภาพ' },
     { code: 'visual_location_fit', label: 'ขนาดสถานที่', status: compact(f.location).length <= 62 ? 'pass' : 'warning', message: compact(f.location).length <= 62 ? 'อยู่ในพื้นที่ปลอดภัย' : 'สถานที่ยาว อาจถูกย่อบนภาพ' },
     { code: 'visual_layers', label: 'Layer ที่แก้ไขได้', status: 'pass', message: 'รูปคน โลโก้ ข้อความ และสวัสดิการแยกเลเยอร์ ลากย้ายตำแหน่งได้โดยไม่เปลี่ยนภาพต้นฉบับ' },

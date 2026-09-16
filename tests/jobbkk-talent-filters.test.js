@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   mapCriteriaToPremiumFilters,
+  missingRequiredNormalFilters,
   parseEducationRange,
   planTalentNormalFilters,
   salaryOptionLabels,
@@ -79,4 +80,10 @@ test('long sales เนื้องาน expands to short Job Family chips', ()
   assert.ok(position);
   assert.deepEqual(position.value.slice(0, 3), ['พนักงานขาย', 'เซลล์', 'เจ้าหน้าที่ฝ่ายขาย']);
   assert.equal(position.value.every((term) => term.length <= 22 && !/[A-Za-z]/.test(term)), true);
+});
+
+test('ไม่ยอมค้นทั้งประเทศเมื่อใบขอมีจังหวัดแต่ไม่ได้กรอกบนเว็บ', () => {
+  const plan = planTalentNormalFilters({ position: 'พนักงานขาย', province: 'สมุทรปราการ' });
+  assert.deepEqual(missingRequiredNormalFilters(plan, { applied: ['position'] }), ['province']);
+  assert.deepEqual(missingRequiredNormalFilters(plan, { applied: ['position', 'province'] }), []);
 });
