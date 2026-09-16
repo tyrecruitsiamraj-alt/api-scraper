@@ -87,6 +87,7 @@ async function drain() {
 
 /** Fire-and-forget: start the worker without blocking the server action. */
 export function kickWorker() {
+  if (process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME) return;
   void drain();
 }
 

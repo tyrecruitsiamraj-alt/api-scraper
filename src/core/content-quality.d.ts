@@ -28,3 +28,13 @@ export function evaluateContentQuality(input?: {
   } | null;
 }): ContentQualityResult;
 export function qualityFailureMessages(result: ContentQualityResult): string[];
+export const SELF_HEALING_QUALITY_CODES: Set<string>;
+export function operatorBlockingFailures(result?: ContentQualityResult | null): QualityCheck[];
+export function operatorFacingQuality<T extends ContentQualityResult | null | undefined>(result: T): T;
+export function operatorCanApprove(result?: {
+  blocking?: boolean;
+  checks?: Array<{ code: string; status: string }>;
+} | null, options?: {
+  isPreview?: boolean;
+  hasSourceImage?: boolean;
+}): boolean;

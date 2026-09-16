@@ -92,6 +92,42 @@ export function shouldSupplementWithAiSearch(normalCount, need) {
 }
 
 /**
+ * ผ่อน Normal ทีละชั้นเมื่อผลเป็น 0 — ห้ามทิ้งตำแหน่งหรือจังหวัด และห้ามกระโดด AI ก่อนผ่อน.
+ * ชั้นถัดไปตัดเฉพาะตัวกรองเสริมที่ใบขอมี ไม่เดาค่าใหม่.
+ */
+export function talentNormalRelaxationLayers(criteria = {}) {
+  const base = { ...criteria };
+  const dropGroups = [
+    [],
+    ['availableStart', 'experience', 'workType'],
+    ['availableStart', 'experience', 'workType', 'salary', 'age'],
+    ['availableStart', 'experience', 'workType', 'salary', 'age', 'education', 'gender'],
+    ['availableStart', 'experience', 'workType', 'salary', 'age', 'education', 'gender', 'jobTypes', 'keyword'],
+  ];
+  const seen = new Set();
+  const layers = [];
+  for (const dropped of dropGroups) {
+    const next = { ...base };
+    for (const field of dropped) {
+      if (field === 'salary') {
+        delete next.salaryMin;
+        delete next.salaryMax;
+      } else if (field === 'age') {
+        delete next.ageMin;
+        delete next.ageMax;
+      } else {
+        delete next[field];
+      }
+    }
+    const key = JSON.stringify(planTalentNormalFilters(next).map((step) => step.field));
+    if (seen.has(key)) continue;
+    seen.add(key);
+    layers.push({ criteria: next, dropped });
+  }
+  return layers;
+}
+
+/**
  * Ordered like a recruiter on Resume Search Talent → Normal Search:
  * position chips → keyword chips → ประเภทงาน → จังหวัด → วุฒิ/เพศ/เงินเดือน/อายุ/รูปแบบงาน.
  */
@@ -142,6 +178,17 @@ export function missingRequiredNormalFilters(plan = [], report = { applied: [] }
   if (!applied.has('position') && !applied.has('keyword')) missing.push('position');
   if (plan.some((step) => step.field === 'province') && !applied.has('province')) missing.push('province');
   return missing;
+}
+
+/** JobBKK จังหวัด chip รับทั้ง "สมุทรปราการ" และ "จังหวัดสมุทรปราการ" */
+export function provinceSearchAliases(value) {
+  const raw = String(value ?? '').trim();
+  if (!hasSearchValue(raw)) return [];
+  return [...new Set([
+    raw,
+    raw.replace(/^จังหวัด\s*/u, ''),
+    raw.startsWith('จังหวัด') ? raw : `จังหวัด${raw}`,
+  ].filter(Boolean))];
 }
 
 export function mapCriteriaToPremiumFilters(criteria = {}) {

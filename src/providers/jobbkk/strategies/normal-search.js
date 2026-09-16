@@ -8,7 +8,7 @@ import {
   sleep,
   waitForResultChange,
 } from '../resume-talent-entry.js';
-import { missingRequiredNormalFilters, planTalentNormalFilters } from '../talent-filter-plan.js';
+import { missingRequiredNormalFilters, planTalentNormalFilters, provinceSearchAliases } from '../talent-filter-plan.js';
 
 function escapeRegExp(value) {
   return String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -187,7 +187,13 @@ async function applyPlannedFilter(page, step, report) {
     case 'jobTypes':
       return applySearchableChecks(page, /ประเภทงาน|สาขาอาชีพ/u, step.value, 'jobTypes', report);
     case 'province':
-      return applySearchableChecks(page, /สถานที่ทำงานทั้งหมด|พื้นที่ที่ต้องการทำงาน/u, [step.value], 'province', report);
+      return applySearchableChecks(
+        page,
+        /สถานที่ทำงานทั้งหมด|พื้นที่ที่ต้องการทำงาน/u,
+        provinceSearchAliases(step.value),
+        'province',
+        report,
+      );
     case 'education':
       return applyRangeSelect(page, /วุฒิการศึกษา/u, [step.value.min], [step.value.max], 'education', report);
     case 'gender':

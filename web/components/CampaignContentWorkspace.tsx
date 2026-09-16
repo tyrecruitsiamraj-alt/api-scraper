@@ -5,6 +5,7 @@ import { useFormStatus } from 'react-dom';
 import { approveContentAction, editCaptionAction, editPosterAction, rejectContentAction, regenerateContentImageAction, resetPosterStandardAction, runFacebookPreflightAction } from '@/lib/actions';
 import type { PosterFields } from '@/lib/repo';
 import { emptyPosterExtras, emptyPosterLayout } from '../../src/core/poster-template.js';
+import { operatorCanApprove } from '../../src/core/content-quality.js';
 import { PosterDragCanvas } from '@/components/PosterDragCanvas';
 import { PosterExtrasBar } from '@/components/PosterExtrasBar';
 
@@ -78,7 +79,10 @@ export function CampaignContentWorkspace({ campaignId, content, initialPoster, i
   const [poster, setPoster] = useState<PosterFields>(initialPoster);
   const [caption, setCaption] = useState(initialCaption);
   const update = <K extends keyof PosterFields>(key: K, value: PosterFields[K]) => setPoster((current) => ({ ...current, [key]: value }));
-  const canApprove = !content.isPreview && content.hasImage && content.imageGenerationOk && content.qualityStatus !== 'fail';
+  const canApprove = operatorCanApprove({
+    blocking: content.qualityStatus === 'fail',
+    checks: content.qualityChecks ?? [],
+  }, { isPreview: content.isPreview, hasSourceImage: content.hasSourceImage && content.hasImage && content.imageGenerationOk });
   const qualityTone = content.qualityStatus === 'fail' ? 'border-red-200 bg-red-50' : content.qualityStatus === 'pass' ? 'border-emerald-200 bg-emerald-50' : 'border-amber-200 bg-amber-50';
 
   return (

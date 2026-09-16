@@ -7,7 +7,7 @@ import { ensureLatestUpdatedSort } from './latest-sort.js';
 import { isTalentNormalUi, openResumeSearchTalent } from './resume-talent-entry.js';
 import { runAiSearch } from './strategies/ai-search.js';
 import { runNormalSearch } from './strategies/normal-search.js';
-import { shouldSupplementWithAiSearch } from './talent-filter-plan.js';
+import { shouldSupplementWithAiSearch, talentNormalRelaxationLayers } from './talent-filter-plan.js';
 
 const SEARCH_URL = 'https://www.jobbkk.com/resumes/premium';
 const CARD_SELECTOR = 'article.bg-resume a.clickShowDetail[data-id], article.bg-resume a.read-profile[data-id]';
@@ -105,10 +105,24 @@ export async function browserSearchResumeIds(session, criteria, runtime = {}) {
 
   const entry = await openResumeSearchTalent(page).catch(() => ({ profile: 'unknown' }));
   if (entry.profile === 'current' || await isTalentNormalUi(page)) {
-    const normal = await runNormalSearch(page, criteria, { need });
+    const layers = talentNormalRelaxationLayers(criteria);
+    let normal = await runNormalSearch(page, layers[0]?.criteria || criteria, { need });
+    if (!normal.pool.length && layers.length > 1) {
+      for (const layer of layers.slice(1)) {
+        const dropped = (layer.dropped || []).join(', ') || 'ตัวกรองเสริม';
+        console.log(`  [JobBKK] Normal Search ได้ 0 — ผ่อน ${dropped} แล้วยังไม่ใช้ AI`);
+        await openResumeSearchTalent(page).catch(() => {});
+        normal = await runNormalSearch(page, layer.criteria, { need });
+        if (normal.pool.length) break;
+      }
+    }
     let ai = { pool: [], warning: null };
     if (shouldSupplementWithAiSearch(normal.pool.length, need)) {
-      console.log(`  [JobBKK] Normal Search ได้ ${normal.pool.length}/${need} — ใช้ AI Search เติมจำนวน`);
+      if (!normal.pool.length) {
+        console.log(`  [JobBKK] ผ่อน Normal ครบแล้วยังได้ 0/${need} — ใช้ AI Search เติมจำนวน`);
+      } else {
+        console.log(`  [JobBKK] Normal Search ได้ ${normal.pool.length}/${need} — ใช้ AI Search เติมจำนวน`);
+      }
       try {
         ai = await runAiSearch(page, criteria);
       } catch (error) {

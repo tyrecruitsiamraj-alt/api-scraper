@@ -5,8 +5,10 @@ import {
   missingRequiredNormalFilters,
   parseEducationRange,
   planTalentNormalFilters,
+  provinceSearchAliases,
   salaryOptionLabels,
   shouldSupplementWithAiSearch,
+  talentNormalRelaxationLayers,
 } from '../src/providers/jobbkk/talent-filter-plan.js';
 import { buildJobbkkAiQuery } from '../src/providers/jobbkk/strategies/ai-search.js';
 
@@ -86,4 +88,30 @@ test('ไม่ยอมค้นทั้งประเทศเมื่อ�
   const plan = planTalentNormalFilters({ position: 'พนักงานขาย', province: 'สมุทรปราการ' });
   assert.deepEqual(missingRequiredNormalFilters(plan, { applied: ['position'] }), ['province']);
   assert.deepEqual(missingRequiredNormalFilters(plan, { applied: ['position', 'province'] }), []);
+});
+
+test('จังหวัดค้นได้ทั้งแบบมีและไม่มีคำว่าจังหวัด', () => {
+  assert.deepEqual(provinceSearchAliases('สมุทรปราการ'), ['สมุทรปราการ', 'จังหวัดสมุทรปราการ']);
+  assert.deepEqual(provinceSearchAliases('จังหวัดนนทบุรี'), ['จังหวัดนนทบุรี', 'นนทบุรี']);
+});
+
+test('ผ่อน Normal ทีละชั้นเมื่อผลเป็น 0 โดยไม่ทิ้งตำแหน่งหรือจังหวัด และไม่เดาค่าใหม่', () => {
+  const layers = talentNormalRelaxationLayers({
+    position: 'พนักงานขาย',
+    province: 'สมุทรปราการ',
+    education: 'ปริญญาตรี',
+    salaryMin: '25000',
+    gender: 'หญิง',
+    keyword: 'ขาย',
+  });
+  assert.ok(layers.length >= 2);
+  for (const layer of layers) {
+    const plan = planTalentNormalFilters(layer.criteria);
+    assert.equal(plan.some((step) => step.field === 'position'), true);
+    assert.equal(plan.some((step) => step.field === 'province'), true);
+    assert.equal(layer.criteria.province, 'สมุทรปราการ');
+    assert.equal(Object.prototype.hasOwnProperty.call(layer.criteria, 'drivingLicense'), false);
+  }
+  const last = planTalentNormalFilters(layers[layers.length - 1].criteria);
+  assert.deepEqual(last.map((step) => step.field), ['position', 'province']);
 });

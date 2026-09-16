@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { evaluateContentQuality } from '../src/core/content-quality.js';
+import { evaluateContentQuality, operatorCanApprove, operatorFacingQuality } from '../src/core/content-quality.js';
 import { withPosterTemplate } from '../src/core/poster-template.js';
 
 const campaign = {
@@ -236,4 +236,39 @@ test('ร่างที่มีหลักฐาน Google และ Facebook
     researchGate: { ready: true, googleEvidence: 3, facebookEvidence: 2, issues: [] },
   });
   assert.equal(result.checks.find((item) => item.code === 'market_research')?.status, 'pass');
+});
+
+test('ร่างเก่าที่ไม่มี research_gate ไม่ถูกบล็อกถ้าข้อเท็จจริงตรงใบขอ', () => {
+  const result = evaluateContentQuality({ campaign, caption: goodCaption, posterFields: goodPoster, imageReady: true });
+  assert.equal(result.checks.some((item) => item.code === 'market_research'), false);
+  assert.equal(result.blocking, false);
+  assert.equal(operatorCanApprove(result, { hasSourceImage: true }), true);
+});
+
+test('โปสเตอร์รุ่นเก่ายังอนุมัติได้ เพราะระบบประกอบเทมเพลตใหม่ให้เอง', () => {
+  const stale = evaluateContentQuality({
+    campaign,
+    caption: goodCaption,
+    posterFields: { ...goodPoster, templateVersion: 2 },
+    imageReady: true,
+  });
+  assert.equal(stale.checks.find((item) => item.code === 'visual_template')?.status, 'fail');
+  assert.equal(stale.blocking, true);
+  assert.equal(operatorCanApprove(stale, { hasSourceImage: true }), true);
+  const view = operatorFacingQuality(stale);
+  assert.equal(view.status, 'warning');
+  assert.equal(view.blocking, false);
+  assert.equal(operatorCanApprove(stale, { isPreview: true, hasSourceImage: true }), false);
+});
+
+test('สวัสดิการที่แต่งเองยังปิดปุ่มอนุมัติ', () => {
+  const invented = evaluateContentQuality({
+    campaign,
+    caption: `${goodCaption}\nสวัสดิการครบ มีรถรับส่ง`,
+    posterFields: goodPoster,
+    imageReady: true,
+  });
+  assert.equal(invented.blocking, true);
+  assert.equal(operatorCanApprove(invented, { hasSourceImage: true }), false);
+  assert.equal(operatorFacingQuality(invented).status, 'fail');
 });

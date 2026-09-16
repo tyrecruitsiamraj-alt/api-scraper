@@ -231,3 +231,48 @@ export function evaluateContentQuality({ campaign = {}, caption = '', posterFiel
 export function qualityFailureMessages(result) {
   return (result?.checks ?? []).filter((item) => item.status === 'fail').map((item) => item.message);
 }
+
+/** โปสเตอร์รุ่นเก่าประกอบใหม่ได้ตอนบันทึก/อนุมัติ — ไม่ใช่ข้อมูลใบขอผิด */
+export const SELF_HEALING_QUALITY_CODES = new Set(['visual_template']);
+
+export function operatorBlockingFailures(result) {
+  return (result?.checks ?? []).filter((item) => (
+    item.status === 'fail' && !SELF_HEALING_QUALITY_CODES.has(item.code)
+  ));
+}
+
+/** สถานะที่คนเห็นตอนแก้สื่อ: เทมเพลตเก่าไม่ปิดปุ่มอนุมัติ เพราะระบบประกอบให้เอง */
+export function operatorFacingQuality(result) {
+  if (!result) return result;
+  const blocking = operatorBlockingFailures(result);
+  if (blocking.length) {
+    return {
+      ...result,
+      blocking: true,
+      status: 'fail',
+      summary: `ยังอนุมัติไม่ได้: ${blocking.map((item) => item.label).join(', ')}`,
+    };
+  }
+  const healing = (result.checks ?? []).filter((item) => (
+    item.status === 'fail' && SELF_HEALING_QUALITY_CODES.has(item.code)
+  ));
+  if (!healing.length) return result;
+  return {
+    ...result,
+    blocking: false,
+    status: 'warning',
+    summary: 'โปสเตอร์จะถูกประกอบเป็นรุ่นปัจจุบันตอนบันทึกหรืออนุมัติ',
+    checks: (result.checks ?? []).map((item) => (
+      SELF_HEALING_QUALITY_CODES.has(item.code) && item.status === 'fail'
+        ? { ...item, status: 'warning', message: 'ระบบจะประกอบโปสเตอร์รุ่นปัจจุบันให้ตอนบันทึกหรืออนุมัติ' }
+        : item
+    )),
+  };
+}
+
+export function operatorCanApprove(result, { isPreview = false, hasSourceImage = true } = {}) {
+  if (isPreview || hasSourceImage === false) return false;
+  if (!result) return false;
+  if ((result.checks ?? []).length) return operatorBlockingFailures(result).length === 0;
+  return !result.blocking;
+}

@@ -258,7 +258,7 @@ async function renderCampaignDetail({ params, searchParams }: { params: { id: st
     const isPreview = focusedContent.gen_notes?.generation_mode === 'preview';
     const posterFields = focusedContent.poster_fields ?? {
       title: String(c.title || snap.position || snap.request_name || ''),
-      badge: 'เปิดรับสมัครด่วน',
+      badge: '',
       location: humanText(snap.location || snap.work_addr || c.province || ''),
       worktime: String(snap.work_schedule || ''),
       salaryTotal: String(snap.income || ''),
@@ -274,6 +274,10 @@ async function renderCampaignDetail({ params, searchParams }: { params: { id: st
       imageSide: 'right' as const,
       logoVariant: 'people-navy' as const,
     };
+    const qualityStatus = focusedContent.quality_status;
+    const qualityDot = qualityStatus === 'fail' ? 'bg-red-600' : qualityStatus === 'pass' ? 'bg-emerald-600' : 'bg-amber-500';
+    const qualityLabel = qualityStatus === 'fail' ? 'ยังอนุมัติไม่ได้' : qualityStatus === 'pass' ? 'สื่อพร้อมแก้ไข' : 'ควรตรวจเพิ่ม';
+    const qualityScoreClass = qualityStatus === 'fail' ? 'text-red-700' : qualityStatus === 'pass' ? 'text-emerald-700' : 'text-amber-700';
     return (
       <div className="pb-1">
         <header>
@@ -281,9 +285,9 @@ async function renderCampaignDetail({ params, searchParams }: { params: { id: st
           <div className="mt-3 flex items-end justify-between gap-6">
             <h1 className="text-[30px] font-semibold leading-none tracking-[-0.025em] text-[#191919]">{c.request_no || 'ใบงาน'} <span className="mx-3 font-normal text-[#c5c9ce]">|</span> {c.title || 'งานรับสมัคร'}</h1>
             <div className="flex items-center gap-4 pb-0.5">
-              <span className="inline-flex items-center gap-2 text-[15px]"><span className="h-3.5 w-3.5 rounded-full bg-emerald-600" />สื่อพร้อมแก้ไข</span>
+              <span className="inline-flex items-center gap-2 text-[15px]"><span className={`h-3.5 w-3.5 rounded-full ${qualityDot}`} />{qualityLabel}</span>
               <span className="h-7 w-px bg-[#d6d9de]" />
-              <span className="text-[14px] text-[#444]">Quality <b className="ml-2 text-[29px] font-medium leading-none text-emerald-700">{focusedContent.quality_score ?? '—'}</b></span>
+              <span className="text-[14px] text-[#444]">Quality <b className={`ml-2 text-[29px] font-medium leading-none ${qualityScoreClass}`}>{focusedContent.quality_score ?? '—'}</b></span>
             </div>
           </div>
         </header>
@@ -292,7 +296,15 @@ async function renderCampaignDetail({ params, searchParams }: { params: { id: st
           {contentError && <div role="alert" className="rounded-md border border-red-200 bg-red-50 px-4 py-2 text-sm text-red-800">{contentError}</div>}
           <ContentReviewWorkspace
             campaignId={c.id}
-            content={{ id: focusedContent.id, hasSourceImage: Boolean(focusedContent.has_source_image), qualityStatus: focusedContent.quality_status, isPreview }}
+            content={{
+              id: focusedContent.id,
+              hasSourceImage: Boolean(focusedContent.has_source_image),
+              qualityStatus: focusedContent.quality_status,
+              qualityScore: focusedContent.quality_score,
+              qualitySummary: focusedContent.quality_checks?.summary,
+              qualityChecks: focusedContent.quality_checks?.checks,
+              isPreview,
+            }}
             initialPoster={JSON.parse(JSON.stringify(posterFields))}
             initialCaption={focusedContent.caption ?? ''}
             saved={posterSaved}
@@ -539,7 +551,7 @@ async function renderCampaignDetail({ params, searchParams }: { params: { id: st
               const isPreview = ct.gen_notes?.generation_mode === 'preview';
               const posterFields = ct.poster_fields ?? {
                 title: String(c.title || snap.position || snap.request_name || ''),
-                badge: 'เปิดรับสมัครด่วน',
+                badge: '',
                 location: humanText(snap.location || snap.work_addr || c.province || ''),
                 worktime: String(snap.work_schedule || ''),
                 salaryTotal: String(snap.income || ''),

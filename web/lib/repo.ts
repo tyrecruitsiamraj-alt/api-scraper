@@ -1,7 +1,7 @@
 import 'server-only';
 import { randomUUID } from 'node:crypto';
 import { pool, q } from './db';
-import { evaluateContentQuality, qualityFailureMessages } from '../../src/core/content-quality.js';
+import { evaluateContentQuality, operatorFacingQuality, qualityFailureMessages } from '../../src/core/content-quality.js';
 import type { ContentQualityResult } from '../../src/core/content-quality.js';
 import { evaluateWorkflowReadiness } from '../../src/core/workflow-readiness.js';
 import type { WorkflowReadiness } from '../../src/core/workflow-readiness.js';
@@ -2229,6 +2229,37 @@ export type ContentRow = {
   } | null;
 };
 
+function needsPosterHydrate(row: ContentRow) {
+  if (row.status !== 'draft' || !row.has_source_image) return false;
+  const storedVersion = Number(row.poster_fields?.templateVersion) || 0;
+  if (storedVersion !== POSTER_TEMPLATE_VERSION) return true;
+  return !row.has_image;
+}
+
+async function persistDraftQuality(id: string, quality: ContentQualityResult) {
+  await q(
+    `UPDATE campaign_contents
+        SET quality_status=$2, quality_score=$3, quality_checks=$4::jsonb, quality_checked_at=now()
+      WHERE id=$1 AND status='draft'`,
+    [id, quality.status, quality.score, JSON.stringify(quality)],
+  );
+}
+
+async function hydrateStaleDraftPoster(row: ContentRow, campaign: CampaignRow | null) {
+  if (!campaign || !needsPosterHydrate(row)) return row;
+  try {
+    const refreshed = await getContentImageBytes(row.id);
+    return {
+      ...row,
+      poster_fields: refreshed?.poster_fields ?? row.poster_fields,
+      has_image: Boolean(refreshed?.image_bytes || row.has_image),
+    };
+  } catch (error) {
+    console.warn(`  [poster] ประกอบร่าง ${row.id} ตอนเปิดงานไม่สำเร็จ: ${error instanceof Error ? error.message : error}`);
+    return row;
+  }
+}
+
 /** ร่างคอนเทนต์ทุก version ของ campaign (ใหม่สุดก่อน). image bytes ไม่ดึงมา (สตรีมแยก). */
 export async function listCampaignContents(campaignId: string) {
   try {
@@ -2244,23 +2275,46 @@ export async function listCampaignContents(campaignId: string) {
       ),
       getCampaign(campaignId),
     ]);
+    const hydrated = [];
+    let hydratedOne = false;
+    for (const row of rows) {
+      if (!hydratedOne && needsPosterHydrate(row)) {
+        hydrated.push(await hydrateStaleDraftPoster(row, campaign));
+        hydratedOne = true;
+      } else {
+        hydrated.push(row);
+      }
+    }
     // ตรวจทุก version ด้วยกฎปัจจุบันทุกครั้ง ไม่เชื่อคะแนนเก่าที่อาจสร้างก่อนเพิ่ม
     // factual gate รุ่นใหม่ มิฉะนั้นร่างเก่าที่แต่งสวัสดิการ/LINE อาจยังโชว์ 100/100.
-    return rows.map((row) => {
-      if (!campaign) return row;
+    const viewed = [];
+    for (const row of hydrated) {
+      if (!campaign) {
+        viewed.push(row);
+        continue;
+      }
       try {
         const quality = evaluateContentQuality({
           campaign,
           caption: row.caption,
           posterFields: row.poster_fields ?? row.quality_checks?.posterFields ?? null,
           imageReady: row.has_image && row.image_generation_ok,
-          researchGate: row.gen_notes?.research_gate ?? { ready: false, issues: ['ร่างนี้ไม่มีหลักฐานสำรวจตลาดก่อนสร้าง'] },
+          researchGate: row.gen_notes?.research_gate ?? null,
         });
-        return { ...row, quality_status: quality.status, quality_score: quality.score, quality_checks: quality };
+        const view = operatorFacingQuality(quality);
+        if (row.status === 'draft' && (
+          row.quality_status !== quality.status
+          || row.quality_score !== quality.score
+          || row.quality_checks?.summary !== quality.summary
+        )) {
+          await persistDraftQuality(row.id, quality).catch(() => {});
+        }
+        viewed.push({ ...row, quality_status: view.status, quality_score: view.score, quality_checks: view });
       } catch {
-        return row;
+        viewed.push(row);
       }
-    });
+    }
+    return viewed;
   } catch {
     // schema-015 (gen_notes) ยังไม่ migrate — query แบบไม่มีคอลัมน์นั้น
     const rows = await q<Omit<ContentRow, 'gen_notes' | 'image_generation_ok' | 'quality_status' | 'quality_score' | 'quality_checks' | 'quality_checked_at' | 'has_source_image' | 'poster_fields'>>(
@@ -2347,6 +2401,11 @@ export async function approveContentForSummary(opts: {
   feedbackCode?: string;
   feedbackNote?: string | null;
 }) {
+  try {
+    await getContentImageBytes(opts.contentId);
+  } catch (error) {
+    throw new Error(error instanceof Error ? error.message : 'ประกอบโปสเตอร์รุ่นใหม่ไม่สำเร็จ กรุณาลองใหม่');
+  }
   const client = await pool().connect();
   try {
     await client.query('BEGIN');
@@ -2383,7 +2442,7 @@ export async function approveContentForSummary(opts: {
       caption: row.caption,
       posterFields: row.poster_fields ?? row.quality_checks?.posterFields ?? null,
       imageReady: row.has_image && row.image_generation_ok,
-      researchGate: row.gen_notes?.research_gate ?? { ready: false, issues: ['ร่างนี้ไม่มีหลักฐานสำรวจตลาดก่อนสร้าง'] },
+      researchGate: row.gen_notes?.research_gate ?? null,
     });
     await client.query(
       `UPDATE campaign_contents
@@ -2711,7 +2770,7 @@ export async function updateContentPoster(
     const sourceUri = `data:${row.source_image_mime};base64,${row.source_image_bytes.toString('base64')}`;
     const rendered = await renderPoster(fields, sourceUri);
     if (!rendered) throw new Error('ประกอบโปสเตอร์ไม่สำเร็จ กรุณาลองใหม่');
-    const researchGate = row.gen_notes?.research_gate ?? { ready: false, issues: ['ร่างนี้ไม่มีหลักฐานสำรวจตลาดก่อนสร้าง'] };
+    const researchGate = row.gen_notes?.research_gate ?? null;
     const quality = evaluateContentQuality({
       campaign: row.campaign,
       caption: row.caption,
@@ -2778,7 +2837,7 @@ export async function refreshContentQuality(id: string): Promise<ContentQualityR
     caption: rows[0].caption,
     posterFields: rows[0].quality_checks?.posterFields ?? null,
     imageReady: rows[0].image_ready,
-    researchGate: rows[0].gen_notes?.research_gate ?? { ready: false, issues: ['ร่างนี้ไม่มีหลักฐานสำรวจตลาดก่อนสร้าง'] },
+    researchGate: rows[0].gen_notes?.research_gate ?? null,
   });
   await q(
     `UPDATE campaign_contents
@@ -2855,10 +2914,18 @@ async function recomposeStoredDraftPoster(id: string, row: {
   source_image_bytes: Buffer;
   source_image_mime: string | null;
 }) {
-  const fields = withPosterTemplate({
+  const meta = await q<{ campaign: CampaignRow; caption: string | null; gen_notes: Record<string, any> | null }>(
+    `SELECT to_jsonb(c.*) AS campaign, cc.caption, cc.gen_notes
+       FROM recruit_campaigns c
+       JOIN campaign_contents cc ON cc.campaign_id = c.id
+      WHERE cc.id = $1`,
+    [id],
+  );
+  const campaign = meta[0]?.campaign ?? {};
+  const fields = withPosterTemplate(applyTrustedPosterFacts({
     ...(row.poster_fields ?? {}),
     templateVersion: row.poster_fields?.templateVersion,
-  });
+  }, campaign)) as PosterFields;
   const sourceUri = `data:${row.source_image_mime || 'image/png'};base64,${row.source_image_bytes.toString('base64')}`;
   const rendered = await renderPoster(fields, sourceUri);
   if (!rendered) throw new Error('ประกอบโปสเตอร์ไม่สำเร็จ กรุณาลองใหม่');
@@ -2868,7 +2935,15 @@ async function recomposeStoredDraftPoster(id: string, row: {
       WHERE id=$1 AND status='draft'`,
     [id, rendered.bytes, rendered.mime, JSON.stringify(fields)],
   );
-  return { image_bytes: rendered.bytes, image_mime: rendered.mime };
+  const quality = evaluateContentQuality({
+    campaign,
+    caption: meta[0]?.caption,
+    posterFields: fields,
+    imageReady: true,
+    researchGate: meta[0]?.gen_notes?.research_gate ?? null,
+  });
+  await persistDraftQuality(id, quality).catch(() => {});
+  return { image_bytes: rendered.bytes, image_mime: rendered.mime, poster_fields: fields };
 }
 
 export async function getContentImageBytes(id: string) {
@@ -2885,14 +2960,21 @@ export async function getContentImageBytes(id: string) {
     [id],
   );
   const row = rows[0];
-  if (!row?.image_bytes) return row ?? null;
+  if (!row) return null;
   const sourceBytes = row.source_image_bytes;
   const storedVersion = Number(row.poster_fields?.templateVersion) || 0;
-  if (storedVersion === POSTER_TEMPLATE_VERSION) {
-    return { image_bytes: row.image_bytes, image_mime: row.image_mime };
+  const current = storedVersion === POSTER_TEMPLATE_VERSION;
+  if (current && row.image_bytes) {
+    return { image_bytes: row.image_bytes, image_mime: row.image_mime, poster_fields: row.poster_fields };
   }
   if (!sourceBytes) {
-    throw new Error('โปสเตอร์ยังเป็นรุ่นเก่า และไม่มีภาพต้นฉบับให้ประกอบใหม่ กรุณาสั่งสร้างรูปใหม่');
+    if (current && row.image_bytes) {
+      return { image_bytes: row.image_bytes, image_mime: row.image_mime, poster_fields: row.poster_fields };
+    }
+    if (row.image_bytes) {
+      throw new Error('โปสเตอร์ยังเป็นรุ่นเก่า และไม่มีภาพต้นฉบับให้ประกอบใหม่ กรุณาสั่งสร้างรูปใหม่');
+    }
+    return { image_bytes: null, image_mime: row.image_mime, poster_fields: row.poster_fields };
   }
   if (row.status !== 'draft') {
     throw new Error('โปสเตอร์ที่อนุมัติแล้วยังเป็นรุ่นเก่า ห้ามส่งรูปเก่าไปโพสต์ กรุณากลับไปแก้แล้วประกอบใหม่');
@@ -3147,10 +3229,10 @@ export async function enqueueApprovedPost(opts: {
   try {
     await client.query('BEGIN');
     // ล็อก campaign ก่อนสร้างคิว กันกดอนุมัติซ้ำหรือชนกับ “ให้ AI คิดใหม่”.
-    const locked = await client.query<{ campaign_status: string; content_status: string; campaign: CampaignRow; caption: string | null; quality_checks: ContentQualityResult | null; gen_notes: Record<string, any> | null; has_image: boolean; image_generation_ok: boolean }>(
+    const locked = await client.query<{ campaign_status: string; content_status: string; campaign: CampaignRow; caption: string | null; quality_checks: ContentQualityResult | null; gen_notes: Record<string, any> | null; has_image: boolean; image_generation_ok: boolean; poster_fields: PosterFields | null }>(
       `SELECT c.status AS campaign_status, cc.status AS content_status,
               to_jsonb(c.*) AS campaign, cc.caption, cc.quality_checks, cc.gen_notes,
-              (cc.image_bytes IS NOT NULL) AS has_image,
+              cc.poster_fields, (cc.image_bytes IS NOT NULL) AS has_image,
               COALESCE((cc.gen_notes->'image_generation'->>'ok')::boolean, false) AS image_generation_ok
          FROM recruit_campaigns c
          JOIN campaign_contents cc ON cc.id = $2 AND cc.campaign_id = c.id
@@ -3168,9 +3250,9 @@ export async function enqueueApprovedPost(opts: {
     const quality = evaluateContentQuality({
       campaign: locked.rows[0].campaign,
       caption: locked.rows[0].caption,
-      posterFields: locked.rows[0].quality_checks?.posterFields ?? null,
+      posterFields: locked.rows[0].poster_fields ?? locked.rows[0].quality_checks?.posterFields ?? null,
       imageReady: locked.rows[0].has_image && locked.rows[0].image_generation_ok,
-      researchGate: locked.rows[0].gen_notes?.research_gate ?? { ready: false, issues: ['ร่างนี้ไม่มีหลักฐานสำรวจตลาดก่อนสร้าง'] },
+      researchGate: locked.rows[0].gen_notes?.research_gate ?? null,
     });
     await client.query(
       `UPDATE campaign_contents
@@ -3528,20 +3610,31 @@ export type PendingApproval = {
 /** ร่างคอนเทนต์ที่รออนุมัติ (campaign อยู่สถานะ pending_approval) — เก่าก่อน. */
 export async function listPendingApprovalContents(): Promise<PendingApproval[]> {
   try {
-    const rows = await q<PendingApproval & { campaign: CampaignRow }>(
+    const rows = await q<PendingApproval & { campaign: CampaignRow; poster_fields: PosterFields | null; image_generation_ok: boolean; gen_notes: Record<string, any> | null }>(
       `SELECT cc.id, cc.campaign_id, cc.version, cc.caption,
               (cc.image_bytes IS NOT NULL) AS has_image, c.title, c.request_no,
-              cc.quality_status, cc.quality_score, cc.quality_checks,
-              to_jsonb(c.*) AS campaign
+              cc.quality_status, cc.quality_score, cc.quality_checks, cc.poster_fields,
+              COALESCE((cc.gen_notes->'image_generation'->>'ok')::boolean,false) AS image_generation_ok,
+              cc.gen_notes, to_jsonb(c.*) AS campaign
          FROM campaign_contents cc
          JOIN recruit_campaigns c ON c.id = cc.campaign_id
         WHERE cc.status = 'draft' AND c.status = 'pending_approval'
         ORDER BY cc.created_at ASC`,
     );
-    return rows.map(({ campaign, ...row }) => {
-      if (row.quality_status !== 'pending') return row;
-      const quality = evaluateContentQuality({ campaign, caption: row.caption });
-      return { ...row, quality_status: quality.status, quality_score: quality.score, quality_checks: quality };
+    return rows.map(({ campaign, poster_fields, image_generation_ok, gen_notes, ...row }) => {
+      try {
+        const quality = evaluateContentQuality({
+          campaign,
+          caption: row.caption,
+          posterFields: poster_fields ?? row.quality_checks?.posterFields ?? null,
+          imageReady: row.has_image && image_generation_ok,
+          researchGate: gen_notes?.research_gate ?? null,
+        });
+        const view = operatorFacingQuality(quality);
+        return { ...row, quality_status: view.status, quality_score: view.score, quality_checks: view };
+      } catch {
+        return row;
+      }
     });
   } catch {
     return [];

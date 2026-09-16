@@ -10,6 +10,7 @@ import {
 } from '@/lib/actions';
 import type { PosterFields } from '@/lib/repo';
 import { emptyPosterLayout } from '../../src/core/poster-template.js';
+import { operatorCanApprove } from '../../src/core/content-quality.js';
 import { PosterDragCanvas } from '@/components/PosterDragCanvas';
 import { PosterExtrasBar } from '@/components/PosterExtrasBar';
 
@@ -19,6 +20,9 @@ type Props = {
     id: string;
     hasSourceImage: boolean;
     qualityStatus: 'pending' | 'pass' | 'warning' | 'fail';
+    qualityScore?: number | null;
+    qualitySummary?: string;
+    qualityChecks?: Array<{ code: string; label: string; message: string; status: 'pass' | 'warning' | 'fail' | 'not_applicable' }>;
     isPreview: boolean;
   };
   initialPoster: PosterFields;
@@ -48,7 +52,15 @@ export function ContentReviewWorkspace({ campaignId, content, initialPoster, ini
   const [caption, setCaption] = useState(initialCaption);
   const update = <K extends keyof PosterFields>(key: K, value: PosterFields[K]) => setPoster((current) => ({ ...current, [key]: value }));
   const source = `/api/campaign-content/${content.id}/source-image`;
-  const canApprove = !content.isPreview && content.hasSourceImage && content.qualityStatus !== 'fail';
+  const canApprove = operatorCanApprove({
+    blocking: content.qualityStatus === 'fail',
+    checks: content.qualityChecks ?? [],
+  }, { isPreview: content.isPreview, hasSourceImage: content.hasSourceImage });
+  const qualityTone = content.qualityStatus === 'fail'
+    ? 'text-red-700'
+    : content.qualityStatus === 'pass'
+      ? 'text-emerald-700'
+      : 'text-amber-800';
 
   return (
     <section className="grid min-h-[724px] overflow-auto rounded-xl border border-[#d6dce4] bg-white lg:grid-cols-[565px_minmax(0,1fr)]">
@@ -138,7 +150,11 @@ export function ContentReviewWorkspace({ campaignId, content, initialPoster, ini
                 กลับไปใช้แบบต้นฉบับ SO
               </button>
             )}
+            {content.qualitySummary && <span className={`block ${qualityTone}`}>{content.qualitySummary}</span>}
             {!canApprove && <span className="block text-red-700">ยังอนุมัติไม่ได้ กรุณาตรวจข้อมูลสำคัญ</span>}
+            {canApprove && content.qualityStatus === 'warning' && !content.qualitySummary && (
+              <span className="block text-amber-800">ผ่านจุดสำคัญแล้ว ระบบจะประกอบโปสเตอร์รุ่นปัจจุบันให้ตอนอนุมัติ</span>
+            )}
           </div>
           <ActionButtons canApprove={canApprove} />
         </div>
