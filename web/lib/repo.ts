@@ -2880,14 +2880,15 @@ export async function getContentImageBytes(id: string) {
   );
   const row = rows[0];
   if (!row?.image_bytes) return row ?? null;
+  const sourceBytes = row.source_image_bytes;
   const storedVersion = Number(row.poster_fields?.templateVersion) || 0;
-  if (storedVersion === POSTER_TEMPLATE_VERSION || !row.source_image_bytes || row.status !== 'draft') {
+  if (storedVersion === POSTER_TEMPLATE_VERSION || !sourceBytes || row.status !== 'draft') {
     return { image_bytes: row.image_bytes, image_mime: row.image_mime };
   }
   try {
     return await enqueuePosterRefresh(() => recomposeStoredDraftPoster(id, {
       poster_fields: row.poster_fields,
-      source_image_bytes: row.source_image_bytes,
+      source_image_bytes: sourceBytes,
       source_image_mime: row.source_image_mime,
     }));
   } catch (error) {
