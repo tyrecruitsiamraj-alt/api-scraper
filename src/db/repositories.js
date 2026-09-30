@@ -41,12 +41,14 @@ export async function setConnectorCooldown(id, until) {
   await query('UPDATE connectors SET cooldown_until = $2, updated_at = now() WHERE id = $1', [id, until]);
 }
 
-/** Candidates scraped by this connector since midnight (Asia/Bangkok) — live from sources. */
+/** Resumes opened by this connector since midnight (Asia/Bangkok).
+ *  Count from scrape_runs.opened_count — NOT candidate_sources.last_seen_at —
+ *  so repair/enrich touching last_seen_at cannot exhaust the daily cap. */
 export async function countScrapedToday(connectorId) {
   const { rows } = await query(
-    `SELECT count(*)::int AS n FROM candidate_sources
+    `SELECT COALESCE(SUM(opened_count), 0)::int AS n FROM scrape_runs
       WHERE connector_id = $1
-        AND last_seen_at >= ((now() AT TIME ZONE 'Asia/Bangkok')::date::timestamp AT TIME ZONE 'Asia/Bangkok')`,
+        AND started_at >= ((now() AT TIME ZONE 'Asia/Bangkok')::date::timestamp AT TIME ZONE 'Asia/Bangkok')`,
     [connectorId],
   );
   return rows[0]?.n ?? 0;
@@ -68,12 +70,12 @@ export async function setProviderCap(platform, dailyCap) {
   );
 }
 
-/** Candidates scraped today across ALL connectors of this platform (live). */
+/** Resumes opened today across ALL connectors of this platform. */
 export async function platformScrapedToday(platform) {
   const { rows } = await query(
-    `SELECT count(*)::int AS n FROM candidate_sources
+    `SELECT COALESCE(SUM(opened_count), 0)::int AS n FROM scrape_runs
       WHERE platform = $1
-        AND last_seen_at >= ((now() AT TIME ZONE 'Asia/Bangkok')::date::timestamp AT TIME ZONE 'Asia/Bangkok')`,
+        AND started_at >= ((now() AT TIME ZONE 'Asia/Bangkok')::date::timestamp AT TIME ZONE 'Asia/Bangkok')`,
     [platform],
   );
   return rows[0]?.n ?? 0;

@@ -106,8 +106,8 @@ export function humanizeOperatorError(value: string | null | undefined): {
   if (lower.includes('daily cap reached') || lower.includes('provider daily cap')) {
     return {
       title: 'โควต้าค้นหาวันนี้เต็มแล้ว',
-      detail: 'บัญชี Connector ใช้โควต้ารายวันครบ จึงยังเริ่มงานค้นหาต่อไม่ได้ (ไม่เกี่ยวกับคำค้น)',
-      next: 'รอรีเซ็ตหลังเที่ยงคืน (เวลาไทย) หรือไปตั้งค่า → Connectors เพิ่ม daily cap / ใช้บัญชีอื่น แล้วเริ่มงานใหม่',
+      detail: 'โควต้าเปิด Resume ของ JobBKK/JobThai วันนี้ครบแล้ว จึงเริ่มงานค้นหาต่อไม่ได้ (ไม่เกี่ยวกับคำค้นหรือ Worker)',
+      next: 'รอรีเซ็ตหลังเที่ยงคืน (เวลาไทย) หรือไปตั้งค่า → Connectors ดู used today / เพิ่ม daily cap แล้วกด “รันตอนนี้” ใหม่',
       technical,
     };
   }

@@ -741,9 +741,9 @@ export type ProviderLimitRow = { platform: string; daily_cap: number; updated_at
 export async function listProviderLimits() {
   return q<ProviderLimitRow>(
     `SELECT pl.platform, pl.daily_cap, pl.updated_at,
-            COALESCE((SELECT count(*)::int FROM candidate_sources s
-                       WHERE s.platform = pl.platform
-                         AND s.last_seen_at >= ${BANGKOK_DAY_START}), 0) AS used_today
+            COALESCE((SELECT SUM(r.opened_count)::int FROM scrape_runs r
+                       WHERE r.platform = pl.platform
+                         AND r.started_at >= ${BANGKOK_DAY_START}), 0) AS used_today
        FROM provider_limits pl ORDER BY pl.platform`,
   );
 }

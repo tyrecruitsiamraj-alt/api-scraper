@@ -182,13 +182,14 @@ export async function repairIncompleteCandidates(db, opts = {}) {
         await patchCandidateById(client, row.id, parsed);
         if (parsed.phone || parsed.email || hasUsefulEducation(parsed.education) || hasUsefulWorkExperience(parsed.work_experience)
             || parsed.gender || parsed.age || parsed.desired_positions) {
+          // Do NOT bump last_seen_at here — legacy quota counters keyed off it and
+          // repair would falsely exhaust the JobBKK daily cap.
           await client.query(
             `UPDATE candidate_sources
                 SET parse_status = CASE
                       WHEN $2 <> '' OR $3 <> '' THEN 'success'
                       ELSE COALESCE(parse_status, 'partial')
-                    END,
-                    last_seen_at = now()
+                    END
               WHERE candidate_id = $1 AND platform = $4`,
             [row.id, parsed.phone || '', parsed.email || '', row.platform],
           );
