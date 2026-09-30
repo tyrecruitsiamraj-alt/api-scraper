@@ -23,7 +23,8 @@ export async function collectAssetsForDb(request, record, options = {}) {
       const url = new URL(record.profile_image_url, 'https://www.jobbkk.com/').href;
       const { buffer, contentType } = await fetchAsset(request, url, record.source_url);
       const insp = inspectBuffer(buffer);
-      const ext = (insp.valid ? insp.ext : extFromUrl(url, contentType) || '.jpg').replace('.', '');
+      if (!insp.valid) throw new Error(insp.kind === 'html' ? 'html_instead_of_image' : `invalid_image:${insp.kind}`);
+      const ext = insp.ext.replace('.', '');
       assets.push({
         kind: 'profile', title: 'profile', source_url: url,
         file_type: ext, mime: MIME[insp.kind] || contentType || '', byte_size: buffer.length,
@@ -46,11 +47,12 @@ export async function collectAssetsForDb(request, record, options = {}) {
         if (m) ext = extname(decodeURIComponent(m[1])) || ext;
       }
       if (!buffer || buffer.length < 32) throw new Error('empty_buffer');
+      if (!insp.valid) throw new Error(insp.kind === 'html' ? 'html_instead_of_file' : `invalid_file:${insp.kind}`);
       assets.push({
         kind: 'attachment', title: att.title || 'attachment', source_url: att.source_url,
         file_type: (ext || '.bin').replace('.', ''), mime: MIME[insp.kind] || contentType || '',
         byte_size: buffer.length, sha256: sha256(buffer), content: buffer,
-        download_status: insp.valid ? 'success' : 'saved_unverified',
+        download_status: 'success',
       });
     } catch (e) {
       assets.push({ kind: 'attachment', title: att.title || 'attachment', source_url: att.source_url, download_status: `error:${e.message}` });

@@ -314,6 +314,25 @@ export async function listCandidateJobMatches(taskId: string): Promise<Candidate
            WHERE NULLIF(trim(e->>'company'), '') IS NOT NULL
               OR NULLIF(trim(e->>'position'), '') IS NOT NULL
         )
+        AND (
+          EXISTS (
+            SELECT 1 FROM candidate_assets a
+             WHERE a.candidate_id=c.id
+               AND a.kind='attachment'
+               AND a.download_status IN ('success')
+               AND a.content IS NOT NULL
+          )
+          OR (
+            EXISTS (SELECT 1 FROM candidate_sources sx WHERE sx.candidate_id=c.id AND sx.platform='jobthai')
+            AND EXISTS (
+              SELECT 1 FROM candidate_assets a
+               WHERE a.candidate_id=c.id
+                 AND a.kind='profile'
+                 AND a.download_status='success'
+                 AND a.content IS NOT NULL
+            )
+          )
+        )
       ORDER BY CASE tc.qualification_status WHEN 'qualified' THEN 0 WHEN 'needs_review' THEN 1 ELSE 2 END,
                CASE WHEN (COALESCE(jsonb_array_length(tc.qualification_evidence->'passed'),0)
                             + COALESCE(jsonb_array_length(tc.qualification_evidence->'missing'),0)

@@ -260,6 +260,16 @@ function resumeEduWorkPainted() {
   return hasEdu && hasWork;
 }
 
+/** Attachment links painted, or the page explicitly says there are none. */
+function resumeAttachmentsPainted() {
+  const links = document.querySelectorAll(
+    'a[href*="download_attach"], a[href*="download_professional_license"], a[href*="download_file"], a[href*="/resumes/download"]',
+  );
+  if (links.length > 0) return true;
+  const body = (document.body?.innerText || '').replace(/\s+/g, ' ');
+  return /ไม่มี(?:เอกสาร|ไฟล์)แนบ|ไม่พบ(?:เอกสาร|ไฟล์)แนบ/u.test(body);
+}
+
 /** True when the painted page has name + gender/age + education + work (+ place). */
 function resumeDetailComplete() {
   const body = (document.body?.innerText || '').replace(/\s+/g, ' ').trim();
@@ -282,7 +292,7 @@ async function settleResumePage(page) {
   await page.waitForLoadState('networkidle', { timeout: 5_000 }).catch(() => {});
   const masked = await page.locator('.ownerNoLogin').count().then((n) => n > 0).catch(() => false);
 
-  // Scroll so lazy education/work timelines paint (even when contact is masked).
+  // Scroll so lazy education/work/attachment sections paint (even when contact is masked).
   await page.evaluate(async () => {
     const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
     window.scrollTo(0, document.body.scrollHeight || 2000);
@@ -291,10 +301,16 @@ async function settleResumePage(page) {
     await pause(300);
     window.scrollTo(0, 0);
     await pause(250);
+    const attach = document.querySelector(
+      'a[href*="download_attach"], a[href*="download_professional_license"], #attach, .attach, .attachment',
+    );
+    attach?.scrollIntoView?.({ block: 'center' });
+    await pause(300);
   }).catch(() => {});
 
   await page.waitForFunction(resumeSectionsPainted, null, { timeout: 20_000, polling: 200 }).catch(() => {});
   await page.waitForFunction(resumeEduWorkPainted, null, { timeout: 20_000, polling: 250 }).catch(() => {});
+  await page.waitForFunction(resumeAttachmentsPainted, null, { timeout: 12_000, polling: 250 }).catch(() => {});
   if (!populated) {
     await sleep(500);
     return { populated, masked, complete: false };

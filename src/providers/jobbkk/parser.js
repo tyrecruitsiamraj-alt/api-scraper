@@ -433,12 +433,21 @@ function summarizeExperience(work) {
 function extractAttachments($) {
   const items = [];
   const seen = new Set();
-  $('a[href*="download_attach"], a[href*="download_professional_license"]').each((_, a) => {
+  const selectors = [
+    'a[href*="download_attach"]',
+    'a[href*="download_professional_license"]',
+    'a[href*="download_file"]',
+    'a[href*="/resumes/download"]',
+    'a[href*="attach"][href*="download"]',
+  ].join(', ');
+  $(selectors).each((_, a) => {
     const href = $(a).attr('href') ?? '';
     const url = toAbsolute(href);
     if (!url || seen.has(url)) return;
+    // Skip obvious non-file navigation.
+    if (/login|logout|javascript:/i.test(url)) return;
     seen.add(url);
-    let title = clean($(a).text()) || clean($(a).attr('title') ?? '');
+    let title = clean($(a).text()) || clean($(a).attr('title') ?? '') || clean($(a).attr('download') ?? '');
     if (!title) title = `attachment-${items.length + 1}`;
     const parts = new URL(url).pathname.split('/').filter(Boolean);
     items.push({ title, source_url: url, file_id: parts[parts.length - 1] || 'file' });

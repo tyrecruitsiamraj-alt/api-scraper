@@ -4,8 +4,10 @@ import { splitCriteria } from './core/candidate-match.js';
 import { classifyScrapeOutcome, lessonRowsToLogHits, rememberedPreventionLog } from './core/scrape-failure-learning.js';
 import { evaluateResumeQualification } from './core/resume-qualification.js';
 import {
+  isResumeAttachmentsComplete,
   isResumeBodyComplete,
   isResumeDeliveryComplete,
+  resumeAttachmentGaps,
   resumeBodyGaps,
   resumeContactGaps,
 } from './core/resume-completeness.js';
@@ -337,14 +339,39 @@ export async function runConnector(connector, criteria, runtime, opts = {}) {
           reasonCounts.missing_contact = (reasonCounts.missing_contact || 0) + 1;
           console.warn(`  [${id}] qualified but no contact after enrich — demote to needs_review`);
         }
-        // รูปโปรไฟล์เป็นข้อมูลหลักที่ผู้สรรหาต้องเห็น แม้ Resume จะยังไม่ผ่าน
-        // เกณฑ์งานนี้ ส่วนเอกสารแนบยังเก็บเฉพาะคนที่ผ่านเพื่อลดการเก็บข้อมูล
-        // ส่วนบุคคลเกินจำเป็นและไม่เสียเวลาโหลดไฟล์ใหญ่ของคนที่ถูกคัดออก
-        const assets = provider.collectAssetsForDb
-          ? await provider.collectAssetsForDb(sess.request, parsed, {
-            profileOnly: finalQualification.status !== 'qualified',
-          })
-          : [];
+
+        // Always download every listed attachment for saved rows (not profile-only).
+        // Incomplete attachment sets are skipped — desk must never show rows without files.
+        let assets = [];
+        const attachOpts = { platform: connector.platform };
+        const MAX_ATTACH_TRIES = 2;
+        for (let attempt = 0; attempt < MAX_ATTACH_TRIES; attempt += 1) {
+          if (!/jobthai/i.test(connector.platform) && (!Array.isArray(parsed.attachments) || !parsed.attachments.length)) {
+            console.warn(`  ↻ resume ${id}: no attachment links — refetch HTML ${attempt + 1}/${MAX_ATTACH_TRIES}`);
+            await sleep(700 + attempt * 300);
+            html = await provider.fetchResumeHtml(sess, id, runtime);
+            parsed = provider.parseResumeHtml(html, { sourceUrl: url, index: saved + 1, focusPosition: criteria.position || '-' });
+            if (provider.finalizeCandidateRecord) parsed = provider.finalizeCandidateRecord(parsed);
+            if (!isResumeBodyComplete(parsed)) {
+              reasonCounts.incomplete_profile = (reasonCounts.incomplete_profile || 0) + 1;
+              console.warn(`  ✗ skip incomplete resume ${id} after attach refetch: ${resumeBodyGaps(parsed).join(',')}`);
+              return;
+            }
+          }
+          if (provider.collectAssetsForDb) {
+            assets = await provider.collectAssetsForDb(sess.request, parsed, { profileOnly: false });
+          }
+          if (isResumeAttachmentsComplete(parsed, assets, attachOpts)) break;
+          const gaps = resumeAttachmentGaps(parsed, assets, attachOpts);
+          console.warn(`  ↻ resume ${id}: attachments incomplete (${gaps.join(',')}) — retry ${attempt + 1}/${MAX_ATTACH_TRIES}`);
+          await sleep(800 + attempt * 400);
+        }
+        if (!isResumeAttachmentsComplete(parsed, assets, attachOpts)) {
+          const gaps = resumeAttachmentGaps(parsed, assets, attachOpts);
+          reasonCounts.incomplete_attachments = (reasonCounts.incomplete_attachments || 0) + 1;
+          console.warn(`  ✗ skip incomplete attachments ${id}: ${gaps.join(',')}`);
+          return;
+        }
 
         const { isNew, taskLink } = await withTransaction(async (client) => {
           const cand = await upsertCandidate(client, parsed);
@@ -354,7 +381,7 @@ export async function runConnector(connector, criteria, runtime, opts = {}) {
             externalId: provider.externalId(url),
             sourceUrl: url,
             runId,
-            parseStatus: isResumeDeliveryComplete(parsed) ? 'success' : (parsed.parse_status || 'partial'),
+            parseStatus: isResumeDeliveryComplete(parsed, assets, attachOpts) ? 'success' : (parsed.parse_status || 'partial'),
             rawText: parsed.raw_text,
             searchRank: sourceRankById.get(String(id)) ?? i + 1,
           });
@@ -384,7 +411,7 @@ export async function runConnector(connector, criteria, runtime, opts = {}) {
         if (taskLink.becameQualified || !opts.taskId) saved += finalQualification.status === 'qualified' ? 1 : 0;
         if (opts.onProgress) await opts.onProgress(saved, target);
         const att = assets.filter((a) => a.kind === 'attachment' && a.download_status === 'success').length;
-        console.log(`  [${saved}/${target}] ${parsed.name || '(no name)'} ${finalQualification.status} ${taskLink.isNewForTask ? (isNew ? 'NEW' : 'matched') : 'duplicate'} | ☎ ${parsed.phone || '-'} 📎 ${att}`);
+        console.log(`  [${saved}/${target}] ${parsed.name || '(no name)'} ${finalQualification.status} ${taskLink.isNewForTask ? (isNew ? 'NEW' : 'matched') : 'duplicate'} | ☎ ${parsed.phone || '-'} 📎 ${att}/${parsed.attachments?.length || 0}`);
         })(), CANDIDATE_TIMEOUT_MS, `resume_${id}`);
       } catch (e) {
         if (e.fatal) {
