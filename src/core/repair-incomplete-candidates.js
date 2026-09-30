@@ -95,10 +95,29 @@ async function patchCandidateById(client, id, parsed) {
 }
 
 const INCOMPLETE_SQL = `
-  SELECT c.*, s.raw_text, s.platform, s.source_url, s.external_id, s.parse_status
+  SELECT c.*,
+         s.raw_text AS source_raw_text,
+         s.platform, s.source_url, s.external_id, s.parse_status,
+         COALESCE((
+           SELECT string_agg(a.extracted_text, E'\\n' ORDER BY a.created_at)
+             FROM candidate_assets a
+            WHERE a.candidate_id = c.id
+              AND a.extract_status = 'success'
+              AND a.extracted_text IS NOT NULL
+              AND length(trim(a.extracted_text)) > 20
+         ), '') AS ocr_text
     FROM candidates c
     JOIN candidate_sources s ON s.candidate_id = c.id
-   WHERE s.raw_text IS NOT NULL AND length(trim(s.raw_text)) > 40
+   WHERE (
+       (s.raw_text IS NOT NULL AND length(trim(s.raw_text)) > 40)
+       OR EXISTS (
+         SELECT 1 FROM candidate_assets a
+          WHERE a.candidate_id = c.id
+            AND a.extract_status = 'success'
+            AND a.extracted_text IS NOT NULL
+            AND length(trim(a.extracted_text)) > 20
+       )
+     )
      AND (
        COALESCE(NULLIF(trim(c.phone), ''), '') = ''
        OR COALESCE(NULLIF(trim(c.email), ''), '') = ''
@@ -125,6 +144,18 @@ const INCOMPLETE_SQL = `
    LIMIT $1
 `;
 
+function remainingGaps(row, parsed) {
+  const gaps = [];
+  for (const key of ['phone', 'email', 'gender', 'age', 'address', 'province', 'desired_positions', 'expected_salary']) {
+    const after = key === 'full_name' ? parsed.name : parsed[key];
+    const before = row[key];
+    if (blank(before) && blank(after)) gaps.push(key);
+  }
+  if (!hasUsefulEducation(parsed.education)) gaps.push('education');
+  if (!hasUsefulWorkExperience(parsed.work_experience)) gaps.push('work_experience');
+  return gaps;
+}
+
 /**
  * @param {{ query: Function, withTransaction: Function }} db
  * @param {{ dryRun?: boolean, limit?: number, onProgress?: Function }} [opts]
@@ -139,8 +170,10 @@ export async function repairIncompleteCandidates(db, opts = {}) {
   let repaired = 0;
   let filledFields = 0;
   let failed = 0;
+  let unrepaired = 0;
   const sample = [];
   const errors = [];
+  const gapCounts = {};
 
   for (const row of rows) {
     scanned += 1;
@@ -148,6 +181,10 @@ export async function repairIncompleteCandidates(db, opts = {}) {
     const before = Object.fromEntries(REPAIR_TEXT_FIELDS.map((key) => [key, row[key]]));
     const beforeUsefulWork = hasUsefulWorkExperience(row.work_experience);
     const beforeUsefulEdu = hasUsefulEducation(row.education);
+    const combinedText = [row.source_raw_text || row.raw_text || '', row.ocr_text || '']
+      .map((part) => String(part || '').trim())
+      .filter(Boolean)
+      .join('\n');
     const parsed = finalizeCandidateRecord({
       name: row.full_name || '',
       ...Object.fromEntries(REPAIR_TEXT_FIELDS.filter((key) => key !== 'full_name').map((key) => [key, row[key] ?? ''])),
@@ -156,7 +193,7 @@ export async function repairIncompleteCandidates(db, opts = {}) {
       hard_skills: Array.isArray(row.hard_skills) ? row.hard_skills : [],
       soft_skills: Array.isArray(row.soft_skills) ? row.soft_skills : [],
       language_skills: Array.isArray(row.language_skills) ? row.language_skills : [],
-      raw_text: row.raw_text || '',
+      raw_text: combinedText,
     });
     if (!parsed.name && row.full_name) parsed.name = row.full_name;
 
@@ -168,7 +205,13 @@ export async function repairIncompleteCandidates(db, opts = {}) {
     }
     if (!beforeUsefulEdu && hasUsefulEducation(parsed.education)) changed.push('education');
     if (!beforeUsefulWork && hasUsefulWorkExperience(parsed.work_experience)) changed.push('work_experience');
-    if (!changed.length) continue;
+    if (!changed.length) {
+      unrepaired += 1;
+      for (const gap of remainingGaps(row, parsed)) {
+        gapCounts[gap] = (gapCounts[gap] || 0) + 1;
+      }
+      continue;
+    }
 
     if (dryRun) {
       repaired += 1;
@@ -210,10 +253,12 @@ export async function repairIncompleteCandidates(db, opts = {}) {
     limit,
     scanned,
     repaired,
+    unrepaired,
     failed,
     filledFields,
     sample,
     errors,
+    unrepairedGapCounts: gapCounts,
     hasMore: rows.length >= limit,
   };
 }
