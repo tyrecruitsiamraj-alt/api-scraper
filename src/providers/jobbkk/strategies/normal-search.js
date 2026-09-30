@@ -92,7 +92,80 @@ async function applyChipField(page, field, terms, report) {
   if (!report.applied.includes(field)) report.applied.push(field);
 }
 
+async function readSelectTags(page, openerPattern) {
+  const wrap = page.locator('.ant-select, .ant-form-item').filter({ hasText: openerPattern }).first();
+  const texts = await wrap.locator('.ant-select-selection-item').allTextContents().catch(() => []);
+  return texts.map((text) => String(text || '').replace(/\s+/g, ' ').trim()).filter(Boolean);
+}
+
+/** Drop junk tags Ant Design sometimes keeps (bare quotes / punctuation) after a failed pick. */
+async function clearJunkSelectTags(page, openerPattern) {
+  const wrap = page.locator('.ant-select, .ant-form-item').filter({ hasText: openerPattern }).first();
+  const items = wrap.locator('.ant-select-selection-item');
+  const count = await items.count().catch(() => 0);
+  for (let i = count - 1; i >= 0; i -= 1) {
+    const text = String(await items.nth(i).innerText().catch(() => '')).replace(/\s+/g, ' ').trim();
+    if (text && !/^["'\\.\-_/]+$/.test(text) && /[ก-๙A-Za-z]/.test(text)) continue;
+    const remove = items.nth(i).locator('.ant-select-selection-item-remove, [aria-label="remove"], .anticon-close');
+    if (await remove.count().catch(() => 0)) {
+      await remove.first().click({ force: true }).catch(() => {});
+      await sleep(80);
+    }
+  }
+}
+
+async function pickSearchableValue(page, value) {
+  const search = await firstVisibleLocator([
+    page.locator('.ant-select-dropdown:visible input'),
+    page.locator('.ant-tree-select-dropdown:visible input'),
+    page.locator('.ant-select-selection-search-input:visible'),
+    page.locator('[role="dialog"]:visible input[type="search"], [role="dialog"]:visible input[type="text"]'),
+  ]);
+  if (search) {
+    await search.fill('');
+    await search.fill(value);
+    await sleep(280);
+  }
+  if (await clickMatchingOption(page, [value])) return true;
+
+  const layer = await visibleOpenLayer(page);
+  const scope = layer || page;
+  const checkbox = await firstVisibleLocator([
+    scope.locator('label').filter({ hasText: new RegExp(`^${escapeRegExp(value)}$`, 'u') }).locator('input[type="checkbox"]'),
+    scope.getByRole('treeitem', { name: new RegExp(`^${escapeRegExp(value)}$`, 'u') }),
+    scope.locator('.ant-select-tree-title, .ant-tree-title').filter({ hasText: new RegExp(`^${escapeRegExp(value)}$`, 'u') }),
+  ]);
+  if (checkbox) {
+    await clickWithoutNavigationWait(checkbox);
+    return true;
+  }
+  const fuzzy = await firstVisibleLocator([
+    scope.getByText(new RegExp(`^${escapeRegExp(value)}$`, 'u')),
+    scope.getByText(new RegExp(escapeRegExp(value), 'u')),
+  ]);
+  if (!fuzzy) return false;
+  await clickWithoutNavigationWait(fuzzy);
+  return true;
+}
+
+function tagsMatchRequested(tags, values) {
+  const joined = tags.join(' ');
+  return values.some((value) => {
+    const bare = String(value).replace(/^จังหวัด\s*/u, '').trim();
+    return tags.some((tag) => tag.includes(bare) || bare.includes(tag.replace(/^จังหวัด\s*/u, '')))
+      || joined.includes(bare);
+  });
+}
+
 async function applySearchableChecks(page, openerPattern, values, field, report) {
+  const wanted = (Array.isArray(values) ? values : [values])
+    .map((value) => String(value ?? '').trim())
+    .filter((value) => value && !/^["'\\.\-_/]+$/.test(value));
+  if (!wanted.length) {
+    report.skipped.push(field);
+    return;
+  }
+
   const opener = await firstVisibleLocator([
     page.getByRole('button', { name: openerPattern }),
     page.getByRole('combobox', { name: openerPattern }),
@@ -105,27 +178,28 @@ async function applySearchableChecks(page, openerPattern, values, field, report)
   }
   await clickWithoutNavigationWait(opener);
   await sleep(300);
-  for (const value of values) {
-    const search = await firstVisibleLocator([
-      page.locator('.ant-select-dropdown:visible input'),
-      page.locator('.ant-tree-select-dropdown:visible input'),
-      page.locator('[role="dialog"]:visible input[type="search"], [role="dialog"]:visible input[type="text"]'),
-    ]);
-    if (search) {
-      await search.fill(value);
-      await sleep(250);
-    }
-    const picked = await clickMatchingOption(page, [value]);
-    if (!picked) {
-      const fuzzy = await firstVisibleLocator([
-        page.getByText(new RegExp(escapeRegExp(value), 'u')),
-      ]);
-      if (fuzzy) await clickWithoutNavigationWait(fuzzy);
-    }
+
+  let pickedAny = false;
+  for (const value of wanted) {
+    if (await pickSearchableValue(page, value)) pickedAny = true;
     await sleep(150);
   }
   await closeOpenLayer(page);
-  report.applied.push(field);
+  await clearJunkSelectTags(page, openerPattern);
+
+  const tags = await readSelectTags(page, openerPattern);
+  const junkOnly = tags.length > 0 && tags.every((tag) => /^["'\\.\-_/]+$/.test(tag));
+  if (junkOnly) {
+    await clickWithoutNavigationWait(opener).catch(() => {});
+    await clearJunkSelectTags(page, openerPattern);
+    await closeOpenLayer(page);
+  }
+  const verified = tagsMatchRequested(await readSelectTags(page, openerPattern), wanted);
+  if (pickedAny && (verified || field !== 'province')) {
+    report.applied.push(field);
+  } else {
+    report.skipped.push(field);
+  }
 }
 
 async function openFilterRow(page, labelPattern) {
@@ -186,14 +260,28 @@ async function applyPlannedFilter(page, step, report) {
       return applyChipField(page, 'keyword', step.value, report);
     case 'jobTypes':
       return applySearchableChecks(page, /ประเภทงาน|สาขาอาชีพ/u, step.value, 'jobTypes', report);
-    case 'province':
-      return applySearchableChecks(
-        page,
-        /สถานที่ทำงานทั้งหมด|พื้นที่ที่ต้องการทำงาน/u,
-        provinceSearchAliases(step.value),
-        'province',
-        report,
-      );
+    case 'province': {
+      // Try bare name first, then จังหวัด… aliases — stop once the select shows a real tag.
+      const aliases = provinceSearchAliases(step.value);
+      for (const alias of aliases) {
+        const before = report.applied.length;
+        await applySearchableChecks(
+          page,
+          /สถานที่ทำงานทั้งหมด|พื้นที่ที่ต้องการทำงาน/u,
+          [alias],
+          'province',
+          report,
+        );
+        if (report.applied.length > before) return;
+        // undo skip from failed attempt so the next alias can retry cleanly
+        const skipAt = report.skipped.lastIndexOf('province');
+        if (skipAt >= 0) report.skipped.splice(skipAt, 1);
+      }
+      if (!report.applied.includes('province') && !report.skipped.includes('province')) {
+        report.skipped.push('province');
+      }
+      return;
+    }
     case 'education':
       return applyRangeSelect(page, /วุฒิการศึกษา/u, [step.value.min], [step.value.max], 'education', report);
     case 'gender':

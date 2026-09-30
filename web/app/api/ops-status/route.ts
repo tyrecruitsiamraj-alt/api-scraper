@@ -37,11 +37,16 @@ export async function GET(req: Request) {
     progress_target: number;
     updated_at: string;
     created_at: string;
+    province: string | null;
+    position: string | null;
   }>(
-    `SELECT id, name, status, phase, last_error, progress_got, progress_target, updated_at, created_at
+    `SELECT id, name, status, phase, last_error, progress_got, progress_target, updated_at, created_at,
+            NULLIF(TRIM(COALESCE(criteria->>'province','')), '') AS province,
+            NULLIF(TRIM(COALESCE(criteria->>'position','')), '') AS position
        FROM scrape_tasks
       WHERE name ILIKE $1 OR COALESCE(criteria->>'position','') ILIKE $1
          OR COALESCE(criteria->>'job_description','') ILIKE $1
+         OR COALESCE(criteria->>'province','') ILIKE $1
       ORDER BY updated_at DESC
       LIMIT 12`,
     [`%${qText}%`],

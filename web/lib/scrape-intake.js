@@ -156,7 +156,16 @@ export function buildScrapeCriteria({
 } = {}) {
   const rawPosition = pickOverrideOrSnapshot(overrides, 'position', snapshot, 'position') || clean(erpTitle);
   const position = isHeadcountOnlyTitle(rawPosition) ? '' : rawPosition;
-  const province = pickOverrideOrSnapshot(overrides, 'province', snapshot, 'location', 'province') || clean(erpProvince);
+  const provinceRaw = pickOverrideOrSnapshot(overrides, 'province', snapshot, 'location', 'province') || clean(erpProvince);
+  // Unwrap "สมุทรปราการ" / reject bare quotes so JobBKK never gets a `"` tag.
+  const province = (() => {
+    let text = clean(provinceRaw);
+    const wrapped = text.match(/^["'](.+)["']$/u);
+    if (wrapped) text = clean(wrapped[1]);
+    text = text.replace(/^["']+|["']+$/g, '').trim();
+    if (!text || /^["'\\.\-_/]+$/.test(text) || !/[ก-๙]/.test(text)) return '';
+    return text;
+  })();
   const keyword = pickOverrideOrSnapshot(overrides, 'keyword', snapshot, 'keyword', 'keywords');
   const industry = pickOverrideOrSnapshot(overrides, 'industry', snapshot, 'industry', 'occupation', 'job_types', 'jobTypes');
   const jobDescription = pickOverrideOrSnapshot(
