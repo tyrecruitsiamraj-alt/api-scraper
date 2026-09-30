@@ -2,8 +2,10 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   genderFromPrefix,
+  isJunkText,
   needsRepair,
   repairIncompleteCandidates,
+  resolveProvinceFromRow,
 } from '../src/core/repair-incomplete-candidates.js';
 
 test('needsRepair detects empty education/work arrays', () => {
@@ -127,6 +129,58 @@ test('repairIncompleteCandidates replaces year-only work stubs', async () => {
   assert.equal(result.repaired, 1);
   assert.ok(result.sample[0].fields.includes('work_experience'));
   assert.match(String(updated.params.join(' ')), /พนักงานขาย/);
+});
+
+test('resolveProvinceFromRow fills from address and rejects junk quotes', () => {
+  assert.equal(isJunkText('"'), true);
+  assert.equal(resolveProvinceFromRow({
+    province: '"',
+    address: '123 หมู่บ้านทดสอบ สมุทรปราการ 10270',
+  }), 'สมุทรปราการ');
+  assert.equal(resolveProvinceFromRow({
+    province: '',
+    desired_work_area: 'จังหวัดนนทบุรี',
+  }), 'นนทบุรี');
+});
+
+test('repairIncompleteCandidates replaces junk province quote from address', async () => {
+  const row = {
+    id: '55555555-5555-5555-5555-555555555555',
+    full_name: 'นายจังหวัด',
+    prefix: 'นาย',
+    phone: '0811111111',
+    email: 'p@example.com',
+    gender: 'ชาย',
+    age: '30',
+    address: '99 ถนนทดสอบ กรุงเทพมหานคร 10110',
+    province: '"',
+    desired_positions: 'พนักงานขาย',
+    expected_salary: '18000',
+    education: [{ institution: 'มหาวิทยาลัยก', degree: 'ปริญญาตรี' }],
+    work_experience: [{ company: 'บริษัท ก', position: 'ขาย' }],
+    hard_skills: [],
+    soft_skills: [],
+    language_skills: [],
+    platform: 'jobbkk',
+    source_raw_text: 'ที่อยู่ปัจจุบัน 99 ถนนทดสอบ กรุงเทพมหานคร 10110',
+    ocr_text: '',
+  };
+  let updated = null;
+  const db = {
+    async query() { return { rows: [row] }; },
+    async withTransaction(fn) {
+      return fn({
+        async query(sql, params) {
+          if (/UPDATE candidates/i.test(sql)) updated = { sql, params };
+          return { rows: [] };
+        },
+      });
+    },
+  };
+  const result = await repairIncompleteCandidates(db, { limit: 10 });
+  assert.equal(result.repaired, 1);
+  assert.ok(result.sample[0].fields.includes('province'));
+  assert.match(String(updated.params.join(' ')), /กรุงเทพมหานคร/);
 });
 
 test('genderFromPrefix maps Thai/English prefixes', () => {
