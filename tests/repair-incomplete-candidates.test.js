@@ -6,6 +6,7 @@ import {
   needsRepair,
   repairIncompleteCandidates,
   resolveProvinceFromRow,
+  WORK_CHROME_SQL_RE,
 } from '../src/core/repair-incomplete-candidates.js';
 
 test('needsRepair detects empty education/work arrays', () => {
@@ -275,4 +276,33 @@ test('repairIncompleteCandidates uses OCR text when raw_text is thin', async () 
   assert.equal(result.repaired, 1);
   assert.match(String(updated.params.join(' ')), /0855555555/);
   assert.match(String(updated.params.join(' ')), /ช่างอาคาร/);
+});
+
+test('WORK_CHROME_SQL_RE matches login chrome but not real duties with เข้าสู่ระบบ', () => {
+  const re = new RegExp(WORK_CHROME_SQL_RE, 'iu');
+  assert.equal(re.test('register_page username_hint max_case'), true);
+  assert.equal(re.test('คุณจะไม่สามารถเข้าสู่ระบบได้'), true);
+  assert.equal(re.test('help@jobbkk.com'), true);
+  assert.equal(re.test('ยิงคิวอาร์โค้ดพัสดุเข้าสู่ระบบออนไลน์'), false);
+  assert.equal(re.test('คีย์ข้อมูลเข้าสู่ระบบ ERP'), false);
+  assert.equal(re.test('บริษัท ไปรษณีย์ไทย จำกัด'), false);
+});
+
+test('needsRepair ignores real work rows that mention เข้าสู่ระบบ in duties', () => {
+  assert.equal(needsRepair({
+    phone: '0811111111',
+    email: 'a@b.com',
+    gender: 'ชาย',
+    age: '30',
+    address: 'นนทบุรี',
+    province: 'นนทบุรี',
+    desired_positions: 'ธุรการ',
+    expected_salary: '18000',
+    education: [{ institution: 'มหาวิทยาลัยก', degree: 'ปริญญาตรี' }],
+    work_experience: [{
+      company: 'บริษัท ไปรษณีย์ไทย จำกัด',
+      position: 'พนักงานผู้ช่วย',
+      responsibilities: 'ยิงคิวอาร์โค้ดพัสดุเข้าสู่ระบบ',
+    }],
+  }), false);
 });

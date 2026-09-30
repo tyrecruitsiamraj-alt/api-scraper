@@ -43,6 +43,16 @@ test('hasUsefulWorkExperience is false for JobBKK chrome rows', () => {
   assert.equal(hasUsefulWorkExperience(junk), false);
 });
 
+test('real duties containing เข้าสู่ระบบ are not junk work', () => {
+  const real = {
+    company: 'บริษัท ไปรษณีย์ไทย จำกัด',
+    position: 'พนักงานผู้ช่วย',
+    responsibilities: 'ยิงคิวอาร์โค้ดพัสดุเข้าสู่ระบบออนไลน์',
+  };
+  assert.equal(isJunkWorkRow(real), false);
+  assert.equal(hasUsefulWorkExperience([real]), true);
+});
+
 test('finalizeCandidateRecord strips chrome work and recovers real experience from raw_text', () => {
   const parsed = finalizeCandidateRecord({
     name: 'นายทดสอบ',
