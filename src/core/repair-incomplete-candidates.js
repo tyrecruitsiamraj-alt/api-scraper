@@ -11,6 +11,7 @@ import {
   finalizeCandidateRecord,
   hasUsefulEducation,
   hasUsefulWorkExperience,
+  isJunkWorkRow,
 } from '../providers/jobbkk/parser.js';
 
 const PROVINCE_NAMES = (() => {
@@ -55,11 +56,14 @@ function validEmail(value) {
 }
 
 export function needsRepair(row) {
+  const work = Array.isArray(row.work_experience) ? row.work_experience : [];
+  const hasJunkWork = work.some((item) => isJunkWorkRow(item));
   return blank(row.phone) || blank(row.email) || blank(row.gender) || blank(row.age)
     || blank(row.address) || isJunkText(row.province) || blank(row.desired_positions)
     || blank(row.expected_salary)
     || !hasUsefulEducation(row.education)
-    || !hasUsefulWorkExperience(row.work_experience);
+    || !hasUsefulWorkExperience(row.work_experience)
+    || hasJunkWork;
 }
 
 /** Resolve province from address / desired area / raw text using JobBKK province list. */
@@ -98,7 +102,12 @@ export function resolveProvinceFromRow(row = {}, combinedText = '') {
 function jsonbFillExpression(col, paramIndex) {
   // Replace empty arrays, and also year-only / blank work or education stubs.
   if (col === 'work_experience') {
+    // Replace empty/year-only stubs AND JobBKK login/register chrome that leaked in.
+    const junkRow = `e::text ~* 'register_page|username_hint|max_case|no_html|jobbkk|จ๊อบบีเคเค|เข้าสู่ระบบ|ไม่อนุญาตให้ใช้|สมัครสมาชิกไม่สำเร็จ|help@jobbkk\\.com'`;
     return `${col} = CASE
+      WHEN EXISTS (
+        SELECT 1 FROM jsonb_array_elements(COALESCE(${col}, '[]'::jsonb)) e WHERE ${junkRow}
+      ) THEN $${paramIndex}::jsonb
       WHEN $${paramIndex}::jsonb = '[]'::jsonb THEN ${col}
       WHEN COALESCE(jsonb_array_length(${col}), 0) = 0 THEN $${paramIndex}::jsonb
       WHEN NOT EXISTS (
@@ -231,6 +240,10 @@ const INCOMPLETE_SQL = `
           WHERE NULLIF(trim(e->>'company'), '') IS NOT NULL
              OR NULLIF(trim(e->>'position'), '') IS NOT NULL
        )
+       OR EXISTS (
+         SELECT 1 FROM jsonb_array_elements(COALESCE(c.work_experience, '[]'::jsonb)) e
+          WHERE e::text ~* 'register_page|username_hint|max_case|no_html|jobbkk|จ๊อบบีเคเค|เข้าสู่ระบบ|ไม่อนุญาตให้ใช้|สมัครสมาชิกไม่สำเร็จ|help@jobbkk\\.com'
+       )
      )
    ORDER BY c.last_updated_at DESC
    LIMIT $1
@@ -324,6 +337,8 @@ export async function repairIncompleteCandidates(db, opts = {}) {
     if (!needsRepair(row)) continue;
     const before = Object.fromEntries(REPAIR_TEXT_FIELDS.map((key) => [key, row[key]]));
     const beforeUsefulWork = hasUsefulWorkExperience(row.work_experience);
+    const beforeHadJunkWork = Array.isArray(row.work_experience)
+      && row.work_experience.some((item) => isJunkWorkRow(item));
     const beforeUsefulEdu = hasUsefulEducation(row.education);
     const ocrPart = String(row.ocr_text || '').trim();
     if (ocrPart.length > 20) {
@@ -356,7 +371,10 @@ export async function repairIncompleteCandidates(db, opts = {}) {
       if (beforeEmpty && nextOk) changed.push(key);
     }
     if (!beforeUsefulEdu && hasUsefulEducation(parsed.education)) changed.push('education');
-    if (!beforeUsefulWork && hasUsefulWorkExperience(parsed.work_experience)) changed.push('work_experience');
+    if ((!beforeUsefulWork && hasUsefulWorkExperience(parsed.work_experience))
+        || (beforeHadJunkWork && !parsed.work_experience.some((item) => isJunkWorkRow(item)))) {
+      changed.push('work_experience');
+    }
     if (!changed.length) {
       unrepaired += 1;
       for (const gap of remainingGaps(row, parsed)) {
