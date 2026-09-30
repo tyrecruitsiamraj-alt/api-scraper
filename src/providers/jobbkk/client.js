@@ -272,12 +272,9 @@ async function settleResumePage(page) {
 
   await page.waitForLoadState('networkidle', { timeout: 5_000 }).catch(() => {});
   const masked = await page.locator('.ownerNoLogin').count().then((n) => n > 0).catch(() => false);
-  if (!populated || masked) {
-    await sleep(500);
-    return { populated, masked, complete: false };
-  }
 
-  // Scroll once so lazy timeline sections (education/work) paint before we snapshot.
+  // Masked contact only hides phone/email — education/work still paint after scroll.
+  // Returning early here left rows with blank ประวัติการศึกษา/การทำงาน.
   await page.evaluate(async () => {
     const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
     window.scrollTo(0, document.body.scrollHeight || 2000);
@@ -289,12 +286,19 @@ async function settleResumePage(page) {
   }).catch(() => {});
 
   await page.waitForFunction(resumeSectionsPainted, null, { timeout: 20_000, polling: 200 }).catch(() => {});
+  if (!populated) {
+    await sleep(500);
+    return { populated, masked, complete: false };
+  }
+
   const complete = await page
     .waitForFunction(resumeDetailComplete, null, { timeout: 12_000, polling: 250 })
     .then(() => true)
     .catch(() => false);
-  await sleep(complete ? 700 : 1200);
-  return { populated, masked, complete };
+  // Masked pages rarely pass resumeDetailComplete (no phone) — still keep body if sections painted.
+  const bodyReady = complete || await page.evaluate(resumeSectionsPainted).catch(() => false);
+  await sleep(bodyReady ? 700 : 1200);
+  return { populated, masked, complete: bodyReady };
 }
 
 /**

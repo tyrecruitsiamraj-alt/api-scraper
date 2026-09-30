@@ -436,37 +436,47 @@ export function fillMissingFromRawText(record, rawText) {
     }
   }
 
-  if ((!Array.isArray(record.education) || !record.education.length) && !clean(record.education_summary)) {
-    const edu = firstMatch(text, [/ประวัติการศึกษา\s*([\s\S]*?)(?=ประวัติการทำงาน|ข้อมูลการฝึกอบรม|ทักษะ|$)/u]);
+  // Always materialize jsonb arrays when empty — UI/PDF read arrays, not *_summary.
+  if (!Array.isArray(record.education) || !record.education.length) {
+    const edu = clean(record.education_summary)
+      || firstMatch(text, [/ประวัติการศึกษา\s*([\s\S]*?)(?=ประวัติการทำงาน|ข้อมูลการฝึกอบรม|ทักษะ|$)/u]);
     if (edu && edu.length >= 8) {
-      record.education_summary = edu;
+      if (!clean(record.education_summary)) record.education_summary = edu;
       const degree = firstMatch(edu, [/(ปริญญาเอก|ปริญญาโท|ปริญญาตรี|ปวส\.?\/?อนุปริญญา|ปวช\.?|มัธยมศึกษาตอนปลาย|มัธยมศึกษาตอนต้น)/u]);
-      record.education = [{
+      const rows = [{
         institution: firstMatch(edu, [/(มหาวิทยาลัย[^\s]+|วิทยาลัย[^\s]+|โรงเรียน[^\s]+)/u]) || '',
         degree: degree || '',
         major: firstMatch(edu, [/สาขา(?:วิชา)?\s*[:：]?\s*([^\s]+)/u]) || '',
-        faculty: '',
-        graduation_year: firstMatch(edu, [/(?:ปีที่จบ(?:การศึกษา)?|จบ)\s*[:：]?\s*(\d{4})/u]) || '',
-        gpa: '',
-      }].filter((item) => item.institution || item.degree);
+        faculty: firstMatch(edu, [/คณะ(?:วิชา)?\s*[:：]?\s*([^\s]+)/u]) || '',
+        graduation_year: firstMatch(edu, [/(?:ปีที่จบ(?:การศึกษา)?|จบ)\s*[:：]?\s*(\d{4})/u, /\b(20\d{2}|25\d{2})\b/]) || '',
+        gpa: firstMatch(edu, [/เกรด(?:เฉลี่ย)?\s*[:：]?\s*([\d.]+)/u]) || '',
+      }].filter((item) => item.institution || item.degree || item.major);
+      if (rows.length) record.education = rows;
     }
   }
-  if ((!Array.isArray(record.work_experience) || !record.work_experience.length) && !clean(record.experience_summary)) {
-    const work = firstMatch(text, [/ประวัติการทำงาน(?:\/ฝึกงาน)?\s*([\s\S]*?)(?=ข้อมูลการฝึกอบรม|ทักษะ|Hard Skills|Soft Skills|$)/u]);
+  if (!Array.isArray(record.work_experience) || !record.work_experience.length) {
+    const work = clean(record.experience_summary)
+      || firstMatch(text, [/ประวัติการทำงาน(?:\/ฝึกงาน)?\s*([\s\S]*?)(?=ข้อมูลการฝึกอบรม|ทักษะ|Hard Skills|Soft Skills|$)/u]);
     if (work && work.length >= 8) {
-      record.experience_summary = work;
-      const position = firstMatch(work, [/ตำแหน่ง(?:งาน)?\s*[:：]?\s*([^\s]+(?:\s+[^\s]+){0,4})/u]);
-      const company = firstMatch(work, [/(?:ข้อมูลบริษัท|บริษัท)\s*[:：]?\s*([^\s]+(?:\s+[^\s]+){0,5})/u]);
-      if (position || company) {
+      if (!clean(record.experience_summary)) record.experience_summary = work;
+      if (/ไม่มีประสบการณ์/u.test(work)) {
         record.work_experience = [{
-          year: firstMatch(work, [/\b(20\d{2}|25\d{2})\b/]) || '',
-          company: company || '',
-          position: position || '',
-          period: '',
-          salary: '',
-          business_type: '',
-          responsibilities: '',
+          year: '', company: '', position: 'ไม่มีประสบการณ์', period: '', salary: '', business_type: '', responsibilities: '',
         }];
+      } else {
+        const position = firstMatch(work, [/ตำแหน่ง(?:งาน)?\s*[:：]?\s*([^\n|]+?)(?=\s*(?:บริษัท|ข้อมูลบริษัท|ประเภท|ระยะเวลา|เงินเดือน)|$)/u]);
+        const company = firstMatch(work, [/(?:ข้อมูลบริษัท|บริษัท)\s*[:：]?\s*([^\n|]+?)(?=\s*(?:ตำแหน่ง|ประเภท|ระยะเวลา|เงินเดือน)|$)/u]);
+        if (position || company) {
+          record.work_experience = [{
+            year: firstMatch(work, [/\b(20\d{2}|25\d{2})\b/]) || '',
+            company: company || '',
+            position: position || '',
+            period: firstMatch(work, [/ระยะเวลา\s*[:：]?\s*([^\n|]+)/u]) || '',
+            salary: firstMatch(work, [/เงินเดือน\s*[:：]?\s*([\d,]+)/u]) || '',
+            business_type: firstMatch(work, [/ประเภทธุรกิจ\s*[:：]?\s*([^\n|]+)/u]) || '',
+            responsibilities: '',
+          }];
+        }
       }
     }
   }
@@ -604,7 +614,7 @@ export function parseResumeHtml(html, { sourceUrl, index, focusPosition = '-' })
 
   record.attachments = extractAttachments($);
 
-  return {
+  return finalizeCandidateRecord({
     index,
     scraped_at: new Date().toISOString(),
     focus_position: focusPosition,
@@ -614,8 +624,20 @@ export function parseResumeHtml(html, { sourceUrl, index, focusPosition = '-' })
     ...record,
     raw_text: rawText,
     raw_text_preview: rawText.slice(0, 500),
-    parse_status: parseStatus(record, rawText),
-  };
+  });
+}
+
+/** Re-run text recovery and refresh parse_status — used by live scrape and offline repair. */
+export function finalizeCandidateRecord(record = {}) {
+  const next = { ...record };
+  if (!Array.isArray(next.education)) next.education = [];
+  if (!Array.isArray(next.work_experience)) next.work_experience = [];
+  if (!Array.isArray(next.hard_skills)) next.hard_skills = [];
+  if (!Array.isArray(next.soft_skills)) next.soft_skills = [];
+  if (!Array.isArray(next.language_skills)) next.language_skills = [];
+  fillMissingFromRawText(next, next.raw_text || '');
+  next.parse_status = parseStatus(next, next.raw_text || '');
+  return next;
 }
 
 export function dedupeKey(candidate) {

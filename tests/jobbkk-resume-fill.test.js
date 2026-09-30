@@ -1,6 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { fillMissingFromRawText, isResumeProfileThin, parseResumeHtml } from '../src/providers/jobbkk/parser.js';
+import {
+  fillMissingFromRawText,
+  finalizeCandidateRecord,
+  isResumeProfileThin,
+  parseResumeHtml,
+} from '../src/providers/jobbkk/parser.js';
 
 test('fillMissingFromRawText recovers profile fields from collapsed JobBKK text', () => {
   const record = {
@@ -31,14 +36,77 @@ test('fillMissingFromRawText recovers profile fields from collapsed JobBKK text'
   assert.equal(record.expected_salary, '18000');
   assert.match(record.education_summary, /ปริญญาตรี/);
   assert.match(record.experience_summary, /พนักงานขับรถ/);
+  assert.equal(record.education[0]?.degree, 'ปริญญาตรี');
+  assert.match(record.education[0]?.institution || '', /มหาวิทยาลัยตัวอย่าง/);
+  assert.match(record.work_experience[0]?.position || '', /พนักงานขับรถ/);
+  assert.match(record.work_experience[0]?.company || '', /ตัวอย่าง/);
+});
+
+test('fillMissingFromRawText materializes jsonb arrays from *_summary when raw_text is thin', () => {
+  const record = {
+    education: [],
+    work_experience: [],
+    education_summary: 'มหาวิทยาลัยรามคำแหง คณะบริหารธุรกิจ สาขาการตลาด ปริญญาตรี ปีที่จบ 2560',
+    experience_summary: 'บริษัท เอ จำกัด ตำแหน่งงาน พนักงานขาย ระยะเวลา 2 ปี เงินเดือน 15000',
+  };
+  fillMissingFromRawText(record, 'ชื่อ นายทดสอบ');
+  assert.equal(record.education[0]?.degree, 'ปริญญาตรี');
+  assert.match(record.education[0]?.institution || '', /มหาวิทยาลัยรามคำแหง/);
+  assert.match(record.education[0]?.major || '', /การตลาด/);
+  assert.equal(record.work_experience[0]?.position, 'พนักงานขาย');
+  assert.match(record.work_experience[0]?.company || '', /เอ/);
+});
+
+test('fillMissingFromRawText marks no-experience work rows', () => {
+  const record = { education: [], work_experience: [] };
+  fillMissingFromRawText(record, 'ประวัติการศึกษา มัธยมศึกษาตอนปลาย ประวัติการทำงาน ไม่มีประสบการณ์ Soft Skills');
+  assert.equal(record.work_experience[0]?.position, 'ไม่มีประสบการณ์');
 });
 
 test('fillMissingFromRawText never overwrites existing values', () => {
-  const record = { gender: 'หญิง', age: '40', phone: '0899999999' };
-  fillMissingFromRawText(record, 'เพศ : ชาย อายุ 21 ปี เบอร์โทรศัพท์ 0811111111');
+  const record = {
+    gender: 'หญิง',
+    age: '40',
+    phone: '0899999999',
+    education: [{ institution: 'เก่า', degree: 'ปวช.' }],
+    work_experience: [{ company: 'เก่า', position: 'ธุรการ' }],
+  };
+  fillMissingFromRawText(record, [
+    'เพศ : ชาย อายุ 21 ปี เบอร์โทรศัพท์ 0811111111',
+    'ประวัติการศึกษา มหาวิทยาลัยใหม่ ปริญญาตรี',
+    'ประวัติการทำงาน บริษัทใหม่ ตำแหน่งงาน โปรแกรมเมอร์ Soft Skills',
+  ].join(' '));
   assert.equal(record.gender, 'หญิง');
   assert.equal(record.age, '40');
   assert.equal(record.phone, '0899999999');
+  assert.equal(record.education[0].institution, 'เก่า');
+  assert.equal(record.work_experience[0].position, 'ธุรการ');
+});
+
+test('finalizeCandidateRecord repairs blank arrays from raw_text and sets parse_status', () => {
+  const repaired = finalizeCandidateRecord({
+    name: 'นายซ่อม ข้อมูล',
+    phone: '',
+    email: '',
+    gender: '',
+    education: null,
+    work_experience: null,
+    raw_text: [
+      'เพศ : ชาย อายุ 25 ปี ที่อยู่ปัจจุบัน นนทบุรี 11000',
+      'เบอร์โทรศัพท์ 0833333333 อีเมล repair@example.com',
+      'ประวัติการศึกษา วิทยาลัยเทคนิคตัวอย่าง ปวส. สาขาช่างยนต์',
+      'ประวัติการทำงาน บริษัท บี จำกัด ตำแหน่งงาน ช่างยนต์ Soft Skills',
+    ].join(' '),
+  });
+  assert.equal(repaired.gender, 'ชาย');
+  assert.equal(repaired.age, '25');
+  assert.match(repaired.phone, /0833333333/);
+  assert.equal(repaired.email, 'repair@example.com');
+  assert.ok(Array.isArray(repaired.education));
+  assert.ok(repaired.education.length >= 1);
+  assert.ok(Array.isArray(repaired.work_experience));
+  assert.ok(repaired.work_experience.length >= 1);
+  assert.notEqual(repaired.parse_status, 'failed');
 });
 
 test('preview_new HTML parser fills gender/age/education before returning', () => {

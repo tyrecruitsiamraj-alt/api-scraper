@@ -438,12 +438,49 @@ export async function candidatesForRun(runId) {
 export async function candidatesForRuns(runIds) {
   if (!runIds?.length) return [];
   const { rows } = await query(
-    `SELECT DISTINCT c.id, c.email, c.phone, c.line_id
-       FROM candidates c JOIN candidate_sources s ON s.candidate_id = c.id
-      WHERE s.run_id = ANY($1::uuid[])`,
+    `SELECT DISTINCT ON (c.id)
+            c.id, c.email, c.phone, c.line_id, c.gender, c.age, c.address, c.province,
+            c.desired_positions, c.expected_salary, c.education, c.work_experience,
+            c.full_name, c.prefix, c.first_name, c.last_name, c.birth_date,
+            c.nationality, c.religion, c.height, c.weight, c.marital_status,
+            c.military_status, c.vehicle, c.driving_license, c.driving_ability,
+            c.desired_work_area, c.job_type, c.available_start, c.intro,
+            c.hard_skills, c.soft_skills, c.language_skills,
+            s.raw_text
+       FROM candidates c
+       JOIN candidate_sources s ON s.candidate_id = c.id
+      WHERE s.run_id = ANY($1::uuid[])
+      ORDER BY c.id, s.last_seen_at DESC NULLS LAST`,
     [runIds],
   );
   return rows;
+}
+
+/**
+ * Patch blank candidate fields from a repaired parse — never invents, never
+ * overwrites non-empty text, only fills empty jsonb arrays.
+ */
+export async function patchCandidateFromParsed(id, parsed) {
+  const sets = [];
+  const params = [id];
+  for (const col of TEXT_COLS) {
+    const value = col === 'full_name' ? (parsed.name ?? parsed.full_name ?? '') : (parsed[col] ?? '');
+    params.push(String(value ?? ''));
+    sets.push(`${col} = COALESCE(NULLIF($${params.length}, ''), ${col})`);
+  }
+  for (const col of JSON_COLS) {
+    params.push(stringifyForJsonb(parsed[col]));
+    sets.push(`${col} = CASE WHEN $${params.length}::jsonb <> '[]'::jsonb AND COALESCE(jsonb_array_length(${col}), 0) = 0 THEN $${params.length}::jsonb ELSE ${col} END`);
+  }
+  const phoneNorm = String(parsed.phone ?? '').replace(/\D/g, '');
+  const emailNorm = validEmail(parsed.email);
+  params.push(phoneNorm);
+  sets.push(`phone_norm = COALESCE(NULLIF($${params.length}, ''), phone_norm)`);
+  params.push(emailNorm);
+  sets.push(`email_norm = COALESCE(NULLIF($${params.length}, ''), email_norm)`);
+  sets.push('last_updated_at = now()');
+  await query(`UPDATE candidates SET ${sets.join(', ')} WHERE id = $1`, params);
+  return true;
 }
 
 /** Concatenated successful OCR text across a candidate's attachments. */

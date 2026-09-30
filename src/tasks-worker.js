@@ -11,6 +11,7 @@ import {
   dueTasks,
   extractedTextForCandidate,
   fillCandidateContacts,
+  patchCandidateFromParsed,
   finishTask,
   getAssetContent,
   getCachedFamilyPlan,
@@ -32,6 +33,7 @@ import { envInt, loadRuntime } from './config.js';
 import { runConnector } from './pipeline.js';
 import { extractAttachment } from './core/ollama.js';
 import { contactsFromText } from './core/contacts.js';
+import { finalizeCandidateRecord } from './providers/jobbkk/parser.js';
 import { suggestAdjacentPositions, positionsFromDescription } from './core/job-family.js';
 import { resolveSearchIdentityFromDescription } from '../web/lib/scrape-intake.js';
 import { filterZeroYieldExpansionTerms } from './core/scrape-failure-learning.js';
@@ -259,17 +261,64 @@ export async function runTask(t, runtime) {
     await bumpTaskProgress(t.id, (oc += 1));
   }
 
-  // ---- phase 3: enrich — fill missing candidate contacts from the OCR text ----
+  // ---- phase 3: enrich — repair blank fields from raw_text + OCR contacts ----
   const cands = await candidatesForRuns(runIds);
   await setTaskPhase(t.id, 'enrich', cands.length);
   console.log(`  enrich: ${cands.length} candidate(s)`);
   let i = 0;
   let filled = 0;
   for (const c of cands) {
+    const ocrText = await extractedTextForCandidate(c.id);
+    const raw = [c.raw_text || '', ocrText || ''].filter(Boolean).join('\n');
+    const eduEmpty = !Array.isArray(c.education) || c.education.length === 0;
+    const workEmpty = !Array.isArray(c.work_experience) || c.work_experience.length === 0;
+    const needsBody = !c.phone || !c.email || !c.gender || !c.age || !c.address || !c.province
+      || !c.desired_positions || !c.expected_salary || eduEmpty || workEmpty;
+    if (raw && needsBody) {
+      const repaired = finalizeCandidateRecord({
+        name: c.full_name || '',
+        prefix: c.prefix || '',
+        first_name: c.first_name || '',
+        last_name: c.last_name || '',
+        phone: c.phone || '',
+        email: c.email || '',
+        line_id: c.line_id || '',
+        gender: c.gender || '',
+        age: c.age || '',
+        birth_date: c.birth_date || '',
+        nationality: c.nationality || '',
+        religion: c.religion || '',
+        height: c.height || '',
+        weight: c.weight || '',
+        marital_status: c.marital_status || '',
+        military_status: c.military_status || '',
+        vehicle: c.vehicle || '',
+        driving_license: c.driving_license || '',
+        driving_ability: c.driving_ability || '',
+        address: c.address || '',
+        province: c.province || '',
+        intro: c.intro || '',
+        desired_positions: c.desired_positions || '',
+        desired_work_area: c.desired_work_area || '',
+        job_type: c.job_type || '',
+        expected_salary: c.expected_salary || '',
+        available_start: c.available_start || '',
+        education: Array.isArray(c.education) ? c.education : [],
+        work_experience: Array.isArray(c.work_experience) ? c.work_experience : [],
+        hard_skills: Array.isArray(c.hard_skills) ? c.hard_skills : [],
+        soft_skills: Array.isArray(c.soft_skills) ? c.soft_skills : [],
+        language_skills: Array.isArray(c.language_skills) ? c.language_skills : [],
+        raw_text: raw,
+      });
+      await patchCandidateFromParsed(c.id, repaired);
+      filled += 1;
+      c.phone = repaired.phone || c.phone;
+      c.email = repaired.email || c.email;
+      c.line_id = repaired.line_id || c.line_id;
+    }
     if (!c.email || !c.phone || !c.line_id) {
-      const text = await extractedTextForCandidate(c.id);
-      if (text) {
-        const found = contactsFromText(text);
+      if (ocrText) {
+        const found = contactsFromText(ocrText);
         const patch = {};
         if (!c.email && found.email) patch.email = found.email;
         if (!c.phone && found.phone) patch.phone = found.phone;

@@ -90,7 +90,7 @@ async function main() {
   }, 2000);
 
   let dotenv;
-  let fillMissingFromRawText;
+  let finalizeCandidateRecord;
   let getPool;
   let closePool;
   let withTransaction;
@@ -103,7 +103,7 @@ async function main() {
       import('../src/db/repositories.js'),
     ]);
     dotenv = mods[0].default;
-    fillMissingFromRawText = mods[1].fillMissingFromRawText;
+    finalizeCandidateRecord = mods[1].finalizeCandidateRecord;
     getPool = mods[2].getPool;
     closePool = mods[2].closePool;
     withTransaction = mods[2].withTransaction;
@@ -172,7 +172,7 @@ async function main() {
       scanned += 1;
       if (!needsRepair(row)) continue;
       const before = Object.fromEntries(TEXT_FIELDS.map((key) => [key, row[key]]));
-      const parsed = {
+      const parsed = finalizeCandidateRecord({
         name: row.full_name || '',
         ...Object.fromEntries(TEXT_FIELDS.filter((key) => key !== 'full_name').map((key) => [key, row[key] ?? ''])),
         education: Array.isArray(row.education) ? row.education : [],
@@ -180,8 +180,8 @@ async function main() {
         hard_skills: Array.isArray(row.hard_skills) ? row.hard_skills : [],
         soft_skills: Array.isArray(row.soft_skills) ? row.soft_skills : [],
         language_skills: Array.isArray(row.language_skills) ? row.language_skills : [],
-      };
-      fillMissingFromRawText(parsed, row.raw_text);
+        raw_text: row.raw_text || '',
+      });
       if (!parsed.name && row.full_name) parsed.name = row.full_name;
 
       const changed = [];

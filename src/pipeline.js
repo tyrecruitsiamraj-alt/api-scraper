@@ -278,12 +278,18 @@ export async function runConnector(connector, criteria, runtime, opts = {}) {
           html = await provider.fetchResumeHtml(sess, id, runtime);
           parsed = provider.parseResumeHtml(html, { sourceUrl: url, index: saved + 1, focusPosition: criteria.position || '-' });
         }
+        if (provider.isResumeMasked?.(html)) {
+          console.warn(`  [${id}] contact masked — keep public body (education/work) as partial`);
+        }
         // JobBKK บางครั้งวาดแค่ชื่อก่อน — เปิดใหม่ 1 ครั้งถ้าโปรไฟล์ยังบางเกินกว่าจะใช้
         if (provider.isResumeProfileThin?.(parsed)) {
           console.warn(`  ↻ resume ${id}: profile still thin — refetch once`);
           await sleep(800);
           html = await provider.fetchResumeHtml(sess, id, runtime);
           parsed = provider.parseResumeHtml(html, { sourceUrl: url, index: saved + 1, focusPosition: criteria.position || '-' });
+        }
+        if (provider.finalizeCandidateRecord) {
+          parsed = provider.finalizeCandidateRecord(parsed);
         }
         opened += 1;
         const qualification = evaluateResumeQualification(parsed, {
@@ -292,9 +298,10 @@ export async function runConnector(connector, criteria, runtime, opts = {}) {
         });
         for (const reason of qualification.reasons) reasonCounts[reason] = (reasonCounts[reason] || 0) + 1;
 
-        // เปิดเผยข้อมูลติดต่อ/ดาวน์โหลดเอกสารเฉพาะคนที่ผ่าน Hard Filter เท่านั้น.
-        if (qualification.status === 'qualified' && provider.enrichContacts) {
+        // เปิดเผยข้อมูลติดต่อสำหรับคนที่ผ่านหรือต้องตรวจเพิ่ม — คนที่ reject ไม่เสียโควตา.
+        if (['qualified', 'needs_review'].includes(qualification.status) && provider.enrichContacts) {
           await provider.enrichContacts(sess.request, id, parsed, runtime);
+          if (provider.finalizeCandidateRecord) parsed = provider.finalizeCandidateRecord(parsed);
         }
         // รูปโปรไฟล์เป็นข้อมูลหลักที่ผู้สรรหาต้องเห็น แม้ Resume จะยังไม่ผ่าน
         // เกณฑ์งานนี้ ส่วนเอกสารแนบยังเก็บเฉพาะคนที่ผ่านเพื่อลดการเก็บข้อมูล

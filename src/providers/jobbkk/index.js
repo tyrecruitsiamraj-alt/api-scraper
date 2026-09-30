@@ -1,7 +1,7 @@
 import { getJobbkkSession, logoutJobbkk } from './session.js';
-import { fetchResumeHtml, isResumeAuthBlocked, resumeDetailUrl } from './client.js';
+import { fetchResumeHtml, isResumeAuthBlocked, isResumeMasked, resumeDetailUrl } from './client.js';
 import { browserSearchResumeIds } from './browser-search.js';
-import { parseResumeHtml, isResumeProfileThin } from './parser.js';
+import { parseResumeHtml, isResumeProfileThin, finalizeCandidateRecord } from './parser.js';
 import { collectAssetsForDb } from './assets.js';
 
 export const jobbkkProvider = {
@@ -15,12 +15,14 @@ export const jobbkkProvider = {
   getSession: getJobbkkSession,
   logout: logoutJobbkk,
   isResumeAuthBlocked,
+  isResumeMasked,
   // Browser-driven search — runs on the session's logged-in page (see browser-search.js).
   searchResumeIds: (session, criteria, runtime) => browserSearchResumeIds(session, criteria, runtime),
   fetchResumeHtml,
   resumeDetailUrl,
   parseResumeHtml,
   isResumeProfileThin,
+  finalizeCandidateRecord,
   collectAssetsForDb,
 
   /** Stable external id for this platform = the resume data-id. */

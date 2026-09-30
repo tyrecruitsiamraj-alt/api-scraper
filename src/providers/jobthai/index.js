@@ -1,6 +1,7 @@
 import { getJobthaiSession } from './session.js';
 import { fetchResumeHtml, resumeDetailUrl, revealContact, searchResumeIds } from './client.js';
-import { externalId, parseResumeHtml } from './parser.js';
+import { externalId, parseResumeHtml as parseJobthaiResumeHtml } from './parser.js';
+import { finalizeCandidateRecord } from '../jobbkk/parser.js';
 import { collectAssetsForDb } from './assets.js';
 
 const isReal = (v) => v && !/x{3,}|click|กรุณา|ดูข้อมูล/i.test(v);
@@ -13,7 +14,10 @@ export const jobthaiProvider = {
   searchResumeIds,
   fetchResumeHtml,
   resumeDetailUrl,
-  parseResumeHtml,
+  parseResumeHtml(html, opts) {
+    return finalizeCandidateRecord(parseJobthaiResumeHtml(html, opts));
+  },
+  finalizeCandidateRecord,
   collectAssetsForDb,
   externalId,
 
