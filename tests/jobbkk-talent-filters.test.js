@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {
   mapCriteriaToPremiumFilters,
   missingRequiredNormalFilters,
+  normalizeProvinceValue,
   parseEducationRange,
   planTalentNormalFilters,
   provinceSearchAliases,
@@ -92,7 +93,10 @@ test('ไม่ยอมค้นทั้งประเทศเมื่อ�
 
 test('จังหวัดค้นได้ทั้งแบบมีและไม่มีคำว่าจังหวัด', () => {
   assert.deepEqual(provinceSearchAliases('สมุทรปราการ'), ['สมุทรปราการ', 'จังหวัดสมุทรปราการ']);
-  assert.deepEqual(provinceSearchAliases('จังหวัดนนทบุรี'), ['จังหวัดนนทบุรี', 'นนทบุรี']);
+  assert.deepEqual(provinceSearchAliases('จังหวัดนนทบุรี'), ['นนทบุรี', 'จังหวัดนนทบุรี']);
+  assert.equal(normalizeProvinceValue('"สมุทรปราการ"'), 'สมุทรปราการ');
+  assert.equal(normalizeProvinceValue('"'), '');
+  assert.deepEqual(provinceSearchAliases('"'), []);
 });
 
 test('ผ่อน Normal ทีละชั้นเมื่อผลเป็น 0 โดยไม่ทิ้งตำแหน่งหรือจังหวัด และไม่เดาค่าใหม่', () => {

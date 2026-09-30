@@ -10,7 +10,11 @@ import { knownPositionsFromDescription } from '../../core/job-family.js';
 const MAX_CHIP_LEN = 22;
 
 export function hasSearchValue(value) {
-  return value !== undefined && value !== null && String(value).trim() !== '' && String(value).trim() !== 'ไม่ระบุ';
+  const text = String(value ?? '').trim();
+  if (!text || text === 'ไม่ระบุ') return false;
+  // ERP/JSON paste sometimes leaves a bare quote that Ant Design renders as a tag.
+  if (/^["'\\.\-_/]+$/.test(text)) return false;
+  return true;
 }
 
 export function parseTerms(value) {
@@ -142,7 +146,10 @@ export function planTalentNormalFilters(criteria = {}) {
   add('position', searchablePositionTerms(criteria));
   add('keyword', searchableKeywordTerms(criteria));
   add('jobTypes', occupationTerms(criteria).slice(0, 5));
-  if (hasSearchValue(criteria.province)) add('province', String(criteria.province).trim());
+  if (hasSearchValue(criteria.province)) {
+    const province = normalizeProvinceValue(criteria.province) || String(criteria.province).trim();
+    if (hasSearchValue(province)) add('province', province);
+  }
 
   const education = parseEducationRange(criteria.education);
   if (education) add('education', education);
@@ -180,15 +187,27 @@ export function missingRequiredNormalFilters(plan = [], report = { applied: [] }
   return missing;
 }
 
+/** Strip wrapping quotes from ERP/JSON paste; reject punctuation-only junk. */
+export function normalizeProvinceValue(value) {
+  let text = String(value ?? '').replace(/\s+/g, ' ').trim();
+  const wrapped = text.match(/^["'](.+)["']$/u);
+  if (wrapped) text = wrapped[1].replace(/\s+/g, ' ').trim();
+  text = text.replace(/^\\["']+|\\["']+$/g, '').replace(/^["']+|["']+$/g, '').trim();
+  if (!hasSearchValue(text)) return '';
+  if (!/[ก-๙]/.test(text)) return '';
+  return text;
+}
+
 /** JobBKK จังหวัด chip รับทั้ง "สมุทรปราการ" และ "จังหวัดสมุทรปราการ" */
 export function provinceSearchAliases(value) {
-  const raw = String(value ?? '').trim();
-  if (!hasSearchValue(raw)) return [];
+  const raw = normalizeProvinceValue(value);
+  if (!raw) return [];
+  const bare = raw.replace(/^จังหวัด\s*/u, '').trim();
   return [...new Set([
+    bare,
     raw,
-    raw.replace(/^จังหวัด\s*/u, ''),
-    raw.startsWith('จังหวัด') ? raw : `จังหวัด${raw}`,
-  ].filter(Boolean))];
+    bare && !bare.startsWith('จังหวัด') ? `จังหวัด${bare}` : '',
+  ].filter((item) => hasSearchValue(item)))];
 }
 
 export function mapCriteriaToPremiumFilters(criteria = {}) {

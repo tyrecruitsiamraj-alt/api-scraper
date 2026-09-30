@@ -49,6 +49,17 @@ test('salary comes from explicit bounds or a simple income figure, not mixed pro
   });
 });
 
+test('province with wrapping quotes is unwrapped; bare quote is dropped', () => {
+  const quoted = buildScrapeCriteria({
+    snapshot: { location: '"สมุทรปราการ"' },
+  });
+  assert.equal(quoted.province, 'สมุทรปราการ');
+  const junk = buildScrapeCriteria({
+    snapshot: { location: '"' },
+  });
+  assert.equal(junk.province, undefined);
+});
+
 test('criteria keeps operator overrides and skips empty snapshot fields', () => {
   const criteria = buildScrapeCriteria({
     snapshot: {
