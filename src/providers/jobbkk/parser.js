@@ -275,15 +275,72 @@ function extractWork($) {
         .filter(Boolean)
         .join('\n'),
     };
-    if (item.company || item.position) out.push(item);
+    if ((item.company || item.position) && !isJunkWorkRow(item)) out.push(item);
   });
   return out;
+}
+
+/** JobBKK login/register i18n + footer chrome that must never become work history. */
+const JOBBKK_SITE_CHROME_RE = /register_page|username_hint|max_case|no_html|no_symbols|symbol_casepassword|invalid_characters_password|invalid_email|must_be_greater_than|register_success|register_failed|employer_login|data_enter_system|data_company|help@jobbkk\.com|sales@jobbkk\.com|บริษัท\s*จัดหางาน\s*จ๊อบบีเคเค|JOBBKK\.COM|ไม่อนุญาตให้ใช้|คุณจะไม่สามารถเข้าสู่ระบบ|สมัครสมาชิกไม่สำเร็จ|สำหรับผู้ประกอบการเท่านั้น|ลงประกาศรับสมัครงาน/iu;
+
+/** Drop login/register chrome that sometimes lands inside body.innerText. */
+export function stripJobbkkSiteChrome(text) {
+  let out = String(text ?? '');
+  if (!out) return '';
+  // Key/value i18n pairs: "max_case":"{name} ต้องไม่เกิน..."
+  out = out.replace(/\\?"[a-z_][a-z0-9_]*\\?"\s*:\s*\\?"(?:[^"\\]|\\.){0,400}\\?"/giu, ' ');
+  // Nested register_page / login_page objects
+  // Only the object opener — never scan forward with [^}] (unclosed JSON would eat the resume).
+  out = out.replace(/\\?"(?:register_page|login_page|section_subtitle)\\?"\s*:\s*\{\s*,?\s*/giu, ' ');
+  out = out.replace(/\{\s*\\?"(?:register_page|max_case|username_hint|login_page)\\?"\s*:\s*/giu, ' ');
+  out = out.replace(/\b(?:register_page|username_hint|max_case|no_html|no_symbols|symbol_casepassword|invalid_email|register_success|register_failed|employer_login|data_enter_system|data_company)\b/giu, ' ');
+  out = out.replace(/ที่กำหนด\s*คุณจะไม่สามารถเข้าสู่ระบบได้/giu, ' ');
+  // Footer only — do not span past the JobBKK contact line into resume body.
+  out = out.replace(/บริษัท\s*จัดหางาน\s*จ๊อบบีเคเค[^.]{0,240}?(?:help@jobbkk\.com|sales@jobbkk\.com)/giu, ' ');
+  out = out.replace(/(?:help|sales)@jobbkk\.com/giu, ' ');
+  out = out.replace(/ฝ่ายบริการลูกค้า\s*:[^\n]{0,200}/giu, ' ');
+  out = out.replace(/สร้างเรซูเม่ สำหรับสมัครงานฟรี[^\n]{0,120}/giu, ' ');
+  out = out.replace(/ลงประกาศรับสมัครงาน สำหรับผู้ประกอบการเท่านั้น[^\n]{0,200}/giu, ' ');
+  out = out.replace(/[{}\[\]]+/g, ' ');
+  out = out.replace(/\\+"/g, ' ');
+  return clean(out);
+}
+
+export function isJobbkkSiteChromeText(text) {
+  const raw = String(text ?? '');
+  if (!raw.trim()) return false;
+  const stripped = stripJobbkkSiteChrome(raw);
+  const chromeHits = JOBBKK_SITE_CHROME_RE.test(raw)
+    || (raw.match(/\\?"[a-z_]+\\?"\s*:\s*\\?"/g) || []).length >= 3;
+  if (!chromeHits) return false;
+  // Mixed blobs: after strip, if almost nothing left (or no real job markers), treat as chrome.
+  if (stripped.length < 24) return true;
+  if (!/(?:ข้อมูลบริษัท|(?<!ข้อมูล)บริษัท\s*[:：]|ตำแหน่ง(?:งาน)?\s*[:：])/u.test(stripped)
+      && stripped.length < Math.max(40, raw.length * 0.45)) {
+    return true;
+  }
+  // Still contains chrome markers after strip → reject
+  return JOBBKK_SITE_CHROME_RE.test(stripped);
+}
+
+export function isJunkWorkRow(item) {
+  const company = clean(item?.company);
+  const position = clean(item?.position);
+  const responsibilities = clean(item?.responsibilities);
+  const blob = [company, position, responsibilities].filter(Boolean).join(' ');
+  if (!blob) return true;
+  if (isJobbkkSiteChromeText(blob)) return true;
+  if (/จ๊อบบีเคเค|jobbkk\.com/i.test(company)) return true;
+  // Position/company that is clearly a validation sentence, not a job title
+  if (/ต้องไม่เกิน|ต้องมากกว่า|รูปแบบอีเมล|รหัสผ่านต้อง|ไม่อนุญาต/u.test(blob)) return true;
+  return false;
 }
 
 /** True when at least one work row has a company or position the desk can show. */
 export function hasUsefulWorkExperience(rows) {
   if (!Array.isArray(rows) || !rows.length) return false;
   return rows.some((item) => {
+    if (isJunkWorkRow(item)) return false;
     const company = clean(item?.company);
     const position = clean(item?.position);
     return Boolean(company || position);
@@ -299,8 +356,8 @@ export function hasUsefulEducation(rows) {
 const WORK_FIELD_STOP = '(?=\\s*(?:ข้อมูลบริษัท|ประเภทธุรกิจ|ตำแหน่ง(?:งาน)?|ระยะเวลา|เงินเดือน|รายละเอียดงาน|Hard Skills|Soft Skills|ทักษะความรู้|ข้อมูลการฝึกอบรม|$))';
 
 function parseOneWorkChunk(chunk) {
-  const text = clean(chunk);
-  if (!text) return null;
+  const text = stripJobbkkSiteChrome(chunk);
+  if (!text || isJobbkkSiteChromeText(text)) return null;
   if (/ไม่มีประสบการณ์/u.test(text)) {
     return {
       year: '', company: '', position: 'ไม่มีประสบการณ์', period: '', salary: '', business_type: '', responsibilities: '',
@@ -316,7 +373,7 @@ function parseOneWorkChunk(chunk) {
   const companyClean = clean(company).replace(/^[:：]+/, '');
   if (!position && !companyClean) return null;
   if (!position && companyClean.length < 2) return null;
-  return {
+  const row = {
     year: firstMatch(text, [/\b(20\d{2}|25\d{2})\b/]) || '',
     company: companyClean || '',
     position: position || '',
@@ -325,6 +382,7 @@ function parseOneWorkChunk(chunk) {
     business_type: firstMatch(text, [new RegExp(`ประเภทธุรกิจ\\s*[:：]?\\s*(.+?)${WORK_FIELD_STOP}`, 'u')]) || '',
     responsibilities: firstMatch(text, [/รายละเอียดงาน\s*[:：]?\s*(.+)$/u]) || '',
   };
+  return isJunkWorkRow(row) ? null : row;
 }
 
 function splitWorkChunks(work) {
@@ -340,8 +398,12 @@ function splitWorkChunks(work) {
 
 /** Split a JobBKK work section into one-or-more structured rows. */
 export function parseWorkEntriesFromText(workText) {
-  const work = clean(workText);
+  const work = stripJobbkkSiteChrome(workText);
   if (!work || work.length < 4) return [];
+  // Whole section was login/register chrome (no recoverable job markers).
+  if (isJobbkkSiteChromeText(workText) && !/(?:ข้อมูลบริษัท|(?<!ข้อมูล)บริษัท\s*[:：]|ตำแหน่ง(?:งาน)?\s*[:：])/u.test(work)) {
+    return [];
+  }
   if (/ไม่มีประสบการณ์/u.test(work) && !/(?:ข้อมูลบริษัท|(?<!ข้อมูล)บริษัท|ตำแหน่ง)/u.test(work)) {
     return [parseOneWorkChunk(work)].filter(Boolean);
   }
@@ -349,6 +411,7 @@ export function parseWorkEntriesFromText(workText) {
   // Dedupe identical company+position pairs while keeping order.
   const seen = new Set();
   return rows.filter((row) => {
+    if (isJunkWorkRow(row)) return false;
     const key = `${row.company}|${row.position}|${row.year}|${row.period}`;
     if (seen.has(key)) return false;
     seen.add(key);
@@ -402,6 +465,8 @@ function extractEducationPreviewNew($) {
 
 /** preview_new layout work: .skills / .experience timeline (h2 = year). */
 function extractWorkPreviewNew($) {
+  // preview_new timeline blocks under .experience / .work-experience
+
   const out = [];
   $('.skills .timeline-2 .content-2, .experience .timeline-2 .content-2, .work-experience .timeline-2 .content-2').each((_, block) => {
     const item = {
@@ -414,7 +479,7 @@ function extractWorkPreviewNew($) {
       responsibilities: readFieldIn($, block, ['รายละเอียดงาน'], true),
     };
     // Year alone is not useful on the desk — it rendered as "—" and blocked text repair.
-    if (item.company || item.position) out.push(item);
+    if ((item.company || item.position) && !isJunkWorkRow(item)) out.push(item);
   });
   return out;
 }
@@ -484,7 +549,7 @@ export function isResumeProfileThin(parsed = {}) {
  * Safe to re-run on existing candidates — never overwrites a non-empty value.
  */
 export function fillMissingFromRawText(record, rawText) {
-  const text = clean(rawText);
+  const text = stripJobbkkSiteChrome(rawText);
   if (!record || !text) return record || emptyRecord();
 
   const STOP = '(?=\\s*(?:ตำแหน่ง|พื้นที่ที่ต้องการ|เงินเดือน(?:ที่ต้องการ)?|ระยะเวลาเริ่มงาน|งานที่ต้องการ|ประวัติการศึกษา|ประวัติการทำงาน|เพศ|สถานภาพ|ส่วนสูง|น้ำหนัก|สัญชาติ|ศาสนา|Hard Skills|Soft Skills)|$)';
@@ -541,13 +606,22 @@ export function fillMissingFromRawText(record, rawText) {
       if (rows.length) record.education = rows;
     }
   }
+  // Drop site-chrome rows that already leaked into structured work.
+  if (Array.isArray(record.work_experience) && record.work_experience.length) {
+    record.work_experience = record.work_experience.filter((row) => !isJunkWorkRow(row));
+  }
+  if (isJobbkkSiteChromeText(record.experience_summary)) {
+    record.experience_summary = '';
+  }
+
   if (!hasUsefulWorkExperience(record.work_experience)) {
-    const work = clean(record.experience_summary)
+    const workRaw = clean(record.experience_summary)
       || firstMatch(text, [
         /ประวัติการทำงาน(?:\/ฝึกงาน)?\s*([\s\S]*?)(?=ข้อมูลการฝึกอบรม|ทักษะความรู้|Hard Skills|Soft Skills|$)/u,
         /ประวัติการทำงาน(?:\/ฝึกงาน)?\s*([\s\S]*?)(?=ทักษะ|Hard Skills|Soft Skills|$)/u,
       ]);
-    if (work && work.length >= 4) {
+    const work = stripJobbkkSiteChrome(workRaw);
+    if (work && work.length >= 4 && !isJobbkkSiteChromeText(work)) {
       if (!clean(record.experience_summary)) record.experience_summary = work;
       const rows = parseWorkEntriesFromText(work);
       if (rows.length) record.work_experience = rows;
@@ -714,6 +788,11 @@ export function finalizeCandidateRecord(record = {}) {
   if (!Array.isArray(next.hard_skills)) next.hard_skills = [];
   if (!Array.isArray(next.soft_skills)) next.soft_skills = [];
   if (!Array.isArray(next.language_skills)) next.language_skills = [];
+  next.raw_text = stripJobbkkSiteChrome(next.raw_text || '');
+  if (Array.isArray(next.work_experience)) {
+    next.work_experience = next.work_experience.filter((row) => !isJunkWorkRow(row));
+  }
+  if (isJobbkkSiteChromeText(next.experience_summary)) next.experience_summary = '';
   fillMissingFromRawText(next, next.raw_text || '');
   next.parse_status = parseStatus(next, next.raw_text || '');
   return next;
