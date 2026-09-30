@@ -1,7 +1,9 @@
 /**
- * Repair incomplete candidate rows from stored source raw_text.
- * Never invents values — only fills blank fields already present in text.
+ * Repair incomplete candidate rows from stored source raw_text + OCR.
+ * Never invents values — only fills blank fields already present in text,
+ * contact tokens in OCR, or an explicit Thai/English name prefix.
  */
+import { contactsFromText } from './contacts.js';
 import {
   finalizeCandidateRecord,
   hasUsefulEducation,
@@ -156,6 +158,45 @@ function remainingGaps(row, parsed) {
   return gaps;
 }
 
+/** Gender from an explicit name prefix already stored on the row (not invented). */
+export function genderFromPrefix(prefix, fullName = '') {
+  // Thai letters are non-word chars in JS, so avoid \\b — match start of prefix/name.
+  const sources = [String(prefix || '').trim(), String(fullName || '').trim()].filter(Boolean);
+  for (const source of sources) {
+    if (/^(นางสาว|น\.ส\.?|ด\.ญ\.|ดญ\.|Mrs\.?|Miss\.?|Ms\.?)/i.test(source)) return 'หญิง';
+    if (/^นาง(?!สาว)/.test(source)) return 'หญิง';
+    if (/^(นาย|ด\.ช\.|ดช\.|Mr\.?)/i.test(source)) return 'ชาย';
+  }
+  return '';
+}
+
+/** Extra OCR/contact fills that the JobBKK label parser may miss. */
+function applyOcrAndPrefixFills(parsed, row, combinedText) {
+  const contacts = contactsFromText(combinedText);
+  if (blank(parsed.phone) && contacts.phone) parsed.phone = contacts.phone;
+  if (blank(parsed.email) && contacts.email) parsed.email = contacts.email;
+  if (blank(parsed.line_id) && contacts.line_id) parsed.line_id = contacts.line_id;
+
+  if (blank(parsed.gender)) {
+    const fromLabel = String(combinedText).match(/เพศ\s*[:：]?\s*(ชาย|หญิง)/u)?.[1]
+      || String(combinedText).match(/\bGender\s*[:：]?\s*(Male|Female)\b/i)?.[1]
+      || '';
+    if (/^male$/i.test(fromLabel)) parsed.gender = 'ชาย';
+    else if (/^female$/i.test(fromLabel)) parsed.gender = 'หญิง';
+    else if (fromLabel) parsed.gender = fromLabel;
+  }
+  if (blank(parsed.gender)) {
+    parsed.gender = genderFromPrefix(row.prefix || parsed.prefix, row.full_name || parsed.name);
+  }
+
+  if (blank(parsed.expected_salary)) {
+    const salary = String(combinedText).match(
+      /(?:เงินเดือน(?:ที่ต้องการ)?|Expected\s*Salary|Salary)\s*[:：]?\s*([\d,][\d,\s-]*\d)/iu,
+    )?.[1];
+    if (salary) parsed.expected_salary = salary.replace(/\s+/g, '');
+  }
+}
+
 /**
  * @param {{ query: Function, withTransaction: Function }} db
  * @param {{ dryRun?: boolean, limit?: number, onProgress?: Function }} [opts]
@@ -171,6 +212,8 @@ export async function repairIncompleteCandidates(db, opts = {}) {
   let filledFields = 0;
   let failed = 0;
   let unrepaired = 0;
+  let withOcr = 0;
+  let ocrChars = 0;
   const sample = [];
   const errors = [];
   const gapCounts = {};
@@ -181,7 +224,12 @@ export async function repairIncompleteCandidates(db, opts = {}) {
     const before = Object.fromEntries(REPAIR_TEXT_FIELDS.map((key) => [key, row[key]]));
     const beforeUsefulWork = hasUsefulWorkExperience(row.work_experience);
     const beforeUsefulEdu = hasUsefulEducation(row.education);
-    const combinedText = [row.source_raw_text || row.raw_text || '', row.ocr_text || '']
+    const ocrPart = String(row.ocr_text || '').trim();
+    if (ocrPart.length > 20) {
+      withOcr += 1;
+      ocrChars += ocrPart.length;
+    }
+    const combinedText = [row.source_raw_text || row.raw_text || '', ocrPart]
       .map((part) => String(part || '').trim())
       .filter(Boolean)
       .join('\n');
@@ -196,6 +244,7 @@ export async function repairIncompleteCandidates(db, opts = {}) {
       raw_text: combinedText,
     });
     if (!parsed.name && row.full_name) parsed.name = row.full_name;
+    applyOcrAndPrefixFills(parsed, row, combinedText);
 
     const changed = [];
     for (const key of REPAIR_TEXT_FIELDS) {
@@ -256,6 +305,8 @@ export async function repairIncompleteCandidates(db, opts = {}) {
     unrepaired,
     failed,
     filledFields,
+    withOcr,
+    ocrChars,
     sample,
     errors,
     unrepairedGapCounts: gapCounts,
