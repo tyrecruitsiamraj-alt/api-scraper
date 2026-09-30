@@ -3,8 +3,9 @@ import assert from 'node:assert/strict';
 import { evaluateWorkflowReadiness } from '../src/core/workflow-readiness.js';
 
 const readyInput = {
+  modules: { scraping: true, autopost: true, contentGeneration: false },
   workers: [
-    { kind: 'scraper', online: true, meta: { types: ['draft', 'measure'], image_generation: { configured: true, model: 'gpt-image-2' } } },
+    { kind: 'scraper', online: true, meta: { types: ['scrape', 'measure'], content_pipeline: 'evidence-v1' } },
     { kind: 'autopost', online: true, meta: { capabilities: ['post', 'preflight'] } },
   ],
   facebookAccounts: [{ group_count: 3, preflight_verified: true }],
@@ -17,10 +18,30 @@ const readyInput = {
   lastSelftest: { status: 'done', finished_at: '2026-08-04T08:00:00.000Z' },
 };
 
+const contentReadyInput = {
+  ...readyInput,
+  modules: { scraping: true, autopost: true, contentGeneration: true },
+  workers: [
+    { kind: 'scraper', online: true, meta: { types: ['draft', 'measure'], image_generation: { configured: true, model: 'gpt-image-2' } } },
+    readyInput.workers[1],
+  ],
+};
+
 test('พร้อมครบทุก dependency ได้สถานะ ready', () => {
   const result = evaluateWorkflowReadiness(readyInput);
   assert.equal(result.status, 'ready');
   assert.equal(result.score, 100);
+  assert.match(result.summary, /ค้นหาผู้สมัครและโพสต์ Facebook/);
+  assert.equal(result.checks.some((x) => x.code === 'content_worker'), false);
+});
+
+test('ปิด Content แล้วไม่มีเครื่องสร้างประกาศก็ยังพร้อมได้', () => {
+  const result = evaluateWorkflowReadiness({
+    ...readyInput,
+    workers: [readyInput.workers[1]],
+  });
+  assert.equal(result.checks.find((x) => x.code === 'content_scope')?.status, 'pass');
+  assert.equal(result.checks.find((x) => x.code === 'post_worker')?.status, 'pass');
 });
 
 test('Facebook ล้มเหลวติดต่อกันถูกบล็อกแม้ worker online', () => {
@@ -79,18 +100,18 @@ test('รอบทดลองที่ล้มแล้ว retry สำเร�
   assert.match(result.checks.find((x) => x.code === 'recent_errors')?.message ?? '', /แก้สำเร็จแล้ว 3 งาน/);
 });
 
-test('worker สร้างประกาศออฟไลน์ถูกบล็อก', () => {
-  const result = evaluateWorkflowReadiness({ ...readyInput, workers: readyInput.workers.slice(1) });
+test('เมื่อเปิด Content แล้ว worker สร้างประกาศออฟไลน์ถูกบล็อก', () => {
+  const result = evaluateWorkflowReadiness({ ...contentReadyInput, workers: contentReadyInput.workers.slice(1) });
   assert.equal(result.status, 'blocked');
   assert.equal(result.checks.find((x) => x.code === 'content_worker')?.status, 'fail');
 });
 
-test('worker รุ่นเก่าที่ไม่มี Golden Flow capability ถูกบล็อก ไม่ใช่เพียง warning', () => {
+test('เมื่อเปิด Content แล้ว worker รุ่นเก่าที่ไม่มี Golden Flow capability ถูกบล็อก ไม่ใช่เพียง warning', () => {
   const result = evaluateWorkflowReadiness({
-    ...readyInput,
+    ...contentReadyInput,
     workers: [
       { kind: 'scraper', online: true, meta: { types: ['scrape', 'draft', 'measure', 'selftest'] } },
-      readyInput.workers[1],
+      contentReadyInput.workers[1],
     ],
   });
   assert.equal(result.status, 'blocked');
@@ -99,9 +120,9 @@ test('worker รุ่นเก่าที่ไม่มี Golden Flow capabi
 
 test('worker คนละ commit กับ Production ถูกบล็อกแม้ capability ครบ', () => {
   const result = evaluateWorkflowReadiness({
-    ...readyInput,
+    ...contentReadyInput,
     requiredBuildSha: 'new-build',
-    workers: readyInput.workers.map((worker) => ({ ...worker, meta: { ...worker.meta, build_sha: 'old-build' } })),
+    workers: contentReadyInput.workers.map((worker) => ({ ...worker, meta: { ...worker.meta, build_sha: 'old-build' } })),
   });
   assert.equal(result.status, 'blocked');
   assert.equal(result.checks.find((x) => x.code === 'content_worker')?.status, 'fail');

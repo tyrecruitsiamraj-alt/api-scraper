@@ -1,0 +1,13 @@
+# ขอบเขตผลิตภัณฑ์: Scrap + Autopost เท่านั้น
+
+ระบบ live นี้ทำเฉพาะ:
+
+1. **ค้นหาผู้สมัคร (Scrap)** — JobBKK/JobThai ตาม playbook
+2. **โพสต์ Facebook (Autopost)** — คิวโพสต์ บัญชี กลุ่ม ติดตามผล
+
+**ห้าม** รับงาน สร้าง แก้ หรือขยายเส้นทาง **สร้างประกาศ / Content AI** (ร่างโปสเตอร์ Caption จากใบขอ) อีก
+
+- คำขอ So Recruit ประเภท `content` = ปฏิเสธ / บอกว่าไม่รับแล้ว
+- งานศูนย์งานโฟกัส Scrap; Autopost ใช้หน้า `/autopost`
+- ความพร้อมระบบ (readiness) ห้ามหักคะแนนเพราะไม่มีเครื่องสร้าง Content
+- แหล่งความจริงของสCope: `src/core/product-scope.js`

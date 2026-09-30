@@ -3,13 +3,24 @@
  * No network and no database access here, so the same policy is testable.
  */
 
+import { PRODUCT_MODULES } from './product-scope.js';
+
 function item(code, label, status, message) {
   return { code, label, status, message };
+}
+
+function resolveModules(input = {}) {
+  return {
+    scraping: input.modules?.scraping ?? PRODUCT_MODULES.scraping,
+    autopost: input.modules?.autopost ?? PRODUCT_MODULES.autopost,
+    contentGeneration: input.modules?.contentGeneration ?? PRODUCT_MODULES.contentGeneration,
+  };
 }
 
 /**
  * @param {{
  *  requiredBuildSha?: string,
+ *  modules?: { scraping?: boolean, autopost?: boolean, contentGeneration?: boolean },
  *  workers?: Array<{kind?:string, online?:boolean, meta?:Record<string,any>|null}>,
  *  facebookAccounts?: Array<{group_count?:number,preflight_verified?:boolean}>,
  *  queue?: {queued?:number, oldest_queued_minutes?:number|null, stale_running?:number, stalled_progress?:number, errors_24h?:number, resolved_errors_24h?:number},
@@ -22,6 +33,7 @@ function item(code, label, status, message) {
  * }} input
  */
 export function evaluateWorkflowReadiness(input = {}) {
+  const modules = resolveModules(input);
   const requiredBuildSha = String(input.requiredBuildSha || '').trim();
   const workers = (input.workers ?? []).filter((worker) => (
     !requiredBuildSha || String(worker.meta?.build_sha || '') === requiredBuildSha
@@ -31,97 +43,107 @@ export function evaluateWorkflowReadiness(input = {}) {
   const postQueue = input.postQueue ?? {};
   const checks = [];
 
-  const contentWorker = workers.some((worker) => {
-    if (!worker.online) return false;
-    const types = Array.isArray(worker.meta?.types) ? worker.meta.types : [];
-    return types.includes('draft') || worker.kind === 'scraper' || worker.kind === 'orchestrator';
-  });
-  checks.push(contentWorker
-    ? item('content_worker', 'เครื่องสร้างประกาศ', 'pass', 'พร้อมรับงานสร้างประกาศ')
-    : item('content_worker', 'เครื่องสร้างประกาศ', 'fail', 'ยังไม่มีเครื่องออนไลน์ งานสร้างประกาศใหม่จะรอ'));
-  const contentCapability = workers.find((worker) => {
-    if (!worker.online) return false;
-    const types = Array.isArray(worker.meta?.types) ? worker.meta.types : [];
-    return types.includes('draft');
-  })?.meta?.image_generation;
-  if (contentCapability && !contentCapability.configured) {
-    checks.push(item('image_provider', 'สิทธิ์สร้างรูป AI', 'fail', 'เครื่องสร้าง Content ยังไม่มี OPENAI_API_KEY จึงสร้างรูปตามตำแหน่งไม่ได้'));
-  } else if (contentCapability?.configured) {
-    checks.push(item('image_provider', 'สิทธิ์สร้างรูป AI', 'pass', `พร้อมสร้างรูปด้วย ${contentCapability.model || contentCapability.provider}`));
+  if (modules.contentGeneration) {
+    const contentWorker = workers.some((worker) => {
+      if (!worker.online) return false;
+      const types = Array.isArray(worker.meta?.types) ? worker.meta.types : [];
+      return types.includes('draft') || worker.kind === 'scraper' || worker.kind === 'orchestrator';
+    });
+    checks.push(contentWorker
+      ? item('content_worker', 'เครื่องสร้างประกาศ', 'pass', 'พร้อมรับงานสร้างประกาศ')
+      : item('content_worker', 'เครื่องสร้างประกาศ', 'fail', 'ยังไม่มีเครื่องออนไลน์ งานสร้างประกาศใหม่จะรอ'));
+    const contentCapability = workers.find((worker) => {
+      if (!worker.online) return false;
+      const types = Array.isArray(worker.meta?.types) ? worker.meta.types : [];
+      return types.includes('draft');
+    })?.meta?.image_generation;
+    if (contentCapability && !contentCapability.configured) {
+      checks.push(item('image_provider', 'สิทธิ์สร้างรูป AI', 'fail', 'เครื่องสร้าง Content ยังไม่มี OPENAI_API_KEY จึงสร้างรูปตามตำแหน่งไม่ได้'));
+    } else if (contentCapability?.configured) {
+      checks.push(item('image_provider', 'สิทธิ์สร้างรูป AI', 'pass', `พร้อมสร้างรูปด้วย ${contentCapability.model || contentCapability.provider}`));
+    } else {
+      // Missing provenance means this is an old worker. Treat it as unavailable,
+      // not degraded: it lacks the search timeout/content-image contracts required
+      // by the Golden Flow and can otherwise keep a task alive forever.
+      checks.push(item('image_provider', 'สิทธิ์สร้างรูป AI', 'fail', 'Worker รุ่นเดิมยังไม่รายงานความพร้อมของรูปและ Golden Flow กรุณารีเฟรช Worker ก่อนรับงานใหม่'));
+    }
   } else {
-    // Missing provenance means this is an old worker. Treat it as unavailable,
-    // not degraded: it lacks the search timeout/content-image contracts required
-    // by the Golden Flow and can otherwise keep a task alive forever.
-    checks.push(item('image_provider', 'สิทธิ์สร้างรูป AI', 'fail', 'Worker รุ่นเดิมยังไม่รายงานความพร้อมของรูปและ Golden Flow กรุณารีเฟรช Worker ก่อนรับงานใหม่'));
+    checks.push(item('content_scope', 'ขอบเขตงานสร้างประกาศ', 'pass', 'ระบบนี้ปิดงานสร้างประกาศแล้ว — ไม่ต้องมีเครื่อง Content'));
   }
 
-  const postWorker = workers.some((worker) => (
-    worker.online
-    && worker.kind === 'autopost'
-    && Array.isArray(worker.meta?.capabilities)
-    && worker.meta.capabilities.includes('post')
-  ));
-  checks.push(postWorker
-    ? item('post_worker', 'เครื่องเผยแพร่ Facebook', 'pass', 'พร้อมรับงานเผยแพร่')
-    : item('post_worker', 'เครื่องเผยแพร่ Facebook', 'fail', 'ยังไม่มีเครื่องเผยแพร่ Facebook ที่ประกาศ capability post'));
-  const preflightWorker = workers.some((worker) => (
-    worker.online
-    && worker.kind === 'autopost'
-    && Array.isArray(worker.meta?.capabilities)
-    && worker.meta.capabilities.includes('preflight')
-  ));
-  const readyAccounts = accounts.filter((account) => Number(account.group_count || 0) > 0).length;
-  const verifiedPreflightAccounts = accounts.filter((account) => (
-    Number(account.group_count || 0) > 0 && account.preflight_verified === true
-  )).length;
-  if (!preflightWorker) {
-    const anyFacebookWorkerOnline = workers.some((worker) => worker.online && worker.kind === 'autopost');
-    checks.push(item(
-      'facebook_preflight',
-      'การทดสอบ Facebook แบบไม่โพสต์จริง',
-      'fail',
-      anyFacebookWorkerOnline
-        ? 'เครื่องเผยแพร่ Facebook ที่ออนไลน์ยังไม่ประกาศ capability preflight'
-        : 'ยังไม่มีเครื่องเผยแพร่ Facebook ออนไลน์สำหรับทดสอบ Session และกลุ่ม',
+  if (modules.autopost) {
+    const postWorker = workers.some((worker) => (
+      worker.online
+      && worker.kind === 'autopost'
+      && Array.isArray(worker.meta?.capabilities)
+      && worker.meta.capabilities.includes('post')
     ));
-  } else if (readyAccounts <= 0) {
-    checks.push(item('facebook_preflight', 'การทดสอบ Facebook แบบไม่โพสต์จริง', 'fail', 'ยังไม่มีบัญชีและกลุ่ม Facebook สำหรับทดสอบแบบไม่โพสต์จริง'));
-  } else if (verifiedPreflightAccounts <= 0) {
-    checks.push(item('facebook_preflight', 'การทดสอบ Facebook แบบไม่โพสต์จริง', 'fail', 'ยังไม่มีบัญชีที่ผ่านการตรวจ Session และกลุ่มแบบไม่โพสต์จริงภายใน 24 ชั่วโมง'));
-  } else {
-    checks.push(item('facebook_preflight', 'การทดสอบ Facebook แบบไม่โพสต์จริง', 'pass', `ผ่านการตรวจ Session และกลุ่มแบบไม่โพสต์จริง ${verifiedPreflightAccounts} บัญชี`));
+    checks.push(postWorker
+      ? item('post_worker', 'เครื่องเผยแพร่ Facebook', 'pass', 'พร้อมรับงานเผยแพร่')
+      : item('post_worker', 'เครื่องเผยแพร่ Facebook', 'fail', 'ยังไม่มีเครื่องเผยแพร่ Facebook ที่ประกาศ capability post'));
+    const preflightWorker = workers.some((worker) => (
+      worker.online
+      && worker.kind === 'autopost'
+      && Array.isArray(worker.meta?.capabilities)
+      && worker.meta.capabilities.includes('preflight')
+    ));
+    const readyAccounts = accounts.filter((account) => Number(account.group_count || 0) > 0).length;
+    const verifiedPreflightAccounts = accounts.filter((account) => (
+      Number(account.group_count || 0) > 0 && account.preflight_verified === true
+    )).length;
+    if (!preflightWorker) {
+      const anyFacebookWorkerOnline = workers.some((worker) => worker.online && worker.kind === 'autopost');
+      checks.push(item(
+        'facebook_preflight',
+        'การทดสอบ Facebook แบบไม่โพสต์จริง',
+        'fail',
+        anyFacebookWorkerOnline
+          ? 'เครื่องเผยแพร่ Facebook ที่ออนไลน์ยังไม่ประกาศ capability preflight'
+          : 'ยังไม่มีเครื่องเผยแพร่ Facebook ออนไลน์สำหรับทดสอบ Session และกลุ่ม',
+      ));
+    } else if (readyAccounts <= 0) {
+      checks.push(item('facebook_preflight', 'การทดสอบ Facebook แบบไม่โพสต์จริง', 'fail', 'ยังไม่มีบัญชีและกลุ่ม Facebook สำหรับทดสอบแบบไม่โพสต์จริง'));
+    } else if (verifiedPreflightAccounts <= 0) {
+      checks.push(item('facebook_preflight', 'การทดสอบ Facebook แบบไม่โพสต์จริง', 'fail', 'ยังไม่มีบัญชีที่ผ่านการตรวจ Session และกลุ่มแบบไม่โพสต์จริงภายใน 24 ชั่วโมง'));
+    } else {
+      checks.push(item('facebook_preflight', 'การทดสอบ Facebook แบบไม่โพสต์จริง', 'pass', `ผ่านการตรวจ Session และกลุ่มแบบไม่โพสต์จริง ${verifiedPreflightAccounts} บัญชี`));
+    }
+
+    checks.push(readyAccounts > 0
+      ? item('facebook_account', 'บัญชีและกลุ่ม Facebook', 'pass', `พร้อมใช้งาน ${readyAccounts} บัญชี`)
+      : item('facebook_account', 'บัญชีและกลุ่ม Facebook', 'fail', 'ยังไม่มีบัญชีที่ผูกกลุ่มสำหรับเผยแพร่'));
   }
 
-  checks.push(readyAccounts > 0
-    ? item('facebook_account', 'บัญชีและกลุ่ม Facebook', 'pass', `พร้อมใช้งาน ${readyAccounts} บัญชี`)
-    : item('facebook_account', 'บัญชีและกลุ่ม Facebook', 'fail', 'ยังไม่มีบัญชีที่ผูกกลุ่มสำหรับเผยแพร่'));
-
-  const contentOutput = input.contentOutput ?? {};
-  const passingWithImage = Number(contentOutput.passing_with_image || 0);
-  const verifiedGeneration = Number(contentOutput.verified_generation || 0);
-  if (verifiedGeneration > 0) {
-    checks.push(item('content_output', 'ผลลัพธ์ข้อความและรูป', 'pass', `มีร่างที่ผ่านข้อมูล มีรูปจริง และตรวจที่มาของรูปแล้ว ${verifiedGeneration} ร่าง`));
-  } else if (passingWithImage > 0) {
-    checks.push(item('content_output', 'ผลลัพธ์ข้อความและรูป', 'warning', 'มีร่างเก่าที่ผ่านและมีรูป แต่ยังไม่ได้บันทึกหลักฐานการสร้างรูปแบบใหม่ กรุณาทดสอบสร้าง Content ใหม่ 1 งาน'));
-  } else {
-    checks.push(item('content_output', 'ผลลัพธ์ข้อความและรูป', 'fail', 'ยังไม่มีร่างที่ผ่านด่านข้อเท็จจริงและมีรูปพร้อมใช้'));
+  if (modules.contentGeneration) {
+    const contentOutput = input.contentOutput ?? {};
+    const passingWithImage = Number(contentOutput.passing_with_image || 0);
+    const verifiedGeneration = Number(contentOutput.verified_generation || 0);
+    if (verifiedGeneration > 0) {
+      checks.push(item('content_output', 'ผลลัพธ์ข้อความและรูป', 'pass', `มีร่างที่ผ่านข้อมูล มีรูปจริง และตรวจที่มาของรูปแล้ว ${verifiedGeneration} ร่าง`));
+    } else if (passingWithImage > 0) {
+      checks.push(item('content_output', 'ผลลัพธ์ข้อความและรูป', 'warning', 'มีร่างเก่าที่ผ่านและมีรูป แต่ยังไม่ได้บันทึกหลักฐานการสร้างรูปแบบใหม่ กรุณาทดสอบสร้าง Content ใหม่ 1 งาน'));
+    } else {
+      checks.push(item('content_output', 'ผลลัพธ์ข้อความและรูป', 'fail', 'ยังไม่มีร่างที่ผ่านด่านข้อเท็จจริงและมีรูปพร้อมใช้'));
+    }
   }
 
-  const scrapeOutput = input.scrapeOutput ?? {};
-  const completedScrapes = Number(scrapeOutput.completed || 0);
-  const partialScrapes = Number(scrapeOutput.partial || 0);
-  const scrapeErrors = Number(scrapeOutput.error || 0);
-  if (scrapeErrors > 0) {
-    checks.push(item('scrape_output', 'ผลค้นหาผู้สมัคร', 'fail', `ระบบค้นหาขัดข้อง ${scrapeErrors} งาน ต้องตรวจและแก้ก่อนรับงานใหม่`));
-  } else if (completedScrapes <= 0) {
-    checks.push(item('scrape_output', 'ผลค้นหาผู้สมัคร', 'fail', 'ยังไม่มีงานล่าสุดที่ได้ Resume ผ่านเกณฑ์ครบจำนวนเป้าหมาย'));
-  } else if (partialScrapes > 0) {
-    // Market exhaustion is a business outcome: keep it visible, but do not
-    // mark a healthy queue/worker as degraded merely because the market did
-    // not contain enough qualified people for a particular requisition.
-    checks.push(item('scrape_output', 'ผลค้นหาผู้สมัคร', 'pass', `ระบบค้นหาทำงานปกติ: ได้ Resume ครบเป้า ${completedScrapes} งาน · ตลาดยังไม่ครบ ${partialScrapes} งาน`));
-  } else {
-    checks.push(item('scrape_output', 'ผลค้นหาผู้สมัคร', 'pass', `งานค้นหาล่าสุดได้ Resume ครบเป้าหมาย ${completedScrapes} งาน`));
+  if (modules.scraping) {
+    const scrapeOutput = input.scrapeOutput ?? {};
+    const completedScrapes = Number(scrapeOutput.completed || 0);
+    const partialScrapes = Number(scrapeOutput.partial || 0);
+    const scrapeErrors = Number(scrapeOutput.error || 0);
+    if (scrapeErrors > 0) {
+      checks.push(item('scrape_output', 'ผลค้นหาผู้สมัคร', 'fail', `ระบบค้นหาขัดข้อง ${scrapeErrors} งาน ต้องตรวจและแก้ก่อนรับงานใหม่`));
+    } else if (completedScrapes <= 0) {
+      checks.push(item('scrape_output', 'ผลค้นหาผู้สมัคร', 'fail', 'ยังไม่มีงานล่าสุดที่ได้ Resume ผ่านเกณฑ์ครบจำนวนเป้าหมาย'));
+    } else if (partialScrapes > 0) {
+      // Market exhaustion is a business outcome: keep it visible, but do not
+      // mark a healthy queue/worker as degraded merely because the market did
+      // not contain enough qualified people for a particular requisition.
+      checks.push(item('scrape_output', 'ผลค้นหาผู้สมัคร', 'pass', `ระบบค้นหาทำงานปกติ: ได้ Resume ครบเป้า ${completedScrapes} งาน · ตลาดยังไม่ครบ ${partialScrapes} งาน`));
+    } else {
+      checks.push(item('scrape_output', 'ผลค้นหาผู้สมัคร', 'pass', `งานค้นหาล่าสุดได้ Resume ครบเป้าหมาย ${completedScrapes} งาน`));
+    }
   }
 
   const queued = Number(queue.queued || 0);
@@ -148,8 +170,12 @@ export function evaluateWorkflowReadiness(input = {}) {
   const failed = unresolvedCoreErrors + Number(postQueue.failed_24h || 0);
   // A successful preflight proves only session/group access and must never
   // hide a streak of real publish failures.
-  const recentPostRuns = (input.recentPostRuns ?? []).filter((run) => String(run.mode || 'post') === 'post');
-  const postFailureStreak = recentPostRuns.length > 0 && recentPostRuns.every((run) => ['failed', 'cancelled'].includes(String(run.status || '')));
+  const recentPostRuns = modules.autopost
+    ? (input.recentPostRuns ?? []).filter((run) => String(run.mode || 'post') === 'post')
+    : [];
+  const postFailureStreak = modules.autopost
+    && recentPostRuns.length > 0
+    && recentPostRuns.every((run) => ['failed', 'cancelled'].includes(String(run.status || '')));
   checks.push(postFailureStreak
     ? item('recent_errors', 'งานผิดพลาดล่าสุด', 'fail', `การเผยแพร่ Facebook ล่าสุดล้มเหลวติดต่อกัน ${recentPostRuns.length} ครั้ง ห้ามรายงานว่าระบบพร้อม`)
     : failed > 0
@@ -174,10 +200,13 @@ export function evaluateWorkflowReadiness(input = {}) {
   const warnings = checks.filter((check) => check.status === 'warning');
   const score = Math.round((checks.reduce((sum, check) => sum + (check.status === 'pass' ? 1 : check.status === 'warning' ? 0.5 : 0), 0) / checks.length) * 100);
   const status = failures.length ? 'blocked' : warnings.length ? 'degraded' : 'ready';
+  const readySummary = !modules.contentGeneration && modules.scraping && modules.autopost
+    ? 'ระบบพร้อมสำหรับค้นหาผู้สมัครและโพสต์ Facebook'
+    : 'ระบบพร้อมตั้งแต่รับงานจนถึงเผยแพร่และติดตามผล';
   const summary = failures.length
     ? `ระบบยังไม่พร้อมทำงานครบเส้น: ${failures.map((check) => check.label).join(', ')}`
     : warnings.length
       ? `ระบบทำงานได้ แต่ควรตรวจเพิ่ม: ${warnings.map((check) => check.label).join(', ')}`
-      : 'ระบบพร้อมตั้งแต่รับงานจนถึงเผยแพร่และติดตามผล';
-  return { status, score, summary, checks };
+      : readySummary;
+  return { status, score, summary, checks, modules };
 }

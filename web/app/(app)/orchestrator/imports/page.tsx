@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { listConnectorOptions, listSoRecruitPostingRequests } from '@/lib/repo';
-import { startCampaignAction, startSoRecruitScrapeAction } from '@/lib/actions';
+import { rejectRequestAction, startCampaignAction, startSoRecruitScrapeAction } from '@/lib/actions';
+import { CONTENT_DISABLED_OPERATOR_MESSAGE, isContentGenerationEnabled, productScopeSummary } from '@/lib/product-scope';
 
 export const dynamic = 'force-dynamic';
 
@@ -15,6 +16,7 @@ function fmtDate(v: string | null): string {
 
 export default async function ImportsPage() {
   const [reqs, connectors] = await Promise.all([listSoRecruitPostingRequests(), listConnectorOptions()]);
+  const contentEnabled = isContentGenerationEnabled();
 
   return (
     <div className="space-y-6">
@@ -22,12 +24,17 @@ export default async function ImportsPage() {
         <Link href="/orchestrator" className="text-sm text-subtle hover:text-accent">← กลับ Dashboard</Link>
       </div>
       <div>
-        <h1 className="text-2xl font-semibold tracking-tight">คำขอสร้างประกาศและค้นหาผู้สมัครจาก So Recruit</h1>
+        <h1 className="text-2xl font-semibold tracking-tight">คำขอจาก So Recruit</h1>
         <p className="mt-1 text-sm text-subtle">
-          คำขอจากทีม Matching เมื่อผู้สมัครในคลังไม่พอ · งานประกาศจะให้ AI ช่วยร่าง ส่วนงานค้นหาต้องเลือกบัญชีก่อนเริ่ม
-          (ระบบจะแจ้งสถานะกลับ So Recruit อัตโนมัติ)
+          ขอบเขตระบบ: {productScopeSummary()}. คำขอค้นหาผู้สมัครเลือกบัญชีแล้วเริ่มได้ · คำขอสร้างประกาศ{contentEnabled ? 'ให้ AI ช่วยร่าง' : 'ไม่รับแล้ว ให้ตีกลับ'}
         </p>
       </div>
+
+      {!contentEnabled && (
+        <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-950">
+          {CONTENT_DISABLED_OPERATOR_MESSAGE}
+        </div>
+      )}
 
       {reqs.length === 0 ? (
         <div className="card px-5 py-16 text-center text-subtle">
@@ -85,10 +92,16 @@ export default async function ImportsPage() {
                           เริ่มค้นหาผู้สมัคร
                         </button>
                       </form>
-                    ) : (
+                    ) : contentEnabled ? (
                       <form action={startCampaignAction} className="inline">
                         <input type="hidden" name="requestNo" value={r.request_no} />
                         <button className="btn-primary btn-sm">เริ่มสร้างประกาศ</button>
+                      </form>
+                    ) : (
+                      <form action={rejectRequestAction} className="inline-flex items-center gap-2">
+                        <input type="hidden" name="requestNo" value={r.request_no} />
+                        <input type="hidden" name="reason" value={CONTENT_DISABLED_OPERATOR_MESSAGE} />
+                        <button className="btn-secondary btn-sm">ตีกลับ (ไม่รับสร้างประกาศ)</button>
                       </form>
                     )}
                   </td>

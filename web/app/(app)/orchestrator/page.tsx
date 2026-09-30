@@ -14,6 +14,7 @@ import { WorkerStatus } from '@/components/WorkerStatus';
 import { WorkCenter, type WorkCenterItem, type WorkCenterStage, type Step } from '@/components/WorkCenter';
 import { humanizeOperatorError, operatorJobTitle } from '@/lib/operator-copy';
 import { prefillScrapePlan } from '@/lib/scrape-intake.js';
+import { CONTENT_DISABLED_OPERATOR_MESSAGE, isContentGenerationEnabled, productScopeSummary } from '@/lib/product-scope';
 
 export const dynamic = 'force-dynamic';
 
@@ -102,6 +103,7 @@ export default async function OrchestratorPage({ searchParams }: { searchParams?
   const contentByCampaign = new Map(pending.map((content) => [content.campaign_id, content]));
   const postByCampaign = new Map(postStates.map((state) => [state.campaign_id, state]));
   const pendingAdminByCampaign = new Map(pendingAdmin.map((x) => [x.campaign_id, x.pending]));
+  const contentEnabled = isContentGenerationEnabled();
   const items: WorkCenterItem[] = [
     ...reqs.map((request): WorkCenterItem => {
       // ใบตรวจข้อมูล: ช่องไหนมี/ขาด — คนตรวจเห็นก่อนกดรับ/ตีกลับ (ขาดเยอะ = ตีกลับพร้อมบอกได้เลย)
@@ -120,16 +122,17 @@ export default async function OrchestratorPage({ searchParams }: { searchParams?
         location: request.erp_province || '',
         qty: request.erp_qty ? String(request.erp_qty) : '',
       });
+      const isDisabledContent = !contentEnabled && request.request_type === 'content';
       return {
         id: `request:${request.id}`,
         kind: request.request_type,
         stage: 'intake',
         title: operatorJobTitle({ position: requestFields.position, title: request.erp_title, requestNo: request.request_no }),
         requestNo: request.request_no,
-        detail: request.reason || request.notes,
+        detail: isDisabledContent ? CONTENT_DISABLED_OPERATOR_MESSAGE : (request.reason || request.notes),
         requester: request.requested_by_name,
         connector: null,
-        statusLabel: 'รออนุมัติรับงาน',
+        statusLabel: isDisabledContent ? 'ไม่รับงานสร้างประกาศ' : 'รออนุมัติรับงาน',
         createdAt: request.created_at,
         href: '/orchestrator/imports',
         context: requestFields.location || request.requested_by_name,
@@ -138,7 +141,10 @@ export default async function OrchestratorPage({ searchParams }: { searchParams?
         requestFields,
       };
     }),
-    ...campaigns.map((campaign): WorkCenterItem => {
+    ...(contentEnabled
+      ? campaigns
+      : campaigns.filter((campaign) => ['approved', 'posting', 'measuring', 'done'].includes(campaign.status)))
+      .map((campaign): WorkCenterItem => {
       const content = contentByCampaign.get(campaign.id);
       const post = postByCampaign.get(campaign.id);
       const postFailed = post?.status === 'failed' || post?.status === 'cancelled';
@@ -166,7 +172,7 @@ export default async function OrchestratorPage({ searchParams }: { searchParams?
         connector: null,
         statusLabel,
         createdAt: campaign.created_at,
-        href: `/orchestrator/${campaign.id}`,
+        href: contentEnabled ? `/orchestrator/${campaign.id}` : '/autopost',
         context: campaign.province || campaign.created_by,
         content: content ? {
           id: content.id,
@@ -180,7 +186,7 @@ export default async function OrchestratorPage({ searchParams }: { searchParams?
         campaignId: campaign.id,
         nextAction: postFailed
           ? 'retry_post'
-          : campaign.status === 'draft_error' || (campaign.status === 'new' && !!campaign.status_note)
+          : contentEnabled && (campaign.status === 'draft_error' || (campaign.status === 'new' && !!campaign.status_note))
             ? 'retry_draft'
             : canMeasure
               ? 'measure'
@@ -231,10 +237,16 @@ export default async function OrchestratorPage({ searchParams }: { searchParams?
     <div className="space-y-4">
       <AutoRefresh seconds={8} />
       {typeof searchParams?.notice === 'string' && <div role="status" className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">{searchParams.notice}</div>}
+      {!contentEnabled && (
+        <div className="rounded-xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-950">
+          ขอบเขตระบบตอนนี้: <b>{productScopeSummary()}</b> — ไม่รับงานสร้างประกาศใหม่ ใช้ศูนย์งานสำหรับค้นหาผู้สมัคร และหน้าโพสต์ Facebook สำหรับ Autopost
+        </div>
+      )}
       <details className="rounded-2xl border border-line bg-white px-4 py-3">
         <summary className="cursor-pointer text-sm font-medium text-ink">สถานะเครื่องและการตรวจระบบ <span className="font-normal text-subtle">(สำหรับผู้ดูแล)</span></summary>
         <div className="mt-3"><WorkerStatus /></div>
       </details>
+      {contentEnabled && (
       <details className="rounded-2xl border border-violet-200 bg-violet-50 p-4 text-violet-950">
         <summary className="cursor-pointer font-semibold">สมองเรียนรู้การสร้าง Content <span className="font-normal text-sm text-violet-800">— ดูเมื่ออยากตรวจหลักฐานการเรียนรู้</span></summary>
         <div className="flex flex-wrap items-center justify-between gap-3">
@@ -252,6 +264,7 @@ export default async function OrchestratorPage({ searchParams }: { searchParams?
           </div>
         </div>
       </details>
+      )}
       <WorkCenter
         items={items}
         connectors={connectors.map((connector) => ({ id: connector.id, label: `${connector.platform === 'jobthai' ? 'JobThai' : connector.platform === 'jobbkk' ? 'JobBKK' : connector.platform} · ${connector.label}`, available: connector.available, blockReason: connector.block_reason }))}

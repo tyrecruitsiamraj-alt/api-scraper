@@ -15,6 +15,7 @@ import {
   startSoRecruitScrapeAction,
 } from '@/lib/actions';
 import { EDUCATION_LEVELS, GENDERS, PROVINCES, SALARY_LABELS, SALARY_STEPS } from '@/lib/filter-options';
+import { CONTENT_DISABLED_OPERATOR_MESSAGE, isContentGenerationEnabled } from '@/lib/product-scope';
 
 export type WorkCenterStage = 'intake' | 'working' | 'review' | 'completed' | 'attention';
 
@@ -312,6 +313,21 @@ function WorkAction({ item, connectors, facebookAccounts }: {
       </form>
     );
     if (item.kind === 'content') {
+      if (!isContentGenerationEnabled()) {
+        return (
+          <div className="w-full space-y-3">
+            <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+              {CONTENT_DISABLED_OPERATOR_MESSAGE}
+            </div>
+            <form action={rejectRequestAction} className="flex flex-wrap items-end gap-2">
+              <input type="hidden" name="requestNo" value={item.requestNo ?? ''} />
+              <input type="hidden" name="reason" value={CONTENT_DISABLED_OPERATOR_MESSAGE} />
+              <button className="btn-secondary">ตีกลับคำขอสร้างประกาศ</button>
+              <Link href="/autopost" className="btn-ghost btn-sm">ไปหน้าโพสต์ Facebook</Link>
+            </form>
+          </div>
+        );
+      }
       // ช่องแก้ไขใน RequestFieldsEditor ผูกกับ form นี้ผ่าน form= attribute
       const formId = `approve-req-${item.id}`;
       return (

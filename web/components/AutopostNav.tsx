@@ -6,7 +6,7 @@ import { usePathname } from 'next/navigation';
 // แท็บย่อยใต้ "โพสต์ & ผลลัพธ์" — แยกงานที่กำลังทำ (ภาพรวม/คิว) ออกจากผลที่เก็บเกี่ยวได้ (leads)
 const ITEMS = [
   { href: '/autopost', label: 'ภาพรวมการโพสต์', detail: 'งานที่รอ · สถานะระบบ · จำนวนที่โพสต์ได้' },
-  { href: '/autopost/example', label: 'ตัวอย่าง Content', detail: 'ภาพ · Caption · ลองแก้ข้อความ' },
+  { href: '/autopost/example', label: 'ตัวอย่างประกาศ', detail: 'ภาพ · Caption · ลองแก้ข้อความ' },
   { href: '/autopost/results', label: 'ผลลัพธ์และผู้สนใจ', detail: 'เบอร์ผู้สนใจที่เก็บได้ · โพสต์ที่ได้ผล' },
   { href: '/autopost/report', label: 'รายงานสัปดาห์', detail: 'สรุปผลรายสัปดาห์ · ส่งหัวหน้า' },
 ];

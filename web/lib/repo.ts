@@ -5,6 +5,7 @@ import { evaluateContentQuality, operatorFacingQuality, qualityFailureMessages }
 import type { ContentQualityResult } from '../../src/core/content-quality.js';
 import { evaluateWorkflowReadiness } from '../../src/core/workflow-readiness.js';
 import type { WorkflowReadiness } from '../../src/core/workflow-readiness.js';
+import { CONTENT_DISABLED_OPERATOR_MESSAGE, isContentGenerationEnabled, PRODUCT_MODULES } from './product-scope';
 import { renderPoster } from '../../src/core/poster.js';
 import { applyTrustedPosterFacts } from '../../src/core/campaign-facts.js';
 import { normalizePosterLayout, normalizePosterStandard, posterFieldsForQuality, posterStandardFromFields, POSTER_TEMPLATE_ID, POSTER_TEMPLATE_VERSION, withPosterTemplate, buildPosterSvg } from '../../src/core/poster-template.js';
@@ -2031,6 +2032,9 @@ export async function createCampaignFromRequest(
   createdBy: string | null,
   overrides?: IntakeOverrides,
 ) {
+  if (!isContentGenerationEnabled()) {
+    throw new Error(CONTENT_DISABLED_OPERATOR_MESSAGE);
+  }
   const ov = cleanOverrides(overrides);
   const st = await q<StagedRequest>(`SELECT * FROM erp_open_requests WHERE request_no = $1`, [requestNo]);
 
@@ -2854,6 +2858,17 @@ export async function refreshContentQuality(id: string): Promise<ContentQualityR
  * 'orchestrator:<id>' ล็อกต่อ campaign กันคิดซ้ำซ้อน; ข้ามถ้ามี draft job ค้างอยู่แล้ว.
  */
 export async function enqueueDraftForCampaign(campaignId: string, ownerUser: string | null = null) {
+  if (!isContentGenerationEnabled()) {
+    await q(
+      `UPDATE recruit_campaigns
+          SET status='needs_input',
+              status_note=$2,
+              updated_at=now()
+        WHERE id=$1`,
+      [campaignId, CONTENT_DISABLED_OPERATOR_MESSAGE],
+    );
+    return false;
+  }
   const workers = await q<{ name: string }>(
     `SELECT name FROM workers
       WHERE last_seen > now() - interval '2 minutes'
@@ -3427,6 +3442,15 @@ export async function getCampaignAutopostProgress(campaignId: string): Promise<C
  * ป้องกัน action ถูกเรียกตรงหรือกดซ้อน แม้หน้า UI จะเก่าอยู่.
  */
 export async function beginCampaignDraftRetry(campaignId: string, ownerUser: string | null): Promise<boolean> {
+  if (!isContentGenerationEnabled()) {
+    await q(
+      `UPDATE recruit_campaigns
+          SET status='needs_input', status_note=$2, updated_at=now()
+        WHERE id=$1`,
+      [campaignId, CONTENT_DISABLED_OPERATOR_MESSAGE],
+    );
+    return false;
+  }
   const client = await pool().connect();
   try {
     await client.query('BEGIN');
@@ -3829,7 +3853,19 @@ export async function getWorkflowReadiness(): Promise<WorkflowReadinessSnapshot>
     ).catch(() => []),
   ]);
   return {
-    ...evaluateWorkflowReadiness({ requiredBuildSha: REQUIRED_WORKER_BUILD_SHA, workers, facebookAccounts, queue, postQueue, inconsistentCampaigns: inconsistent, lastSelftest: selftest, contentOutput, scrapeOutput, recentPostRuns }),
+    ...evaluateWorkflowReadiness({
+      requiredBuildSha: REQUIRED_WORKER_BUILD_SHA,
+      modules: PRODUCT_MODULES,
+      workers,
+      facebookAccounts,
+      queue,
+      postQueue,
+      inconsistentCampaigns: inconsistent,
+      lastSelftest: selftest,
+      contentOutput,
+      scrapeOutput,
+      recentPostRuns,
+    }),
     workers,
   };
 }

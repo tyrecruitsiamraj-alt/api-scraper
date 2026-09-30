@@ -6,6 +6,7 @@ import { getServerSession } from 'next-auth';
 import { authOptions } from './auth';
 import { encryptSecret } from './crypto';
 import { kickWorker } from './worker-kick';
+import { CONTENT_DISABLED_OPERATOR_MESSAGE, isContentGenerationEnabled } from './product-scope';
 import { normalizePosterExtras, normalizePosterLayout } from '../../src/core/poster-template.js';
 import type { PosterExtra, PosterLayout } from '../../src/core/poster-template.js';
 import {
@@ -390,6 +391,9 @@ function readIntakeOverrides(formData: FormData) {
 export async function startCampaignAction(formData: FormData) {
   const session = await getServerSession(authOptions);
   if (!session) throw new Error('unauthorized');
+  if (!isContentGenerationEnabled()) {
+    redirect(`/orchestrator?notice=${encodeURIComponent(CONTENT_DISABLED_OPERATOR_MESSAGE)}`);
+  }
   const requestNo = String(formData.get('requestNo') ?? '').trim();
   if (requestNo) {
     const owner = session.user?.email ?? session.user?.name ?? null;
@@ -537,6 +541,9 @@ export async function retryCampaignDraftAction(formData: FormData) {
   const session = await getServerSession(authOptions);
   if (!session) throw new Error('unauthorized');
   const campaignId = String(formData.get('campaignId') ?? '').trim();
+  if (!isContentGenerationEnabled()) {
+    redirect(`/orchestrator${campaignId ? `/${campaignId}` : ''}?contentError=${encodeURIComponent(CONTENT_DISABLED_OPERATOR_MESSAGE)}`);
+  }
   if (!campaignId) throw new Error('ไม่พบ campaign');
   const started = await beginCampaignDraftRetry(campaignId, session.user?.email ?? session.user?.name ?? null);
   if (started) kickWorker();
