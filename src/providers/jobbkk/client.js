@@ -249,7 +249,18 @@ function resumeSectionsPainted() {
   return ready;
 }
 
-/** True when the painted page has more than a name shell — contact/gender + education or work. */
+/** Both education AND work must be present — OR was how blank work rows slipped through. */
+function resumeEduWorkPainted() {
+  const body = (document.body?.innerText || '').replace(/\s+/g, ' ').trim();
+  if (body.length < 80) return false;
+  const hasEdu = /ประวัติการศึกษา/.test(body)
+    && /(?:วุฒิ|มหาวิทยาลัย|วิทยาลัย|ปวช|ปวส|มัธยม|ปริญญา|โรงเรียน)/.test(body);
+  const hasWork = /ประวัติการทำงาน/.test(body)
+    && /(?:ตำแหน่ง|บริษัท|ไม่มีประสบการณ์)/.test(body);
+  return hasEdu && hasWork;
+}
+
+/** True when the painted page has name + gender/age + education + work (+ place). */
 function resumeDetailComplete() {
   const body = (document.body?.innerText || '').replace(/\s+/g, ' ').trim();
   if (body.length < 80) return false;
@@ -257,11 +268,9 @@ function resumeDetailComplete() {
     !!(document.querySelector('h3.jobseeker-name')?.textContent?.trim())
     || !!(document.querySelector('.rsm-name span')?.textContent?.trim());
   if (!hasName) return false;
-  const hasContact = /(?:เบอร์โทร|อีเมล|Email)\s*[:：]?/.test(body) || /0\d[\d\-]{7,}\d/.test(body) || /@/.test(body);
   const hasGenderOrAge = /เพศ\s*[:：]?\s*(?:ชาย|หญิง)/.test(body) || /อายุ\s*[:：]?\s*\d{1,2}/.test(body);
-  const hasEdu = /ประวัติการศึกษา/.test(body) && /(?:วุฒิ|มหาวิทยาลัย|วิทยาลัย|ปวช|ปวส|มัธยม|ปริญญา)/.test(body);
-  const hasWork = /ประวัติการทำงาน/.test(body) && /(?:ตำแหน่ง|บริษัท|ไม่มีประสบการณ์)/.test(body);
-  return (hasContact || hasGenderOrAge) && (hasEdu || hasWork);
+  const hasPlace = /ที่อยู่ปัจจุบัน|พื้นที่ที่ต้องการทำงาน/.test(body);
+  return hasGenderOrAge && hasPlace && resumeEduWorkPainted();
 }
 
 async function settleResumePage(page) {
@@ -273,32 +282,31 @@ async function settleResumePage(page) {
   await page.waitForLoadState('networkidle', { timeout: 5_000 }).catch(() => {});
   const masked = await page.locator('.ownerNoLogin').count().then((n) => n > 0).catch(() => false);
 
-  // Masked contact only hides phone/email — education/work still paint after scroll.
-  // Returning early here left rows with blank ประวัติการศึกษา/การทำงาน.
+  // Scroll so lazy education/work timelines paint (even when contact is masked).
   await page.evaluate(async () => {
     const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
     window.scrollTo(0, document.body.scrollHeight || 2000);
-    await pause(350);
+    await pause(400);
     window.scrollTo(0, Math.floor((document.body.scrollHeight || 2000) / 2));
-    await pause(250);
+    await pause(300);
     window.scrollTo(0, 0);
-    await pause(200);
+    await pause(250);
   }).catch(() => {});
 
   await page.waitForFunction(resumeSectionsPainted, null, { timeout: 20_000, polling: 200 }).catch(() => {});
+  await page.waitForFunction(resumeEduWorkPainted, null, { timeout: 20_000, polling: 250 }).catch(() => {});
   if (!populated) {
     await sleep(500);
     return { populated, masked, complete: false };
   }
 
   const complete = await page
-    .waitForFunction(resumeDetailComplete, null, { timeout: 12_000, polling: 250 })
+    .waitForFunction(resumeDetailComplete, null, { timeout: 15_000, polling: 250 })
     .then(() => true)
     .catch(() => false);
-  // Masked pages rarely pass resumeDetailComplete (no phone) — still keep body if sections painted.
-  const bodyReady = complete || await page.evaluate(resumeSectionsPainted).catch(() => false);
-  await sleep(bodyReady ? 700 : 1200);
-  return { populated, masked, complete: bodyReady };
+  const eduWorkReady = complete || await page.evaluate(resumeEduWorkPainted).catch(() => false);
+  await sleep(eduWorkReady ? 800 : 1400);
+  return { populated, masked, complete: eduWorkReady };
 }
 
 /**
@@ -330,10 +338,10 @@ export async function fetchResumeHtml(session, id, runtime = {}) {
         // a modal/overlay, and the generic "press Escape / click .close" heuristics tear
         // it down before the data paints. A cookie banner doesn't block DOM extraction.
 
-        // Wait for name/contact, scroll to force education/work, then require a full paint.
-        // Snapshotting the shell too early is what produced blank phone/gender/education.
+        // Wait for name + education + work. Reload when body is still incomplete
+        // (including masked contact pages — mask must not skip edu/work wait).
         let settled = await settleResumePage(page);
-        if (settled.populated && !settled.masked && !settled.complete) {
+        if (settled.populated && !settled.complete) {
           await page.reload({ waitUntil: 'domcontentloaded', timeout: RESUME_GOTO_TIMEOUT_MS() }).catch(() => {});
           settled = await settleResumePage(page);
         }

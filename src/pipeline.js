@@ -3,6 +3,12 @@ import { RateLimiter } from './core/anti-ban.js';
 import { splitCriteria } from './core/candidate-match.js';
 import { classifyScrapeOutcome, lessonRowsToLogHits, rememberedPreventionLog } from './core/scrape-failure-learning.js';
 import { evaluateResumeQualification } from './core/resume-qualification.js';
+import {
+  isResumeBodyComplete,
+  isResumeDeliveryComplete,
+  resumeBodyGaps,
+  resumeContactGaps,
+} from './core/resume-completeness.js';
 import { envInt, sleep } from './config.js';
 import {
   countScrapedToday,
@@ -279,19 +285,36 @@ export async function runConnector(connector, criteria, runtime, opts = {}) {
           parsed = provider.parseResumeHtml(html, { sourceUrl: url, index: saved + 1, focusPosition: criteria.position || '-' });
         }
         if (provider.isResumeMasked?.(html)) {
-          console.warn(`  [${id}] contact masked — keep public body (education/work) as partial`);
-        }
-        // JobBKK บางครั้งวาดแค่ชื่อก่อน — เปิดใหม่ 1 ครั้งถ้าโปรไฟล์ยังบางเกินกว่าจะใช้
-        if (provider.isResumeProfileThin?.(parsed)) {
-          console.warn(`  ↻ resume ${id}: profile still thin — refetch once`);
-          await sleep(800);
-          html = await provider.fetchResumeHtml(sess, id, runtime);
-          parsed = provider.parseResumeHtml(html, { sourceUrl: url, index: saved + 1, focusPosition: criteria.position || '-' });
+          console.warn(`  [${id}] contact masked — still require education/work body`);
         }
         if (provider.finalizeCandidateRecord) {
           parsed = provider.finalizeCandidateRecord(parsed);
         }
+        // Fail-closed body completeness: refetch until name/gender/age/place/edu/work are filled.
+        const MAX_BODY_REFETCH = 2;
+        for (let attempt = 0; attempt < MAX_BODY_REFETCH && !isResumeBodyComplete(parsed); attempt += 1) {
+          const gaps = resumeBodyGaps(parsed);
+          console.warn(`  ↻ resume ${id}: incomplete body (${gaps.join(',')}) — refetch ${attempt + 1}/${MAX_BODY_REFETCH}`);
+          await sleep(900 + attempt * 400);
+          html = await provider.fetchResumeHtml(sess, id, runtime);
+          parsed = provider.parseResumeHtml(html, { sourceUrl: url, index: saved + 1, focusPosition: criteria.position || '-' });
+          if (provider.finalizeCandidateRecord) parsed = provider.finalizeCandidateRecord(parsed);
+        }
+        // Also keep the legacy thin-shell refetch once if still thin.
+        if (provider.isResumeProfileThin?.(parsed) && !isResumeBodyComplete(parsed)) {
+          console.warn(`  ↻ resume ${id}: profile still thin — final refetch`);
+          await sleep(800);
+          html = await provider.fetchResumeHtml(sess, id, runtime);
+          parsed = provider.parseResumeHtml(html, { sourceUrl: url, index: saved + 1, focusPosition: criteria.position || '-' });
+          if (provider.finalizeCandidateRecord) parsed = provider.finalizeCandidateRecord(parsed);
+        }
         opened += 1;
+        if (!isResumeBodyComplete(parsed)) {
+          const gaps = resumeBodyGaps(parsed);
+          reasonCounts.incomplete_profile = (reasonCounts.incomplete_profile || 0) + 1;
+          console.warn(`  ✗ skip incomplete resume ${id}: ${gaps.join(',')}`);
+          return; // do not upsert incomplete rows — desk must only show complete data
+        }
         const qualification = evaluateResumeQualification(parsed, {
           criteria: { ...criteria, ...localFilters },
           sourcingSpec: opts.qualificationSpec || {},
@@ -303,12 +326,23 @@ export async function runConnector(connector, criteria, runtime, opts = {}) {
           await provider.enrichContacts(sess.request, id, parsed, runtime);
           if (provider.finalizeCandidateRecord) parsed = provider.finalizeCandidateRecord(parsed);
         }
+        // Qualified delivery must also have contact; otherwise demote — never ship blank ☎.
+        let finalQualification = qualification;
+        if (qualification.status === 'qualified' && resumeContactGaps(parsed).length) {
+          finalQualification = {
+            ...qualification,
+            status: 'needs_review',
+            reasons: [...(qualification.reasons || []), 'missing_contact'],
+          };
+          reasonCounts.missing_contact = (reasonCounts.missing_contact || 0) + 1;
+          console.warn(`  [${id}] qualified but no contact after enrich — demote to needs_review`);
+        }
         // รูปโปรไฟล์เป็นข้อมูลหลักที่ผู้สรรหาต้องเห็น แม้ Resume จะยังไม่ผ่าน
         // เกณฑ์งานนี้ ส่วนเอกสารแนบยังเก็บเฉพาะคนที่ผ่านเพื่อลดการเก็บข้อมูล
         // ส่วนบุคคลเกินจำเป็นและไม่เสียเวลาโหลดไฟล์ใหญ่ของคนที่ถูกคัดออก
         const assets = provider.collectAssetsForDb
           ? await provider.collectAssetsForDb(sess.request, parsed, {
-            profileOnly: qualification.status !== 'qualified',
+            profileOnly: finalQualification.status !== 'qualified',
           })
           : [];
 
@@ -320,7 +354,7 @@ export async function runConnector(connector, criteria, runtime, opts = {}) {
             externalId: provider.externalId(url),
             sourceUrl: url,
             runId,
-            parseStatus: parsed.parse_status,
+            parseStatus: isResumeDeliveryComplete(parsed) ? 'success' : (parsed.parse_status || 'partial'),
             rawText: parsed.raw_text,
             searchRank: sourceRankById.get(String(id)) ?? i + 1,
           });
@@ -329,7 +363,7 @@ export async function runConnector(connector, criteria, runtime, opts = {}) {
             candidateId: cand.id,
             sourceId,
             matchedPosition: criteria.position || criteria.keyword || null,
-            qualification,
+            qualification: finalQualification,
           });
           for (const a of assets) {
             if (a.sha256) await saveAsset(client, cand.id, sourceId, a);
@@ -339,18 +373,18 @@ export async function runConnector(connector, criteria, runtime, opts = {}) {
 
         if (isNew) newCount += 1;
         else updatedCount += 1;
-        if (qualification.status === 'qualified') qualified += 1;
-        else if (qualification.status === 'needs_review') { needsReview += 1; filteredOut += 1; }
+        if (finalQualification.status === 'qualified') qualified += 1;
+        else if (finalQualification.status === 'needs_review') { needsReview += 1; filteredOut += 1; }
         else { rejected += 1; filteredOut += 1; }
         if (!taskLink.isNewForTask) {
           duplicate += 1;
           reasonCounts.duplicate = (reasonCounts.duplicate || 0) + 1;
         }
         // Progress and completion count only candidates newly qualified for this task.
-        if (taskLink.becameQualified || !opts.taskId) saved += qualification.status === 'qualified' ? 1 : 0;
+        if (taskLink.becameQualified || !opts.taskId) saved += finalQualification.status === 'qualified' ? 1 : 0;
         if (opts.onProgress) await opts.onProgress(saved, target);
         const att = assets.filter((a) => a.kind === 'attachment' && a.download_status === 'success').length;
-        console.log(`  [${saved}/${target}] ${parsed.name || '(no name)'} ${qualification.status} ${taskLink.isNewForTask ? (isNew ? 'NEW' : 'matched') : 'duplicate'} | ☎ ${parsed.phone || '-'} 📎 ${att}`);
+        console.log(`  [${saved}/${target}] ${parsed.name || '(no name)'} ${finalQualification.status} ${taskLink.isNewForTask ? (isNew ? 'NEW' : 'matched') : 'duplicate'} | ☎ ${parsed.phone || '-'} 📎 ${att}`);
         })(), CANDIDATE_TIMEOUT_MS, `resume_${id}`);
       } catch (e) {
         if (e.fatal) {

@@ -2,6 +2,7 @@ import { getJobbkkSession, logoutJobbkk } from './session.js';
 import { fetchResumeHtml, isResumeAuthBlocked, isResumeMasked, resumeDetailUrl } from './client.js';
 import { browserSearchResumeIds } from './browser-search.js';
 import { parseResumeHtml, isResumeProfileThin, finalizeCandidateRecord } from './parser.js';
+import { isResumeBodyComplete } from '../../core/resume-completeness.js';
 import { collectAssetsForDb } from './assets.js';
 
 export const jobbkkProvider = {
@@ -22,6 +23,7 @@ export const jobbkkProvider = {
   resumeDetailUrl,
   parseResumeHtml,
   isResumeProfileThin,
+  isResumeBodyComplete,
   finalizeCandidateRecord,
   collectAssetsForDb,
 
