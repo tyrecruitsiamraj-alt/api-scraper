@@ -1575,7 +1575,14 @@ export async function enqueueScrapeForTask(taskId: string, ownerUser: string | n
   // to one known-good machine.  Without this, an older Mac that happens to come
   // back online can win the alphabetical worker list and receive the next job.
   const configuredWorker = String(process.env.SCRAPE_PREFERRED_WORKER ?? '').trim();
-  const preferredWorker = selectPreferredScrapeWorker(readyWorkers, configuredWorker);
+  let preferredWorker = selectPreferredScrapeWorker(readyWorkers, configuredWorker);
+  if (!preferredWorker && configuredWorker) {
+    // Preferred machine offline — fall back to any ready scraper so desk "รันตอนนี้" still moves.
+    preferredWorker = selectPreferredScrapeWorker(readyWorkers, '');
+    if (preferredWorker) {
+      console.warn(`[enqueue] preferred ${configuredWorker} offline — fallback to ${preferredWorker}`);
+    }
+  }
   if (!preferredWorker) {
     await q(
       `UPDATE scrape_tasks
@@ -1585,12 +1592,75 @@ export async function enqueueScrapeForTask(taskId: string, ownerUser: string | n
     );
     return false;
   }
+
+  // Recover stale queued jobs pinned to a dead worker so "รันตอนนี้" can move again.
   await q(
+    `UPDATE work_queue
+        SET status='error',
+            finished_at=now(),
+            last_error=COALESCE(last_error,'') || ' · stale queue recovered (worker offline or reassigned)'
+      WHERE ref_id=$1
+        AND type='scrape'
+        AND status='queued'
+        AND created_at < now() - interval '2 minutes'
+        AND (preferred_worker IS NULL OR preferred_worker <> $2)`,
+    [taskId, preferredWorker],
+  );
+  await q(
+    `UPDATE work_queue
+        SET preferred_worker=$2,
+            last_error=NULL
+      WHERE ref_id=$1
+        AND type='scrape'
+        AND status='queued'
+        AND preferred_worker IS DISTINCT FROM $2`,
+    [taskId, preferredWorker],
+  );
+
+  const inserted = await q<{ id: string }>(
     `INSERT INTO work_queue (type, module, connector_key, ref_id, payload, owner_user, preferred_worker)
      SELECT 'scrape', 'scraper', $1, $2, $3::jsonb, $4, $5
       WHERE NOT EXISTS (
-        SELECT 1 FROM work_queue w WHERE w.ref_id = $2 AND w.status IN ('queued','running'))`,
+        SELECT 1 FROM work_queue w WHERE w.ref_id = $2 AND w.status IN ('queued','running'))
+     RETURNING id`,
     [`${platform}:${connector_id}`, taskId, JSON.stringify(criteria ?? {}), ownerUser, preferredWorker],
+  );
+  if (!inserted[0]) {
+    const live = await q<{ id: string; status: string; preferred_worker: string | null }>(
+      `SELECT id, status, preferred_worker FROM work_queue
+        WHERE ref_id=$1 AND type='scrape' AND status IN ('queued','running')
+        ORDER BY created_at DESC LIMIT 1`,
+      [taskId],
+    );
+    if (live[0]?.status === 'running') {
+      await q(
+        `UPDATE scrape_tasks SET status='running', last_error=NULL, updated_at=now() WHERE id=$1`,
+        [taskId],
+      );
+      return true;
+    }
+    if (live[0]?.status === 'queued') {
+      await q(
+        `UPDATE scrape_tasks
+            SET status='queued', phase='idle', last_error=NULL, updated_at=now()
+          WHERE id=$1`,
+        [taskId],
+      );
+      return true;
+    }
+    await q(
+      `UPDATE scrape_tasks
+          SET status='idle', phase='idle', last_error=$2, updated_at=now()
+        WHERE id=$1 AND status <> 'running'`,
+      [taskId, 'ยังไม่เริ่มค้นหา: ส่งเข้าคิวไม่สำเร็จ กรุณากดรันอีกครั้ง'],
+    );
+    return false;
+  }
+  await q(
+    `UPDATE scrape_tasks
+        SET status='queued', phase='idle', last_error=NULL, updated_at=now()
+      WHERE id=$1 AND status <> 'running'`,
+    [taskId],
   );
   return true;
 }

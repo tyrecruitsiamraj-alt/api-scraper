@@ -18,3 +18,7 @@ test('ยังรองรับการ pin ด้วยชื่อ slot โ
 test('ไม่ส่งงานเมื่อชื่อเครื่องที่ pin ไม่มี Worker ออนไลน์', () => {
   assert.equal(selectPreferredScrapeWorker(workers, 'OTHER-MACHINE'), null);
 });
+
+test('ไม่มี pin แล้วเลือก worker แรกที่พร้อม', () => {
+  assert.equal(selectPreferredScrapeWorker(workers, ''), 'scraper-1');
+});

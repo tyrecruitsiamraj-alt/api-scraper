@@ -6,6 +6,7 @@ import { getServerSession } from 'next-auth';
 import { authOptions } from './auth';
 import { encryptSecret } from './crypto';
 import { kickWorker } from './worker-kick';
+import { q } from './db';
 import { CONTENT_DISABLED_OPERATOR_MESSAGE, isContentGenerationEnabled } from './product-scope';
 import { normalizePosterExtras, normalizePosterLayout } from '../../src/core/poster-template.js';
 import type { PosterExtra, PosterLayout } from '../../src/core/poster-template.js';
@@ -308,11 +309,24 @@ export async function createTaskAction(formData: FormData) {
   });
   if (runNow) {
     const queued = await enqueueScrapeForTask(taskId); // hand off to the unified work_queue runner
-    if (queued) kickWorker(); // drain only when a capability-verified worker owns it
+    if (queued) {
+      kickWorker(); // drain only when a capability-verified worker owns it
+      revalidatePath('/scraping');
+      revalidatePath('/orchestrator');
+      redirect(`/scraping/${taskId}?started=1`);
+    }
+    const rows = await q<{ last_error: string | null }>(
+      `SELECT last_error FROM scrape_tasks WHERE id=$1`,
+      [taskId],
+    ).catch(() => [] as { last_error: string | null }[]);
+    const reason = rows[0]?.last_error || 'ยังไม่เริ่มค้นหา: Worker ยังไม่พร้อม';
+    revalidatePath('/scraping');
+    revalidatePath('/orchestrator');
+    redirect(`/scraping/${taskId}?notice=${encodeURIComponent(reason)}`);
   }
   revalidatePath('/scraping');
   revalidatePath('/orchestrator');
-  redirect(`/scraping/${taskId}?${runNow ? 'started=1' : 'created=1'}`);
+  redirect(`/scraping/${taskId}?created=1`);
 }
 
 export async function queueTaskAction(formData: FormData) {
@@ -321,7 +335,19 @@ export async function queueTaskAction(formData: FormData) {
   if (id) {
     await queueTask(id);
     const queued = await enqueueScrapeForTask(id); // hand off to the unified work_queue runner
-    if (queued) kickWorker(); // no generic Next.js Digest when worker is not ready
+    if (queued) {
+      kickWorker(); // no generic Next.js Digest when worker is not ready
+    } else {
+      const rows = await q<{ last_error: string | null }>(
+        `SELECT last_error FROM scrape_tasks WHERE id=$1`,
+        [id],
+      ).catch(() => [] as { last_error: string | null }[]);
+      const reason = rows[0]?.last_error || 'ยังไม่เริ่มค้นหา: Worker ยังไม่พร้อม';
+      revalidatePath('/scraping');
+      revalidatePath(`/scraping/${id}`);
+      revalidatePath('/orchestrator');
+      redirect(`/scraping/${id}?notice=${encodeURIComponent(reason)}`);
+    }
   }
   revalidatePath('/scraping');
   revalidatePath(`/scraping/${id}`);
@@ -455,10 +481,23 @@ export async function startSoRecruitScrapeAction(formData: FormData) {
     ageMax: formField('scrapeAgeMax'),
   });
   const queued = await enqueueScrapeForTask(taskId, owner);
-  if (queued) kickWorker();
+  if (queued) {
+    kickWorker();
+  } else {
+    const rows = await q<{ last_error: string | null }>(
+      `SELECT last_error FROM scrape_tasks WHERE id=$1`,
+      [taskId],
+    ).catch(() => [] as { last_error: string | null }[]);
+    const reason = rows[0]?.last_error || 'ยังไม่เริ่มค้นหา: Worker ยังไม่พร้อม';
+    revalidatePath('/orchestrator');
+    revalidatePath('/orchestrator/imports');
+    revalidatePath('/scraping');
+    redirect(`/scraping/${taskId}?notice=${encodeURIComponent(reason)}`);
+  }
   revalidatePath('/orchestrator');
   revalidatePath('/orchestrator/imports');
   revalidatePath('/scraping');
+  redirect(`/scraping/${taskId}?started=1`);
 }
 
 /** ตรวจรับผล Scraping หลัง worker ทำครบ เพื่อปิดคำขอกลับไปยัง So Recruit. */

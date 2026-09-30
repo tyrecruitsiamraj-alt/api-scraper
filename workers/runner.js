@@ -210,6 +210,7 @@ async function recoverStale() {
  *  - the job's account (connector_key) has NO job currently running  ← per-account lock
  */
 async function claimNext() {
+  const machineName = os.hostname();
   const { rows } = await query(
     `UPDATE work_queue SET status='running', worker_id=$1, locked_at=now(),
             started_at=COALESCE(started_at, now())
@@ -218,7 +219,11 @@ async function claimNext() {
          WHERE q.status='queued'
            AND q.type = ANY($2)
            AND q.available_at <= now()
-           AND (q.preferred_worker IS NULL OR q.preferred_worker = $3)
+           AND (
+             q.preferred_worker IS NULL
+             OR q.preferred_worker = $3
+             OR lower(q.preferred_worker) = lower($4)
+           )
            AND NOT EXISTS (
              SELECT 1 FROM work_queue r
               WHERE r.connector_key = q.connector_key AND r.status='running')
@@ -226,7 +231,7 @@ async function claimNext() {
          FOR UPDATE SKIP LOCKED
          LIMIT 1)
       RETURNING *`,
-    [WORKER_ID, SUPPORTED, WORKER_NAME],
+    [WORKER_ID, SUPPORTED, WORKER_NAME, machineName],
   );
   return rows[0] ?? null;
 }

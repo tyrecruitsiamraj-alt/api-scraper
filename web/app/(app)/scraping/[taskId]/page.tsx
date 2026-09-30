@@ -16,11 +16,12 @@ export default async function ScrapeTaskDetailPage({
   searchParams,
 }: {
   params: { taskId: string };
-  searchParams?: { started?: string; created?: string };
+  searchParams?: { started?: string; created?: string; notice?: string };
 }) {
   const task = await getTask(params.taskId);
   if (!task) notFound();
   const title = operatorJobTitle({ position: task.criteria?.position || task.criteria?.keyword, title: task.name, requestNo: task.source_request_no });
+  const notice = typeof searchParams?.notice === 'string' ? searchParams.notice : null;
 
   return (
     <div className="space-y-5">
@@ -35,6 +36,7 @@ export default async function ScrapeTaskDetailPage({
         <Link href={`/candidates/jobs/${task.id}`} className="btn-secondary">ดูผู้สมัครของงานนี้</Link>
       </header>
 
+      {notice && <div role="status" className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">{notice}</div>}
       {searchParams?.started === '1' && <div role="status" className="rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-900">✓ รับคำสั่งแล้ว ระบบกำลังส่งงานให้เครื่องค้นหา หน้านี้จะอัปเดตความคืบหน้าเอง</div>}
       {searchParams?.created === '1' && <div role="status" className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-900">✓ บันทึกงานแล้ว เมื่อต้องการเริ่ม ให้กด “รันตอนนี้” เพียงครั้งเดียว</div>}
 
