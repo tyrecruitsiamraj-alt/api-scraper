@@ -3,12 +3,26 @@
  * Never invents values — only fills blank fields already present in text,
  * contact tokens in OCR, or an explicit Thai/English name prefix.
  */
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { contactsFromText } from './contacts.js';
 import {
   finalizeCandidateRecord,
   hasUsefulEducation,
   hasUsefulWorkExperience,
 } from '../providers/jobbkk/parser.js';
+
+const PROVINCE_NAMES = (() => {
+  try {
+    const here = dirname(fileURLToPath(import.meta.url));
+    const raw = JSON.parse(readFileSync(join(here, '../providers/jobbkk/provinces.json'), 'utf8'));
+    return Object.values(raw.provinces || {}).map((name) => String(name).trim()).filter(Boolean);
+  } catch {
+    return ['กรุงเทพมหานคร', 'สมุทรปราการ', 'นนทบุรี', 'ปทุมธานี', 'ชลบุรี'];
+  }
+})();
+const PROVINCE_BY_LENGTH = [...PROVINCE_NAMES].sort((a, b) => b.length - a.length);
 
 /** PostgreSQL jsonb cannot store the Unicode NUL escape (\\u0000). */
 function stringifyForJsonb(value) {
@@ -29,6 +43,12 @@ function blank(value) {
   return value == null || String(value).trim() === '';
 }
 
+/** Bare quotes / punctuation left by bad parses — treat as empty for repair. */
+export function isJunkText(value) {
+  const text = String(value ?? '').trim();
+  return !text || /^["'\\.\-_/]+$/.test(text);
+}
+
 function validEmail(value) {
   const email = String(value ?? '').trim().toLowerCase();
   return /^[^@\s]+@[^@\s]+\.[^\s@]{2,}$/.test(email) ? email : '';
@@ -36,10 +56,43 @@ function validEmail(value) {
 
 export function needsRepair(row) {
   return blank(row.phone) || blank(row.email) || blank(row.gender) || blank(row.age)
-    || blank(row.address) || blank(row.province) || blank(row.desired_positions)
+    || blank(row.address) || isJunkText(row.province) || blank(row.desired_positions)
     || blank(row.expected_salary)
     || !hasUsefulEducation(row.education)
     || !hasUsefulWorkExperience(row.work_experience);
+}
+
+/** Resolve province from address / desired area / raw text using JobBKK province list. */
+export function resolveProvinceFromRow(row = {}, combinedText = '') {
+  if (!isJunkText(row.province) && PROVINCE_NAMES.includes(String(row.province).trim())) {
+    return String(row.province).trim();
+  }
+  const chunks = [
+    row.address,
+    row.desired_work_area,
+    combinedText,
+  ].map((part) => String(part || '').trim()).filter(Boolean);
+  for (const chunk of chunks) {
+    const labeled = chunk.match(/จังหวัด\s*([ก-๙]+)/u)?.[1];
+    if (labeled) {
+      const hit = PROVINCE_BY_LENGTH.find((name) => name === labeled || name.includes(labeled) || labeled.includes(name));
+      if (hit) return hit;
+    }
+    const metro = chunk.match(/([ก-๙]+มหานคร)/u)?.[1];
+    if (metro && PROVINCE_NAMES.includes(metro)) return metro;
+    for (const name of PROVINCE_BY_LENGTH) {
+      if (chunk.includes(name)) return name;
+    }
+  }
+  // Last token before postcode: "… สมุทรปราการ 10270"
+  for (const chunk of chunks) {
+    const m = chunk.replace(/\s*ประเทศไทย\s*$/u, '').match(/([ก-๙][ก-๙.\s]*?)\s+(\d{5})\s*$/u);
+    if (!m?.[1]) continue;
+    const last = m[1].trim().split(/\s+/).filter(Boolean).pop() || '';
+    const hit = PROVINCE_BY_LENGTH.find((name) => name === last || name.endsWith(last) || last.includes(name));
+    if (hit) return hit;
+  }
+  return '';
 }
 
 function jsonbFillExpression(col, paramIndex) {
@@ -81,7 +134,18 @@ async function patchCandidateById(client, id, parsed) {
   for (const col of REPAIR_TEXT_FIELDS) {
     const value = col === 'full_name' ? (parsed.name ?? '') : (parsed[col] ?? '');
     params.push(String(value ?? ''));
-    sets.push(`${col} = COALESCE(NULLIF($${params.length}, ''), ${col})`);
+    if (col === 'province') {
+      // Replace blank OR junk tags like " so a real province can land.
+      sets.push(`${col} = CASE
+        WHEN $${params.length} <> '' AND (
+          NULLIF(trim(COALESCE(${col}, '')), '') IS NULL
+          OR trim(${col}) ~ '^["''\\\\.\\-_/]+$'
+        ) THEN $${params.length}
+        ELSE COALESCE(NULLIF($${params.length}, ''), ${col})
+      END`);
+    } else {
+      sets.push(`${col} = COALESCE(NULLIF($${params.length}, ''), ${col})`);
+    }
   }
   for (const col of REPAIR_JSON_FIELDS) {
     params.push(stringifyForJsonb(parsed[col]));
@@ -137,6 +201,9 @@ const INCOMPLETE_SQL = `
             AND a.extracted_text IS NOT NULL
             AND length(trim(a.extracted_text)) > 20
        )
+       -- Province-only repair can use address / desired_work_area without long raw_text.
+       OR NULLIF(trim(COALESCE(c.address, '')), '') IS NOT NULL
+       OR NULLIF(trim(COALESCE(c.desired_work_area, '')), '') IS NOT NULL
      )
      AND (
        COALESCE(NULLIF(trim(c.phone), ''), '') = ''
@@ -144,6 +211,11 @@ const INCOMPLETE_SQL = `
        OR COALESCE(NULLIF(trim(c.gender), ''), '') = ''
        OR COALESCE(NULLIF(trim(c.age), ''), '') = ''
        OR COALESCE(NULLIF(trim(c.address), ''), '') = ''
+       OR COALESCE(NULLIF(trim(c.province), ''), '') = ''
+       OR (
+         NULLIF(trim(c.province), '') IS NOT NULL
+         AND trim(c.province) !~ '[ก-๙]'
+       )
        OR COALESCE(NULLIF(trim(c.desired_positions), ''), '') = ''
        OR COALESCE(NULLIF(trim(c.expected_salary), ''), '') = ''
        OR COALESCE(jsonb_array_length(c.education), 0) = 0
@@ -169,7 +241,9 @@ function remainingGaps(row, parsed) {
   for (const key of ['phone', 'email', 'gender', 'age', 'address', 'province', 'desired_positions', 'expected_salary']) {
     const after = key === 'full_name' ? parsed.name : parsed[key];
     const before = row[key];
-    if (blank(before) && blank(after)) gaps.push(key);
+    const beforeEmpty = key === 'province' ? isJunkText(before) : blank(before);
+    const afterEmpty = key === 'province' ? isJunkText(after) : blank(after);
+    if (beforeEmpty && afterEmpty) gaps.push(key);
   }
   if (!hasUsefulEducation(parsed.education)) gaps.push('education');
   if (!hasUsefulWorkExperience(parsed.work_experience)) gaps.push('work_experience');
@@ -212,6 +286,15 @@ function applyOcrAndPrefixFills(parsed, row, combinedText) {
       /(?:เงินเดือน(?:ที่ต้องการ)?|Expected\s*Salary|Salary)\s*[:：]?\s*([\d,][\d,\s-]*\d)/iu,
     )?.[1];
     if (salary) parsed.expected_salary = salary.replace(/\s+/g, '');
+  }
+
+  if (isJunkText(parsed.province)) {
+    parsed.province = resolveProvinceFromRow({
+      ...row,
+      address: parsed.address || row.address,
+      desired_work_area: parsed.desired_work_area || row.desired_work_area,
+      province: '',
+    }, combinedText);
   }
 }
 
@@ -268,7 +351,9 @@ export async function repairIncompleteCandidates(db, opts = {}) {
     for (const key of REPAIR_TEXT_FIELDS) {
       const target = key === 'full_name' ? 'name' : key;
       const next = parsed[target] ?? '';
-      if (blank(before[key]) && !blank(next)) changed.push(key);
+      const beforeEmpty = key === 'province' ? isJunkText(before[key]) : blank(before[key]);
+      const nextOk = key === 'province' ? !isJunkText(next) : !blank(next);
+      if (beforeEmpty && nextOk) changed.push(key);
     }
     if (!beforeUsefulEdu && hasUsefulEducation(parsed.education)) changed.push('education');
     if (!beforeUsefulWork && hasUsefulWorkExperience(parsed.work_experience)) changed.push('work_experience');
