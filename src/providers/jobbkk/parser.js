@@ -280,6 +280,82 @@ function extractWork($) {
   return out;
 }
 
+/** True when at least one work row has a company or position the desk can show. */
+export function hasUsefulWorkExperience(rows) {
+  if (!Array.isArray(rows) || !rows.length) return false;
+  return rows.some((item) => {
+    const company = clean(item?.company);
+    const position = clean(item?.position);
+    return Boolean(company || position);
+  });
+}
+
+/** True when education rows have institution/degree/major. */
+export function hasUsefulEducation(rows) {
+  if (!Array.isArray(rows) || !rows.length) return false;
+  return rows.some((item) => clean(item?.institution) || clean(item?.degree) || clean(item?.major));
+}
+
+const WORK_FIELD_STOP = '(?=\\s*(?:ข้อมูลบริษัท|ประเภทธุรกิจ|ตำแหน่ง(?:งาน)?|ระยะเวลา|เงินเดือน|รายละเอียดงาน|Hard Skills|Soft Skills|ทักษะความรู้|ข้อมูลการฝึกอบรม|$))';
+
+function parseOneWorkChunk(chunk) {
+  const text = clean(chunk);
+  if (!text) return null;
+  if (/ไม่มีประสบการณ์/u.test(text)) {
+    return {
+      year: '', company: '', position: 'ไม่มีประสบการณ์', period: '', salary: '', business_type: '', responsibilities: '',
+    };
+  }
+  const position = firstMatch(text, [
+    new RegExp(`ตำแหน่ง(?:งาน)?\\s*[:：]?\\s*(.+?)${WORK_FIELD_STOP}`, 'u'),
+  ]);
+  const company = firstMatch(text, [
+    new RegExp(`ข้อมูลบริษัท\\s*[:：]?\\s*(.+?)${WORK_FIELD_STOP}`, 'u'),
+    new RegExp(`(?<!ข้อมูล)บริษัท\\s*[:：]?\\s*(.+?)${WORK_FIELD_STOP}`, 'u'),
+  ]);
+  const companyClean = clean(company).replace(/^[:：]+/, '');
+  if (!position && !companyClean) return null;
+  if (!position && companyClean.length < 2) return null;
+  return {
+    year: firstMatch(text, [/\b(20\d{2}|25\d{2})\b/]) || '',
+    company: companyClean || '',
+    position: position || '',
+    period: firstMatch(text, [new RegExp(`ระยะเวลา\\s*[:：]?\\s*(.+?)${WORK_FIELD_STOP}`, 'u')]) || '',
+    salary: firstMatch(text, [/เงินเดือน\s*[:：]?\s*([\d,]+)/u]) || '',
+    business_type: firstMatch(text, [new RegExp(`ประเภทธุรกิจ\\s*[:：]?\\s*(.+?)${WORK_FIELD_STOP}`, 'u')]) || '',
+    responsibilities: firstMatch(text, [/รายละเอียดงาน\s*[:：]?\s*(.+)$/u]) || '',
+  };
+}
+
+function splitWorkChunks(work) {
+  const labeled = work.split(/(?=ข้อมูลบริษัท\s*[:：]?)/u).map(clean).filter((chunk) => chunk.length >= 6);
+  if (labeled.length > 1) return labeled;
+  const byYear = work
+    .split(/(?=\b(?:20\d{2}|25\d{2})\b\s+(?:ข้อมูลบริษัท|(?<!ข้อมูล)บริษัท)\s*[:：]?)/u)
+    .map(clean)
+    .filter((chunk) => chunk.length >= 6);
+  if (byYear.length > 1) return byYear;
+  return [work];
+}
+
+/** Split a JobBKK work section into one-or-more structured rows. */
+export function parseWorkEntriesFromText(workText) {
+  const work = clean(workText);
+  if (!work || work.length < 4) return [];
+  if (/ไม่มีประสบการณ์/u.test(work) && !/(?:ข้อมูลบริษัท|(?<!ข้อมูล)บริษัท|ตำแหน่ง)/u.test(work)) {
+    return [parseOneWorkChunk(work)].filter(Boolean);
+  }
+  const rows = splitWorkChunks(work).map(parseOneWorkChunk).filter(Boolean);
+  // Dedupe identical company+position pairs while keeping order.
+  const seen = new Set();
+  return rows.filter((row) => {
+    const key = `${row.company}|${row.position}|${row.year}|${row.period}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
 /**
  * Read a labelled value inside a preview_new timeline block.
  * Handles "label: value", "<span>label</span> value", and (detail) next <p>.
@@ -324,20 +400,21 @@ function extractEducationPreviewNew($) {
   return out;
 }
 
-/** preview_new layout work: .skills .timeline-2 .content-2 (h2 = year). */
+/** preview_new layout work: .skills / .experience timeline (h2 = year). */
 function extractWorkPreviewNew($) {
   const out = [];
-  $('.skills .timeline-2 .content-2').each((_, block) => {
+  $('.skills .timeline-2 .content-2, .experience .timeline-2 .content-2, .work-experience .timeline-2 .content-2').each((_, block) => {
     const item = {
       year: clean($(block).find('h2').first().text()),
       company: readFieldIn($, block, ['ข้อมูลบริษัท', 'บริษัท']),
       business_type: readFieldIn($, block, ['ประเภทธุรกิจ']),
-      position: readFieldIn($, block, ['ตำแหน่งงาน']),
+      position: readFieldIn($, block, ['ตำแหน่งงาน', 'ตำแหน่ง']),
       period: readFieldIn($, block, ['ระยะเวลา']),
       salary: readFieldIn($, block, ['เงินเดือน']),
       responsibilities: readFieldIn($, block, ['รายละเอียดงาน'], true),
     };
-    if (item.company || item.position || item.year) out.push(item);
+    // Year alone is not useful on the desk — it rendered as "—" and blocked text repair.
+    if (item.company || item.position) out.push(item);
   });
   return out;
 }
@@ -384,7 +461,7 @@ export function isResumeProfileThin(parsed = {}) {
   const hasContact = clean(parsed.phone) || clean(parsed.email);
   const hasGenderOrAge = clean(parsed.gender) || clean(parsed.age);
   const hasEdu = (Array.isArray(parsed.education) && parsed.education.length > 0) || clean(parsed.education_summary);
-  const hasWork = (Array.isArray(parsed.work_experience) && parsed.work_experience.length > 0)
+  const hasWork = hasUsefulWorkExperience(parsed.work_experience)
     || clean(parsed.experience_summary)
     || /ไม่มีประสบการณ์/u.test(text);
   if (hasContact && (hasEdu || hasWork || hasGenderOrAge)) return false;
@@ -436,8 +513,9 @@ export function fillMissingFromRawText(record, rawText) {
     }
   }
 
-  // Always materialize jsonb arrays when empty — UI/PDF read arrays, not *_summary.
-  if (!Array.isArray(record.education) || !record.education.length) {
+  // Always materialize jsonb arrays when empty/weak — UI/PDF read arrays, not *_summary.
+  // Year-only work stubs must be replaced; otherwise the desk shows "—" forever.
+  if (!hasUsefulEducation(record.education)) {
     const edu = clean(record.education_summary)
       || firstMatch(text, [/ประวัติการศึกษา\s*([\s\S]*?)(?=ประวัติการทำงาน|ข้อมูลการฝึกอบรม|ทักษะ|$)/u]);
     if (edu && edu.length >= 8) {
@@ -454,30 +532,16 @@ export function fillMissingFromRawText(record, rawText) {
       if (rows.length) record.education = rows;
     }
   }
-  if (!Array.isArray(record.work_experience) || !record.work_experience.length) {
+  if (!hasUsefulWorkExperience(record.work_experience)) {
     const work = clean(record.experience_summary)
-      || firstMatch(text, [/ประวัติการทำงาน(?:\/ฝึกงาน)?\s*([\s\S]*?)(?=ข้อมูลการฝึกอบรม|ทักษะ|Hard Skills|Soft Skills|$)/u]);
-    if (work && work.length >= 8) {
+      || firstMatch(text, [
+        /ประวัติการทำงาน(?:\/ฝึกงาน)?\s*([\s\S]*?)(?=ข้อมูลการฝึกอบรม|ทักษะความรู้|Hard Skills|Soft Skills|$)/u,
+        /ประวัติการทำงาน(?:\/ฝึกงาน)?\s*([\s\S]*?)(?=ทักษะ|Hard Skills|Soft Skills|$)/u,
+      ]);
+    if (work && work.length >= 4) {
       if (!clean(record.experience_summary)) record.experience_summary = work;
-      if (/ไม่มีประสบการณ์/u.test(work)) {
-        record.work_experience = [{
-          year: '', company: '', position: 'ไม่มีประสบการณ์', period: '', salary: '', business_type: '', responsibilities: '',
-        }];
-      } else {
-        const position = firstMatch(work, [/ตำแหน่ง(?:งาน)?\s*[:：]?\s*([^\n|]+?)(?=\s*(?:บริษัท|ข้อมูลบริษัท|ประเภท|ระยะเวลา|เงินเดือน)|$)/u]);
-        const company = firstMatch(work, [/(?:ข้อมูลบริษัท|บริษัท)\s*[:：]?\s*([^\n|]+?)(?=\s*(?:ตำแหน่ง|ประเภท|ระยะเวลา|เงินเดือน)|$)/u]);
-        if (position || company) {
-          record.work_experience = [{
-            year: firstMatch(work, [/\b(20\d{2}|25\d{2})\b/]) || '',
-            company: company || '',
-            position: position || '',
-            period: firstMatch(work, [/ระยะเวลา\s*[:：]?\s*([^\n|]+)/u]) || '',
-            salary: firstMatch(work, [/เงินเดือน\s*[:：]?\s*([\d,]+)/u]) || '',
-            business_type: firstMatch(work, [/ประเภทธุรกิจ\s*[:：]?\s*([^\n|]+)/u]) || '',
-            responsibilities: '',
-          }];
-        }
-      }
+      const rows = parseWorkEntriesFromText(work);
+      if (rows.length) record.work_experience = rows;
     }
   }
 
@@ -595,6 +659,12 @@ export function parseResumeHtml(html, { sourceUrl, index, focusPosition = '-' })
   if (!record.province && record.desired_work_area) {
     record.province = firstMatch(record.desired_work_area, [/([ก-๙]+มหานคร|[ก-๙]+)/u]);
   }
+
+  // Classic JobBKK keeps prose blobs in #education_page1 / #experience_page1.
+  const eduPage = clean($('#education_page1').text());
+  const expPage = clean($('#experience_page1').text());
+  if (eduPage && !clean(record.education_summary)) record.education_summary = eduPage;
+  if (expPage && !clean(record.experience_summary)) record.experience_summary = expPage;
 
   // structured education / work — classic selectors first, preview_new as fallback
   let education = extractEducation($);

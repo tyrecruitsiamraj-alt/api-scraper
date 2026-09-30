@@ -458,7 +458,7 @@ export async function candidatesForRuns(runIds) {
 
 /**
  * Patch blank candidate fields from a repaired parse — never invents, never
- * overwrites non-empty text, only fills empty jsonb arrays.
+ * overwrites non-empty text. Also replaces year-only work/education stubs.
  */
 export async function patchCandidateFromParsed(id, parsed) {
   const sets = [];
@@ -470,7 +470,33 @@ export async function patchCandidateFromParsed(id, parsed) {
   }
   for (const col of JSON_COLS) {
     params.push(stringifyForJsonb(parsed[col]));
-    sets.push(`${col} = CASE WHEN $${params.length}::jsonb <> '[]'::jsonb AND COALESCE(jsonb_array_length(${col}), 0) = 0 THEN $${params.length}::jsonb ELSE ${col} END`);
+    const i = params.length;
+    if (col === 'work_experience') {
+      sets.push(`${col} = CASE
+        WHEN $${i}::jsonb = '[]'::jsonb THEN ${col}
+        WHEN COALESCE(jsonb_array_length(${col}), 0) = 0 THEN $${i}::jsonb
+        WHEN NOT EXISTS (
+          SELECT 1 FROM jsonb_array_elements(COALESCE(${col}, '[]'::jsonb)) e
+           WHERE NULLIF(trim(e->>'company'), '') IS NOT NULL
+              OR NULLIF(trim(e->>'position'), '') IS NOT NULL
+        ) THEN $${i}::jsonb
+        ELSE ${col}
+      END`);
+    } else if (col === 'education') {
+      sets.push(`${col} = CASE
+        WHEN $${i}::jsonb = '[]'::jsonb THEN ${col}
+        WHEN COALESCE(jsonb_array_length(${col}), 0) = 0 THEN $${i}::jsonb
+        WHEN NOT EXISTS (
+          SELECT 1 FROM jsonb_array_elements(COALESCE(${col}, '[]'::jsonb)) e
+           WHERE NULLIF(trim(e->>'institution'), '') IS NOT NULL
+              OR NULLIF(trim(e->>'degree'), '') IS NOT NULL
+              OR NULLIF(trim(e->>'major'), '') IS NOT NULL
+        ) THEN $${i}::jsonb
+        ELSE ${col}
+      END`);
+    } else {
+      sets.push(`${col} = CASE WHEN $${i}::jsonb <> '[]'::jsonb AND COALESCE(jsonb_array_length(${col}), 0) = 0 THEN $${i}::jsonb ELSE ${col} END`);
+    }
   }
   const phoneNorm = String(parsed.phone ?? '').replace(/\D/g, '');
   const emailNorm = validEmail(parsed.email);

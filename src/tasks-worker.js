@@ -33,7 +33,7 @@ import { envInt, loadRuntime } from './config.js';
 import { runConnector } from './pipeline.js';
 import { extractAttachment } from './core/ollama.js';
 import { contactsFromText } from './core/contacts.js';
-import { finalizeCandidateRecord } from './providers/jobbkk/parser.js';
+import { finalizeCandidateRecord, hasUsefulEducation, hasUsefulWorkExperience } from './providers/jobbkk/parser.js';
 import { suggestAdjacentPositions, positionsFromDescription } from './core/job-family.js';
 import { resolveSearchIdentityFromDescription } from '../web/lib/scrape-intake.js';
 import { filterZeroYieldExpansionTerms } from './core/scrape-failure-learning.js';
@@ -270,8 +270,8 @@ export async function runTask(t, runtime) {
   for (const c of cands) {
     const ocrText = await extractedTextForCandidate(c.id);
     const raw = [c.raw_text || '', ocrText || ''].filter(Boolean).join('\n');
-    const eduEmpty = !Array.isArray(c.education) || c.education.length === 0;
-    const workEmpty = !Array.isArray(c.work_experience) || c.work_experience.length === 0;
+    const eduEmpty = !hasUsefulEducation(c.education);
+    const workEmpty = !hasUsefulWorkExperience(c.work_experience);
     const needsBody = !c.phone || !c.email || !c.gender || !c.age || !c.address || !c.province
       || !c.desired_positions || !c.expected_salary || eduEmpty || workEmpty;
     if (raw && needsBody) {

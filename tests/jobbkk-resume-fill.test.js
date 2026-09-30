@@ -143,6 +143,42 @@ test('preview_new HTML parser fills gender/age/education before returning', () =
   assert.equal(isResumeProfileThin(parsed), false);
 });
 
-test('name-only shell is treated as a thin JobBKK profile', () => {
-  assert.equal(isResumeProfileThin({ name: 'นายทดสอบ', raw_text: 'นายทดสอบ' }), true);
+test('fillMissingFromRawText replaces year-only work stubs from raw_text', () => {
+  const record = {
+    education: [],
+    work_experience: [{ year: '2022', company: '', position: '', period: '', salary: '', business_type: '', responsibilities: '' }],
+  };
+  fillMissingFromRawText(record, [
+    'ประวัติการทำงาน/ฝึกงาน 2022 ข้อมูลบริษัท : บริษัท ดี จำกัด',
+    'ตำแหน่งงาน : พนักงานขาย ระยะเวลา : 1 ปี Soft Skills',
+  ].join(' '));
+  assert.equal(record.work_experience[0]?.position, 'พนักงานขาย');
+  assert.match(record.work_experience[0]?.company || '', /ดี/);
+});
+
+test('fillMissingFromRawText parses multiple work jobs', () => {
+  const record = { education: [], work_experience: [] };
+  fillMissingFromRawText(record, [
+    'ประวัติการทำงาน/ฝึกงาน',
+    '2023 ข้อมูลบริษัท : บจก.เอ ตำแหน่งงาน : ช่าง ระยะเวลา : 1 ปี',
+    '2021 ข้อมูลบริษัท : บจก.บี ตำแหน่งงาน : ช่างผู้ช่วย ระยะเวลา : 2 ปี',
+    'ทักษะความรู้ Soft Skills',
+  ].join(' '));
+  assert.equal(record.work_experience.length, 2);
+  assert.equal(record.work_experience[0]?.position, 'ช่าง');
+  assert.equal(record.work_experience[1]?.position, 'ช่างผู้ช่วย');
+});
+
+test('classic #experience_page1 is materialized into work_experience', () => {
+  const html = `
+    <html><body>
+      <div class="rsm-name"><span>นายทดสอบ เพจ</span></div>
+      <div id="education_page1">มหาวิทยาลัยตัวอย่าง ปริญญาตรี</div>
+      <div id="experience_page1">2021 ข้อมูลบริษัท บริษัท เอ จำกัด ตำแหน่งงาน พนักงานขับรถ ระยะเวลา 1 ปี</div>
+    </body></html>
+  `;
+  const parsed = parseResumeHtml(html, { sourceUrl: 'https://www.jobbkk.com/resumes/preview/9', index: 1 });
+  assert.equal(parsed.education[0]?.degree, 'ปริญญาตรี');
+  assert.equal(parsed.work_experience[0]?.position, 'พนักงานขับรถ');
+  assert.match(parsed.work_experience[0]?.company || '', /เอ/);
 });

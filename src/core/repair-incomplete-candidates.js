@@ -2,7 +2,11 @@
  * Repair incomplete candidate rows from stored source raw_text.
  * Never invents values — only fills blank fields already present in text.
  */
-import { finalizeCandidateRecord } from '../providers/jobbkk/parser.js';
+import {
+  finalizeCandidateRecord,
+  hasUsefulEducation,
+  hasUsefulWorkExperience,
+} from '../providers/jobbkk/parser.js';
 
 /** PostgreSQL jsonb cannot store the Unicode NUL escape (\\u0000). */
 function stringifyForJsonb(value) {
@@ -31,8 +35,39 @@ function validEmail(value) {
 export function needsRepair(row) {
   return blank(row.phone) || blank(row.email) || blank(row.gender) || blank(row.age)
     || blank(row.address) || blank(row.province) || blank(row.desired_positions)
-    || blank(row.expected_salary) || !Array.isArray(row.education) || row.education.length === 0
-    || !Array.isArray(row.work_experience) || row.work_experience.length === 0;
+    || blank(row.expected_salary)
+    || !hasUsefulEducation(row.education)
+    || !hasUsefulWorkExperience(row.work_experience);
+}
+
+function jsonbFillExpression(col, paramIndex) {
+  // Replace empty arrays, and also year-only / blank work or education stubs.
+  if (col === 'work_experience') {
+    return `${col} = CASE
+      WHEN $${paramIndex}::jsonb = '[]'::jsonb THEN ${col}
+      WHEN COALESCE(jsonb_array_length(${col}), 0) = 0 THEN $${paramIndex}::jsonb
+      WHEN NOT EXISTS (
+        SELECT 1 FROM jsonb_array_elements(COALESCE(${col}, '[]'::jsonb)) e
+         WHERE NULLIF(trim(e->>'company'), '') IS NOT NULL
+            OR NULLIF(trim(e->>'position'), '') IS NOT NULL
+      ) THEN $${paramIndex}::jsonb
+      ELSE ${col}
+    END`;
+  }
+  if (col === 'education') {
+    return `${col} = CASE
+      WHEN $${paramIndex}::jsonb = '[]'::jsonb THEN ${col}
+      WHEN COALESCE(jsonb_array_length(${col}), 0) = 0 THEN $${paramIndex}::jsonb
+      WHEN NOT EXISTS (
+        SELECT 1 FROM jsonb_array_elements(COALESCE(${col}, '[]'::jsonb)) e
+         WHERE NULLIF(trim(e->>'institution'), '') IS NOT NULL
+            OR NULLIF(trim(e->>'degree'), '') IS NOT NULL
+            OR NULLIF(trim(e->>'major'), '') IS NOT NULL
+      ) THEN $${paramIndex}::jsonb
+      ELSE ${col}
+    END`;
+  }
+  return `${col} = CASE WHEN $${paramIndex}::jsonb <> '[]'::jsonb AND COALESCE(jsonb_array_length(${col}), 0) = 0 THEN $${paramIndex}::jsonb ELSE ${col} END`;
 }
 
 async function patchCandidateById(client, id, parsed) {
@@ -48,7 +83,7 @@ async function patchCandidateById(client, id, parsed) {
   }
   for (const col of REPAIR_JSON_FIELDS) {
     params.push(stringifyForJsonb(parsed[col]));
-    sets.push(`${col} = CASE WHEN $${params.length}::jsonb <> '[]'::jsonb AND COALESCE(jsonb_array_length(${col}), 0) = 0 THEN $${params.length}::jsonb ELSE ${col} END`);
+    sets.push(jsonbFillExpression(col, params.length));
   }
   params.push(phoneNorm);
   sets.push(`phone_norm = COALESCE(NULLIF($${params.length}, ''), phone_norm)`);
@@ -73,7 +108,18 @@ const INCOMPLETE_SQL = `
        OR COALESCE(NULLIF(trim(c.desired_positions), ''), '') = ''
        OR COALESCE(NULLIF(trim(c.expected_salary), ''), '') = ''
        OR COALESCE(jsonb_array_length(c.education), 0) = 0
+       OR NOT EXISTS (
+         SELECT 1 FROM jsonb_array_elements(COALESCE(c.education, '[]'::jsonb)) e
+          WHERE NULLIF(trim(e->>'institution'), '') IS NOT NULL
+             OR NULLIF(trim(e->>'degree'), '') IS NOT NULL
+             OR NULLIF(trim(e->>'major'), '') IS NOT NULL
+       )
        OR COALESCE(jsonb_array_length(c.work_experience), 0) = 0
+       OR NOT EXISTS (
+         SELECT 1 FROM jsonb_array_elements(COALESCE(c.work_experience, '[]'::jsonb)) e
+          WHERE NULLIF(trim(e->>'company'), '') IS NOT NULL
+             OR NULLIF(trim(e->>'position'), '') IS NOT NULL
+       )
      )
    ORDER BY c.last_updated_at DESC
    LIMIT $1
@@ -100,6 +146,8 @@ export async function repairIncompleteCandidates(db, opts = {}) {
     scanned += 1;
     if (!needsRepair(row)) continue;
     const before = Object.fromEntries(REPAIR_TEXT_FIELDS.map((key) => [key, row[key]]));
+    const beforeUsefulWork = hasUsefulWorkExperience(row.work_experience);
+    const beforeUsefulEdu = hasUsefulEducation(row.education);
     const parsed = finalizeCandidateRecord({
       name: row.full_name || '',
       ...Object.fromEntries(REPAIR_TEXT_FIELDS.filter((key) => key !== 'full_name').map((key) => [key, row[key] ?? ''])),
@@ -118,12 +166,8 @@ export async function repairIncompleteCandidates(db, opts = {}) {
       const next = parsed[target] ?? '';
       if (blank(before[key]) && !blank(next)) changed.push(key);
     }
-    if ((!Array.isArray(row.education) || row.education.length === 0) && parsed.education?.length) {
-      changed.push('education');
-    }
-    if ((!Array.isArray(row.work_experience) || row.work_experience.length === 0) && parsed.work_experience?.length) {
-      changed.push('work_experience');
-    }
+    if (!beforeUsefulEdu && hasUsefulEducation(parsed.education)) changed.push('education');
+    if (!beforeUsefulWork && hasUsefulWorkExperience(parsed.work_experience)) changed.push('work_experience');
     if (!changed.length) continue;
 
     if (dryRun) {
@@ -136,7 +180,7 @@ export async function repairIncompleteCandidates(db, opts = {}) {
     try {
       await db.withTransaction(async (client) => {
         await patchCandidateById(client, row.id, parsed);
-        if (parsed.phone || parsed.email || (parsed.education?.length) || (parsed.work_experience?.length)
+        if (parsed.phone || parsed.email || hasUsefulEducation(parsed.education) || hasUsefulWorkExperience(parsed.work_experience)
             || parsed.gender || parsed.age || parsed.desired_positions) {
           await client.query(
             `UPDATE candidate_sources
