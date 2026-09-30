@@ -18,3 +18,5 @@ logs/
 
 # Codex temporary worktrees/clones are local build artifacts, not project source.
 .codex-tmp/
+.vercel
+.env*
