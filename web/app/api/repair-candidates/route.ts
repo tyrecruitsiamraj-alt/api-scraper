@@ -32,7 +32,7 @@ export async function POST(req: Request) {
     body = {};
   }
   const dryRun = Boolean(body.dryRun);
-  const limit = Number.isFinite(body.limit) ? Number(body.limit) : 200;
+  const limit = Number.isFinite(body.limit) ? Number(body.limit) : 2000;
 
   try {
     const result = await runIncompleteCandidateRepair({ dryRun, limit });

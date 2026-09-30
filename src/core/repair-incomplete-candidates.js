@@ -1,7 +1,9 @@
 /**
- * Repair incomplete candidate rows from stored source raw_text.
- * Never invents values — only fills blank fields already present in text.
+ * Repair incomplete candidate rows from stored source raw_text + OCR.
+ * Never invents values — only fills blank fields already present in text,
+ * contact tokens in OCR, or an explicit Thai/English name prefix.
  */
+import { contactsFromText } from './contacts.js';
 import {
   finalizeCandidateRecord,
   hasUsefulEducation,
@@ -95,10 +97,47 @@ async function patchCandidateById(client, id, parsed) {
 }
 
 const INCOMPLETE_SQL = `
-  SELECT c.*, s.raw_text, s.platform, s.source_url, s.external_id, s.parse_status
+  SELECT c.*,
+         COALESCE((
+           SELECT string_agg(s2.raw_text, E'\\n' ORDER BY length(COALESCE(s2.raw_text, '')) DESC)
+             FROM candidate_sources s2
+            WHERE s2.candidate_id = c.id
+              AND s2.raw_text IS NOT NULL
+              AND length(trim(s2.raw_text)) > 40
+         ), '') AS source_raw_text,
+         s.platform, s.source_url, s.external_id, s.parse_status,
+         COALESCE((
+           SELECT string_agg(a.extracted_text, E'\\n' ORDER BY a.created_at)
+             FROM candidate_assets a
+            WHERE a.candidate_id = c.id
+              AND a.extract_status = 'success'
+              AND a.extracted_text IS NOT NULL
+              AND length(trim(a.extracted_text)) > 20
+         ), '') AS ocr_text
     FROM candidates c
-    JOIN candidate_sources s ON s.candidate_id = c.id
-   WHERE s.raw_text IS NOT NULL AND length(trim(s.raw_text)) > 40
+    JOIN LATERAL (
+      SELECT s0.platform, s0.source_url, s0.external_id, s0.parse_status, s0.raw_text
+        FROM candidate_sources s0
+       WHERE s0.candidate_id = c.id
+       ORDER BY length(COALESCE(s0.raw_text, '')) DESC, s0.last_seen_at DESC NULLS LAST
+       LIMIT 1
+    ) s ON TRUE
+   WHERE (
+       length(trim(COALESCE((
+         SELECT string_agg(s2.raw_text, E'\\n')
+           FROM candidate_sources s2
+          WHERE s2.candidate_id = c.id
+            AND s2.raw_text IS NOT NULL
+            AND length(trim(s2.raw_text)) > 40
+       ), ''))) > 40
+       OR EXISTS (
+         SELECT 1 FROM candidate_assets a
+          WHERE a.candidate_id = c.id
+            AND a.extract_status = 'success'
+            AND a.extracted_text IS NOT NULL
+            AND length(trim(a.extracted_text)) > 20
+       )
+     )
      AND (
        COALESCE(NULLIF(trim(c.phone), ''), '') = ''
        OR COALESCE(NULLIF(trim(c.email), ''), '') = ''
@@ -125,6 +164,57 @@ const INCOMPLETE_SQL = `
    LIMIT $1
 `;
 
+function remainingGaps(row, parsed) {
+  const gaps = [];
+  for (const key of ['phone', 'email', 'gender', 'age', 'address', 'province', 'desired_positions', 'expected_salary']) {
+    const after = key === 'full_name' ? parsed.name : parsed[key];
+    const before = row[key];
+    if (blank(before) && blank(after)) gaps.push(key);
+  }
+  if (!hasUsefulEducation(parsed.education)) gaps.push('education');
+  if (!hasUsefulWorkExperience(parsed.work_experience)) gaps.push('work_experience');
+  return gaps;
+}
+
+/** Gender from an explicit name prefix already stored on the row (not invented). */
+export function genderFromPrefix(prefix, fullName = '') {
+  // Thai letters are non-word chars in JS, so avoid \\b — match start of prefix/name.
+  const sources = [String(prefix || '').trim(), String(fullName || '').trim()].filter(Boolean);
+  for (const source of sources) {
+    if (/^(นางสาว|น\.ส\.?|ด\.ญ\.|ดญ\.|Mrs\.?|Miss\.?|Ms\.?)/i.test(source)) return 'หญิง';
+    if (/^นาง(?!สาว)/.test(source)) return 'หญิง';
+    if (/^(นาย|ด\.ช\.|ดช\.|Mr\.?)/i.test(source)) return 'ชาย';
+  }
+  return '';
+}
+
+/** Extra OCR/contact fills that the JobBKK label parser may miss. */
+function applyOcrAndPrefixFills(parsed, row, combinedText) {
+  const contacts = contactsFromText(combinedText);
+  if (blank(parsed.phone) && contacts.phone) parsed.phone = contacts.phone;
+  if (blank(parsed.email) && contacts.email) parsed.email = contacts.email;
+  if (blank(parsed.line_id) && contacts.line_id) parsed.line_id = contacts.line_id;
+
+  if (blank(parsed.gender)) {
+    const fromLabel = String(combinedText).match(/เพศ\s*[:：]?\s*(ชาย|หญิง)/u)?.[1]
+      || String(combinedText).match(/\bGender\s*[:：]?\s*(Male|Female)\b/i)?.[1]
+      || '';
+    if (/^male$/i.test(fromLabel)) parsed.gender = 'ชาย';
+    else if (/^female$/i.test(fromLabel)) parsed.gender = 'หญิง';
+    else if (fromLabel) parsed.gender = fromLabel;
+  }
+  if (blank(parsed.gender)) {
+    parsed.gender = genderFromPrefix(row.prefix || parsed.prefix, row.full_name || parsed.name);
+  }
+
+  if (blank(parsed.expected_salary)) {
+    const salary = String(combinedText).match(
+      /(?:เงินเดือน(?:ที่ต้องการ)?|Expected\s*Salary|Salary)\s*[:：]?\s*([\d,][\d,\s-]*\d)/iu,
+    )?.[1];
+    if (salary) parsed.expected_salary = salary.replace(/\s+/g, '');
+  }
+}
+
 /**
  * @param {{ query: Function, withTransaction: Function }} db
  * @param {{ dryRun?: boolean, limit?: number, onProgress?: Function }} [opts]
@@ -139,8 +229,12 @@ export async function repairIncompleteCandidates(db, opts = {}) {
   let repaired = 0;
   let filledFields = 0;
   let failed = 0;
+  let unrepaired = 0;
+  let withOcr = 0;
+  let ocrChars = 0;
   const sample = [];
   const errors = [];
+  const gapCounts = {};
 
   for (const row of rows) {
     scanned += 1;
@@ -148,6 +242,15 @@ export async function repairIncompleteCandidates(db, opts = {}) {
     const before = Object.fromEntries(REPAIR_TEXT_FIELDS.map((key) => [key, row[key]]));
     const beforeUsefulWork = hasUsefulWorkExperience(row.work_experience);
     const beforeUsefulEdu = hasUsefulEducation(row.education);
+    const ocrPart = String(row.ocr_text || '').trim();
+    if (ocrPart.length > 20) {
+      withOcr += 1;
+      ocrChars += ocrPart.length;
+    }
+    const combinedText = [row.source_raw_text || row.raw_text || '', ocrPart]
+      .map((part) => String(part || '').trim())
+      .filter(Boolean)
+      .join('\n');
     const parsed = finalizeCandidateRecord({
       name: row.full_name || '',
       ...Object.fromEntries(REPAIR_TEXT_FIELDS.filter((key) => key !== 'full_name').map((key) => [key, row[key] ?? ''])),
@@ -156,9 +259,10 @@ export async function repairIncompleteCandidates(db, opts = {}) {
       hard_skills: Array.isArray(row.hard_skills) ? row.hard_skills : [],
       soft_skills: Array.isArray(row.soft_skills) ? row.soft_skills : [],
       language_skills: Array.isArray(row.language_skills) ? row.language_skills : [],
-      raw_text: row.raw_text || '',
+      raw_text: combinedText,
     });
     if (!parsed.name && row.full_name) parsed.name = row.full_name;
+    applyOcrAndPrefixFills(parsed, row, combinedText);
 
     const changed = [];
     for (const key of REPAIR_TEXT_FIELDS) {
@@ -168,7 +272,13 @@ export async function repairIncompleteCandidates(db, opts = {}) {
     }
     if (!beforeUsefulEdu && hasUsefulEducation(parsed.education)) changed.push('education');
     if (!beforeUsefulWork && hasUsefulWorkExperience(parsed.work_experience)) changed.push('work_experience');
-    if (!changed.length) continue;
+    if (!changed.length) {
+      unrepaired += 1;
+      for (const gap of remainingGaps(row, parsed)) {
+        gapCounts[gap] = (gapCounts[gap] || 0) + 1;
+      }
+      continue;
+    }
 
     if (dryRun) {
       repaired += 1;
@@ -211,10 +321,14 @@ export async function repairIncompleteCandidates(db, opts = {}) {
     limit,
     scanned,
     repaired,
+    unrepaired,
     failed,
     filledFields,
+    withOcr,
+    ocrChars,
     sample,
     errors,
+    unrepairedGapCounts: gapCounts,
     hasMore: rows.length >= limit,
   };
 }

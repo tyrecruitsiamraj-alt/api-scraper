@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  genderFromPrefix,
   needsRepair,
   repairIncompleteCandidates,
 } from '../src/core/repair-incomplete-candidates.js';
@@ -107,7 +108,8 @@ test('repairIncompleteCandidates replaces year-only work stubs', async () => {
     soft_skills: [],
     language_skills: [],
     platform: 'jobbkk',
-    raw_text: 'ประวัติการทำงาน/ฝึกงาน 2022 ข้อมูลบริษัท : บริษัท ดี จำกัด ตำแหน่งงาน : พนักงานขาย Soft Skills',
+    source_raw_text: 'ประวัติการทำงาน/ฝึกงาน 2022 ข้อมูลบริษัท : บริษัท ดี จำกัด ตำแหน่งงาน : พนักงานขาย Soft Skills',
+    ocr_text: '',
   };
   let updated = null;
   const db = {
@@ -125,4 +127,98 @@ test('repairIncompleteCandidates replaces year-only work stubs', async () => {
   assert.equal(result.repaired, 1);
   assert.ok(result.sample[0].fields.includes('work_experience'));
   assert.match(String(updated.params.join(' ')), /พนักงานขาย/);
+});
+
+test('genderFromPrefix maps Thai/English prefixes', () => {
+  assert.equal(genderFromPrefix('นาย'), 'ชาย');
+  assert.equal(genderFromPrefix('นางสาว'), 'หญิง');
+  assert.equal(genderFromPrefix('', 'นาง สมใจ ใจดี'), 'หญิง');
+  assert.equal(genderFromPrefix('Mr.'), 'ชาย');
+  assert.equal(genderFromPrefix(''), '');
+});
+
+test('repairIncompleteCandidates fills gender from prefix and contacts from OCR', async () => {
+  const row = {
+    id: '44444444-4444-4444-4444-444444444444',
+    full_name: 'นายสมชาย ใจดี',
+    prefix: 'นาย',
+    phone: '',
+    email: '',
+    gender: '',
+    age: '28',
+    address: 'กรุงเทพมหานคร',
+    province: 'กรุงเทพมหานคร',
+    desired_positions: 'ช่าง',
+    expected_salary: '',
+    education: [{ institution: 'มหาวิทยาลัยก', degree: 'ปริญญาตรี' }],
+    work_experience: [{ company: 'บริษัท ก', position: 'ช่าง' }],
+    hard_skills: [],
+    soft_skills: [],
+    language_skills: [],
+    platform: 'jobbkk',
+    source_raw_text: 'ชื่อ นายสมชาย ใจดี',
+    ocr_text: 'Contact 0899999999 email prefix@example.com Expected Salary 16000',
+  };
+  let updated = null;
+  const db = {
+    async query() { return { rows: [row] }; },
+    async withTransaction(fn) {
+      return fn({
+        async query(sql, params) {
+          if (/UPDATE candidates/i.test(sql)) updated = { sql, params };
+          return { rows: [] };
+        },
+      });
+    },
+  };
+  const result = await repairIncompleteCandidates(db, { limit: 10 });
+  assert.equal(result.repaired, 1);
+  assert.ok(result.withOcr >= 1);
+  assert.match(String(updated.params.join(' ')), /ชาย/);
+  assert.match(String(updated.params.join(' ')), /0899999999/);
+  assert.match(String(updated.params.join(' ')), /16000/);
+});
+
+test('repairIncompleteCandidates uses OCR text when raw_text is thin', async () => {
+  const row = {
+    id: '33333333-3333-3333-3333-333333333333',
+    full_name: 'นายโอซีอาร์',
+    phone: '',
+    email: '',
+    gender: '',
+    age: '',
+    address: '',
+    province: '',
+    desired_positions: 'ช่าง',
+    expected_salary: '15000',
+    education: [],
+    work_experience: [],
+    hard_skills: [],
+    soft_skills: [],
+    language_skills: [],
+    platform: 'jobbkk',
+    source_raw_text: 'ชื่อ นายโอซีอาร์',
+    ocr_text: [
+      'เพศ : ชาย อายุ 26 ปี ที่อยู่ปัจจุบัน กรุงเทพมหานคร',
+      'เบอร์โทรศัพท์ 0855555555 อีเมล ocr@example.com',
+      'ประวัติการศึกษา มหาวิทยาลัยตัวอย่าง ปริญญาตรี',
+      'ประวัติการทำงาน บริษัท โอ จำกัด ตำแหน่งงาน ช่างอาคาร Soft Skills',
+    ].join(' '),
+  };
+  let updated = null;
+  const db = {
+    async query() { return { rows: [row] }; },
+    async withTransaction(fn) {
+      return fn({
+        async query(sql, params) {
+          if (/UPDATE candidates/i.test(sql)) updated = { sql, params };
+          return { rows: [] };
+        },
+      });
+    },
+  };
+  const result = await repairIncompleteCandidates(db, { limit: 10 });
+  assert.equal(result.repaired, 1);
+  assert.match(String(updated.params.join(' ')), /0855555555/);
+  assert.match(String(updated.params.join(' ')), /ช่างอาคาร/);
 });
