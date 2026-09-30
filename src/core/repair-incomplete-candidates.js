@@ -40,6 +40,26 @@ export const REPAIR_TEXT_FIELDS = [
 ];
 export const REPAIR_JSON_FIELDS = ['education', 'work_experience', 'hard_skills', 'soft_skills', 'language_skills'];
 
+/**
+ * SQL regex for JobBKK login/register chrome inside work_experience jsonb.
+ * Keep specific — bare "เข้าสู่ระบบ" / "jobbkk" match real job duties (e.g. คีย์เข้าสู่ระบบ).
+ */
+export const WORK_CHROME_SQL_RE = [
+  'register_page',
+  'username_hint',
+  'max_case',
+  'no_html',
+  'employer_login',
+  'help@jobbkk\\.com',
+  'sales@jobbkk\\.com',
+  'บริษัท\\s*จัดหางาน\\s*จ๊อบบีเคเค',
+  'JOBBKK\\.COM',
+  'คุณจะไม่สามารถเข้าสู่ระบบ',
+  'สมัครสมาชิกไม่สำเร็จ',
+  'ไม่อนุญาตให้ใช้',
+  'สำหรับผู้ประกอบการเท่านั้น',
+].join('|');
+
 function blank(value) {
   return value == null || String(value).trim() === '';
 }
@@ -103,7 +123,7 @@ function jsonbFillExpression(col, paramIndex) {
   // Replace empty arrays, and also year-only / blank work or education stubs.
   if (col === 'work_experience') {
     // Replace empty/year-only stubs AND JobBKK login/register chrome that leaked in.
-    const junkRow = `e::text ~* 'register_page|username_hint|max_case|no_html|jobbkk|จ๊อบบีเคเค|เข้าสู่ระบบ|ไม่อนุญาตให้ใช้|สมัครสมาชิกไม่สำเร็จ|help@jobbkk\\.com'`;
+    const junkRow = `e::text ~* '${WORK_CHROME_SQL_RE}'`;
     return `${col} = CASE
       WHEN EXISTS (
         SELECT 1 FROM jsonb_array_elements(COALESCE(${col}, '[]'::jsonb)) e WHERE ${junkRow}
@@ -242,7 +262,7 @@ const INCOMPLETE_SQL = `
        )
        OR EXISTS (
          SELECT 1 FROM jsonb_array_elements(COALESCE(c.work_experience, '[]'::jsonb)) e
-          WHERE e::text ~* 'register_page|username_hint|max_case|no_html|jobbkk|จ๊อบบีเคเค|เข้าสู่ระบบ|ไม่อนุญาตให้ใช้|สมัครสมาชิกไม่สำเร็จ|help@jobbkk\\.com'
+          WHERE e::text ~* '${WORK_CHROME_SQL_RE}'
        )
      )
    ORDER BY c.last_updated_at DESC
