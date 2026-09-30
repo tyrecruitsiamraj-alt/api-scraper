@@ -98,7 +98,13 @@ async function patchCandidateById(client, id, parsed) {
 
 const INCOMPLETE_SQL = `
   SELECT c.*,
-         s.raw_text AS source_raw_text,
+         COALESCE((
+           SELECT string_agg(s2.raw_text, E'\\n' ORDER BY length(COALESCE(s2.raw_text, '')) DESC)
+             FROM candidate_sources s2
+            WHERE s2.candidate_id = c.id
+              AND s2.raw_text IS NOT NULL
+              AND length(trim(s2.raw_text)) > 40
+         ), '') AS source_raw_text,
          s.platform, s.source_url, s.external_id, s.parse_status,
          COALESCE((
            SELECT string_agg(a.extracted_text, E'\\n' ORDER BY a.created_at)
@@ -109,9 +115,21 @@ const INCOMPLETE_SQL = `
               AND length(trim(a.extracted_text)) > 20
          ), '') AS ocr_text
     FROM candidates c
-    JOIN candidate_sources s ON s.candidate_id = c.id
+    JOIN LATERAL (
+      SELECT s0.platform, s0.source_url, s0.external_id, s0.parse_status, s0.raw_text
+        FROM candidate_sources s0
+       WHERE s0.candidate_id = c.id
+       ORDER BY length(COALESCE(s0.raw_text, '')) DESC, s0.last_seen_at DESC NULLS LAST
+       LIMIT 1
+    ) s ON TRUE
    WHERE (
-       (s.raw_text IS NOT NULL AND length(trim(s.raw_text)) > 40)
+       length(trim(COALESCE((
+         SELECT string_agg(s2.raw_text, E'\\n')
+           FROM candidate_sources s2
+          WHERE s2.candidate_id = c.id
+            AND s2.raw_text IS NOT NULL
+            AND length(trim(s2.raw_text)) > 40
+       ), ''))) > 40
        OR EXISTS (
          SELECT 1 FROM candidate_assets a
           WHERE a.candidate_id = c.id
