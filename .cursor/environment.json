@@ -1,0 +1,28 @@
+{
+  "name": "SO Recruitment",
+  "install": "bash scripts/cloud-agent-install.sh",
+  "start": "bash scripts/cloud-agent-start.sh",
+  "chromeExecutablePath": "/usr/local/bin/google-chrome",
+  "ports": [
+    { "name": "web", "port": 3000 },
+    { "name": "control-api", "port": 8080 },
+    { "name": "autopost", "port": 3100 }
+  ],
+  "terminals": [
+    {
+      "name": "control-api",
+      "command": "npm run api",
+      "description": "Scraper control API on port 8080"
+    },
+    {
+      "name": "web",
+      "command": "npm run dev --prefix web",
+      "description": "Next.js recruitment console on port 3000"
+    },
+    {
+      "name": "autopost",
+      "command": "npm start --prefix autopost",
+      "description": "Auto-Post Express admin on port 3100"
+    }
+  ]
+}
