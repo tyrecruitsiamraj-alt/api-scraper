@@ -18,18 +18,31 @@ if not exist "%ROOT%\package.json" (
 )
 
 echo [1/3] ไปสาขา main แล้วดึงโค้ดล่าสุด...
-git checkout main
+REM Worker ต้องวิ่งโค้ด production เสมอ — ทิ้งแก้ค้างในเครื่องก่อน pull
+git fetch origin main
 if errorlevel 1 (
-  echo   git checkout main ไม่สำเร็จ
+  echo   git fetch ไม่สำเร็จ ตรวจเน็ต/สิทธิ์ GitHub
   pause
   exit /b 1
 )
-git pull --ff-only origin main
+git checkout -B main origin/main
 if errorlevel 1 (
-  echo   git pull ไม่สำเร็จ
-  pause
-  exit /b 1
+  echo   checkout main ไม่สำเร็จ — ลองรีเซ็ตแบบบังคับ
+  git reset --hard origin/main
+  if errorlevel 1 (
+    echo   git reset ไม่สำเร็จ
+    pause
+    exit /b 1
+  )
+) else (
+  git reset --hard origin/main
+  if errorlevel 1 (
+    echo   git reset ไม่สำเร็จ
+    pause
+    exit /b 1
+  )
 )
+git clean -fd
 for /f %%i in ('git rev-parse --short HEAD') do set "WORKER_BUILD_SHA=%%i"
 echo   ใช้โค้ด %WORKER_BUILD_SHA%
 echo.
