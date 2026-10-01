@@ -43,6 +43,7 @@ if (-not (Test-Path (Join-Path $Root 'package.json'))) {
 
 $OutputDir = Join-Path $Root 'output'
 $LogDir = Join-Path $OutputDir 'worker-logs'
+$RestartFlagPath = Join-Path $OutputDir 'restart-after-update.json'
 New-Item -ItemType Directory -Force -Path $LogDir | Out-Null
 
 $Patterns = @{
@@ -278,12 +279,63 @@ $Title
 }
 
 function Start-ScrapeWorker {
+  # ดึง main ก่อนเปิดทุกครั้ง — scrape ใช้โค้ดล่าสุดแม้ลืมกด Update Code
+  try {
+    $footer.Text = 'กำลังดึงโค้ดก่อนเปิด Scrap...'
+    [System.Windows.Forms.Application]::DoEvents()
+  } catch { }
+  try {
+    Update-WorkerCode | Out-Null
+  } catch {
+    # เน็ต/git พังก็เปิดด้วยโค้ดที่มีอยู่ — อย่าบล็อกการค้นหา
+    try { $footer.Text = "ดึงโค้ดไม่สำเร็จ เปิดด้วยของเดิม: $($_.Exception.Message)" } catch { }
+  }
   Start-WorkerWindow -Title 'SO Scraper Pool (auto-scale)' -WorkDir $Root -NpmScript 'scraper:pool' -Group 'Scrape'
 }
 
 function Start-AutopostWorker {
   $autopost = Join-Path $Root 'autopost'
   Start-WorkerWindow -Title 'SO AutoPost Worker (worker:post)' -WorkDir $autopost -NpmScript 'worker:post' -Group 'Autopost'
+}
+
+function Save-RestartAfterUpdate([bool]$Scrape, [bool]$Autopost) {
+  $payload = @{
+    scrape = $Scrape
+    autopost = $Autopost
+    at = (Get-Date).ToString('o')
+  } | ConvertTo-Json -Compress
+  [System.IO.File]::WriteAllText($RestartFlagPath, $payload, [System.Text.Encoding]::UTF8)
+}
+
+function Resume-AfterUpdateIfNeeded {
+  if (-not (Test-Path -LiteralPath $RestartFlagPath)) { return }
+  try {
+    $raw = [System.IO.File]::ReadAllText($RestartFlagPath, [System.Text.Encoding]::UTF8)
+    Remove-Item -LiteralPath $RestartFlagPath -Force -ErrorAction SilentlyContinue
+    $flag = $raw | ConvertFrom-Json
+    $wantScrape = [bool]$flag.scrape
+    $wantAuto = [bool]$flag.autopost
+    if (-not $wantScrape -and -not $wantAuto) { return }
+    Set-Busy $true
+    try {
+      if ($wantScrape -and -not (Test-WorkerRunning 'Scrape')) {
+        $footer.Text = 'อัปเดตแล้ว — กำลังเปิด Scrap...'
+        [System.Windows.Forms.Application]::DoEvents()
+        Start-ScrapeWorker
+      }
+      if ($wantAuto -and -not (Test-WorkerRunning 'Autopost')) {
+        $footer.Text = 'อัปเดตแล้ว — กำลังเปิด Autopost...'
+        [System.Windows.Forms.Application]::DoEvents()
+        Start-AutopostWorker
+      }
+      $footer.Text = "อัปเดตแล้ว: $(Get-WorkerBuildSha) — เปิด Worker ตามเดิมแล้ว"
+    } finally {
+      Set-Busy $false
+      Refresh-Status
+    }
+  } catch {
+    $footer.Text = "อัปเดตแล้ว แต่เปิด Worker ต่อไม่สำเร็จ: $($_.Exception.Message)"
+  }
 }
 
 # ---- UI ----
@@ -531,6 +583,8 @@ $updateBtn.Add_Click({
     $wasAuto = Test-WorkerRunning 'Autopost'
     if ($wasScrape) { Stop-WorkerGroup 'Scrape' | Out-Null }
     if ($wasAuto) { Stop-WorkerGroup 'Autopost' | Out-Null }
+    # แผงใหม่จะอ่านไฟล์นี้แล้วเปิด Worker กลับให้อัตโนมัติ
+    Save-RestartAfterUpdate -Scrape $wasScrape -Autopost $wasAuto
     $footer.Text = 'กำลังดึงโค้ดจาก GitHub...'
     [System.Windows.Forms.Application]::DoEvents()
     $sha = Update-WorkerCode
@@ -554,6 +608,7 @@ $updateBtn.Add_Click({
   } catch {
     $msg = $_.Exception.Message
     if (-not $msg) { $msg = "$_" }
+    Remove-Item -LiteralPath $RestartFlagPath -Force -ErrorAction SilentlyContinue
     [System.Windows.Forms.MessageBox]::Show(
       $msg,
       'อัปเดตโค้ดไม่สำเร็จ',
@@ -578,7 +633,10 @@ $timer.Interval = 4000
 $timer.Add_Tick({ Refresh-Status })
 $timer.Start()
 
-$form.Add_Shown({ Refresh-Status })
+$form.Add_Shown({
+  Refresh-Status
+  Resume-AfterUpdateIfNeeded
+})
 $form.Add_FormClosed({ $timer.Stop() })
 
 if ($LegacyTerminals) {

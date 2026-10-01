@@ -183,6 +183,25 @@ const HANDLERS = {
     await sleep(400);
     return { ok: true, echo: job.payload ?? null };
   },
+  // Remote Update Code: git reset to origin/main then exit so scraper-pool respawns
+  // with the new runner.js from disk. Enqueued via POST /api/update-workers.
+  async update_code(job) {
+    const cwd = process.cwd();
+    const run = (args) => execFileSync('git', args, { cwd, encoding: 'utf8' }).trim();
+    run(['fetch', 'origin', 'main']);
+    try { run(['checkout', '-B', 'main', 'origin/main']); } catch { /* reset below */ }
+    run(['reset', '--hard', 'origin/main']);
+    const sha = run(['rev-parse', '--short', 'HEAD']);
+    const restart = job?.payload?.restart !== false;
+    if (restart) {
+      // Finish the job first; exit after reply so pool launches a fresh process.
+      setTimeout(() => {
+        try { releaseProcessLock(); } catch { /* ignore */ }
+        process.exit(0);
+      }, 800);
+    }
+    return { ok: true, sha, restart };
+  },
   // NOTE: post / collect handlers intentionally NOT registered yet — those jobs stay
   // queued (never claimed) until the autopost handler is wired + tested carefully.
 };
