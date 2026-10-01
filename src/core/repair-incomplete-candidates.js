@@ -11,6 +11,7 @@ import {
   finalizeCandidateRecord,
   hasUsefulEducation,
   hasUsefulWorkExperience,
+  isJunkAddress,
   isJunkEducationRow,
   isJunkWorkRow,
   isMangledWorkRow,
@@ -101,10 +102,11 @@ export function needsRepair(row) {
   const education = Array.isArray(row.education) ? row.education : [];
   const hasJunkWork = work.some((item) => isJunkWorkRow(item) || isMangledWorkRow(item));
   const hasJunkEducation = education.some((item) => isJunkEducationRow(item));
-  const junkAddress = /JOBBKK\s*TEST|เทสระบบสมัครงาน/i.test(String(row.address || ''));
+  const junkAddress = isJunkAddress(row.address)
+    || /JOBBKK\s*TEST|เทสระบบสมัครงาน/i.test(String(row.address || ''));
   const junkDesired = /เทสระบบสมัครงาน|เรซูเม่นี้สำหรับใช้ทดสอบระบบ/i.test(String(row.desired_positions || ''));
   return blank(row.phone) || blank(row.email) || blank(row.gender) || blank(row.age)
-    || blank(row.address) || isJunkText(row.province) || blank(row.desired_positions)
+    || blank(row.address) || junkAddress || isJunkText(row.province) || blank(row.desired_positions)
     || blank(row.expected_salary)
     || !hasUsefulEducation(row.education)
     || !hasUsefulWorkExperience(row.work_experience)
@@ -207,10 +209,10 @@ async function patchCandidateById(client, id, parsed) {
         ELSE COALESCE(NULLIF($${params.length}, ''), ${col})
       END`);
     } else if (col === 'address' || col === 'desired_positions') {
-      // Clear JobBKK test-resume placeholders even when the repaired value is empty.
+      // Clear JobBKK test-resume / address-form i18n even when the repaired value is empty.
       sets.push(`${col} = CASE
         WHEN $${params.length} <> '' THEN $${params.length}
-        WHEN COALESCE(${col}, '') ~* 'JOBBKK\\s*TEST|เทสระบบสมัครงาน|เรซูเม่นี้สำหรับใช้ทดสอบระบบ'
+        WHEN COALESCE(${col}, '') ~* 'JOBBKK\\s*TEST|เทสระบบสมัครงาน|เรซูเม่นี้สำหรับใช้ทดสอบระบบ|address_placeholder|postal_code|introduce_yourself_placeholder|introduce_yourself_label|other_country'
           THEN ''
         ELSE ${col}
       END`);
@@ -312,7 +314,7 @@ const INCOMPLETE_SQL = `
          SELECT 1 FROM jsonb_array_elements(COALESCE(c.education, '[]'::jsonb)) e
           WHERE e::text ~* 'JOBBKK\\.COM|JOBBKK\\s*TEST|เทสระบบสมัครงาน'
        )
-       OR COALESCE(c.address,'') ~* 'JOBBKK\\s*TEST|เทสระบบสมัครงาน'
+       OR COALESCE(c.address,'') ~* 'JOBBKK\\s*TEST|เทสระบบสมัครงาน|address_placeholder|postal_code|introduce_yourself_placeholder|introduce_yourself_label|other_country'
        OR COALESCE(c.desired_positions,'') ~* 'เทสระบบสมัครงาน|เรซูเม่นี้สำหรับใช้ทดสอบระบบ'
      )
    ORDER BY c.last_updated_at DESC
@@ -324,8 +326,12 @@ function remainingGaps(row, parsed) {
   for (const key of ['phone', 'email', 'gender', 'age', 'address', 'province', 'desired_positions', 'expected_salary']) {
     const after = key === 'full_name' ? parsed.name : parsed[key];
     const before = row[key];
-    const beforeEmpty = key === 'province' ? isJunkText(before) : blank(before);
-    const afterEmpty = key === 'province' ? isJunkText(after) : blank(after);
+    const beforeEmpty = key === 'province' ? isJunkText(before)
+      : key === 'address' ? (blank(before) || isJunkAddress(before))
+        : blank(before);
+    const afterEmpty = key === 'province' ? isJunkText(after)
+      : key === 'address' ? (blank(after) || isJunkAddress(after))
+        : blank(after);
     if (beforeEmpty && afterEmpty) gaps.push(key);
   }
   if (!hasUsefulEducation(parsed.education)) gaps.push('education');
@@ -439,10 +445,15 @@ export async function repairIncompleteCandidates(db, opts = {}) {
       const target = key === 'full_name' ? 'name' : key;
       const next = parsed[target] ?? '';
       const beforeVal = before[key];
-      const beforeJunkTest = (key === 'address' || key === 'desired_positions')
-        && /JOBBKK\s*TEST|เทสระบบสมัครงาน|เรซูเม่นี้สำหรับใช้ทดสอบระบบ/i.test(String(beforeVal || ''));
+      const beforeJunkTest = key === 'address'
+        ? (isJunkAddress(beforeVal)
+          || /JOBBKK\s*TEST|เทสระบบสมัครงาน|เรซูเม่นี้สำหรับใช้ทดสอบระบบ/i.test(String(beforeVal || '')))
+        : key === 'desired_positions'
+          && /JOBBKK\s*TEST|เทสระบบสมัครงาน|เรซูเม่นี้สำหรับใช้ทดสอบระบบ/i.test(String(beforeVal || ''));
       const beforeEmpty = key === 'province' ? isJunkText(beforeVal) : (blank(beforeVal) || beforeJunkTest);
-      const nextOk = key === 'province' ? !isJunkText(next) : !blank(next);
+      const nextOk = key === 'province' ? !isJunkText(next)
+        : key === 'address' ? (!blank(next) && !isJunkAddress(next))
+          : !blank(next);
       if (beforeEmpty && nextOk) changed.push(key);
       else if (beforeJunkTest && blank(next)) changed.push(key);
     }
