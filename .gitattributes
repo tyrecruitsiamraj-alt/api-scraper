@@ -1,4 +1,6 @@
 # Shell scripts สำหรับ Mac/Linux ต้องเป็น LF เสมอ (CRLF ทำ bash พังด้วย \r)
 *.command text eol=lf
 *.sh text eol=lf
-scripts/so-worker-control.ps1 text working-tree-encoding=UTF-8 eol=crlf
+
+# คงไบต์เดิมของแผง Worker รวม UTF-8 BOM (PS 5.1 ต้องมี BOM)
+scripts/so-worker-control.ps1 -text
