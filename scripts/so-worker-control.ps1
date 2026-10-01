@@ -46,8 +46,8 @@ $LogDir = Join-Path $OutputDir 'worker-logs'
 New-Item -ItemType Directory -Force -Path $LogDir | Out-Null
 
 $Patterns = @{
-  Scrape   = @('scraper-pool\.mjs', 'workers[/\\]runner\.js')
-  Autopost = @('post-remote-worker-supervisor\.js', 'post-remote-worker\.js')
+  Scrape   = @('scraper-pool\.mjs', 'workers[/\\]runner\.js', 'npm.*scraper:pool', 'start-scrape\.cmd')
+  Autopost = @('post-remote-worker-supervisor\.js', 'post-remote-worker\.js', 'npm.*worker:post', 'start-autopost\.cmd')
 }
 
 function Get-MatchingProcesses([string[]]$Patterns) {
@@ -152,112 +152,95 @@ function Update-WorkerCode {
   }
 }
 
-function Get-LogTail([string]$LogPath, [int]$Lines = 25) {
-  if (-not (Test-Path -LiteralPath $LogPath)) { return '(ยังไม่มีไฟล์ log)' }
-  try {
-    $tail = Get-Content -LiteralPath $LogPath -Tail $Lines -ErrorAction Stop
-    if (-not $tail) { return '(log ว่าง)' }
-    return ($tail -join "`n")
-  } catch {
-    return "(อ่าน log ไม่ได้: $($_.Exception.Message))"
+function Resolve-NpmCmd {
+  $cmd = Get-Command npm.cmd -ErrorAction SilentlyContinue
+  if ($cmd -and $cmd.Source) { return $cmd.Source }
+  $cmd = Get-Command npm -ErrorAction SilentlyContinue
+  if ($cmd -and $cmd.Source) { return $cmd.Source }
+  $nodeDir = Split-Path -Parent (Resolve-NodeExe)
+  foreach ($name in @('npm.cmd', 'npm.exe', 'npm')) {
+    $candidate = Join-Path $nodeDir $name
+    if (Test-Path -LiteralPath $candidate) { return $candidate }
   }
+  throw "ไม่พบ npm - ติดตั้ง Node.js แบบมี npm แล้วเปิดแผงใหม่"
 }
 
-function Start-HiddenNode([string]$Name, [string]$WorkDir, [string]$NodeArgs, [string]$LogName, [hashtable]$ExtraEnv) {
-  $logPath = Join-Path $LogDir $LogName
-  $stamp = Get-Date -Format 'yyyy-MM-dd HH:mm:ss'
-  Add-Content -Path $logPath -Value "`n==== $stamp start $Name ====`n" -Encoding UTF8
-
-  if (-not (Test-Path -LiteralPath $WorkDir)) {
-    throw "ไม่พบโฟลเดอร์งาน: $WorkDir"
-  }
-
-  $nodeExe = Resolve-NodeExe
-  $scriptRel = ($NodeArgs -split '\s+')[0]
-  $scriptPath = Join-Path $WorkDir $scriptRel
-  if (-not (Test-Path -LiteralPath $scriptPath)) {
-    throw "ไม่พบสคริปต์ Worker: $scriptPath"
-  }
-
-  # เขียน launcher .cmd แล้วรัน - เลี่ยง bug ใส่ quote ของ cmd /c บรรทัดเดียว
-  $launcher = Join-Path $LogDir ("run-" + $Name.ToLower() + ".cmd")
-  $lines = @(
-    '@echo off'
-    'chcp 65001 >nul'
-    "cd /d `"$WorkDir`""
-    "set `"WORKER_BUILD_SHA=$(Get-WorkerBuildSha)`""
-    'set "WORKER_CAPABILITIES=post,preflight"'
-    'set "AUTO_POST_DAILY_ENABLED=0"'
-  )
-  foreach ($key in $ExtraEnv.Keys) {
-    $val = [string]$ExtraEnv[$key]
-    $lines += "set `"$key=$val`""
-  }
-  $lines += "`"$nodeExe`" $NodeArgs >> `"$logPath`" 2>&1"
-  Set-Content -LiteralPath $launcher -Value $lines -Encoding ASCII
-
-  $psi = New-Object System.Diagnostics.ProcessStartInfo
-  $psi.FileName = $env:ComSpec
-  if (-not $psi.FileName) { $psi.FileName = 'cmd.exe' }
-  $psi.Arguments = "/d /c `"$launcher`""
-  $psi.WorkingDirectory = $WorkDir
-  $psi.UseShellExecute = $false
-  $psi.CreateNoWindow = $true
-  $psi.WindowStyle = [System.Diagnostics.ProcessWindowStyle]::Hidden
-
-  $proc = [System.Diagnostics.Process]::Start($psi)
-  if (-not $proc) {
-    throw "สตาร์ท $Name ไม่สำเร็จ (Process.Start คืนค่าว่าง)"
-  }
-  return @{
-    Pid = $proc.Id
-    LogPath = $logPath
-    Launcher = $launcher
-    NodeExe = $nodeExe
-  }
-}
-
-function Wait-WorkerStarted([string]$Group, [string]$LogPath, [int]$TimeoutSec = 8) {
+function Wait-WorkerStarted([string]$Group, [int]$TimeoutSec = 20) {
   $deadline = (Get-Date).AddSeconds($TimeoutSec)
   while ((Get-Date) -lt $deadline) {
     if (Test-WorkerRunning $Group) { return $true }
-    Start-Sleep -Milliseconds 400
+    Start-Sleep -Milliseconds 500
     [System.Windows.Forms.Application]::DoEvents()
   }
   return $false
 }
 
-function Start-ScrapeWorker {
-  $info = Start-HiddenNode -Name 'Scrape' -WorkDir $Root -NodeArgs 'workers/scraper-pool.mjs' -LogName 'scrape-pool.log' -ExtraEnv @{}
-  if (-not (Wait-WorkerStarted -Group 'Scrape' -LogPath $info.LogPath)) {
-    throw @"
-เปิด Scrap ไม่สำเร็จ (process ไม่ค้าง)
-node: $($info.NodeExe)
-log: $($info.LogPath)
+# เปิดแบบเดียวกับ start-workers-legacy.bat ที่เคยใช้ได้จริง
+# ใช้หน้าต่าง cmd ย่อ (Minimized) + npm run - ไม่ซ่อนแบบ CreateNoWindow ที่พังบนเครื่องนี้
+function Start-WorkerWindow([string]$Title, [string]$WorkDir, [string]$NpmScript, [string]$Group) {
+  if (-not (Test-Path -LiteralPath $WorkDir)) {
+    throw "ไม่พบโฟลเดอร์งาน: $WorkDir"
+  }
+  $npm = Resolve-NpmCmd
+  $sha = Get-WorkerBuildSha
+  $logPath = Join-Path $LogDir ($(if ($Group -eq 'Scrape') { 'scrape-pool.log' } else { 'autopost.log' }))
+  $stamp = Get-Date -Format 'yyyy-MM-dd HH:mm:ss'
+  Add-Content -Path $logPath -Value "`n==== $stamp start $Title via npm run $NpmScript ====`n" -Encoding UTF8
 
-$(Get-LogTail $info.LogPath)
+  # เขียน .cmd แล้ว start ชื่อหน้าต่างคงที่ - ปิดด้วย taskkill ตามชื่อได้
+  $safeName = $Group.ToLower()
+  $launcher = Join-Path $LogDir ("start-$safeName.cmd")
+  $content = @(
+    '@echo off'
+    'chcp 65001 >nul'
+    "cd /d `"$WorkDir`""
+    "set WORKER_BUILD_SHA=$sha"
+    'set WORKER_CAPABILITIES=post,preflight'
+    'set AUTO_POST_DAILY_ENABLED=0'
+    "title $Title"
+    "echo [%date% %time%] starting $NpmScript>> `"$logPath`""
+    "`"$npm`" run $NpmScript"
+    "echo [%date% %time%] exited errorlevel=%errorlevel%>> `"$logPath`""
+  ) -join "`r`n"
+  [System.IO.File]::WriteAllText($launcher, $content, [System.Text.Encoding]::ASCII)
+
+  # start "title" cmd /k launcher - เหมือน legacy ที่ใช้ได้
+  $cmdExe = $env:ComSpec
+  if (-not $cmdExe) { $cmdExe = 'cmd.exe' }
+  # start "ชื่อหน้าต่าง" /MIN launcher.cmd - เหมือนปุ่ม start-workers เดิม
+  $argLine = "/c start `"$Title`" /MIN `"$launcher`""
+  $p = Start-Process -FilePath $cmdExe -ArgumentList $argLine -WorkingDirectory $WorkDir -WindowStyle Hidden -PassThru
+  if (-not $p) {
+    throw "สั่งเปิดหน้าต่าง $Title ไม่สำเร็จ"
+  }
+
+  if (-not (Wait-WorkerStarted -Group $Group -TimeoutSec 20)) {
+    throw @"
+เปิด $Title ไม่สำเร็จภายใน 20 วินาที
+npm: $npm
+launcher: $launcher
+โฟลเดอร์: $WorkDir
+
+ลองดูหน้าต่างย่อบน taskbar ชื่อ:
+$Title
+หรือกด 'เปิดไฟล์ log'
 "@
   }
 }
 
+function Start-ScrapeWorker {
+  Start-WorkerWindow -Title 'SO Scraper Pool (auto-scale)' -WorkDir $Root -NpmScript 'scraper:pool' -Group 'Scrape'
+}
+
 function Start-AutopostWorker {
   $autopost = Join-Path $Root 'autopost'
-  $info = Start-HiddenNode -Name 'Autopost' -WorkDir $autopost -NodeArgs 'scripts/post-remote-worker-supervisor.js' -LogName 'autopost.log' -ExtraEnv @{}
-  if (-not (Wait-WorkerStarted -Group 'Autopost' -LogPath $info.LogPath)) {
-    throw @"
-เปิด Autopost ไม่สำเร็จ (process ไม่ค้าง)
-node: $($info.NodeExe)
-log: $($info.LogPath)
-
-$(Get-LogTail $info.LogPath)
-"@
-  }
+  Start-WorkerWindow -Title 'SO AutoPost Worker (worker:post)' -WorkDir $autopost -NpmScript 'worker:post' -Group 'Autopost'
 }
 
 # ---- UI ----
 $form = New-Object System.Windows.Forms.Form
 $form.Text = 'SO Workers'
-$form.Size = New-Object System.Drawing.Size(460, 420)
+$form.Size = New-Object System.Drawing.Size(460, 460)
 $form.StartPosition = 'CenterScreen'
 $form.FormBorderStyle = 'FixedSingle'
 $form.MaximizeBox = $false
@@ -272,7 +255,7 @@ $title.AutoSize = $true
 $form.Controls.Add($title)
 
 $subtitle = New-Object System.Windows.Forms.Label
-$subtitle.Text = 'เขียว = เปิดอยู่ | เทา = ปิดอยู่  (กดสวิตช์เพื่อสลับ)'
+$subtitle.Text = 'เขียว = เปิดอยู่ | เทา = ปิดอยู่  (เปิดแล้วมีหน้าต่างย่อที่ taskbar)'
 $subtitle.ForeColor = [System.Drawing.Color]::FromArgb(100, 110, 120)
 $subtitle.Location = New-Object System.Drawing.Point(26, 48)
 $subtitle.AutoSize = $true
@@ -375,8 +358,15 @@ $refreshBtn.Size = New-Object System.Drawing.Size(120, 34)
 $refreshBtn.Location = New-Object System.Drawing.Point(292, 286)
 $form.Controls.Add($refreshBtn)
 
+$legacyBtn = New-Object System.Windows.Forms.Button
+$legacyBtn.Text = 'เปิดแบบเดิม (มีหน้าต่าง)'
+$legacyBtn.Size = New-Object System.Drawing.Size(400, 30)
+$legacyBtn.Location = New-Object System.Drawing.Point(24, 326)
+$form.Controls.Add($legacyBtn)
+
+
 $footer = New-Object System.Windows.Forms.Label
-$footer.Location = New-Object System.Drawing.Point(26, 336)
+$footer.Location = New-Object System.Drawing.Point(26, 364)
 $footer.Size = New-Object System.Drawing.Size(400, 36)
 $footer.ForeColor = [System.Drawing.Color]::FromArgb(100, 110, 120)
 $footer.Text = "โค้ด: $(Get-WorkerBuildSha)"
@@ -471,6 +461,16 @@ foreach ($ctrl in @($scrapeRow.Panel, $scrapeRow.Title, $scrapeRow.Status, $scra
 foreach ($ctrl in @($autoRow.Panel, $autoRow.Title, $autoRow.Status, $autoRow.Hint, $autoRow.Track, $autoRow.Thumb, $autoRow.SwitchText)) {
   $ctrl.Add_Click($autoClick)
 }
+
+$legacyBtn.Add_Click({
+  if ($busy) { return }
+  $legacy = Join-Path $Root 'start-workers-legacy.bat'
+  if (-not (Test-Path -LiteralPath $legacy)) {
+    [System.Windows.Forms.MessageBox]::Show('ไม่พบ start-workers-legacy.bat', 'SO Workers', 'OK', 'Error') | Out-Null
+    return
+  }
+  Start-Process -FilePath $legacy -WorkingDirectory $Root
+})
 
 $updateBtn.Add_Click({
   if ($busy) { return }
