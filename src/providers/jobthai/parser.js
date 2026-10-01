@@ -142,10 +142,28 @@ function isTimelineAgeLine(line) {
   return /^\d{4}\s*[-–—]\s*\d{1,2}$/u.test(clean(line));
 }
 
+const DUTY_STOP_RE = /^(?:คุณเคยดูเรซูเม่|Resume\s*-?\s*View\s*Credit|Credit\s*ที่ใช้แล้ว|ความสามารถ|ประวัติการศึกษา|ประวัติการฝึกอบรม|รายละเอียดส่วนตัว|คลิกดูข้อมูล|พิมพ์ประวัติ|Add Favorites|สงวนลิขสิทธิ์|setTimeout)/iu;
+
+function trimDutyChrome(text) {
+  const lines = String(text || '').split('\n');
+  const kept = [];
+  for (const line of lines) {
+    if (DUTY_STOP_RE.test(clean(line))) break;
+    kept.push(line);
+  }
+  return clean(kept.join('\n')).slice(0, 4000);
+}
+
 function absorbWorkLine(item, line) {
+  if (DUTY_STOP_RE.test(clean(line))) {
+    item._stopDuty = true;
+    return;
+  }
+  if (item._stopDuty) return;
+
   const dutyInline = firstMatch(line, [/หน้าที่-?ผลงาน\s*[:：]?\s*([\s\S]+)/u]);
   if (dutyInline) {
-    item.responsibilities = clean([item.responsibilities, dutyInline].filter(Boolean).join('\n'));
+    item.responsibilities = trimDutyChrome([item.responsibilities, dutyInline].filter(Boolean).join('\n'));
   }
   // After duties start, only append narrative lines — never re-read ตำแหน่ง from duty text.
   if (item.responsibilities) {
@@ -155,7 +173,7 @@ function absorbWorkLine(item, line) {
       && !isJobThaiPeriodLine(line)
       && line.length > 8
     ) {
-      item.responsibilities = clean(`${item.responsibilities}\n${line}`);
+      item.responsibilities = trimDutyChrome(`${item.responsibilities}\n${line}`);
     }
     if (!item.salary) {
       const sal = firstMatch(line, [/เงินเดือน[^0-9]{0,20}([\d,]+)/u]);
@@ -219,6 +237,8 @@ export function parseWork(workText) {
     }
 
     if (item.company && (item.position || item.salary || item.responsibilities)) {
+      delete item._stopDuty;
+      item.responsibilities = trimDutyChrome(item.responsibilities);
       items.push(item);
     }
   }

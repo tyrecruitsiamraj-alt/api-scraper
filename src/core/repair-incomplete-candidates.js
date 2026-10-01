@@ -17,6 +17,14 @@ import {
   isJunkWorkRow,
   isMangledWorkRow,
 } from '../providers/jobbkk/parser.js';
+import { parseWork as parseJobThaiWork } from '../providers/jobthai/parser.js';
+
+const JOBTHAI_DUTY_CHROME_RE = /Resume\s*-?\s*View\s*Credit|Credit\s*ที่ใช้แล้ว|คุณเคยดูเรซูเม่|สงวนลิขสิทธิ์|setTimeout/i;
+
+function workHasDutyChrome(rows) {
+  return Array.isArray(rows)
+    && rows.some((item) => JOBTHAI_DUTY_CHROME_RE.test(String(item?.responsibilities || '')));
+}
 
 const PROVINCE_NAMES = (() => {
   try {
@@ -64,6 +72,7 @@ export const WORK_CHROME_SQL_RE = [
   'สำหรับผู้ประกอบการเท่านั้น',
   'Resume\\s*-\\s*View\\s*Credit',
   'Credit\\s*ที่ใช้แล้ว',
+  'คุณเคยดูเรซูเม่',
   'สามารถดูหรือติดต่อได้',
 ].join('|');
 
@@ -101,7 +110,8 @@ function validEmail(value) {
 export function needsRepair(row) {
   const work = Array.isArray(row.work_experience) ? row.work_experience : [];
   const education = Array.isArray(row.education) ? row.education : [];
-  const hasJunkWork = work.some((item) => isJunkWorkRow(item) || isMangledWorkRow(item));
+  const hasJunkWork = work.some((item) => isJunkWorkRow(item) || isMangledWorkRow(item))
+    || workHasDutyChrome(work);
   const hasJunkEducation = education.some((item) => isJunkEducationRow(item));
   const junkAddress = isJunkAddress(row.address)
     || /JOBBKK\s*TEST|เทสระบบสมัครงาน/i.test(String(row.address || ''));
@@ -421,8 +431,9 @@ export async function repairIncompleteCandidates(db, opts = {}) {
     if (!needsRepair(row)) continue;
     const before = Object.fromEntries(REPAIR_TEXT_FIELDS.map((key) => [key, row[key]]));
     const beforeUsefulWork = hasUsefulWorkExperience(row.work_experience);
-    const beforeHadJunkWork = Array.isArray(row.work_experience)
-      && row.work_experience.some((item) => isJunkWorkRow(item) || isMangledWorkRow(item));
+    const beforeHadJunkWork = (Array.isArray(row.work_experience)
+      && row.work_experience.some((item) => isJunkWorkRow(item) || isMangledWorkRow(item)))
+      || workHasDutyChrome(row.work_experience);
     const beforeUsefulEdu = hasUsefulEducation(row.education);
     const beforeHadJunkEdu = Array.isArray(row.education)
       && row.education.some((item) => isJunkEducationRow(item));
@@ -448,6 +459,21 @@ export async function repairIncompleteCandidates(db, opts = {}) {
     if (!parsed.name && row.full_name) parsed.name = row.full_name;
     applyOcrAndPrefixFills(parsed, row, combinedText);
 
+    // JobThai period/duty layout is not JobBKK's — re-parse work from raw when chrome or weak.
+    if (String(row.platform || '').toLowerCase() === 'jobthai' && combinedText.length > 40) {
+      const beforeChrome = workHasDutyChrome(row.work_experience) || workHasDutyChrome(parsed.work_experience);
+      const beforeWeak = !hasUsefulWorkExperience(parsed.work_experience)
+        || (Array.isArray(parsed.work_experience)
+          && parsed.work_experience.some((item) => isJunkWorkRow(item) || isMangledWorkRow(item)));
+      if (beforeChrome || beforeWeak || !hasUsefulWorkExperience(row.work_experience)) {
+        const jtWork = parseJobThaiWork(combinedText)
+          .filter((item) => item.company || item.position);
+        if (jtWork.length && !workHasDutyChrome(jtWork) && hasUsefulWorkExperience(jtWork)) {
+          parsed.work_experience = jtWork;
+        }
+      }
+    }
+
     const changed = [];
     for (const key of REPAIR_TEXT_FIELDS) {
       const target = key === 'full_name' ? 'name' : key;
@@ -470,7 +496,9 @@ export async function repairIncompleteCandidates(db, opts = {}) {
       changed.push('education');
     }
     if ((!beforeUsefulWork && hasUsefulWorkExperience(parsed.work_experience))
-        || (beforeHadJunkWork && !parsed.work_experience.some((item) => isJunkWorkRow(item) || isMangledWorkRow(item)))) {
+        || (beforeHadJunkWork
+          && !parsed.work_experience.some((item) => isJunkWorkRow(item) || isMangledWorkRow(item))
+          && !workHasDutyChrome(parsed.work_experience))) {
       changed.push('work_experience');
     }
     if (!changed.length) {

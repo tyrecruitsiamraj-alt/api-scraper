@@ -55,3 +55,26 @@ Mini Big C สาขาตลาดพระพรหมเครือสหพ
   assert.match(work[0].company, /Mini Big C/);
   assert.match(work[0].responsibilities, /ระบบการเงิน/);
 });
+
+test('stops duties before JobThai credit / section chrome', () => {
+  const sample = `
+ก.ย. 56 - พ.ค. 57
+Solartron Public Company Limited
+เงินเดือน 25,000 ตำแหน่ง Production Supervisor
+Solartron Public Company Limited
+เงินเดือน 25,000 ตำแหน่ง Production Supervisor หน้าที่-ผลงาน 1.ควบคุมการผลิต
+2.ดูแลคุณภาพงาน
+คุณเคยดูเรซูเม่นี้แล้ว
+Resume View Credit
+Credit ที่ใช้แล้ว 1
+ความสามารถ
+ภาษาอังกฤษ
+`;
+  const work = parseWork(sample);
+  assert.equal(work.length, 1);
+  assert.match(work[0].responsibilities, /ควบคุมการผลิต/);
+  assert.match(work[0].responsibilities, /ดูแลคุณภาพงาน/);
+  assert.doesNotMatch(work[0].responsibilities, /คุณเคยดูเรซูเม่/);
+  assert.doesNotMatch(work[0].responsibilities, /View Credit/);
+  assert.doesNotMatch(work[0].responsibilities, /ความสามารถ/);
+});
