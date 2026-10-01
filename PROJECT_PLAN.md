@@ -176,7 +176,7 @@
 
 - ตอนตรวจไม่พบ Process `node` และไม่พบ Port ของระบบที่กำลัง Listen
 - ผลกระทบ: งานสร้างประกาศ, Scraping และ Facebook ไม่มีเครื่องรับงาน
-- จุดเริ่ม Worker: `start-workers.bat`
+- จุดเริ่ม Worker: `SO-Workers.bat` / `start-workers.bat` (แผงสวิตช์) · โหมดเก่า `start-workers.bat legacy`
 
 ### RC-02: Version Contract ระหว่าง Production กับ Worker ไม่ตรงกับโค้ดปัจจุบัน
 
@@ -694,7 +694,7 @@ Login
 
 - Scraper/Content Worker ทำงานบนเครื่องนี้และรับ Self-test/Content Queue จริง
 - Facebook Worker เปิดเฉพาะ `preflight` และปิด Auto Daily; จึงไม่นับว่า Gate B ด้าน “พร้อมเผยแพร่จริง” ผ่านครบจนกว่าผู้ใช้อนุญาตเปิด `post`
-- `start-workers.bat` อ่าน SHA ปัจจุบันหลัง `git pull` อัตโนมัติ และ Scraper Pool recovery ถูกแก้ไม่ให้สร้าง runner ซ้ำ
+- `SO-Workers.bat` เปิดแผงสวิตช์; กดอัปเดตโค้ดแล้วตั้ง `WORKER_BUILD_SHA` อัตโนมัติ และ Scraper Pool recovery ถูกแก้ไม่ให้สร้าง runner ซ้ำ
 
 ### Gate C — ทดสอบ Web → Queue → Worker
 
