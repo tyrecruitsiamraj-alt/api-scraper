@@ -281,7 +281,7 @@ function extractWork($) {
 }
 
 /** JobBKK login/register i18n + footer chrome that must never become work history. */
-const JOBBKK_SITE_CHROME_RE = /register_page|username_hint|max_case|no_html|no_symbols|symbol_casepassword|invalid_characters_password|invalid_email|must_be_greater_than|register_success|register_failed|employer_login|data_enter_system|data_company|help@jobbkk\.com|sales@jobbkk\.com|บริษัท\s*จัดหางาน\s*จ๊อบบีเคเค|JOBBKK\.COM|ไม่อนุญาตให้ใช้|คุณจะไม่สามารถเข้าสู่ระบบ|สมัครสมาชิกไม่สำเร็จ|สำหรับผู้ประกอบการเท่านั้น|ลงประกาศรับสมัครงาน/iu;
+const JOBBKK_SITE_CHROME_RE = /register_page|username_hint|max_case|no_html|no_symbols|symbol_casepassword|invalid_characters_password|invalid_email|must_be_greater_than|register_success|register_failed|employer_login|data_enter_system|data_company|help@jobbkk\.com|sales@jobbkk\.com|บริษัท\s*จัดหางาน\s*จ๊อบบีเคเค|JOBBKK\.COM|ไม่อนุญาตให้ใช้|คุณจะไม่สามารถเข้าสู่ระบบ|สมัครสมาชิกไม่สำเร็จ|สำหรับผู้ประกอบการเท่านั้น|Resume\s*-\s*View\s*Credit|Credit\s*ที่ใช้แล้ว|สามารถดูหรือติดต่อได้/iu;
 
 /** Drop login/register chrome that sometimes lands inside body.innerText. */
 export function stripJobbkkSiteChrome(text) {
@@ -301,6 +301,10 @@ export function stripJobbkkSiteChrome(text) {
   out = out.replace(/ฝ่ายบริการลูกค้า\s*:[^\n]{0,200}/giu, ' ');
   out = out.replace(/สร้างเรซูเม่ สำหรับสมัครงานฟรี[^\n]{0,120}/giu, ' ');
   out = out.replace(/ลงประกาศรับสมัครงาน สำหรับผู้ประกอบการเท่านั้น[^\n]{0,200}/giu, ' ');
+  // Employer resume-credit meter leaked into body/work text.
+  out = out.replace(/สามารถดูหรือติดต่อได้\s*[:：]?[\s\S]*$/iu, ' ');
+  out = out.replace(/Resume\s*-\s*View\s*Credit[\s\S]*$/iu, ' ');
+  out = out.replace(/Credit\s*ที่ใช้แล้ว[^\n]{0,200}/giu, ' ');
   out = out.replace(/[{}\[\]]+/g, ' ');
   out = out.replace(/\\+"/g, ' ');
   return clean(out);
@@ -323,6 +327,179 @@ export function isJobbkkSiteChromeText(text) {
   return JOBBKK_SITE_CHROME_RE.test(stripped);
 }
 
+/** True when company/position still contain glued labels or credit-meter chrome. */
+export function isMangledWorkRow(item) {
+  const company = clean(item?.company);
+  const position = clean(item?.position);
+  const responsibilities = clean(item?.responsibilities);
+  const head = `${company} ${position}`.trim();
+  if (!head) return false;
+  if (/Resume\s*-\s*View\s*Credit|Credit\s*ที่ใช้แล้ว|สามารถดูหรือติดต่อได้/i.test(head)) return true;
+  if (/Resume\s*-\s*View\s*Credit|Credit\s*ที่ใช้แล้ว|สามารถดูหรือติดต่อได้/i.test(responsibilities)) return true;
+  // Field labels that belong in other columns leaked into company/position.
+  if (/เงินเดือน\s*\(?บาท\)?\s*[:：]?|ประเภทธุรกิจ\s*[:：]|รายละเอียดงาน|หน้าที่-ผลงาน|ระยะเวลา\s*[:：]/u.test(head)) return true;
+  if (/ตำแหน่ง(?:งาน)?\s*[:：]/u.test(company) || /^ตำแหน่ง(?:งาน)?\s+/u.test(company)) return true;
+  // Employer UI actions leaked into position ("บันทึก ยกเลิก นัดสัมภาษณ์ ตำแหน่งงาน ::").
+  if (/บันทึก\s*ยกเลิก\s*นัดสัมภาษณ์|นัดสัมภาษณ์\s*ตำแหน่งงาน/u.test(head)) return true;
+  // Duties dumped into company (long prose, no company cue near the start).
+  if (company.length > 140 && !/(?:บริษัท|จำกัด|มหาชน|Co\.?\s*Ltd|Limited|Inc\.?)/i.test(company.slice(0, 48))) {
+    return true;
+  }
+  // Position swallowed the whole job block.
+  if (position.length > 160 && /(?:หน้าที่|รายละเอียด|เงินเดือน|ประเภทธุรกิจ)/u.test(position)) return true;
+  return false;
+}
+
+/**
+ * Rebuild one mangled work row by re-splitting glued labels from company/position text.
+ * Returns null when nothing useful remains.
+ */
+export function normalizeWorkRow(item) {
+  if (!item || typeof item !== 'object') return null;
+  const parts = [
+    item.company, item.position, item.period, item.salary,
+    item.business_type, item.responsibilities, item.year,
+  ].map(clean).filter(Boolean);
+  let blob = parts.join(' ');
+  blob = stripJobbkkSiteChrome(blob);
+  if (!blob) return null;
+  // Insert separators so label regexes can cut glued Thai/ASCII blocks.
+  blob = blob
+    .replace(/ตำแหน่ง(?:งาน)?\s*[:：]?/gu, ' ตำแหน่งงาน : ')
+    .replace(/ข้อมูลบริษัท\s*[:：]?/gu, ' ข้อมูลบริษัท : ')
+    .replace(/(?<!ข้อมูล)บริษัท\s*[:：]/gu, ' บริษัท : ')
+    .replace(/เงินเดือน\s*\(?บาท\)?\s*[:：]?/gu, ' เงินเดือน : ')
+    .replace(/ประเภทธุรกิจ\s*[:：]?/gu, ' ประเภทธุรกิจ : ')
+    .replace(/ระยะเวลา\s*[:：]?/gu, ' ระยะเวลา : ')
+    .replace(/รายละเอียดงาน/gu, ' รายละเอียดงาน ')
+    .replace(/หน้าที่-ผลงาน/gu, ' รายละเอียดงาน ')
+    .replace(/ที่อยู่\s*[:：]?/gu, ' ที่อยู่ : ');
+  blob = clean(blob);
+  // Text before ตำแหน่งงาน is usually the employer when labels were glued without ข้อมูลบริษัท.
+  const unlabeledCompany = clean(blob.match(/^(.*?)(?=\s*ตำแหน่ง(?:งาน)?\s*[:：])/u)?.[1] || '')
+    .replace(/^(?:ข้อมูลบริษัท|บริษัท)\s*[:：]?\s*/u, '');
+  // Rebuild a clean labeled blob instead of concatenating duplicates.
+  const labeledBlob = [
+    unlabeledCompany ? `ข้อมูลบริษัท : ${unlabeledCompany}` : '',
+    (() => {
+      const pos = firstMatch(blob, [/ตำแหน่ง(?:งาน)?\s*[:：]?\s*(.+?)(?=\s*(?:ประเภทธุรกิจ|ระยะเวลา|เงินเดือน|รายละเอียดงาน|ที่อยู่|$))/u]);
+      return pos ? `ตำแหน่งงาน : ${pos}` : '';
+    })(),
+    (() => {
+      const bizValues = [...blob.matchAll(/ประเภทธุรกิจ\s*[:：]?\s*(.+?)(?=\s*(?:ระยะเวลา|เงินเดือน|รายละเอียดงาน|ที่อยู่|ตำแหน่ง|ประเภทธุรกิจ|$))/gu)]
+        .map((m) => clean(m[1]))
+        .filter((value) => value && value.length >= 2 && !/^(?:เซลล์|พนักงาน)$/u.test(value));
+      return bizValues.length ? `ประเภทธุรกิจ : ${bizValues[bizValues.length - 1]}` : '';
+    })(),
+    (() => {
+      // Prefer the last ระยะเวลา value (earlier ones are often glued leftovers like "เซลล์ระยะเวลา").
+      const periods = [...blob.matchAll(/ระยะเวลา\s*[:：]?\s*(.+?)(?=\s*(?:ประเภทธุรกิจ|เงินเดือน|รายละเอียดงาน|ที่อยู่|ตำแหน่ง|$))/gu)]
+        .map((m) => clean(m[1]))
+        .filter((value) => value && !/^(?:เซลล์|พนักงาน|เจ้าหน้าที่)$/u.test(value));
+      return periods.length ? `ระยะเวลา : ${periods[periods.length - 1]}` : '';
+    })(),
+    (() => {
+      const salary = firstMatch(blob, [/เงินเดือน\s*[:：]?\s*([\d,]+)/u]);
+      return salary ? `เงินเดือน : ${salary}` : '';
+    })(),
+    (() => {
+      const detail = firstMatch(blob, [/รายละเอียดงาน\s*(.+)$/u]);
+      return detail ? `รายละเอียดงาน ${detail}` : '';
+    })(),
+  ].filter(Boolean).join(' ');
+  const parsed = parseOneWorkChunk(labeledBlob || blob);
+  if (parsed && !isMangledWorkRow(parsed) && !isJunkWorkRow(parsed)) {
+    if (!clean(parsed.company) && unlabeledCompany && unlabeledCompany.length <= 120) {
+      parsed.company = unlabeledCompany;
+    }
+    // De-dupe "อักษร… จำกัด อักษร… จำกัด"
+    if (clean(parsed.company)) {
+      const parts = clean(parsed.company).split(/\s+/);
+      const half = Math.floor(parts.length / 2);
+      if (half > 0) {
+        const a = parts.slice(0, half).join(' ');
+        const b = parts.slice(half).join(' ');
+        if (a && a === b) parsed.company = a;
+      }
+      parsed.company = clean(parsed.company)
+        .replace(/^(บริษัท\s+)+/u, 'บริษัท ')
+        .replace(/(บริษัท\s+){2,}/gu, 'บริษัท ');
+    }
+    if (!isMangledWorkRow(parsed)) return parsed;
+  }
+  // Fallback: keep short company/position heads before the first glued label.
+  let company = clean(item.company)
+    .replace(/ตำแหน่ง(?:งาน)?\s*[:：]?[\s\S]*$/u, '')
+    .replace(/เงินเดือน[\s\S]*$/u, '')
+    .replace(/ประเภทธุรกิจ[\s\S]*$/u, '')
+    .replace(/รายละเอียดงาน[\s\S]*$/u, '')
+    .replace(/หน้าที่-ผลงาน[\s\S]*$/u, '');
+  let position = clean(item.position)
+    .replace(/สามารถดูหรือติดต่อได้[\s\S]*$/iu, '')
+    .replace(/Resume\s*-\s*View\s*Credit[\s\S]*$/iu, '')
+    .replace(/เงินเดือน[\s\S]*$/u, '')
+    .replace(/ประเภทธุรกิจ[\s\S]*$/u, '')
+    .replace(/รายละเอียดงาน[\s\S]*$/u, '')
+    .replace(/หน้าที่-ผลงาน[\s\S]*$/u, '')
+    .replace(/ระยะเวลา[\s\S]*$/u, '');
+  // "Trainee โรงแรมอครา … ตำแหน่ง Trainee" → company from mid text, short position.
+  const posLabel = position.match(/^(.*?)\s+ตำแหน่ง\s+(.+)$/u);
+  if (posLabel) {
+    const before = clean(posLabel[1]);
+    const after = clean(posLabel[2]);
+    if (after && after.length <= 80) position = after;
+    if (!company && before) company = before.replace(/^ตำแหน่ง\s+/u, '');
+  }
+  if (!company && unlabeledCompany && unlabeledCompany.length <= 120) company = unlabeledCompany;
+  // "เสิร์ฟ โอโตยะ" / "ตำแหน่ง ผู้จัดการโรงงาน" leftovers
+  company = clean(company).replace(/^ตำแหน่ง(?:งาน)?\s+/u, '');
+  position = clean(position);
+  if (!position && company && company.length <= 60) {
+    // company field held only a position label
+    const maybePos = clean(item.company).match(/^ตำแหน่ง(?:งาน)?\s+(.+)$/u)?.[1];
+    if (maybePos && maybePos.length <= 80) {
+      position = clean(maybePos).replace(/เงินเดือน[\s\S]*$/u, '');
+      company = '';
+    }
+  }
+  const out = {
+    year: clean(item.year) || '',
+    company,
+    position,
+    period: clean(item.period) || '',
+    salary: clean(item.salary) || firstMatch(blob, [/เงินเดือน\s*[:：]?\s*([\d,]+)/u]) || '',
+    business_type: clean(item.business_type)
+      || firstMatch(blob, [/ประเภทธุรกิจ\s*[:：]?\s*(.+?)(?=\s*(?:ระยะเวลา|เงินเดือน|รายละเอียดงาน|ที่อยู่|$))/u])
+      || '',
+    responsibilities: clean(item.responsibilities)
+      || firstMatch(blob, [/รายละเอียดงาน\s*(.+)$/u])
+      || '',
+  };
+  if (!out.company && !out.position) return null;
+  if (isMangledWorkRow(out) || isJunkWorkRow(out)) return null;
+  return out;
+}
+
+/** Normalize mangled rows; drop chrome-only rows. */
+export function sanitizeWorkExperience(rows) {
+  if (!Array.isArray(rows) || !rows.length) return [];
+  const out = [];
+  const seen = new Set();
+  for (const row of rows) {
+    let next = row;
+    if (isMangledWorkRow(row)) next = normalizeWorkRow(row);
+    if (!next || isJunkWorkRow(next) || isMangledWorkRow(next)) continue;
+    const company = clean(next.company);
+    const position = clean(next.position);
+    if (!company && !position) continue;
+    const key = `${company}|${position}|${clean(next.year)}|${clean(next.period)}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(next);
+  }
+  return out;
+}
+
 export function isJunkWorkRow(item) {
   const company = clean(item?.company);
   const position = clean(item?.position);
@@ -331,26 +508,38 @@ export function isJunkWorkRow(item) {
   if (!blob) return true;
   if (isJobbkkSiteChromeText(blob)) return true;
   if (/จ๊อบบีเคเค|jobbkk\.com/i.test(company)) return true;
+  if (/Resume\s*-\s*View\s*Credit|Credit\s*ที่ใช้แล้ว|สามารถดูหรือติดต่อได้/i.test(`${company} ${position}`)) return true;
   // Position/company that is clearly a validation sentence, not a job title
-  if (/ต้องไม่เกิน|ต้องมากกว่า|รูปแบบอีเมล|รหัสผ่านต้อง|ไม่อนุญาต/u.test(blob)) return true;
+  if (/ต้องไม่เกิน|ต้องมากกว่า|รูปแบบอีเมล|รหัสผ่านต้อง|ไม่อนุญาต/u.test(`${company} ${position}`)) return true;
   return false;
 }
 
 /** True when at least one work row has a company or position the desk can show. */
 export function hasUsefulWorkExperience(rows) {
   if (!Array.isArray(rows) || !rows.length) return false;
-  return rows.some((item) => {
-    if (isJunkWorkRow(item)) return false;
+  return sanitizeWorkExperience(rows).some((item) => {
     const company = clean(item?.company);
     const position = clean(item?.position);
     return Boolean(company || position);
   });
 }
 
+export function isJunkEducationRow(item) {
+  const blob = [item?.institution, item?.faculty, item?.major, item?.degree]
+    .map(clean).filter(Boolean).join(' ');
+  if (!blob) return true;
+  if (/JOBBKK\.COM|JOBBKK\s*TEST|เทสระบบสมัครงาน/i.test(blob)) return true;
+  if (/register_page|username_hint|max_case|help@jobbkk/i.test(blob)) return true;
+  return false;
+}
+
 /** True when education rows have institution/degree/major. */
 export function hasUsefulEducation(rows) {
   if (!Array.isArray(rows) || !rows.length) return false;
-  return rows.some((item) => clean(item?.institution) || clean(item?.degree) || clean(item?.major));
+  return rows.some((item) => {
+    if (isJunkEducationRow(item)) return false;
+    return Boolean(clean(item?.institution) || clean(item?.degree) || clean(item?.major));
+  });
 }
 
 const WORK_FIELD_STOP = '(?=\\s*(?:ข้อมูลบริษัท|ประเภทธุรกิจ|ตำแหน่ง(?:งาน)?|ระยะเวลา|เงินเดือน|รายละเอียดงาน|Hard Skills|Soft Skills|ทักษะความรู้|ข้อมูลการฝึกอบรม|$))';
@@ -606,15 +795,22 @@ export function fillMissingFromRawText(record, rawText) {
       if (rows.length) record.education = rows;
     }
   }
-  // Drop site-chrome rows that already leaked into structured work.
+  // Drop site-chrome / normalize glued company+position rows.
+  if (Array.isArray(record.education) && record.education.length) {
+    record.education = record.education.filter((row) => !isJunkEducationRow(row));
+  }
+  const hadMangledWork = Array.isArray(record.work_experience)
+    && record.work_experience.some((row) => isMangledWorkRow(row));
   if (Array.isArray(record.work_experience) && record.work_experience.length) {
-    record.work_experience = record.work_experience.filter((row) => !isJunkWorkRow(row));
+    record.work_experience = sanitizeWorkExperience(record.work_experience);
   }
   if (isJobbkkSiteChromeText(record.experience_summary)) {
     record.experience_summary = '';
+  } else if (clean(record.experience_summary)) {
+    record.experience_summary = stripJobbkkSiteChrome(record.experience_summary);
   }
 
-  if (!hasUsefulWorkExperience(record.work_experience)) {
+  if (!hasUsefulWorkExperience(record.work_experience) || hadMangledWork) {
     const workRaw = clean(record.experience_summary)
       || firstMatch(text, [
         /ประวัติการทำงาน(?:\/ฝึกงาน)?\s*([\s\S]*?)(?=ข้อมูลการฝึกอบรม|ทักษะความรู้|Hard Skills|Soft Skills|$)/u,
@@ -622,9 +818,16 @@ export function fillMissingFromRawText(record, rawText) {
       ]);
     const work = stripJobbkkSiteChrome(workRaw);
     if (work && work.length >= 4 && !isJobbkkSiteChromeText(work)) {
-      if (!clean(record.experience_summary)) record.experience_summary = work;
+      if (!clean(record.experience_summary) || isJobbkkSiteChromeText(record.experience_summary)) {
+        record.experience_summary = work;
+      }
       const rows = parseWorkEntriesFromText(work);
-      if (rows.length) record.work_experience = rows;
+      if (rows.length) {
+        const cleaned = sanitizeWorkExperience(rows);
+        if (cleaned.length && (!hasUsefulWorkExperience(record.work_experience) || hadMangledWork)) {
+          record.work_experience = cleaned;
+        }
+      }
     }
   }
 
@@ -789,11 +992,22 @@ export function finalizeCandidateRecord(record = {}) {
   if (!Array.isArray(next.soft_skills)) next.soft_skills = [];
   if (!Array.isArray(next.language_skills)) next.language_skills = [];
   next.raw_text = stripJobbkkSiteChrome(next.raw_text || '');
+  if (Array.isArray(next.education)) {
+    next.education = next.education.filter((row) => !isJunkEducationRow(row));
+  }
   if (Array.isArray(next.work_experience)) {
-    next.work_experience = next.work_experience.filter((row) => !isJunkWorkRow(row));
+    next.work_experience = sanitizeWorkExperience(next.work_experience);
   }
   if (isJobbkkSiteChromeText(next.experience_summary)) next.experience_summary = '';
+  else if (clean(next.experience_summary)) next.experience_summary = stripJobbkkSiteChrome(next.experience_summary);
   fillMissingFromRawText(next, next.raw_text || '');
+  // Test-resume placeholders must not stay on the desk (after fill — raw_text can reintroduce them).
+  if (/JOBBKK\s*TEST|เทสระบบสมัครงาน|เรซูเม่นี้สำหรับใช้ทดสอบระบบ/i.test(clean(next.address))) {
+    next.address = '';
+  }
+  if (/JOBBKK\s*TEST|เทสระบบสมัครงาน|เรซูเม่นี้สำหรับใช้ทดสอบระบบ/i.test(clean(next.desired_positions))) {
+    next.desired_positions = '';
+  }
   next.parse_status = parseStatus(next, next.raw_text || '');
   return next;
 }
