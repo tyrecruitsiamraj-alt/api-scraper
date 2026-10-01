@@ -102,19 +102,60 @@ export async function readResumeResultPool(page) {
   });
 }
 
+export async function readTalentResultCount(page) {
+  return page.evaluate(() => {
+    const text = document.body?.innerText || '';
+    const match = text.match(/ผลการค้นหา\s*([\d,]+)\s*เรซูเม่/u);
+    return match ? Number(match[1].replace(/,/g, '')) : null;
+  }).catch(() => null);
+}
+
+/**
+ * Decide whether Talent search results are ready to accept.
+ * Critical: a leftover "ผลการค้นหา 0 เรซูเม่" from the previous keyword must NOT
+ * count as done on the first poll — that made every keyword after the first
+ * finish in ~4s with found=0 (ขับรถผู้บริหาร / พนักงานขับรถ).
+ */
+export function shouldAcceptTalentSearchResult({
+  searching,
+  sawSearching,
+  changedIds,
+  countText,
+  beforeCount,
+  elapsedMs,
+  minWaitMs = 2500,
+}) {
+  if (searching) return false;
+  if (changedIds) return true;
+  if (countText !== null && beforeCount !== null && countText !== beforeCount) return true;
+  if (sawSearching && countText !== null && elapsedMs >= 500) return true;
+  // Site may not show "กำลังค้นหา" — wait a beat so we don't accept the pre-click 0.
+  if (!sawSearching && elapsedMs >= minWaitMs && countText !== null) return true;
+  return false;
+}
+
 export async function waitForResultChange(page, previousIds = [], timeoutMs = 45_000) {
   const before = new Set((previousIds ?? []).map(String));
+  const beforeCount = await readTalentResultCount(page);
   const start = Date.now();
+  let sawSearching = false;
   while (Date.now() - start < timeoutMs) {
-    const searching = await page.getByRole('button', { name: /กำลังค้นหา/u }).count().catch(() => 0);
+    const searching = (await page.getByRole('button', { name: /กำลังค้นหา/u }).count().catch(() => 0)) > 0;
+    if (searching) sawSearching = true;
     const pool = await readResumeResultPool(page);
-    const countText = await page.evaluate(() => {
-      const text = document.body?.innerText || '';
-      const match = text.match(/ผลการค้นหา\s*([\d,]+)\s*เรซูเม่/u);
-      return match ? Number(match[1].replace(/,/g, '')) : null;
-    }).catch(() => null);
-    const changed = pool.some((item) => !before.has(String(item.id)));
-    if (!searching && (changed || countText === 0)) return pool;
+    const countText = await readTalentResultCount(page);
+    const changedIds = pool.some((item) => !before.has(String(item.id)));
+    const elapsedMs = Date.now() - start;
+    if (shouldAcceptTalentSearchResult({
+      searching,
+      sawSearching,
+      changedIds,
+      countText,
+      beforeCount,
+      elapsedMs,
+    })) {
+      return pool;
+    }
     await sleep(400);
   }
   return readResumeResultPool(page);
