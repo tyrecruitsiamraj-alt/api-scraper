@@ -93,6 +93,34 @@ function Test-WorkerRunning([string]$Group) {
   return @(Get-MatchingProcesses $Patterns[$Group]).Count -gt 0
 }
 
+# ตอนดับเบิลคลิกจาก Explorer PATH อาจไม่มี node - รวม PATH จาก Registry
+try {
+  $machinePath = [Environment]::GetEnvironmentVariable('Path', 'Machine')
+  $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
+  if ($machinePath -or $userPath) {
+    $env:Path = (@($machinePath, $userPath, $env:Path) | Where-Object { $_ }) -join ';'
+  }
+} catch { }
+
+function Resolve-NodeExe {
+  $cmd = Get-Command node -ErrorAction SilentlyContinue
+  if ($cmd -and $cmd.Source -and (Test-Path -LiteralPath $cmd.Source)) {
+    return $cmd.Source
+  }
+  $candidates = @(
+    (Join-Path $env:ProgramFiles 'nodejs\node.exe')
+    (Join-Path ${env:ProgramFiles(x86)} 'nodejs\node.exe')
+    (Join-Path $env:LOCALAPPDATA 'Programs\nodejs\node.exe')
+    (Join-Path $env:LOCALAPPDATA 'nvs\node\*\*\node.exe')
+  )
+  foreach ($pattern in $candidates) {
+    if (-not $pattern) { continue }
+    $hit = Get-Item -Path $pattern -ErrorAction SilentlyContinue | Select-Object -First 1
+    if ($hit) { return $hit.FullName }
+  }
+  throw "ไม่พบ node.exe - ติดตั้ง Node.js แล้วลองเปิดแผงใหม่ (หรือเปิดจากเครื่องที่รัน node ใน cmd ได้)"
+}
+
 function Get-WorkerBuildSha {
   Push-Location $Root
   try {
@@ -124,40 +152,106 @@ function Update-WorkerCode {
   }
 }
 
+function Get-LogTail([string]$LogPath, [int]$Lines = 25) {
+  if (-not (Test-Path -LiteralPath $LogPath)) { return '(ยังไม่มีไฟล์ log)' }
+  try {
+    $tail = Get-Content -LiteralPath $LogPath -Tail $Lines -ErrorAction Stop
+    if (-not $tail) { return '(log ว่าง)' }
+    return ($tail -join "`n")
+  } catch {
+    return "(อ่าน log ไม่ได้: $($_.Exception.Message))"
+  }
+}
+
 function Start-HiddenNode([string]$Name, [string]$WorkDir, [string]$NodeArgs, [string]$LogName, [hashtable]$ExtraEnv) {
   $logPath = Join-Path $LogDir $LogName
   $stamp = Get-Date -Format 'yyyy-MM-dd HH:mm:ss'
   Add-Content -Path $logPath -Value "`n==== $stamp start $Name ====`n" -Encoding UTF8
 
-  $nodeExe = (Get-Command node -ErrorAction Stop).Source
-  # ใช้ cmd /c + CreateNoWindow แล้ว redirect เข้าไฟล์ - ไม่เปิด console
-  # และไม่ค้าง pipe เวลาแผงสวิตช์ปิด (ต่างจาก RedirectStandard* บน Process)
-  $inner = "`"$nodeExe`" $NodeArgs >> `"$logPath`" 2>&1"
+  if (-not (Test-Path -LiteralPath $WorkDir)) {
+    throw "ไม่พบโฟลเดอร์งาน: $WorkDir"
+  }
+
+  $nodeExe = Resolve-NodeExe
+  $scriptRel = ($NodeArgs -split '\s+')[0]
+  $scriptPath = Join-Path $WorkDir $scriptRel
+  if (-not (Test-Path -LiteralPath $scriptPath)) {
+    throw "ไม่พบสคริปต์ Worker: $scriptPath"
+  }
+
+  # เขียน launcher .cmd แล้วรัน - เลี่ยง bug ใส่ quote ของ cmd /c บรรทัดเดียว
+  $launcher = Join-Path $LogDir ("run-" + $Name.ToLower() + ".cmd")
+  $lines = @(
+    '@echo off'
+    'chcp 65001 >nul'
+    "cd /d `"$WorkDir`""
+    "set `"WORKER_BUILD_SHA=$(Get-WorkerBuildSha)`""
+    'set "WORKER_CAPABILITIES=post,preflight"'
+    'set "AUTO_POST_DAILY_ENABLED=0"'
+  )
+  foreach ($key in $ExtraEnv.Keys) {
+    $val = [string]$ExtraEnv[$key]
+    $lines += "set `"$key=$val`""
+  }
+  $lines += "`"$nodeExe`" $NodeArgs >> `"$logPath`" 2>&1"
+  Set-Content -LiteralPath $launcher -Value $lines -Encoding ASCII
+
   $psi = New-Object System.Diagnostics.ProcessStartInfo
-  $psi.FileName = 'cmd.exe'
-  $psi.Arguments = "/d /c $inner"
+  $psi.FileName = $env:ComSpec
+  if (-not $psi.FileName) { $psi.FileName = 'cmd.exe' }
+  $psi.Arguments = "/d /c `"$launcher`""
   $psi.WorkingDirectory = $WorkDir
   $psi.UseShellExecute = $false
   $psi.CreateNoWindow = $true
   $psi.WindowStyle = [System.Diagnostics.ProcessWindowStyle]::Hidden
 
-  $psi.EnvironmentVariables['WORKER_BUILD_SHA'] = (Get-WorkerBuildSha)
-  $psi.EnvironmentVariables['WORKER_CAPABILITIES'] = 'post,preflight'
-  $psi.EnvironmentVariables['AUTO_POST_DAILY_ENABLED'] = '0'
-  foreach ($key in $ExtraEnv.Keys) {
-    $psi.EnvironmentVariables[$key] = [string]$ExtraEnv[$key]
+  $proc = [System.Diagnostics.Process]::Start($psi)
+  if (-not $proc) {
+    throw "สตาร์ท $Name ไม่สำเร็จ (Process.Start คืนค่าว่าง)"
   }
+  return @{
+    Pid = $proc.Id
+    LogPath = $logPath
+    Launcher = $launcher
+    NodeExe = $nodeExe
+  }
+}
 
-  [void][System.Diagnostics.Process]::Start($psi)
+function Wait-WorkerStarted([string]$Group, [string]$LogPath, [int]$TimeoutSec = 8) {
+  $deadline = (Get-Date).AddSeconds($TimeoutSec)
+  while ((Get-Date) -lt $deadline) {
+    if (Test-WorkerRunning $Group) { return $true }
+    Start-Sleep -Milliseconds 400
+    [System.Windows.Forms.Application]::DoEvents()
+  }
+  return $false
 }
 
 function Start-ScrapeWorker {
-  Start-HiddenNode -Name 'Scrape' -WorkDir $Root -NodeArgs 'workers/scraper-pool.mjs' -LogName 'scrape-pool.log' -ExtraEnv @{}
+  $info = Start-HiddenNode -Name 'Scrape' -WorkDir $Root -NodeArgs 'workers/scraper-pool.mjs' -LogName 'scrape-pool.log' -ExtraEnv @{}
+  if (-not (Wait-WorkerStarted -Group 'Scrape' -LogPath $info.LogPath)) {
+    throw @"
+เปิด Scrap ไม่สำเร็จ (process ไม่ค้าง)
+node: $($info.NodeExe)
+log: $($info.LogPath)
+
+$(Get-LogTail $info.LogPath)
+"@
+  }
 }
 
 function Start-AutopostWorker {
   $autopost = Join-Path $Root 'autopost'
-  Start-HiddenNode -Name 'Autopost' -WorkDir $autopost -NodeArgs 'scripts/post-remote-worker-supervisor.js' -LogName 'autopost.log' -ExtraEnv @{}
+  $info = Start-HiddenNode -Name 'Autopost' -WorkDir $autopost -NodeArgs 'scripts/post-remote-worker-supervisor.js' -LogName 'autopost.log' -ExtraEnv @{}
+  if (-not (Wait-WorkerStarted -Group 'Autopost' -LogPath $info.LogPath)) {
+    throw @"
+เปิด Autopost ไม่สำเร็จ (process ไม่ค้าง)
+node: $($info.NodeExe)
+log: $($info.LogPath)
+
+$(Get-LogTail $info.LogPath)
+"@
+  }
 }
 
 # ---- UI ----
@@ -350,17 +444,18 @@ function Invoke-RowToggle($Row, [string]$GroupName) {
       $Row.Status.ForeColor = [System.Drawing.Color]::FromArgb(37, 99, 235)
       [System.Windows.Forms.Application]::DoEvents()
       if ($GroupName -eq 'Scrap') { Start-ScrapeWorker } else { Start-AutopostWorker }
-      Start-Sleep -Seconds 2
+      $footer.Text = "เปิด $GroupName แล้ว"
     } else {
       $footer.Text = "กำลังปิด $GroupName..."
       $Row.Status.Text = 'กำลังปิด...'
       $Row.Status.ForeColor = [System.Drawing.Color]::FromArgb(37, 99, 235)
       [System.Windows.Forms.Application]::DoEvents()
       Stop-WorkerGroup $(if ($GroupName -eq 'Scrap') { 'Scrape' } else { 'Autopost' }) | Out-Null
-      Start-Sleep -Seconds 1
+      Start-Sleep -Milliseconds 800
+      $footer.Text = "ปิด $GroupName แล้ว"
     }
   } catch {
-    [System.Windows.Forms.MessageBox]::Show($_.Exception.Message, $GroupName, 'OK', 'Error') | Out-Null
+    [System.Windows.Forms.MessageBox]::Show($_.Exception.Message, "$GroupName - เปิด/ปิดไม่สำเร็จ", 'OK', 'Error') | Out-Null
   } finally {
     Set-Busy $false
     Refresh-Status
