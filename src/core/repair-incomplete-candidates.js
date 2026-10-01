@@ -13,6 +13,7 @@ import {
   hasUsefulWorkExperience,
   isJunkAddress,
   isJunkEducationRow,
+  isJunkPersonalField,
   isJunkWorkRow,
   isMangledWorkRow,
 } from '../providers/jobbkk/parser.js';
@@ -213,6 +214,13 @@ async function patchCandidateById(client, id, parsed) {
       sets.push(`${col} = CASE
         WHEN $${params.length} <> '' THEN $${params.length}
         WHEN COALESCE(${col}, '') ~* 'JOBBKK\\s*TEST|เทสระบบสมัครงาน|เรซูเม่นี้สำหรับใช้ทดสอบระบบ|address_placeholder|postal_code|introduce_yourself_placeholder|introduce_yourself_label|other_country'
+          THEN ''
+        ELSE ${col}
+      END`);
+    } else if (col === 'marital_status' || col === 'military_status') {
+      sets.push(`${col} = CASE
+        WHEN $${params.length} <> '' THEN $${params.length}
+        WHEN COALESCE(${col}, '') ~* 'Hard[[:space:]]*Skill|Soft[[:space:]]*Skill|Resume|เครดิต|หางานตาม|JOBBKK|วันเกิด[0-9]'
           THEN ''
         ELSE ${col}
       END`);

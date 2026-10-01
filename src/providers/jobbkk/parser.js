@@ -114,6 +114,68 @@ function extractProvinceFromAddress(address) {
   return firstMatch(text, [/จังหวัด\s*([^\s,]+)/u, /([ก-๙]+มหานคร)/u]);
 }
 
+/** True when a personal-status field swallowed the rest of the resume chrome. */
+export function isJunkPersonalField(value) {
+  const text = clean(value);
+  if (!text) return false;
+  if (/Hard\s*Skill|Soft\s*Skill|Resume\s*-?\s*View|เครดิต|หางานตาม|JOBBKK|จ๊อบบีเคเค|self\.__next_f/i.test(text)) {
+    return true;
+  }
+  if (text.length > 80 && /(?:ยานพาหนะ|ใบขับขี่|ความสามารถในการพิมพ์)/u.test(text)) return true;
+  if (/^วันเกิด\d/u.test(text)) return true;
+  return false;
+}
+
+/**
+ * Recover a Thai street address from labeled or unlabeled JobBKK body text.
+ * preview_new often glues the house number onto the facebook URL with no "ที่อยู่ปัจจุบัน" label.
+ */
+export function extractAddressFromText(text) {
+  const raw = stripJobbkkSiteChrome(text);
+  if (!raw) return '';
+
+  const normalizeAddr = (value) => {
+    let out = stripLeadingDash(clean(value));
+    out = out.replace(/\s*ประเทศไทย\s*$/u, '').trim();
+    out = out.replace(/^(?:https?:\/\/)?(?:www\.)?facebook\.com\/[^\s/]+\/?/i, '');
+    return clean(out);
+  };
+
+  const labeled = firstMatch(raw, [
+    /ที่อยู่ปัจจุบัน\s*[:：]?\s*(.+?)(?=\s*(?:เบอร์|โทรศัพท์|อีเมล|แนะนำตัว|งานที่ต้องการ|เพศ|Hard Skills|Soft Skills)|$)/u,
+  ]);
+  if (labeled) {
+    const addr = normalizeAddr(labeled);
+    if (addr && !isJunkAddress(addr) && !/jobbkk|จ๊อบบีเคเค/i.test(addr)) return addr;
+  }
+
+  // facebook.com/.../77/8 หมู่บ้าน... 10510 ประเทศไทย
+  const afterFb = raw.match(
+    /facebook\.com\/[^\s]*?\/(\d{1,5}\/\d{1,5}[\s\S]{5,200}?\d{5})\s*ประเทศไทย/i,
+  );
+  if (afterFb?.[1]) {
+    const addr = normalizeAddr(afterFb[1]);
+    if (addr && !isJunkAddress(addr)) return addr;
+  }
+
+  // Generic Thai address with postcode — skip JobBKK company footer.
+  const candidates = [
+    ...raw.matchAll(
+      /(\d{1,5}\/\d{1,5}[^\n]{5,180}?(?:แขวง|ตำบล)[^\n]{0,100}?(?:เขต|อำเภอ)[^\n]{0,80}?\d{5})(?:\s*ประเทศไทย)?/gu,
+    ),
+    ...raw.matchAll(
+      /((?:หมู่บ้าน|ซอย|ถนน)[^\n]{5,180}?(?:แขวง|ตำบล)[^\n]{0,100}?(?:เขต|อำเภอ)[^\n]{0,80}?\d{5})(?:\s*ประเทศไทย)?/gu,
+    ),
+  ].map((m) => normalizeAddr(m[1])).filter(Boolean);
+
+  for (const addr of candidates) {
+    if (isJunkAddress(addr)) continue;
+    if (/jobbkk|จ๊อบบีเคเค|ทัศนียา|รามคำแหง\s*39/i.test(addr)) continue;
+    if (/(?:แขวง|ตำบล)/u.test(addr) && /\d{5}/.test(addr)) return addr;
+  }
+  return '';
+}
+
 function emptyRecord() {
   return {
     prefix: '', name: '', first_name: '', last_name: '',
@@ -520,13 +582,35 @@ export function sanitizeWorkExperience(rows) {
     let next = row;
     if (isMangledWorkRow(row)) next = normalizeWorkRow(row);
     if (!next || isJunkWorkRow(next) || isMangledWorkRow(next)) continue;
-    const company = clean(next.company);
+    // Company often keeps "จำกัด- มกราคม 2568 ถึง ปัจจุบัน" glued on.
+    let company = clean(next.company);
+    let period = clean(next.period);
+    const gluedPeriod = company.match(
+      /^(.+?จำกัด)\s*[-–—]\s*((?:มกราคม|กุมภาพันธ์|มีนาคม|เมษายน|พฤษภาคม|มิถุนายน|กรกฎาคม|สิงหาคม|กันยายน|ตุลาคม|พฤศจิกายน|ธันวาคม).+)$/u,
+    );
+    if (gluedPeriod) {
+      company = clean(gluedPeriod[1]);
+      if (!period) period = clean(gluedPeriod[2]);
+    }
+    let salary = clean(next.salary);
+    if (/^[,.\-—_/]+$/.test(salary)) salary = '';
+    let businessType = clean(next.business_type);
+    // business_type sometimes starts with type then "ที่อยู่:..."
+    const bizSplit = businessType.match(/^(.+?)ที่อยู่\s*[:：]/u);
+    if (bizSplit) businessType = clean(bizSplit[1]);
     const position = clean(next.position);
     if (!company && !position) continue;
-    const key = `${company}|${position}|${clean(next.year)}|${clean(next.period)}`;
+    const key = `${company}|${position}|${clean(next.year)}|${period}`;
     if (seen.has(key)) continue;
     seen.add(key);
-    out.push(next);
+    out.push({
+      ...next,
+      company,
+      position,
+      period,
+      salary,
+      business_type: businessType,
+    });
   }
   return out;
 }
@@ -789,16 +873,29 @@ export function fillMissingFromRawText(record, rawText) {
   set('religion', firstMatch(text, [new RegExp(`ศาสนา\\s*[:：]?\\s*(.+?)${STOP}`, 'u')]));
   set('height', firstMatch(text, [/ส่วนสูง\s*[:：]?\s*([\d.]+)/u]));
   set('weight', firstMatch(text, [/น้ำหนัก\s*[:：]?\s*([\d.]+)/u]));
-  set('marital_status', firstMatch(text, [new RegExp(`สถานะ(?:ภาพ)?(?:สมรส)?\\s*[:：]?\\s*(.+?)${STOP}`, 'u')]));
-  set('military_status', firstMatch(text, [new RegExp(`สถานภาพทางทหาร\\s*[:：]?\\s*(.+?)${STOP}`, 'u')]));
+  if (isJunkPersonalField(record.marital_status)) record.marital_status = '';
+  if (isJunkPersonalField(record.military_status)) record.military_status = '';
+  {
+    const marital = firstMatch(text, [
+      /สถานะ(?:ภาพ)?(?:สมรส)?\s*[:：]?\s*(โสด|สมรส|หม้าย|หย่า|แยกกันอยู่)/u,
+      new RegExp(`สถานะ(?:ภาพ)?(?:สมรส)?\\s*[:：]?\\s*(.+?)${STOP}`, 'u'),
+    ]);
+    if (marital && !isJunkPersonalField(marital)) set('marital_status', marital);
+  }
+  {
+    const military = firstMatch(text, [
+      /สถานภาพทางทหาร\s*[:：]?\s*(ได้รับการยกเว้น|ผ่านการเกณฑ์|ยังไม่เกณฑ์|ไม่ต้องเกณฑ์ทหาร)/u,
+      new RegExp(`สถานภาพทางทหาร\\s*[:：]?\\s*(.+?)${STOP}`, 'u'),
+    ]);
+    if (military && !isJunkPersonalField(military)) set('military_status', military);
+  }
   set('expected_salary', firstMatch(text, [/เงินเดือนที่ต้องการ\s*[:：]?\s*([\d,][\d,\s-]*\d)/u]));
   set('desired_work_area', firstMatch(text, [new RegExp(`พื้นที่ที่ต้องการทำงาน\\s*[:：]?\\s*(.+?)${STOP}`, 'u')]));
   set('available_start', firstMatch(text, [new RegExp(`ระยะเวลาเริ่มงาน\\s*[:：]?\\s*(.+?)${STOP}`, 'u')]));
   if (isJunkAddress(record.address)) record.address = '';
   {
-    const addrStop = '(?=\\s*(?:ตำแหน่ง|พื้นที่ที่ต้องการ|เงินเดือน(?:ที่ต้องการ)?|ระยะเวลาเริ่มงาน|งานที่ต้องการ|ประวัติการศึกษา|ประวัติการทำงาน|เพศ|สถานภาพ|ส่วนสูง|น้ำหนัก|สัญชาติ|ศาสนา|เบอร์(?:โทร(?:ศัพท์)?)?|โทรศัพท์|อีเมล|Email|Line|Hard Skills|Soft Skills)|$)';
-    const addr = firstMatch(text, [new RegExp(`ที่อยู่ปัจจุบัน\\s*[:：]?\\s*(.+?)${addrStop}`, 'u')]);
-    if (addr && !isJunkAddress(addr)) set('address', stripLeadingDash(addr));
+    const addr = extractAddressFromText(text);
+    if (addr && !isJunkAddress(addr)) set('address', addr);
   }
   set('job_type', firstMatch(text, [new RegExp(`(?:รูปแบบงาน|ประเภทงาน)\\s*[:：]?\\s*(.+?)${STOP}`, 'u')]));
 
@@ -1040,10 +1137,13 @@ export function finalizeCandidateRecord(record = {}) {
   // Test-resume / form-i18n placeholders must not stay on the desk (after fill).
   if (isJunkAddress(next.address)
       || /JOBBKK\s*TEST|เทสระบบสมัครงาน|เรซูเม่นี้สำหรับใช้ทดสอบระบบ/i.test(clean(next.address))) {
-    next.address = '';
+    next.address = extractAddressFromText(next.raw_text || '') || '';
   } else if (clean(next.address)) {
     next.address = stripLeadingDash(stripJobbkkSiteChrome(next.address));
-    if (isJunkAddress(next.address)) next.address = '';
+    if (isJunkAddress(next.address)) next.address = extractAddressFromText(next.raw_text || '') || '';
+  }
+  if (!clean(next.address)) {
+    next.address = extractAddressFromText(next.raw_text || '') || '';
   }
   if (/JOBBKK\s*TEST|เทสระบบสมัครงาน|เรซูเม่นี้สำหรับใช้ทดสอบระบบ/i.test(clean(next.desired_positions))) {
     next.desired_positions = '';
@@ -1051,6 +1151,8 @@ export function finalizeCandidateRecord(record = {}) {
   if (clean(next.intro) && (ADDRESS_FORM_I18N_RE.test(next.intro) || isJobbkkSiteChromeText(next.intro))) {
     next.intro = '';
   }
+  if (isJunkPersonalField(next.marital_status)) next.marital_status = '';
+  if (isJunkPersonalField(next.military_status)) next.military_status = '';
   next.parse_status = parseStatus(next, next.raw_text || '');
   return next;
 }
