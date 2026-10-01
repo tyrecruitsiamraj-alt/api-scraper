@@ -163,7 +163,7 @@ function Start-AutopostWorker {
 # ---- UI ----
 $form = New-Object System.Windows.Forms.Form
 $form.Text = 'SO Workers'
-$form.Size = New-Object System.Drawing.Size(420, 360)
+$form.Size = New-Object System.Drawing.Size(460, 420)
 $form.StartPosition = 'CenterScreen'
 $form.FormBorderStyle = 'FixedSingle'
 $form.MaximizeBox = $false
@@ -173,76 +173,117 @@ $form.Font = New-Object System.Drawing.Font('Segoe UI', 10)
 $title = New-Object System.Windows.Forms.Label
 $title.Text = 'เปิด / ปิด Worker'
 $title.Font = New-Object System.Drawing.Font('Segoe UI Semibold', 16)
-$title.Location = New-Object System.Drawing.Point(24, 18)
+$title.Location = New-Object System.Drawing.Point(24, 16)
 $title.AutoSize = $true
 $form.Controls.Add($title)
 
 $subtitle = New-Object System.Windows.Forms.Label
-$subtitle.Text = 'ไม่เปิดหน้าต่างดำ - กดสวิตช์อย่างเดียว (Chrome ตอน scrape/โพสต์อาจยังโผล่)'
+$subtitle.Text = 'เขียว = เปิดอยู่ | เทา = ปิดอยู่  (กดสวิตช์เพื่อสลับ)'
 $subtitle.ForeColor = [System.Drawing.Color]::FromArgb(100, 110, 120)
-$subtitle.Location = New-Object System.Drawing.Point(26, 52)
+$subtitle.Location = New-Object System.Drawing.Point(26, 48)
 $subtitle.AutoSize = $true
 $form.Controls.Add($subtitle)
 
 function New-SwitchRow([string]$LabelText, [int]$Top) {
   $panel = New-Object System.Windows.Forms.Panel
   $panel.Location = New-Object System.Drawing.Point(24, $Top)
-  $panel.Size = New-Object System.Drawing.Size(360, 64)
+  $panel.Size = New-Object System.Drawing.Size(400, 88)
   $panel.BackColor = [System.Drawing.Color]::White
   $panel.BorderStyle = 'FixedSingle'
+  $panel.Cursor = [System.Windows.Forms.Cursors]::Hand
 
   $label = New-Object System.Windows.Forms.Label
   $label.Text = $LabelText
-  $label.Location = New-Object System.Drawing.Point(14, 12)
+  $label.Location = New-Object System.Drawing.Point(14, 10)
   $label.AutoSize = $true
   $label.Font = New-Object System.Drawing.Font('Segoe UI Semibold', 11)
+  $label.Cursor = [System.Windows.Forms.Cursors]::Hand
   $panel.Controls.Add($label)
 
   $status = New-Object System.Windows.Forms.Label
   $status.Text = 'กำลังตรวจ...'
   $status.Location = New-Object System.Drawing.Point(14, 36)
-  $status.AutoSize = $true
-  $status.ForeColor = [System.Drawing.Color]::FromArgb(100, 110, 120)
+  $status.Size = New-Object System.Drawing.Size(220, 28)
+  $status.Font = New-Object System.Drawing.Font('Segoe UI Semibold', 14)
+  $status.Cursor = [System.Windows.Forms.Cursors]::Hand
   $panel.Controls.Add($status)
 
-  $toggle = New-Object System.Windows.Forms.CheckBox
-  $toggle.Appearance = 'Button'
-  $toggle.Text = 'ปิด'
-  $toggle.Size = New-Object System.Drawing.Size(88, 36)
-  $toggle.Location = New-Object System.Drawing.Point(256, 14)
-  $toggle.TextAlign = 'MiddleCenter'
-  $toggle.FlatStyle = 'Flat'
-  $panel.Controls.Add($toggle)
+  $hint = New-Object System.Windows.Forms.Label
+  $hint.Text = ''
+  $hint.Location = New-Object System.Drawing.Point(14, 64)
+  $hint.AutoSize = $true
+  $hint.ForeColor = [System.Drawing.Color]::FromArgb(120, 130, 140)
+  $hint.Font = New-Object System.Drawing.Font('Segoe UI', 8)
+  $hint.Cursor = [System.Windows.Forms.Cursors]::Hand
+  $panel.Controls.Add($hint)
 
-  return @{ Panel = $panel; Toggle = $toggle; Status = $status }
+  # สวิตช์เลื่อน: ราง + ปุ่มกลม
+  $track = New-Object System.Windows.Forms.Panel
+  $track.Size = New-Object System.Drawing.Size(72, 36)
+  $track.Location = New-Object System.Drawing.Point(310, 26)
+  $track.BackColor = [System.Drawing.Color]::FromArgb(203, 213, 225)
+  $track.BorderStyle = 'FixedSingle'
+  $track.Cursor = [System.Windows.Forms.Cursors]::Hand
+  $panel.Controls.Add($track)
+
+  $thumb = New-Object System.Windows.Forms.Panel
+  $thumb.Size = New-Object System.Drawing.Size(28, 28)
+  $thumb.Location = New-Object System.Drawing.Point(4, 3)
+  $thumb.BackColor = [System.Drawing.Color]::White
+  $thumb.BorderStyle = 'FixedSingle'
+  $thumb.Cursor = [System.Windows.Forms.Cursors]::Hand
+  $track.Controls.Add($thumb)
+
+  $switchText = New-Object System.Windows.Forms.Label
+  $switchText.Text = 'OFF'
+  $switchText.Font = New-Object System.Drawing.Font('Segoe UI Semibold', 8)
+  $switchText.AutoSize = $false
+  $switchText.Size = New-Object System.Drawing.Size(72, 16)
+  $switchText.Location = New-Object System.Drawing.Point(310, 64)
+  $switchText.TextAlign = 'MiddleCenter'
+  $switchText.ForeColor = [System.Drawing.Color]::FromArgb(100, 110, 120)
+  $switchText.Cursor = [System.Windows.Forms.Cursors]::Hand
+  $panel.Controls.Add($switchText)
+
+  return @{
+    Panel = $panel
+    Title = $label
+    Status = $status
+    Hint = $hint
+    Track = $track
+    Thumb = $thumb
+    SwitchText = $switchText
+    IsOn = $false
+    Enabled = $true
+  }
 }
 
-$scrapeRow = New-SwitchRow 'ค้นหาผู้สมัคร (Scrap)' 88
-$autoRow = New-SwitchRow 'โพสต์ Facebook (Autopost)' 164
+$scrapeRow = New-SwitchRow 'ค้นหาผู้สมัคร (Scrap)' 78
+$autoRow = New-SwitchRow 'โพสต์ Facebook (Autopost)' 178
 $form.Controls.Add($scrapeRow.Panel)
 $form.Controls.Add($autoRow.Panel)
 
 $updateBtn = New-Object System.Windows.Forms.Button
 $updateBtn.Text = 'อัปเดตโค้ด'
-$updateBtn.Size = New-Object System.Drawing.Size(110, 34)
-$updateBtn.Location = New-Object System.Drawing.Point(24, 246)
+$updateBtn.Size = New-Object System.Drawing.Size(120, 34)
+$updateBtn.Location = New-Object System.Drawing.Point(24, 286)
 $form.Controls.Add($updateBtn)
 
 $logBtn = New-Object System.Windows.Forms.Button
 $logBtn.Text = 'เปิดไฟล์ log'
-$logBtn.Size = New-Object System.Drawing.Size(110, 34)
-$logBtn.Location = New-Object System.Drawing.Point(146, 246)
+$logBtn.Size = New-Object System.Drawing.Size(120, 34)
+$logBtn.Location = New-Object System.Drawing.Point(158, 286)
 $form.Controls.Add($logBtn)
 
 $refreshBtn = New-Object System.Windows.Forms.Button
 $refreshBtn.Text = 'รีเฟรช'
-$refreshBtn.Size = New-Object System.Drawing.Size(110, 34)
-$refreshBtn.Location = New-Object System.Drawing.Point(268, 246)
+$refreshBtn.Size = New-Object System.Drawing.Size(120, 34)
+$refreshBtn.Location = New-Object System.Drawing.Point(292, 286)
 $form.Controls.Add($refreshBtn)
 
 $footer = New-Object System.Windows.Forms.Label
-$footer.Location = New-Object System.Drawing.Point(26, 296)
-$footer.Size = New-Object System.Drawing.Size(360, 20)
+$footer.Location = New-Object System.Drawing.Point(26, 336)
+$footer.Size = New-Object System.Drawing.Size(400, 36)
 $footer.ForeColor = [System.Drawing.Color]::FromArgb(100, 110, 120)
 $footer.Text = "โค้ด: $(Get-WorkerBuildSha)"
 $form.Controls.Add($footer)
@@ -250,27 +291,39 @@ $form.Controls.Add($footer)
 $busy = $false
 function Set-Busy([bool]$Value) {
   $script:busy = $Value
-  $scrapeRow.Toggle.Enabled = -not $Value
-  $autoRow.Toggle.Enabled = -not $Value
+  $scrapeRow.Enabled = -not $Value
+  $autoRow.Enabled = -not $Value
   $updateBtn.Enabled = -not $Value
   $refreshBtn.Enabled = -not $Value
+  $cursor = if ($Value) {
+    [System.Windows.Forms.Cursors]::WaitCursor
+  } else {
+    [System.Windows.Forms.Cursors]::Hand
+  }
+  $scrapeRow.Panel.Cursor = $cursor
+  $autoRow.Panel.Cursor = $cursor
 }
 
 function Update-ToggleVisual($Row, [bool]$On) {
+  $Row.IsOn = $On
   if ($On) {
-    $Row.Toggle.Checked = $true
-    $Row.Toggle.Text = 'เปิด'
-    $Row.Toggle.BackColor = [System.Drawing.Color]::FromArgb(22, 163, 74)
-    $Row.Toggle.ForeColor = [System.Drawing.Color]::White
-    $Row.Status.Text = 'กำลังทำงาน (ซ่อนหน้าต่าง)'
+    $Row.Status.Text = 'เปิดอยู่'
     $Row.Status.ForeColor = [System.Drawing.Color]::FromArgb(22, 163, 74)
+    $Row.Hint.Text = 'กดสวิตช์เพื่อปิด'
+    $Row.Track.BackColor = [System.Drawing.Color]::FromArgb(22, 163, 74)
+    $Row.Thumb.Location = New-Object System.Drawing.Point(38, 3)
+    $Row.SwitchText.Text = 'ON'
+    $Row.SwitchText.ForeColor = [System.Drawing.Color]::FromArgb(22, 163, 74)
+    $Row.Panel.BackColor = [System.Drawing.Color]::FromArgb(240, 253, 244)
   } else {
-    $Row.Toggle.Checked = $false
-    $Row.Toggle.Text = 'ปิด'
-    $Row.Toggle.BackColor = [System.Drawing.Color]::FromArgb(226, 232, 240)
-    $Row.Toggle.ForeColor = [System.Drawing.Color]::FromArgb(51, 65, 85)
     $Row.Status.Text = 'ปิดอยู่'
-    $Row.Status.ForeColor = [System.Drawing.Color]::FromArgb(100, 110, 120)
+    $Row.Status.ForeColor = [System.Drawing.Color]::FromArgb(148, 163, 184)
+    $Row.Hint.Text = 'กดสวิตช์เพื่อเปิด'
+    $Row.Track.BackColor = [System.Drawing.Color]::FromArgb(203, 213, 225)
+    $Row.Thumb.Location = New-Object System.Drawing.Point(4, 3)
+    $Row.SwitchText.Text = 'OFF'
+    $Row.SwitchText.ForeColor = [System.Drawing.Color]::FromArgb(100, 110, 120)
+    $Row.Panel.BackColor = [System.Drawing.Color]::White
   }
 }
 
@@ -285,51 +338,44 @@ function Refresh-Status {
   }
 }
 
-$scrapeRow.Toggle.Add_Click({
+function Invoke-RowToggle($Row, [string]$GroupName) {
   if ($busy) { return }
+  if (-not $Row.Enabled) { return }
+  $wantOn = -not [bool]$Row.IsOn
   Set-Busy $true
   try {
-    if ($scrapeRow.Toggle.Checked) {
-      $footer.Text = 'กำลังเปิด Scrap...'
+    if ($wantOn) {
+      $footer.Text = "กำลังเปิด $GroupName..."
+      $Row.Status.Text = 'กำลังเปิด...'
+      $Row.Status.ForeColor = [System.Drawing.Color]::FromArgb(37, 99, 235)
       [System.Windows.Forms.Application]::DoEvents()
-      Start-ScrapeWorker
+      if ($GroupName -eq 'Scrap') { Start-ScrapeWorker } else { Start-AutopostWorker }
       Start-Sleep -Seconds 2
     } else {
-      $footer.Text = 'กำลังปิด Scrap...'
+      $footer.Text = "กำลังปิด $GroupName..."
+      $Row.Status.Text = 'กำลังปิด...'
+      $Row.Status.ForeColor = [System.Drawing.Color]::FromArgb(37, 99, 235)
       [System.Windows.Forms.Application]::DoEvents()
-      Stop-WorkerGroup 'Scrape' | Out-Null
+      Stop-WorkerGroup $(if ($GroupName -eq 'Scrap') { 'Scrape' } else { 'Autopost' }) | Out-Null
       Start-Sleep -Seconds 1
     }
   } catch {
-    [System.Windows.Forms.MessageBox]::Show($_.Exception.Message, 'Scrap', 'OK', 'Error') | Out-Null
+    [System.Windows.Forms.MessageBox]::Show($_.Exception.Message, $GroupName, 'OK', 'Error') | Out-Null
   } finally {
     Set-Busy $false
     Refresh-Status
   }
-})
+}
 
-$autoRow.Toggle.Add_Click({
-  if ($busy) { return }
-  Set-Busy $true
-  try {
-    if ($autoRow.Toggle.Checked) {
-      $footer.Text = 'กำลังเปิด Autopost...'
-      [System.Windows.Forms.Application]::DoEvents()
-      Start-AutopostWorker
-      Start-Sleep -Seconds 2
-    } else {
-      $footer.Text = 'กำลังปิด Autopost...'
-      [System.Windows.Forms.Application]::DoEvents()
-      Stop-WorkerGroup 'Autopost' | Out-Null
-      Start-Sleep -Seconds 1
-    }
-  } catch {
-    [System.Windows.Forms.MessageBox]::Show($_.Exception.Message, 'Autopost', 'OK', 'Error') | Out-Null
-  } finally {
-    Set-Busy $false
-    Refresh-Status
-  }
-})
+# ผูกคลิกทั้งแถว + สวิตช์
+$scrapeClick = { if (-not $busy) { Invoke-RowToggle $scrapeRow 'Scrap' } }
+$autoClick = { if (-not $busy) { Invoke-RowToggle $autoRow 'Autopost' } }
+foreach ($ctrl in @($scrapeRow.Panel, $scrapeRow.Title, $scrapeRow.Status, $scrapeRow.Hint, $scrapeRow.Track, $scrapeRow.Thumb, $scrapeRow.SwitchText)) {
+  $ctrl.Add_Click($scrapeClick)
+}
+foreach ($ctrl in @($autoRow.Panel, $autoRow.Title, $autoRow.Status, $autoRow.Hint, $autoRow.Track, $autoRow.Thumb, $autoRow.SwitchText)) {
+  $ctrl.Add_Click($autoClick)
+}
 
 $updateBtn.Add_Click({
   if ($busy) { return }
