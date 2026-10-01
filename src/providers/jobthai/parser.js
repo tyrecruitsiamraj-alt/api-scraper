@@ -112,53 +112,154 @@ export function parseEducation(fullText) {
 // fragments (start with "," / very long), and empty dashes.
 function cleanPosition(p) {
   const s = clean(p);
-  if (!s || s === '-' || s.startsWith(',') || s.length > 50 || s.includes('ที่ต้องการสมัคร')) return '';
-  return s;
+  if (!s || s === '-' || s.startsWith(',') || s.includes('ที่ต้องการสมัคร')) return '';
+  // Drop trailing duty blob glued on the same line as the title.
+  let title = clean(s.replace(/\s*หน้าที่-?ผลงาน[\s\S]*$/u, '').replace(/\s*บาท\/?เดือน\s*/gu, ' ').trim());
+  // Titles on JobThai are short; long fragments are duty text leaking after "ตำแหน่ง".
+  if (title.length > 60) title = clean(title.slice(0, 60).replace(/\s+\S*$/u, ''));
+  if (!title || title.length < 2) return '';
+  return title;
 }
 
+const THAI_MONTH = '(?:ม\\.ค\\.|ก\\.พ\\.|มี\\.ค\\.|เม\\.ย\\.|พ\\.ค\\.|มิ\\.ย\\.|ก\\.ค\\.|ส\\.ค\\.|ก\\.ย\\.|ต\\.ค\\.|พ\\.ย\\.|ธ\\.ค\\.)';
+const PERIOD_RE = new RegExp(
+  `^(?:${THAI_MONTH}\\s*\\d{2,4}\\s*[-–—]\\s*(?:ปัจจุบัน|${THAI_MONTH}\\s*\\d{2,4})|\\d{4}\\s*[-–—]\\s*(?:ปัจจุบัน|\\d{4}))$`,
+  'u',
+);
+
+export function isJobThaiPeriodLine(line) {
+  return PERIOD_RE.test(clean(line));
+}
+
+function isTrainingBlock(lines) {
+  const blob = lines.join(' ');
+  if (/เงินเดือน|ตำแหน่ง/.test(blob)) return false;
+  return /สถาบัน|หลักสูตร|ประกาศนียบัตร|วุฒิบัตร/.test(blob);
+}
+
+function isTimelineAgeLine(line) {
+  // "2556 - 23" age ruler between training and real jobs — not a work period.
+  return /^\d{4}\s*[-–—]\s*\d{1,2}$/u.test(clean(line));
+}
+
+function absorbWorkLine(item, line) {
+  const dutyInline = firstMatch(line, [/หน้าที่-?ผลงาน\s*[:：]?\s*([\s\S]+)/u]);
+  if (dutyInline) {
+    item.responsibilities = clean([item.responsibilities, dutyInline].filter(Boolean).join('\n'));
+  }
+  // After duties start, only append narrative lines — never re-read ตำแหน่ง from duty text.
+  if (item.responsibilities) {
+    if (
+      !dutyInline
+      && !/^(?:เงินเดือน|ตำแหน่ง|บริษัท|หน้าที่)/u.test(line)
+      && !isJobThaiPeriodLine(line)
+      && line.length > 8
+    ) {
+      item.responsibilities = clean(`${item.responsibilities}\n${line}`);
+    }
+    if (!item.salary) {
+      const sal = firstMatch(line, [/เงินเดือน[^0-9]{0,20}([\d,]+)/u]);
+      if (sal && /\d/.test(sal)) item.salary = sal;
+    }
+    return;
+  }
+  const posRaw = firstMatch(line, [/ตำแหน่ง(?:งาน)?\s*[:：]?\s*(.+)$/u]);
+  const pos = cleanPosition(posRaw);
+  const sal = firstMatch(line, [/เงินเดือน[^0-9]{0,20}([\d,]+)/u]);
+  if (pos && !item.position) item.position = pos;
+  if (sal && /\d/.test(sal) && !item.salary) item.salary = sal;
+}
+
+/**
+ * JobThai work blocks look like:
+ *   ก.ย. 56 - พ.ค. 57
+ *   บริษัท … / Mini Big C …
+ *   เงินเดือน 12,000 ตำแหน่ง …
+ *   … หน้าที่-ผลงาน …
+ * (each job is often rendered twice — keep the copy with duties).
+ */
 export function parseWork(workText) {
   if (!workText) return [];
-  const lines = workText.split('\n').map(clean).filter(Boolean);
+  const lines = String(workText).split('\n').map(clean).filter(Boolean);
   const items = [];
-  let cur = null;
-  for (const line of lines) {
-    if (/บริษัท|company|ห้างหุ้นส่วน|โรงงาน|องค์การ/i.test(line) && line.length < 80) {
-      if (cur) items.push(cur);
-      const yr = (line.match(/(\d{4})/) || [])[1] || '';
-      cur = { company: clean(line), position: '', period: yr, year: yr, salary: '', responsibilities: '' };
-    } else if (cur) {
-      const pos = cleanPosition(firstMatch(line, [/ตำแหน่ง(?:งาน)?\s*[:：]?\s*(.+)/u]));
-      const sal = firstMatch(line, [/เงินเดือน\s*[:：(บาท)]*\s*([\d,]+)/u]);
-      if (pos && !cur.position) cur.position = pos;
-      if (sal && /\d/.test(sal) && !cur.salary) cur.salary = sal;
+
+  for (let i = 0; i < lines.length; i += 1) {
+    const line = lines[i];
+    if (isTimelineAgeLine(line) || !isJobThaiPeriodLine(line)) continue;
+
+    const period = line;
+    const block = [];
+    let j = i + 1;
+    while (j < lines.length && !isJobThaiPeriodLine(lines[j]) && !isTimelineAgeLine(lines[j])) {
+      block.push(lines[j]);
+      j += 1;
+    }
+    i = j - 1;
+    if (!block.length || isTrainingBlock(block)) continue;
+
+    const item = {
+      company: '',
+      position: '',
+      period,
+      year: (period.match(/\d{4}/) || period.match(/\d{2,4}/) || [])[0] || '',
+      salary: '',
+      responsibilities: '',
+      business_type: '',
+    };
+
+    for (const bl of block) {
+      if (!item.company
+        && !/^(?:เงินเดือน|ตำแหน่ง|หน้าที่)/u.test(bl)
+        && bl.length < 120
+        && !/^ปีที่จบ/u.test(bl)) {
+        item.company = stripEllipsis(bl);
+        continue;
+      }
+      absorbWorkLine(item, bl);
+    }
+
+    if (item.company && (item.position || item.salary || item.responsibilities)) {
+      items.push(item);
     }
   }
-  if (cur) items.push(cur);
 
-  // Real work = company + (a real position OR a salary). Drop bare company
-  // mentions/labels, then dedupe by company+position (the page lists each twice —
-  // once with the title, once as a position-less "-" copy: drop that copy when the
-  // same company already has a titled entry).
-  // A position-less row is the duplicate render of a titled job. Drop it when the
-  // same company (normalized prefix, ellipsis-stripped) OR the same salary already
-  // belongs to a titled entry.
-  const titled = items.filter((e) => e.company && e.position);
-  const posCompanies = titled.map((e) => normName(e.company));
-  const posSalaries = new Set(titled.map((e) => e.salary).filter(Boolean));
-  const sharesTitled = (e) => {
-    const n = normName(e.company);
-    if (e.salary && posSalaries.has(e.salary)) return true;
-    return n.length >= 8 && posCompanies.some((p) => p.startsWith(n) || n.startsWith(p));
-  };
+  // Legacy fallback: company-first lines when period markers are missing.
+  if (!items.length) {
+    let cur = null;
+    for (const line of lines) {
+      if (/บริษัท|company|ห้างหุ้นส่วน|โรงงาน|องค์การ/i.test(line) && line.length < 100) {
+        if (cur) items.push(cur);
+        const yr = (line.match(/(\d{4})/) || [])[1] || '';
+        cur = {
+          company: stripEllipsis(line),
+          position: '',
+          period: yr,
+          year: yr,
+          salary: '',
+          responsibilities: '',
+          business_type: '',
+        };
+      } else if (cur) {
+        absorbWorkLine(cur, line);
+      }
+    }
+    if (cur) items.push(cur);
+  }
+
   const byKey = new Map();
   for (const e of items) {
-    if (!e.company || (!e.position && !e.salary)) continue;
-    if (!e.position && sharesTitled(e)) continue;
+    if (!e.company || (!e.position && !e.salary && !e.responsibilities)) continue;
     e.company = stripEllipsis(e.company);
-    const key = `${normName(e.company).slice(0, 18)}|${e.position}`;
+    e.position = cleanPosition(e.position);
+    const key = `${normName(e.company).slice(0, 18)}|${e.position || e.salary}`;
     const prev = byKey.get(key);
     if (prev) {
-      for (const f of ['year', 'period', 'salary', 'responsibilities']) if (!prev[f] && e[f]) prev[f] = e[f];
+      for (const f of ['year', 'period', 'salary', 'position', 'responsibilities']) {
+        if (!prev[f] && e[f]) prev[f] = e[f];
+        else if (f === 'responsibilities' && (e[f] || '').length > (prev[f] || '').length) prev[f] = e[f];
+        else if (f === 'company' && (e[f] || '').length > (prev[f] || '').length) prev[f] = e[f];
+        else if (f === 'period' && (e[f] || '').length > (prev[f] || '').length) prev[f] = e[f];
+      }
     } else {
       byKey.set(key, e);
     }
@@ -234,14 +335,28 @@ export function parseResumeHtml(html, { sourceUrl, index, focusPosition = '-' })
 
   // education / work sections
   const eduText = sectionBetween(text, 'ประวัติการศึกษา', ['ประวัติการทำงาน', 'ความสามารถ', 'การฝึกอบรม']);
-  const workText = sectionBetween(text, 'ประวัติการทำงาน', ['ความสามารถ', 'การฝึกอบรม', 'โครงการ', 'รายละเอียดเพิ่มเติม']);
+  // JobThai often uses "ประวัติการทำงาน/ฝึกงาน" and stacks training above jobs.
+  const workText = sectionBetween(
+    text,
+    'ประวัติการทำงาน',
+    ['ความสามารถ', 'ทักษะ', 'โครงการ', 'รายละเอียดเพิ่มเติม', 'Resume - View Credit'],
+  );
   // JobThai stacks ALL section headers first then their content, so a bounded
   // "education section" is empty — scan the whole text but keep only real
   // education (must have degree/major/gpa), which excludes training & work.
   rec.education = parseEducation(text);
-  rec.work_experience = parseWork(workText);
+  let work = parseWork(workText);
+  // Period markers often sit only in the full body text after the age ruler.
+  if (!work.some((row) => row.period && row.responsibilities)) {
+    const fromFull = parseWork(text);
+    if (fromFull.length >= work.length) work = fromFull;
+  }
+  rec.work_experience = work;
   rec.education_summary = clean(eduText).slice(0, 1000);
-  rec.experience_summary = clean(workText).slice(0, 2000);
+  rec.experience_summary = work
+    .map((row) => [row.period, row.company, row.position, row.salary, row.responsibilities].filter(Boolean).join(' | '))
+    .join('\n')
+    .slice(0, 4000);
 
   if (!rec.province && rec.desired_work_area) rec.province = rec.desired_work_area;
 
