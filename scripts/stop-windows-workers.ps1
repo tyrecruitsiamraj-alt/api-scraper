@@ -19,7 +19,7 @@ $stopped = 0
 Get-CimInstance Win32_Process | ForEach-Object {
   $command = $_.CommandLine
   if (-not $command) { return }
-  if ($command -match 'stop-windows-workers\.ps1') { return }
+  if ($command -match 'stop-windows-workers\.ps1|so-worker-control\.ps1') { return }
   foreach ($pattern in $patterns) {
     if ($command -match $pattern) {
       Stop-ProcessTree -ProcessId $_.ProcessId

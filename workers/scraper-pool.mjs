@@ -30,13 +30,31 @@ async function countScraperAccounts() {
   return rows[0]?.n ?? 0;
 }
 
+function pipeChildLog(slot, stream, chunk) {
+  const text = chunk.toString();
+  const lines = text.split(/\r?\n/);
+  for (let i = 0; i < lines.length; i += 1) {
+    const line = lines[i];
+    if (!line && i === lines.length - 1) continue;
+    console.log(`[runner #${slot}] ${line}`);
+  }
+}
+
 function launch(slot) {
   // scale() and an exit timer can fire at nearly the same time.  Without this
   // guard they overwrite the same Map entry; the losing child exits on the
   // process lock and schedules another restart forever.
   if (stopping || children.has(slot)) return;
   const env = { ...process.env, WORKER_NAME: `scraper-${slot}` };
-  const child = spawn(process.execPath, [RUNNER], { stdio: 'inherit', env });
+  // windowsHide: บน Windows node.exe เป็น console app — ถ้า inherit/ไม่ซ่อน
+  // จะเด้งหน้าต่างดำทีละ runner (2–8 บาน) ทั้งที่เปิดจากแผงสวิตช์
+  const child = spawn(process.execPath, [RUNNER], {
+    stdio: ['ignore', 'pipe', 'pipe'],
+    env,
+    windowsHide: true,
+  });
+  child.stdout?.on('data', (chunk) => pipeChildLog(slot, 'out', chunk));
+  child.stderr?.on('data', (chunk) => pipeChildLog(slot, 'err', chunk));
   children.set(slot, child);
   child.on('exit', (code) => {
     if (children.get(slot) === child) children.delete(slot);

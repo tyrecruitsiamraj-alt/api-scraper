@@ -29,13 +29,28 @@ function requestShutdown() {
 process.on('SIGINT', requestShutdown);
 process.on('SIGTERM', requestShutdown);
 
+function pipeWorkerLog(streamName, chunk) {
+  const text = chunk.toString();
+  const writer = streamName === 'err' ? console.error : console.log;
+  const lines = text.split(/\r?\n/);
+  for (let i = 0; i < lines.length; i += 1) {
+    const line = lines[i];
+    if (!line && i === lines.length - 1) continue;
+    writer(line);
+  }
+}
+
 function runOnce() {
   return new Promise((resolve) => {
+    // windowsHide: กันเด้งหน้าต่าง cmd ของ node ลูกบน Windows เมื่อรันจากแผงสวิตช์
     child = spawn(process.execPath, [WORKER_SCRIPT], {
       cwd: process.cwd(),
-      stdio: 'inherit',
+      stdio: ['ignore', 'pipe', 'pipe'],
       env: process.env,
+      windowsHide: true,
     });
+    child.stdout?.on('data', (chunk) => pipeWorkerLog('out', chunk));
+    child.stderr?.on('data', (chunk) => pipeWorkerLog('err', chunk));
     child.on('exit', (code, signal) => {
       child = null;
       resolve({ code: code == null ? null : code, signal: signal || null });
