@@ -1,4 +1,4 @@
 @echo off
-REM ไฟล์นี้ชื่อไทยให้หาเจอง่ายบน Windows — ทำงานเดียวกับ start-workers.bat
+REM ไฟล์นี้ชื่อไทยให้หาเจอง่ายบน Windows — เปิดแผงสวิตช์ Worker
 cd /d "%~dp0"
-call "%~dp0start-workers.bat"
+call "%~dp0SO-Workers.bat"

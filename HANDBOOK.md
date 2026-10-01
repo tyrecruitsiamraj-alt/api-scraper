@@ -97,7 +97,9 @@ api-scraper/
 ├─ scripts/                 diagnose/test utilities ของระบบหลัก
 ├─ Dockerfile
 ├─ docker-compose.yml
-├─ start-workers.bat        launcher สำหรับเครื่อง Windows 24 ชั่วโมง
+├─ SO-Workers.bat / start-workers.bat   แผงสวิตช์เปิด–ปิด Worker (Windows)
+├─ start-workers-legacy.bat             โหมดเก่าเปิด terminal 2 หน้าต่าง
+├─ เปิด-Worker.bat                      shortcut ชื่อไทย → SO-Workers.bat
 └─ HANDBOOK.md              เอกสารฉบับนี้
 ```
 
@@ -571,12 +573,12 @@ npm run dev
 
 ### 12.3 Worker เครื่อง Windows
 
-`start-workers.bat` ทำ `git pull` แล้วเปิด 2 หน้าต่าง:
+`SO-Workers.bat` / `start-workers.bat` เปิดแผงสวิตช์ (`scripts/so-worker-control.ps1`) ให้เปิด–ปิด Scrap และ Autopost โดยไม่เปิด terminal รก Worker รันแบบซ่อน ดูสถานะจากสวิตช์ และอ่าน log ที่ `output\worker-logs`
 
-1. Scraper autoscaling pool
-2. Auto‑Post posting worker supervisor
+- กด **อัปเดตโค้ด** ในแผง = `git fetch` + reset ไป `origin/main` แล้วเปิด worker ที่เคยเปิดอยู่ใหม่ พร้อมตั้ง `WORKER_BUILD_SHA`
+- โหมดเก่า (มีหน้าต่าง cmd): `start-workers.bat legacy` หรือ `start-workers-legacy.bat`
 
-Launcher อ่าน Git SHA หลัง `git pull` แล้วส่งเป็น `WORKER_BUILD_SHA` อัตโนมัติ ห้ามฝัง SHA เก่าไว้ในไฟล์ เพราะ Dashboard จะรายงาน Version ไม่ตรงกับ Source ที่กำลังรัน
+ห้ามฝัง SHA เก่าไว้ในไฟล์ เพราะ Dashboard จะรายงาน Version ไม่ตรงกับ Source ที่กำลังรัน
 
 `workers/scraper-pool.mjs` ดูแล runner แต่ละ slot และเปิดใหม่เมื่อ process ตาย โดยลบเฉพาะ lock ที่บันทึก PID ตรงกับ child ที่เพิ่งจบ เพื่อให้กลับมารับงานได้ภายในรอบ restart และไม่สร้าง restart timer ซ้ำ
 
