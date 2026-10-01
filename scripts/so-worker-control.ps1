@@ -63,8 +63,10 @@ function Stop-WorkerGroup([string]$Group) {
   }
   if ($Group -eq 'Scrape') {
     & taskkill.exe /F /T /FI "WINDOWTITLE eq SO Scraper Pool*" 2>$null | Out-Null
+    & taskkill.exe /F /T /FI "WINDOWTITLE eq SO Hidden Scrape*" 2>$null | Out-Null
   } else {
     & taskkill.exe /F /T /FI "WINDOWTITLE eq SO AutoPost Worker*" 2>$null | Out-Null
+    & taskkill.exe /F /T /FI "WINDOWTITLE eq SO Hidden Autopost*" 2>$null | Out-Null
   }
   return $stopped
 }
