@@ -109,27 +109,26 @@ function Start-HiddenNode([string]$Name, [string]$WorkDir, [string]$NodeArgs, [s
   $stamp = Get-Date -Format 'yyyy-MM-dd HH:mm:ss'
   Add-Content -Path $logPath -Value "`n==== $stamp start $Name ====`n" -Encoding UTF8
 
-  $envLines = @(
-    "`$Host.UI.RawUI.WindowTitle = 'SO Hidden $Name'"
-    "Set-Location -LiteralPath '$WorkDir'"
-    "`$env:WORKER_BUILD_SHA = '$(Get-WorkerBuildSha)'"
-    "`$env:WORKER_CAPABILITIES = 'post,preflight'"
-    "`$env:AUTO_POST_DAILY_ENABLED = '0'"
-  )
-  foreach ($key in $ExtraEnv.Keys) {
-    $val = [string]$ExtraEnv[$key]
-    $envLines += "`$env:$key = '$val'"
-  }
-  $envLines += "& node $NodeArgs *>> '$logPath'"
-  $command = $envLines -join '; '
+  $nodeExe = (Get-Command node -ErrorAction Stop).Source
+  # ใช้ cmd /c + CreateNoWindow แล้ว redirect เข้าไฟล์ — ไม่เปิด console
+  # และไม่ค้าง pipe เวลาแผงสวิตช์ปิด (ต่างจาก RedirectStandard* บน Process)
+  $inner = "`"$nodeExe`" $NodeArgs >> `"$logPath`" 2>&1"
+  $psi = New-Object System.Diagnostics.ProcessStartInfo
+  $psi.FileName = 'cmd.exe'
+  $psi.Arguments = "/d /c $inner"
+  $psi.WorkingDirectory = $WorkDir
+  $psi.UseShellExecute = $false
+  $psi.CreateNoWindow = $true
+  $psi.WindowStyle = [System.Diagnostics.ProcessWindowStyle]::Hidden
 
-  Start-Process -FilePath 'powershell.exe' -WindowStyle Hidden -WorkingDirectory $WorkDir -ArgumentList @(
-    '-NoProfile'
-    '-ExecutionPolicy'
-    'Bypass'
-    '-Command'
-    $command
-  ) | Out-Null
+  $psi.EnvironmentVariables['WORKER_BUILD_SHA'] = (Get-WorkerBuildSha)
+  $psi.EnvironmentVariables['WORKER_CAPABILITIES'] = 'post,preflight'
+  $psi.EnvironmentVariables['AUTO_POST_DAILY_ENABLED'] = '0'
+  foreach ($key in $ExtraEnv.Keys) {
+    $psi.EnvironmentVariables[$key] = [string]$ExtraEnv[$key]
+  }
+
+  [void][System.Diagnostics.Process]::Start($psi)
 }
 
 function Start-ScrapeWorker {
@@ -159,7 +158,7 @@ $title.AutoSize = $true
 $form.Controls.Add($title)
 
 $subtitle = New-Object System.Windows.Forms.Label
-$subtitle.Text = 'ไม่เปิด terminal รก — กดสวิตช์อย่างเดียว'
+$subtitle.Text = 'ไม่เปิดหน้าต่างดำ — กดสวิตช์อย่างเดียว (Chrome ตอน scrape/โพสต์อาจยังโผล่)'
 $subtitle.ForeColor = [System.Drawing.Color]::FromArgb(100, 110, 120)
 $subtitle.Location = New-Object System.Drawing.Point(26, 52)
 $subtitle.AutoSize = $true
