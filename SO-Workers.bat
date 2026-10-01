@@ -15,6 +15,12 @@ if not exist "%~dp0scripts\so-worker-control.ps1" (
   exit /b 1
 )
 
-REM แผงสวิตช์เปิด/ปิด Worker — ไม่เปิด terminal รก
-powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\so-worker-control.ps1"
-exit /b %ERRORLEVEL%
+REM -STA จำเป็นต่อ WinForms — ถ้าไม่มี แผงจะพังแล้วหน้าต่างหายไปทันที
+powershell -NoProfile -STA -ExecutionPolicy Bypass -File "%~dp0scripts\so-worker-control.ps1"
+set "EC=%ERRORLEVEL%"
+if not "%EC%"=="0" (
+  echo.
+  echo เปิดแผงสวิตช์ไม่สำเร็จ code=%EC%
+  pause
+)
+exit /b %EC%

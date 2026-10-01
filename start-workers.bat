@@ -5,8 +5,8 @@ cd /d "%~dp0"
 set "ROOT=%CD%"
 
 REM ============================================================
-REM  ดับเบิลคลิกไฟล์นี้ = แผงสวิตช์เปิด/ปิด (ไม่เปิด terminal รก)
-REM  โหมดเก่ามีหน้าต่างดำ: start-workers.bat legacy
+REM  ดับเบิลคลิก = ดึงโค้ด แล้วเปิดแผงสวิตช์ (ไม่เปิด terminal รก)
+REM  โหมดเก่า: start-workers.bat legacy
 REM ============================================================
 
 if /I "%~1"=="legacy" (
@@ -20,37 +20,53 @@ if not exist "%ROOT%\package.json" (
   exit /b 1
 )
 
-echo [1/2] ดึงโค้ดล่าสุดจาก main...
-git fetch origin main
-if errorlevel 1 (
-  echo   git fetch ไม่สำเร็จ — เปิดแผงด้วยโค้ดที่มีอยู่
-  goto :open_panel
+REM กัน bat เขียนทับตัวเองกลางทาง: pull ก่อน แล้วค่อยเปิดตัวใหม่
+if /I not "%~1"=="--open" (
+  echo [1/2] ดึงโค้ดล่าสุดจาก main...
+  git fetch origin main
+  if errorlevel 1 (
+    echo   git fetch ไม่สำเร็จ — เปิดแผงด้วยโค้ดที่มีอยู่
+  ) else (
+    git checkout -B main origin/main
+    if errorlevel 1 git reset --hard origin/main
+    if not errorlevel 1 git reset --hard origin/main
+    git clean -fd >nul 2>&1
+    echo   ใช้โค้ด:
+    git rev-parse --short HEAD
+  )
+  echo.
+  echo [2/2] เปิดแผงสวิตช์ Worker...
+  REM เปิดจากไฟล์ล่าสุดหลัง pull — ไม่ใช้บรรทัดที่เหลือของ bat เก่า
+  cmd /c ""%~f0" --open"
+  set "EC=%ERRORLEVEL%"
+  if not "%EC%"=="0" (
+    echo.
+    echo เปิดแผงไม่สำเร็จ code=%EC%
+    pause
+  )
+  exit /b %EC%
 )
-git checkout -B main origin/main >nul 2>&1
-if errorlevel 1 (
-  git reset --hard origin/main
-) else (
-  git reset --hard origin/main
+
+REM ---- --open: เปิดแผงอย่างเดียว ----
+if exist "%ROOT%\scripts\so-worker-control.ps1" (
+  powershell -NoProfile -STA -ExecutionPolicy Bypass -File "%ROOT%\scripts\so-worker-control.ps1"
+  set "EC=%ERRORLEVEL%"
+  if not "%EC%"=="0" (
+    echo.
+    echo PowerShell แผงสวิตช์จบด้วย error code=%EC%
+    echo ถ้าไม่เห็นหน้าต่างสวิตช์ ดูข้อความด้านบน หรือรัน:
+    echo   powershell -STA -ExecutionPolicy Bypass -File scripts\so-worker-control.ps1
+    pause
+  )
+  exit /b %EC%
 )
-git clean -fd >nul 2>&1
 
-REM หลัง git reset ไฟล์ .bat นี้อาจถูกแทนที่ — เปิดแผงจากพาธที่แน่นอน
-goto :open_panel
-
-:open_panel
-echo [2/2] เปิดแผงสวิตช์ Worker...
 if exist "%ROOT%\SO-Workers.bat" (
   call "%ROOT%\SO-Workers.bat"
   exit /b %ERRORLEVEL%
 )
-if exist "%ROOT%\scripts\so-worker-control.ps1" (
-  powershell -NoProfile -ExecutionPolicy Bypass -File "%ROOT%\scripts\so-worker-control.ps1"
-  exit /b %ERRORLEVEL%
-)
 
-echo.
-echo ยังไม่มีแผงสวิตช์ในโค้ดนี้ — กำลังเปิดแบบเก่าชั่วคราว
-echo กรุณา merge PR แผงสวิตช์เข้า main แล้วกด start-workers อีกครั้ง
-echo.
+echo ไม่พบแผงสวิตช์ — เปิดแบบเก่าชั่วคราว
+pause
 call "%ROOT%\start-workers-legacy.bat"
 exit /b %ERRORLEVEL%

@@ -8,6 +8,24 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+
+# WinForms ต้องรันบน STA — ถ้าเปิดแบบ MTA แผงจะพังแล้วหน้าต่างหายทันที
+$apartment = [System.Threading.Thread]::CurrentThread.GetApartmentState()
+if ($apartment -ne 'STA') {
+  $relaunch = @(
+    '-NoProfile'
+    '-STA'
+    '-ExecutionPolicy'
+    'Bypass'
+    '-File'
+    $PSCommandPath
+  )
+  if ($LegacyTerminals) { $relaunch += '-LegacyTerminals' }
+  $p = Start-Process -FilePath 'powershell.exe' -ArgumentList $relaunch -Wait -PassThru
+  exit $p.ExitCode
+}
+
+try {
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
 [System.Windows.Forms.Application]::EnableVisualStyles()
@@ -258,9 +276,13 @@ function Update-ToggleVisual($Row, [bool]$On) {
 
 function Refresh-Status {
   if ($busy) { return }
-  Update-ToggleVisual $scrapeRow (Test-WorkerRunning 'Scrape')
-  Update-ToggleVisual $autoRow (Test-WorkerRunning 'Autopost')
-  $footer.Text = "โค้ด: $(Get-WorkerBuildSha)  ·  log: output\worker-logs"
+  try {
+    Update-ToggleVisual $scrapeRow (Test-WorkerRunning 'Scrape')
+    Update-ToggleVisual $autoRow (Test-WorkerRunning 'Autopost')
+    $footer.Text = "โค้ด: $(Get-WorkerBuildSha)  ·  log: output\worker-logs"
+  } catch {
+    $footer.Text = "ตรวจสถานะไม่ได้: $($_.Exception.Message)"
+  }
 }
 
 $scrapeRow.Toggle.Add_Click({
@@ -353,3 +375,21 @@ if ($LegacyTerminals) {
 }
 
 [System.Windows.Forms.Application]::Run($form)
+} catch {
+  $msg = $_.Exception.Message
+  $stack = $_.ScriptStackTrace
+  try {
+    Add-Type -AssemblyName System.Windows.Forms -ErrorAction SilentlyContinue
+    [System.Windows.Forms.MessageBox]::Show(
+      "$msg`n`n$stack",
+      'SO Workers — เปิดแผงไม่สำเร็จ',
+      'OK',
+      'Error'
+    ) | Out-Null
+  } catch {
+    Write-Host "SO Workers error: $msg"
+    Write-Host $stack
+    Read-Host 'กด Enter เพื่อปิด'
+  }
+  exit 1
+}
