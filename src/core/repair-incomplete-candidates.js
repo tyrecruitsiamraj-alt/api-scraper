@@ -77,6 +77,8 @@ export const WORK_MANGLED_SQL_RE = [
   'Resume\\s*-\\s*View\\s*Credit',
   'Credit\\s*ที่ใช้แล้ว',
   'สามารถดูหรือติดต่อได้',
+  'บันทึก\\s*ยกเลิก\\s*นัดสัมภาษณ์',
+  'นัดสัมภาษณ์\\s*ตำแหน่งงาน',
 ].join('|');
 
 function blank(value) {

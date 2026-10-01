@@ -339,6 +339,8 @@ export function isMangledWorkRow(item) {
   // Field labels that belong in other columns leaked into company/position.
   if (/เงินเดือน\s*\(?บาท\)?\s*[:：]?|ประเภทธุรกิจ\s*[:：]|รายละเอียดงาน|หน้าที่-ผลงาน|ระยะเวลา\s*[:：]/u.test(head)) return true;
   if (/ตำแหน่ง(?:งาน)?\s*[:：]/u.test(company) || /^ตำแหน่ง(?:งาน)?\s+/u.test(company)) return true;
+  // Employer UI actions leaked into position ("บันทึก ยกเลิก นัดสัมภาษณ์ ตำแหน่งงาน ::").
+  if (/บันทึก\s*ยกเลิก\s*นัดสัมภาษณ์|นัดสัมภาษณ์\s*ตำแหน่งงาน/u.test(head)) return true;
   // Duties dumped into company (long prose, no company cue near the start).
   if (company.length > 140 && !/(?:บริษัท|จำกัด|มหาชน|Co\.?\s*Ltd|Limited|Inc\.?)/i.test(company.slice(0, 48))) {
     return true;
@@ -376,14 +378,52 @@ export function normalizeWorkRow(item) {
   // Text before ตำแหน่งงาน is usually the employer when labels were glued without ข้อมูลบริษัท.
   const unlabeledCompany = clean(blob.match(/^(.*?)(?=\s*ตำแหน่ง(?:งาน)?\s*[:：])/u)?.[1] || '')
     .replace(/^(?:ข้อมูลบริษัท|บริษัท)\s*[:：]?\s*/u, '');
-  const parsed = parseOneWorkChunk(
-    unlabeledCompany && !/(?:ข้อมูลบริษัท|(?<!ข้อมูล)บริษัท\s*[:：])/u.test(blob)
-      ? `ข้อมูลบริษัท : ${unlabeledCompany} ${blob}`
-      : blob,
-  );
+  // Rebuild a clean labeled blob instead of concatenating duplicates.
+  const labeledBlob = [
+    unlabeledCompany ? `ข้อมูลบริษัท : ${unlabeledCompany}` : '',
+    (() => {
+      const pos = firstMatch(blob, [/ตำแหน่ง(?:งาน)?\s*[:：]?\s*(.+?)(?=\s*(?:ประเภทธุรกิจ|ระยะเวลา|เงินเดือน|รายละเอียดงาน|ที่อยู่|$))/u]);
+      return pos ? `ตำแหน่งงาน : ${pos}` : '';
+    })(),
+    (() => {
+      const bizValues = [...blob.matchAll(/ประเภทธุรกิจ\s*[:：]?\s*(.+?)(?=\s*(?:ระยะเวลา|เงินเดือน|รายละเอียดงาน|ที่อยู่|ตำแหน่ง|ประเภทธุรกิจ|$))/gu)]
+        .map((m) => clean(m[1]))
+        .filter((value) => value && value.length >= 2 && !/^(?:เซลล์|พนักงาน)$/u.test(value));
+      return bizValues.length ? `ประเภทธุรกิจ : ${bizValues[bizValues.length - 1]}` : '';
+    })(),
+    (() => {
+      // Prefer the last ระยะเวลา value (earlier ones are often glued leftovers like "เซลล์ระยะเวลา").
+      const periods = [...blob.matchAll(/ระยะเวลา\s*[:：]?\s*(.+?)(?=\s*(?:ประเภทธุรกิจ|เงินเดือน|รายละเอียดงาน|ที่อยู่|ตำแหน่ง|$))/gu)]
+        .map((m) => clean(m[1]))
+        .filter((value) => value && !/^(?:เซลล์|พนักงาน|เจ้าหน้าที่)$/u.test(value));
+      return periods.length ? `ระยะเวลา : ${periods[periods.length - 1]}` : '';
+    })(),
+    (() => {
+      const salary = firstMatch(blob, [/เงินเดือน\s*[:：]?\s*([\d,]+)/u]);
+      return salary ? `เงินเดือน : ${salary}` : '';
+    })(),
+    (() => {
+      const detail = firstMatch(blob, [/รายละเอียดงาน\s*(.+)$/u]);
+      return detail ? `รายละเอียดงาน ${detail}` : '';
+    })(),
+  ].filter(Boolean).join(' ');
+  const parsed = parseOneWorkChunk(labeledBlob || blob);
   if (parsed && !isMangledWorkRow(parsed) && !isJunkWorkRow(parsed)) {
     if (!clean(parsed.company) && unlabeledCompany && unlabeledCompany.length <= 120) {
       parsed.company = unlabeledCompany;
+    }
+    // De-dupe "อักษร… จำกัด อักษร… จำกัด"
+    if (clean(parsed.company)) {
+      const parts = clean(parsed.company).split(/\s+/);
+      const half = Math.floor(parts.length / 2);
+      if (half > 0) {
+        const a = parts.slice(0, half).join(' ');
+        const b = parts.slice(half).join(' ');
+        if (a && a === b) parsed.company = a;
+      }
+      parsed.company = clean(parsed.company)
+        .replace(/^(บริษัท\s+)+/u, 'บริษัท ')
+        .replace(/(บริษัท\s+){2,}/gu, 'บริษัท ');
     }
     if (!isMangledWorkRow(parsed)) return parsed;
   }
@@ -960,17 +1000,14 @@ export function finalizeCandidateRecord(record = {}) {
   }
   if (isJobbkkSiteChromeText(next.experience_summary)) next.experience_summary = '';
   else if (clean(next.experience_summary)) next.experience_summary = stripJobbkkSiteChrome(next.experience_summary);
-  // Test-resume placeholders must not stay on the desk.
+  fillMissingFromRawText(next, next.raw_text || '');
+  // Test-resume placeholders must not stay on the desk (after fill — raw_text can reintroduce them).
   if (/JOBBKK\s*TEST|เทสระบบสมัครงาน|เรซูเม่นี้สำหรับใช้ทดสอบระบบ/i.test(clean(next.address))) {
     next.address = '';
   }
   if (/JOBBKK\s*TEST|เทสระบบสมัครงาน|เรซูเม่นี้สำหรับใช้ทดสอบระบบ/i.test(clean(next.desired_positions))) {
     next.desired_positions = '';
   }
-  if (/^JOBBKK(\s+DOT\s+COM)?$/i.test(clean(next.name || next.full_name))) {
-    // keep name visible as-is; education/address already scrubbed above
-  }
-  fillMissingFromRawText(next, next.raw_text || '');
   next.parse_status = parseStatus(next, next.raw_text || '');
   return next;
 }
