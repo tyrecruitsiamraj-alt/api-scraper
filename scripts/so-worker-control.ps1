@@ -121,12 +121,49 @@ function Resolve-NodeExe {
   throw "ไม่พบ node.exe - ติดตั้ง Node.js แล้วลองเปิดแผงใหม่ (หรือเปิดจากเครื่องที่รัน node ใน cmd ได้)"
 }
 
+function Resolve-GitExe {
+  $cmd = Get-Command git.exe -ErrorAction SilentlyContinue
+  if ($cmd -and $cmd.Source) { return $cmd.Source }
+  $cmd = Get-Command git -ErrorAction SilentlyContinue
+  if ($cmd -and $cmd.Source) { return $cmd.Source }
+  foreach ($candidate in @(
+    (Join-Path $env:ProgramFiles 'Git\cmd\git.exe')
+    (Join-Path $env:ProgramFiles 'Git\bin\git.exe')
+    (Join-Path ${env:ProgramFiles(x86)} 'Git\cmd\git.exe')
+    (Join-Path $env:LOCALAPPDATA 'Programs\Git\cmd\git.exe')
+  )) {
+    if ($candidate -and (Test-Path -LiteralPath $candidate)) { return $candidate }
+  }
+  throw "ไม่พบ git.exe - ติดตั้ง Git for Windows แล้วเปิดแผงใหม่"
+}
+
+function Invoke-Git {
+  param(
+    [Parameter(Mandatory = $true)][string[]]$GitArgs,
+    [switch]$AllowFail
+  )
+  $git = Resolve-GitExe
+  $prevEap = $ErrorActionPreference
+  $ErrorActionPreference = 'Continue'
+  try {
+    $output = & $git @GitArgs 2>&1
+    $code = $LASTEXITCODE
+  } finally {
+    $ErrorActionPreference = $prevEap
+  }
+  $text = ($output | ForEach-Object { "$_" }) -join "`n"
+  if (-not $AllowFail -and $code -ne 0) {
+    throw ("git " + ($GitArgs -join ' ') + " ล้มเหลว (code=$code)`n" + $text)
+  }
+  return @{ Code = $code; Text = $text }
+}
+
 function Get-WorkerBuildSha {
   Push-Location $Root
   try {
-    $sha = (git rev-parse --short HEAD 2>$null)
-    if (-not $sha) { return 'unknown' }
-    return $sha.Trim()
+    $r = Invoke-Git -GitArgs @('rev-parse', '--short', 'HEAD') -AllowFail
+    if ($r.Code -ne 0 -or -not $r.Text) { return 'unknown' }
+    return ($r.Text.Trim() -split "`n")[0].Trim()
   } finally {
     Pop-Location
   }
@@ -135,17 +172,29 @@ function Get-WorkerBuildSha {
 function Update-WorkerCode {
   Push-Location $Root
   try {
-    git fetch origin main 2>&1 | Out-Null
-    if ($LASTEXITCODE -ne 0) { throw "git fetch ไม่สำเร็จ" }
-    git checkout -B main origin/main 2>&1 | Out-Null
-    if ($LASTEXITCODE -ne 0) {
-      git reset --hard origin/main 2>&1 | Out-Null
-      if ($LASTEXITCODE -ne 0) { throw "git reset ไม่สำเร็จ" }
-    } else {
-      git reset --hard origin/main 2>&1 | Out-Null
-      if ($LASTEXITCODE -ne 0) { throw "git reset ไม่สำเร็จ" }
-    }
-    git clean -fd 2>&1 | Out-Null
+    # ขยาย PATH อีกครั้งก่อนดึงโค้ด (แผงเปิดจาก Explorer บางทีไม่มี git/node)
+    try {
+      $machinePath = [Environment]::GetEnvironmentVariable('Path', 'Machine')
+      $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
+      if ($machinePath -or $userPath) {
+        $env:Path = (@($machinePath, $userPath, $env:Path) | Where-Object { $_ }) -join ';'
+      }
+    } catch { }
+
+    Invoke-Git -GitArgs @('fetch', 'origin', 'main') | Out-Null
+    Invoke-Git -GitArgs @('checkout', '-B', 'main', 'origin/main') -AllowFail | Out-Null
+    Invoke-Git -GitArgs @('reset', '--hard', 'origin/main') | Out-Null
+    # อย่าลบ .env / .auth / log ด้วย git clean
+    Invoke-Git -GitArgs @(
+      'clean', '-fd',
+      '-e', '.env',
+      '-e', '.env.local',
+      '-e', 'autopost/.env',
+      '-e', 'web/.env.local',
+      '-e', '.auth',
+      '-e', 'autopost/.auth',
+      '-e', 'output'
+    ) -AllowFail | Out-Null
     return (Get-WorkerBuildSha)
   } finally {
     Pop-Location
@@ -475,6 +524,8 @@ $legacyBtn.Add_Click({
 $updateBtn.Add_Click({
   if ($busy) { return }
   Set-Busy $true
+  $wasScrape = $false
+  $wasAuto = $false
   try {
     $wasScrape = Test-WorkerRunning 'Scrape'
     $wasAuto = Test-WorkerRunning 'Autopost'
@@ -483,15 +534,36 @@ $updateBtn.Add_Click({
     $footer.Text = 'กำลังดึงโค้ดจาก GitHub...'
     [System.Windows.Forms.Application]::DoEvents()
     $sha = Update-WorkerCode
-    $footer.Text = "อัปเดตแล้ว: $sha"
-    if ($wasScrape) { Start-ScrapeWorker }
-    if ($wasAuto) { Start-AutopostWorker }
-    if ($wasScrape -or $wasAuto) { Start-Sleep -Seconds 2 }
+    $footer.Text = "อัปเดตแล้ว: $sha - กำลังเปิดแผงใหม่..."
+    [System.Windows.Forms.Application]::DoEvents()
+
+    # เปิดแผงใหม่จากไฟล์ล่าสุด แล้วปิดแผงเก่า (โค้ดในหน่วยความจำเป็นของเก่า)
+    $relaunch = Join-Path $Root 'SO-Workers.bat'
+    if (-not (Test-Path -LiteralPath $relaunch)) {
+      $relaunch = Join-Path $Root 'start-workers.bat'
+    }
+    if (Test-Path -LiteralPath $relaunch) {
+      $arg = if ($relaunch -like '*start-workers.bat') { '--open' } else { '' }
+      if ($arg) {
+        Start-Process -FilePath $relaunch -ArgumentList $arg -WorkingDirectory $Root
+      } else {
+        Start-Process -FilePath $relaunch -WorkingDirectory $Root
+      }
+    }
+    $form.Close()
   } catch {
-    [System.Windows.Forms.MessageBox]::Show($_.Exception.Message, 'อัปเดตโค้ด', 'OK', 'Error') | Out-Null
+    $msg = $_.Exception.Message
+    if (-not $msg) { $msg = "$_" }
+    [System.Windows.Forms.MessageBox]::Show(
+      $msg,
+      'อัปเดตโค้ดไม่สำเร็จ',
+      'OK',
+      'Error'
+    ) | Out-Null
+    $footer.Text = 'อัปเดตไม่สำเร็จ - ดูกล่องข้อความ'
   } finally {
     Set-Busy $false
-    Refresh-Status
+    try { Refresh-Status } catch { }
   }
 })
 
