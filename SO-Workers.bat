@@ -15,7 +15,7 @@ if not exist "%~dp0scripts\so-worker-control.ps1" (
   exit /b 1
 )
 
-REM -STA จำเป็นต่อ WinForms — ถ้าไม่มี แผงจะพังแล้วหน้าต่างหายไปทันที
+REM -STA = WinForms; ไฟล์ .ps1 ต้องเป็น UTF-8 BOM ไม่งั้นไทยเพี้ยนแล้วพาร์สพัง
 powershell -NoProfile -STA -ExecutionPolicy Bypass -File "%~dp0scripts\so-worker-control.ps1"
 set "EC=%ERRORLEVEL%"
 if not "%EC%"=="0" (

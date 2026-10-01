@@ -1,6 +1,6 @@
-# SO Worker Control — แผงสวิตช์เปิด/ปิด Worker (Windows)
+﻿# SO Worker Control - แผงสวิตช์เปิด/ปิด Worker (Windows)
 # ดับเบิลคลิก SO-Workers.bat หรือ start-workers.bat
-# ไม่เปิด terminal รก — Worker รันแบบซ่อน ดูสถานะจากสวิตช์นี้
+# ไม่เปิด terminal รก - Worker รันแบบซ่อน ดูสถานะจากสวิตช์นี้
 
 [CmdletBinding()]
 param(
@@ -9,7 +9,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
-# WinForms ต้องรันบน STA — ถ้าเปิดแบบ MTA แผงจะพังแล้วหน้าต่างหายทันที
+# WinForms ต้องรันบน STA - ถ้าเปิดแบบ MTA แผงจะพังแล้วหน้าต่างหายทันที
 $apartment = [System.Threading.Thread]::CurrentThread.GetApartmentState()
 if ($apartment -ne 'STA') {
   $relaunch = @(
@@ -33,7 +33,7 @@ Add-Type -AssemblyName System.Drawing
 $Root = Split-Path -Parent $PSScriptRoot
 if (-not (Test-Path (Join-Path $Root 'package.json'))) {
   [System.Windows.Forms.MessageBox]::Show(
-    "โฟลเดอร์ผิด — ต้องอยู่ที่รากโปรเจกต์ api-scraper",
+    "โฟลเดอร์ผิด - ต้องอยู่ที่รากโปรเจกต์ api-scraper",
     "SO Workers",
     'OK',
     'Error'
@@ -130,7 +130,7 @@ function Start-HiddenNode([string]$Name, [string]$WorkDir, [string]$NodeArgs, [s
   Add-Content -Path $logPath -Value "`n==== $stamp start $Name ====`n" -Encoding UTF8
 
   $nodeExe = (Get-Command node -ErrorAction Stop).Source
-  # ใช้ cmd /c + CreateNoWindow แล้ว redirect เข้าไฟล์ — ไม่เปิด console
+  # ใช้ cmd /c + CreateNoWindow แล้ว redirect เข้าไฟล์ - ไม่เปิด console
   # และไม่ค้าง pipe เวลาแผงสวิตช์ปิด (ต่างจาก RedirectStandard* บน Process)
   $inner = "`"$nodeExe`" $NodeArgs >> `"$logPath`" 2>&1"
   $psi = New-Object System.Diagnostics.ProcessStartInfo
@@ -178,7 +178,7 @@ $title.AutoSize = $true
 $form.Controls.Add($title)
 
 $subtitle = New-Object System.Windows.Forms.Label
-$subtitle.Text = 'ไม่เปิดหน้าต่างดำ — กดสวิตช์อย่างเดียว (Chrome ตอน scrape/โพสต์อาจยังโผล่)'
+$subtitle.Text = 'ไม่เปิดหน้าต่างดำ - กดสวิตช์อย่างเดียว (Chrome ตอน scrape/โพสต์อาจยังโผล่)'
 $subtitle.ForeColor = [System.Drawing.Color]::FromArgb(100, 110, 120)
 $subtitle.Location = New-Object System.Drawing.Point(26, 52)
 $subtitle.AutoSize = $true
@@ -279,7 +279,7 @@ function Refresh-Status {
   try {
     Update-ToggleVisual $scrapeRow (Test-WorkerRunning 'Scrape')
     Update-ToggleVisual $autoRow (Test-WorkerRunning 'Autopost')
-    $footer.Text = "โค้ด: $(Get-WorkerBuildSha)  ·  log: output\worker-logs"
+    $footer.Text = "โค้ด: $(Get-WorkerBuildSha)  |  log: output\worker-logs"
   } catch {
     $footer.Text = "ตรวจสถานะไม่ได้: $($_.Exception.Message)"
   }
@@ -382,7 +382,7 @@ if ($LegacyTerminals) {
     Add-Type -AssemblyName System.Windows.Forms -ErrorAction SilentlyContinue
     [System.Windows.Forms.MessageBox]::Show(
       "$msg`n`n$stack",
-      'SO Workers — เปิดแผงไม่สำเร็จ',
+      'SO Workers - เปิดแผงไม่สำเร็จ',
       'OK',
       'Error'
     ) | Out-Null
