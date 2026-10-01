@@ -145,7 +145,11 @@ function extractContactsByIcon($) {
     const text = clean($(row).text());
     for (const [icon, field] of Object.entries(CONTACT_ICON_MAP)) {
       if (src.includes(icon.toLowerCase()) && !contacts[field]) {
-        contacts[field] = field === 'phone' ? normalizePhone(text) : field === 'address' ? stripLeadingDash(text) : text;
+        if (field === 'phone') contacts[field] = normalizePhone(text);
+        else if (field === 'address') {
+          const addr = stripLeadingDash(stripJobbkkSiteChrome(text));
+          contacts[field] = isJunkAddress(addr) ? '' : addr;
+        } else contacts[field] = text;
       }
     }
   });
@@ -280,20 +284,25 @@ function extractWork($) {
   return out;
 }
 
-/** JobBKK login/register i18n + footer chrome that must never become work history. */
-const JOBBKK_SITE_CHROME_RE = /register_page|username_hint|max_case|no_html|no_symbols|symbol_casepassword|invalid_characters_password|invalid_email|must_be_greater_than|register_success|register_failed|employer_login|data_enter_system|data_company|help@jobbkk\.com|sales@jobbkk\.com|บริษัท\s*จัดหางาน\s*จ๊อบบีเคเค|JOBBKK\.COM|ไม่อนุญาตให้ใช้|คุณจะไม่สามารถเข้าสู่ระบบ|สมัครสมาชิกไม่สำเร็จ|สำหรับผู้ประกอบการเท่านั้น|Resume\s*-\s*View\s*Credit|Credit\s*ที่ใช้แล้ว|สามารถดูหรือติดต่อได้/iu;
+/** JobBKK login/register/address-form i18n + footer chrome that must never become resume fields. */
+const JOBBKK_SITE_CHROME_RE = /register_page|username_hint|max_case|no_html|no_symbols|symbol_casepassword|invalid_characters_password|invalid_email|must_be_greater_than|register_success|register_failed|employer_login|data_enter_system|data_company|address_placeholder|introduce_yourself_placeholder|introduce_yourself_label|postal_code|other_country|subdistrict|help@jobbkk\.com|sales@jobbkk\.com|บริษัท\s*จัดหางาน\s*จ๊อบบีเคเค|JOBBKK\.COM|ไม่อนุญาตให้ใช้|คุณจะไม่สามารถเข้าสู่ระบบ|สมัครสมาชิกไม่สำเร็จ|สำหรับผู้ประกอบการเท่านั้น|Resume\s*-\s*View\s*Credit|Credit\s*ที่ใช้แล้ว|สามารถดูหรือติดต่อได้/iu;
+
+const ADDRESS_FORM_I18N_RE = /address_placeholder|introduce_yourself_placeholder|introduce_yourself_label|postal_code|other_country|\\?"district\\?"\s*:\s*\\?"เขต|\\?"subdistrict\\?"\s*:\s*\\?"แขวง|\\?"province\\?"\s*:\s*\\?"จังหวัด|\\?"country\\?"\s*:\s*\\?"ประเทศ/iu;
 
 /** Drop login/register chrome that sometimes lands inside body.innerText. */
 export function stripJobbkkSiteChrome(text) {
   let out = String(text ?? '');
   if (!out) return '';
-  // Key/value i18n pairs: "max_case":"{name} ต้องไม่เกิน..."
-  out = out.replace(/\\?"[a-z_][a-z0-9_]*\\?"\s*:\s*\\?"(?:[^"\\]|\\.){0,400}\\?"/giu, ' ');
+  // Key/value i18n pairs: "max_case":"{name} ต้องไม่เกิน..." (also escaped \"key\":\"value\")
+  out = out.replace(/\\*"[a-z_][a-z0-9_]*\\*"\s*:\s*\\*"(?:[^"\\]|\\.){0,800}\\*"/giu, ' ');
+  // Unclosed trailing placeholder values (common for introduce_yourself_placeholder).
+  out = out.replace(/\\*"introduce_yourself_placeholder\\*"\s*:\s*\\*"[^"]*$/giu, ' ');
+  out = out.replace(/\\*"address_placeholder\\*"\s*:\s*\\*"[^"]*$/giu, ' ');
   // Nested register_page / login_page objects
   // Only the object opener — never scan forward with [^}] (unclosed JSON would eat the resume).
   out = out.replace(/\\?"(?:register_page|login_page|section_subtitle)\\?"\s*:\s*\{\s*,?\s*/giu, ' ');
   out = out.replace(/\{\s*\\?"(?:register_page|max_case|username_hint|login_page)\\?"\s*:\s*/giu, ' ');
-  out = out.replace(/\b(?:register_page|username_hint|max_case|no_html|no_symbols|symbol_casepassword|invalid_email|register_success|register_failed|employer_login|data_enter_system|data_company)\b/giu, ' ');
+  out = out.replace(/\b(?:register_page|username_hint|max_case|no_html|no_symbols|symbol_casepassword|invalid_email|register_success|register_failed|employer_login|data_enter_system|data_company|address_placeholder|introduce_yourself_placeholder|introduce_yourself_label|postal_code|other_country|subdistrict)\b/giu, ' ');
   out = out.replace(/ที่กำหนด\s*คุณจะไม่สามารถเข้าสู่ระบบได้/giu, ' ');
   // Footer only — do not span past the JobBKK contact line into resume body.
   out = out.replace(/บริษัท\s*จัดหางาน\s*จ๊อบบีเคเค[^.]{0,240}?(?:help@jobbkk\.com|sales@jobbkk\.com)/giu, ' ');
@@ -305,9 +314,31 @@ export function stripJobbkkSiteChrome(text) {
   out = out.replace(/สามารถดูหรือติดต่อได้\s*[:：]?[\s\S]*$/iu, ' ');
   out = out.replace(/Resume\s*-\s*View\s*Credit[\s\S]*$/iu, ' ');
   out = out.replace(/Credit\s*ที่ใช้แล้ว[^\n]{0,200}/giu, ' ');
+  // Leftover form-label Thai from address i18n values (not a real address).
+  out = out.replace(/(?:^|\s)(?:ที่อยู่|ประเทศ|ประเทศไทย|ต่างประเทศ|จังหวัด|เขต\/อำเภอ|แขวง\/ตำบล|รหัสไปรษณีย์|แนะนำตัวเอง)(?=\s|$)/gu, ' ');
+  out = out.replace(/โปรดเขียนแนะนำตัวเองสั้น\s*ๆ[^"]{0,200}/giu, ' ');
   out = out.replace(/[{}\[\]]+/g, ' ');
   out = out.replace(/\\+"/g, ' ');
+  out = out.replace(/^[,\s":\\]+|[,\s":\\]+$/g, ' ');
   return clean(out);
+}
+
+/** Address field is JobBKK form i18n, not a real location. */
+export function isJunkAddress(value) {
+  const raw = String(value ?? '').trim();
+  if (!raw) return false; // empty is handled by blank() — not "junk chrome"
+  if (ADDRESS_FORM_I18N_RE.test(raw)) return true;
+  if (/address_placeholder|postal_code|introduce_yourself_/i.test(raw)) return true;
+  // Escaped JSON key/value residue typical of form i18n dumps.
+  if ((raw.match(/\\*"\s*:\s*\\*"/g) || []).length >= 2) return true;
+  if ((raw.match(/\\?"[a-z_]{3,}\\?"\s*:/gi) || []).length >= 2) return true;
+  const stripped = stripJobbkkSiteChrome(raw);
+  if (ADDRESS_FORM_I18N_RE.test(raw) || /address_placeholder|postal_code|introduce_yourself_/i.test(raw)) {
+    if (!stripped || stripped.length < 12) return true;
+  }
+  // After strip of a chrome-looking blob, almost nothing useful left.
+  if (/["\\]/.test(raw) && (!stripped || !/[0-9ก-๙]{3,}/u.test(stripped))) return true;
+  return false;
 }
 
 export function isJobbkkSiteChromeText(text) {
@@ -763,7 +794,12 @@ export function fillMissingFromRawText(record, rawText) {
   set('expected_salary', firstMatch(text, [/เงินเดือนที่ต้องการ\s*[:：]?\s*([\d,][\d,\s-]*\d)/u]));
   set('desired_work_area', firstMatch(text, [new RegExp(`พื้นที่ที่ต้องการทำงาน\\s*[:：]?\\s*(.+?)${STOP}`, 'u')]));
   set('available_start', firstMatch(text, [new RegExp(`ระยะเวลาเริ่มงาน\\s*[:：]?\\s*(.+?)${STOP}`, 'u')]));
-  set('address', firstMatch(text, [new RegExp(`ที่อยู่ปัจจุบัน\\s*[:：]?\\s*(.+?)${STOP}`, 'u')]));
+  if (isJunkAddress(record.address)) record.address = '';
+  {
+    const addrStop = '(?=\\s*(?:ตำแหน่ง|พื้นที่ที่ต้องการ|เงินเดือน(?:ที่ต้องการ)?|ระยะเวลาเริ่มงาน|งานที่ต้องการ|ประวัติการศึกษา|ประวัติการทำงาน|เพศ|สถานภาพ|ส่วนสูง|น้ำหนัก|สัญชาติ|ศาสนา|เบอร์(?:โทร(?:ศัพท์)?)?|โทรศัพท์|อีเมล|Email|Line|Hard Skills|Soft Skills)|$)';
+    const addr = firstMatch(text, [new RegExp(`ที่อยู่ปัจจุบัน\\s*[:：]?\\s*(.+?)${addrStop}`, 'u')]);
+    if (addr && !isJunkAddress(addr)) set('address', stripLeadingDash(addr));
+  }
   set('job_type', firstMatch(text, [new RegExp(`(?:รูปแบบงาน|ประเภทงาน)\\s*[:：]?\\s*(.+?)${STOP}`, 'u')]));
 
   if (!clean(record.desired_positions)) {
@@ -1001,12 +1037,19 @@ export function finalizeCandidateRecord(record = {}) {
   if (isJobbkkSiteChromeText(next.experience_summary)) next.experience_summary = '';
   else if (clean(next.experience_summary)) next.experience_summary = stripJobbkkSiteChrome(next.experience_summary);
   fillMissingFromRawText(next, next.raw_text || '');
-  // Test-resume placeholders must not stay on the desk (after fill — raw_text can reintroduce them).
-  if (/JOBBKK\s*TEST|เทสระบบสมัครงาน|เรซูเม่นี้สำหรับใช้ทดสอบระบบ/i.test(clean(next.address))) {
+  // Test-resume / form-i18n placeholders must not stay on the desk (after fill).
+  if (isJunkAddress(next.address)
+      || /JOBBKK\s*TEST|เทสระบบสมัครงาน|เรซูเม่นี้สำหรับใช้ทดสอบระบบ/i.test(clean(next.address))) {
     next.address = '';
+  } else if (clean(next.address)) {
+    next.address = stripLeadingDash(stripJobbkkSiteChrome(next.address));
+    if (isJunkAddress(next.address)) next.address = '';
   }
   if (/JOBBKK\s*TEST|เทสระบบสมัครงาน|เรซูเม่นี้สำหรับใช้ทดสอบระบบ/i.test(clean(next.desired_positions))) {
     next.desired_positions = '';
+  }
+  if (clean(next.intro) && (ADDRESS_FORM_I18N_RE.test(next.intro) || isJobbkkSiteChromeText(next.intro))) {
+    next.intro = '';
   }
   next.parse_status = parseStatus(next, next.raw_text || '');
   return next;
