@@ -11,7 +11,9 @@ import {
   finalizeCandidateRecord,
   hasUsefulEducation,
   hasUsefulWorkExperience,
+  isJunkEducationRow,
   isJunkWorkRow,
+  isMangledWorkRow,
 } from '../providers/jobbkk/parser.js';
 
 const PROVINCE_NAMES = (() => {
@@ -58,6 +60,23 @@ export const WORK_CHROME_SQL_RE = [
   'สมัครสมาชิกไม่สำเร็จ',
   'ไม่อนุญาตให้ใช้',
   'สำหรับผู้ประกอบการเท่านั้น',
+  'Resume\\s*-\\s*View\\s*Credit',
+  'Credit\\s*ที่ใช้แล้ว',
+  'สามารถดูหรือติดต่อได้',
+].join('|');
+
+/** Glued labels inside company/position — desk shows unreadable blobs. */
+export const WORK_MANGLED_SQL_RE = [
+  'เงินเดือน\\s*\\(?บาท\\)?\\s*[:：]?',
+  'ประเภทธุรกิจ\\s*[:：]?',
+  'รายละเอียดงาน',
+  'หน้าที่-ผลงาน',
+  'ระยะเวลา\\s*[:：]',
+  'ตำแหน่ง(?:งาน)?\\s*[:：]',
+  '^ตำแหน่ง(?:งาน)?\\s+',
+  'Resume\\s*-\\s*View\\s*Credit',
+  'Credit\\s*ที่ใช้แล้ว',
+  'สามารถดูหรือติดต่อได้',
 ].join('|');
 
 function blank(value) {
@@ -77,13 +96,20 @@ function validEmail(value) {
 
 export function needsRepair(row) {
   const work = Array.isArray(row.work_experience) ? row.work_experience : [];
-  const hasJunkWork = work.some((item) => isJunkWorkRow(item));
+  const education = Array.isArray(row.education) ? row.education : [];
+  const hasJunkWork = work.some((item) => isJunkWorkRow(item) || isMangledWorkRow(item));
+  const hasJunkEducation = education.some((item) => isJunkEducationRow(item));
+  const junkAddress = /JOBBKK\s*TEST|เทสระบบสมัครงาน/i.test(String(row.address || ''));
+  const junkDesired = /เทสระบบสมัครงาน|เรซูเม่นี้สำหรับใช้ทดสอบระบบ/i.test(String(row.desired_positions || ''));
   return blank(row.phone) || blank(row.email) || blank(row.gender) || blank(row.age)
     || blank(row.address) || isJunkText(row.province) || blank(row.desired_positions)
     || blank(row.expected_salary)
     || !hasUsefulEducation(row.education)
     || !hasUsefulWorkExperience(row.work_experience)
-    || hasJunkWork;
+    || hasJunkWork
+    || hasJunkEducation
+    || junkAddress
+    || junkDesired;
 }
 
 /** Resolve province from address / desired area / raw text using JobBKK province list. */
@@ -122,8 +148,10 @@ export function resolveProvinceFromRow(row = {}, combinedText = '') {
 function jsonbFillExpression(col, paramIndex) {
   // Replace empty arrays, and also year-only / blank work or education stubs.
   if (col === 'work_experience') {
-    // Replace empty/year-only stubs AND JobBKK login/register chrome that leaked in.
-    const junkRow = `e::text ~* '${WORK_CHROME_SQL_RE}'`;
+    // Replace empty/year-only stubs, login chrome, and glued company/position blobs.
+    const junkRow = `e::text ~* '${WORK_CHROME_SQL_RE}'
+      OR COALESCE(e->>'company','') ~* '${WORK_MANGLED_SQL_RE}'
+      OR COALESCE(e->>'position','') ~* '${WORK_MANGLED_SQL_RE}'`;
     return `${col} = CASE
       WHEN EXISTS (
         SELECT 1 FROM jsonb_array_elements(COALESCE(${col}, '[]'::jsonb)) e WHERE ${junkRow}
@@ -139,7 +167,11 @@ function jsonbFillExpression(col, paramIndex) {
     END`;
   }
   if (col === 'education') {
+    const junkEdu = `e::text ~* 'JOBBKK\\.COM|JOBBKK\\s*TEST|เทสระบบสมัครงาน|register_page|username_hint'`;
     return `${col} = CASE
+      WHEN EXISTS (
+        SELECT 1 FROM jsonb_array_elements(COALESCE(${col}, '[]'::jsonb)) e WHERE ${junkEdu}
+      ) THEN $${paramIndex}::jsonb
       WHEN $${paramIndex}::jsonb = '[]'::jsonb THEN ${col}
       WHEN COALESCE(jsonb_array_length(${col}), 0) = 0 THEN $${paramIndex}::jsonb
       WHEN NOT EXISTS (
@@ -171,6 +203,14 @@ async function patchCandidateById(client, id, parsed) {
           OR trim(${col}) ~ '^["''\\\\.\\-_/]+$'
         ) THEN $${params.length}
         ELSE COALESCE(NULLIF($${params.length}, ''), ${col})
+      END`);
+    } else if (col === 'address' || col === 'desired_positions') {
+      // Clear JobBKK test-resume placeholders even when the repaired value is empty.
+      sets.push(`${col} = CASE
+        WHEN $${params.length} <> '' THEN $${params.length}
+        WHEN COALESCE(${col}, '') ~* 'JOBBKK\\s*TEST|เทสระบบสมัครงาน|เรซูเม่นี้สำหรับใช้ทดสอบระบบ'
+          THEN ''
+        ELSE ${col}
       END`);
     } else {
       sets.push(`${col} = COALESCE(NULLIF($${params.length}, ''), ${col})`);
@@ -263,7 +303,15 @@ const INCOMPLETE_SQL = `
        OR EXISTS (
          SELECT 1 FROM jsonb_array_elements(COALESCE(c.work_experience, '[]'::jsonb)) e
           WHERE e::text ~* '${WORK_CHROME_SQL_RE}'
+             OR COALESCE(e->>'company','') ~* '${WORK_MANGLED_SQL_RE}'
+             OR COALESCE(e->>'position','') ~* '${WORK_MANGLED_SQL_RE}'
        )
+       OR EXISTS (
+         SELECT 1 FROM jsonb_array_elements(COALESCE(c.education, '[]'::jsonb)) e
+          WHERE e::text ~* 'JOBBKK\\.COM|JOBBKK\\s*TEST|เทสระบบสมัครงาน'
+       )
+       OR COALESCE(c.address,'') ~* 'JOBBKK\\s*TEST|เทสระบบสมัครงาน'
+       OR COALESCE(c.desired_positions,'') ~* 'เทสระบบสมัครงาน|เรซูเม่นี้สำหรับใช้ทดสอบระบบ'
      )
    ORDER BY c.last_updated_at DESC
    LIMIT $1
@@ -358,8 +406,10 @@ export async function repairIncompleteCandidates(db, opts = {}) {
     const before = Object.fromEntries(REPAIR_TEXT_FIELDS.map((key) => [key, row[key]]));
     const beforeUsefulWork = hasUsefulWorkExperience(row.work_experience);
     const beforeHadJunkWork = Array.isArray(row.work_experience)
-      && row.work_experience.some((item) => isJunkWorkRow(item));
+      && row.work_experience.some((item) => isJunkWorkRow(item) || isMangledWorkRow(item));
     const beforeUsefulEdu = hasUsefulEducation(row.education);
+    const beforeHadJunkEdu = Array.isArray(row.education)
+      && row.education.some((item) => isJunkEducationRow(item));
     const ocrPart = String(row.ocr_text || '').trim();
     if (ocrPart.length > 20) {
       withOcr += 1;
@@ -386,13 +436,20 @@ export async function repairIncompleteCandidates(db, opts = {}) {
     for (const key of REPAIR_TEXT_FIELDS) {
       const target = key === 'full_name' ? 'name' : key;
       const next = parsed[target] ?? '';
-      const beforeEmpty = key === 'province' ? isJunkText(before[key]) : blank(before[key]);
+      const beforeVal = before[key];
+      const beforeJunkTest = (key === 'address' || key === 'desired_positions')
+        && /JOBBKK\s*TEST|เทสระบบสมัครงาน|เรซูเม่นี้สำหรับใช้ทดสอบระบบ/i.test(String(beforeVal || ''));
+      const beforeEmpty = key === 'province' ? isJunkText(beforeVal) : (blank(beforeVal) || beforeJunkTest);
       const nextOk = key === 'province' ? !isJunkText(next) : !blank(next);
       if (beforeEmpty && nextOk) changed.push(key);
+      else if (beforeJunkTest && blank(next)) changed.push(key);
     }
-    if (!beforeUsefulEdu && hasUsefulEducation(parsed.education)) changed.push('education');
+    if ((!beforeUsefulEdu && hasUsefulEducation(parsed.education))
+        || (beforeHadJunkEdu && !parsed.education.some((item) => isJunkEducationRow(item)))) {
+      changed.push('education');
+    }
     if ((!beforeUsefulWork && hasUsefulWorkExperience(parsed.work_experience))
-        || (beforeHadJunkWork && !parsed.work_experience.some((item) => isJunkWorkRow(item)))) {
+        || (beforeHadJunkWork && !parsed.work_experience.some((item) => isJunkWorkRow(item) || isMangledWorkRow(item)))) {
       changed.push('work_experience');
     }
     if (!changed.length) {
