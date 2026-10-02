@@ -427,13 +427,8 @@ function WorkAction({
           <ScrapeQuickRunForm item={item} connectors={connectors} />
         )}
         <div className="flex flex-wrap gap-2">
-          <button
-            type="button"
-            className="btn-ghost btn-sm"
-            onClick={onExpand}
-            disabled={expanded}
-          >
-            {expanded ? 'กำลังแก้แผนด้านบน' : 'แก้แผนก่อนรัน'}
+          <button type="button" className="btn-ghost btn-sm" onClick={onTogglePlan}>
+            {expanded ? 'ใช้แผนจากใบขอ (ย่อ)' : 'แก้แผนก่อนรัน'}
           </button>
           {item.href && <Link href={item.href} className="btn-ghost btn-sm">ดูใบงาน</Link>}
         </div>
@@ -565,7 +560,7 @@ function WorkItemCard({
           connectors={connectors}
           facebookAccounts={facebookAccounts}
           expanded={expanded}
-          onExpand={() => setExpanded(true)}
+          onTogglePlan={() => setExpanded((v) => !v)}
         />
       </div>
     </article>
