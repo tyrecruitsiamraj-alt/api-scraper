@@ -1,7 +1,8 @@
 # ย้าย Worker ไป Mac (จาก Windows RM009)
 
-> ใช้แผง Mac ที่มีใน repo แล้ว: **`so-control.command`** (แนะนำ) หรือ `start-mac.command`
-> อย่าใช้ `SO-Workers.bat` บน Mac
+> ใช้แผงสวิตช์ Mac: **`SO-Workers.command`** (ดับเบิลคลิก → สวิตช์ Scrap/Autopost · ไม่ค้าง Terminal)
+> ทางลัดเดียวกัน: `start-mac.command`  
+> อย่าใช้ `SO-Workers.bat` (ของ Windows) บน Mac
 
 ## 0) ก่อนย้าย — เช็คเน็ตบน Mac
 
@@ -27,7 +28,7 @@ git checkout main && git pull --ff-only origin main
 npm install
 cd autopost && npm install && npx playwright install
 cd ..
-chmod +x so-control.command start-mac.command so-tasks.command
+chmod +x SO-Workers.command start-mac.command scripts/so-worker-mac-lib.sh so-control.command so-tasks.command
 ```
 
 3. **ก๊อปไฟล์ลับจาก Windows (RM009)** มาวางตำแหน่งเดิม (USB / AirDrop / Shared folder):
@@ -48,16 +49,14 @@ chmod +x so-control.command start-mac.command so-tasks.command
 
 ## 2) เปิดบน Mac
 
-**แนะนำ:** ดับเบิลคลิก **`so-control.command`**
+**แนะนำ:** ดับเบิลคลิก **`SO-Workers.command`** (หรือ `start-mac.command`)
 
-- กด **▶ เริ่มทำงาน** → pull `main` + เปิด scraper pool + autopost + `caffeinate` กันหลับ
-- ปิดหน้าต่างแผงได้ — worker วิ่ง background ต่อ
-- มีโค้ดใหม่ → กด **↻ รีเฟรช**
-- หยุด → กด **■ หยุด worker**
+- ขึ้นแผงสวิตช์ — กด **เปิด Scrap** / **เปิด Autopost** (ไม่มี Terminal ค้าง)
+- Worker วิ่งพื้นหลัง + `caffeinate` กันหลับอัตโนมัติตอนเปิด Scrap
+- **อื่นๆ… → อัปเดตโค้ด** = pull `main` แล้วเปิดตัวที่เคยเปิดอยู่ต่อ
+- ปิดแผงได้ — worker ยังวิ่ง
 
-ทางเลือกเร็ว (เปิด Terminal 2 บาน): ดับเบิลคลิก `start-mac.command`
-
-จด **hostname Mac** จาก Terminal:
+จด hostname:
 
 ```bash
 scutil --get LocalHostName

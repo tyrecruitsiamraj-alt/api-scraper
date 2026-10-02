@@ -98,6 +98,7 @@ api-scraper/
 ├─ Dockerfile
 ├─ docker-compose.yml
 ├─ SO-Workers.bat / start-workers.bat   แผงสวิตช์เปิด–ปิด Worker (Windows)
+├─ SO-Workers.command / start-mac.command แผงสวิตช์ Mac (ไม่มี Terminal ค้าง)
 ├─ start-workers-legacy.bat             โหมดเก่าเปิด terminal 2 หน้าต่าง
 ├─ เปิด-Worker.bat                      shortcut ชื่อไทย → SO-Workers.bat
 └─ HANDBOOK.md              เอกสารฉบับนี้
