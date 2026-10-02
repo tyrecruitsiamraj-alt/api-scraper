@@ -235,39 +235,39 @@ export default async function OrchestratorPage({ searchParams }: { searchParams?
 
   return (
     <div className="space-y-4">
-      <AutoRefresh seconds={8} />
-      {typeof searchParams?.notice === 'string' && <div role="status" className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">{searchParams.notice}</div>}
-      {!contentEnabled && (
-        <div className="rounded-xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-950">
-          ขอบเขตระบบตอนนี้: <b>{productScopeSummary()}</b> — ไม่รับงานสร้างประกาศใหม่ ใช้ศูนย์งานสำหรับค้นหาผู้สมัคร และหน้าโพสต์ Facebook สำหรับ Autopost
+      <AutoRefresh seconds={20} />
+      {typeof searchParams?.notice === 'string' && (
+        <div role="status" className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+          {searchParams.notice}
         </div>
       )}
-      <details className="rounded-2xl border border-line bg-white px-4 py-3">
-        <summary className="cursor-pointer text-sm font-medium text-ink">สถานะเครื่องและการตรวจระบบ <span className="font-normal text-subtle">(สำหรับผู้ดูแล)</span></summary>
-        <div className="mt-3"><WorkerStatus /></div>
-      </details>
-      {contentEnabled && (
-      <details className="rounded-2xl border border-violet-200 bg-violet-50 p-4 text-violet-950">
-        <summary className="cursor-pointer font-semibold">สมองเรียนรู้การสร้าง Content <span className="font-normal text-sm text-violet-800">— ดูเมื่ออยากตรวจหลักฐานการเรียนรู้</span></summary>
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <h2 className="mt-3 font-semibold">สมองเรียนรู้การสร้าง Content</h2>
-            <p className="mt-1 text-sm text-violet-800">
-              เก็บผลจริงจากข้อความ รูป เวลาโพสต์ และกลุ่ม Facebook — ต้องพบซ้ำอย่างน้อย 3 แคมเปญจึงนำมาเป็นสูตรแนะนำ
+      <details className="rounded-xl border border-line bg-white px-4 py-2.5">
+        <summary className="cursor-pointer text-sm text-subtle">
+          สถานะเครื่อง / ขอบเขตระบบ
+          {!contentEnabled ? ` · ${productScopeSummary()}` : ''}
+        </summary>
+        <div className="mt-3 space-y-3">
+          {!contentEnabled && (
+            <p className="rounded-lg bg-sky-50 px-3 py-2 text-sm text-sky-950">
+              ตอนนี้ใช้ศูนย์งานสำหรับ<strong>ค้นหาผู้สมัคร</strong> และหน้าโพสต์ Facebook สำหรับ Autopost — ไม่รับงานสร้างประกาศใหม่
             </p>
-          </div>
-          <div className="flex flex-wrap gap-2 text-sm">
-            <span className="rounded-full bg-white px-3 py-1">หลักฐาน {contentBrain.learning_events}</span>
-            <span className="rounded-full bg-white px-3 py-1">แคมเปญ {contentBrain.campaigns_with_evidence}</span>
-            <span className="rounded-full bg-amber-100 px-3 py-1">กำลังเรียนรู้ {contentBrain.collecting_patterns}</span>
-            <span className="rounded-full bg-emerald-100 px-3 py-1">ยืนยันแล้ว {contentBrain.proven_patterns}</span>
-          </div>
+          )}
+          <WorkerStatus />
+          {contentEnabled && (
+            <div className="rounded-lg border border-violet-100 bg-violet-50 px-3 py-2 text-sm text-violet-950">
+              สมอง Content: หลักฐาน {contentBrain.learning_events} · ยืนยันแล้ว {contentBrain.proven_patterns}
+            </div>
+          )}
         </div>
       </details>
-      )}
       <WorkCenter
         items={items}
-        connectors={connectors.map((connector) => ({ id: connector.id, label: `${connector.platform === 'jobthai' ? 'JobThai' : connector.platform === 'jobbkk' ? 'JobBKK' : connector.platform} · ${connector.label}`, available: connector.available, blockReason: connector.block_reason }))}
+        connectors={connectors.map((connector) => ({
+          id: connector.id,
+          label: `${connector.platform === 'jobthai' ? 'JobThai' : connector.platform === 'jobbkk' ? 'JobBKK' : connector.platform} · ${connector.label}`,
+          available: connector.available,
+          blockReason: connector.block_reason,
+        }))}
         facebookAccounts={fb.map((account) => ({
           id: account.id,
           label: account.label,
