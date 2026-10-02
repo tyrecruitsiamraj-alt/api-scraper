@@ -202,13 +202,70 @@ function RejectBlock({ item }: { item: WorkCenterItem }) {
   );
 }
 
+function scrapePlanSummary(f: Record<string, string>) {
+  const bits = [
+    f.position,
+    f.location,
+    f.qty ? `เป้า ${f.qty} คน` : '',
+    f.gender && f.gender !== 'ไม่ระบุ' ? f.gender : '',
+  ].filter(Boolean);
+  return bits.join(' · ') || 'ตามใบขอ';
+}
+
+/** ฟอร์มรันทันทีจากค่าใบขอ — ไม่ต้องกางแผนก่อน */
+function ScrapeQuickRunForm({ item, connectors }: { item: WorkCenterItem; connectors: Option[] }) {
+  const f = item.requestFields ?? {};
+  const defaultConnector = connectors.find((c) => c.available)?.id ?? '';
+  const canRun = Boolean(defaultConnector);
+  return (
+    <form action={startSoRecruitScrapeAction} className="space-y-2" data-pause-refresh="1">
+      <input type="hidden" name="requestNo" value={item.requestNo ?? ''} />
+      <input type="hidden" name="scrapePosition" value={f.position ?? ''} />
+      <input type="hidden" name="scrapeKeyword" value={f.keyword ?? ''} />
+      <input type="hidden" name="scrapeIndustry" value={f.industry ?? ''} />
+      <input type="hidden" name="scrapeProvince" value={f.location ?? ''} />
+      <input type="hidden" name="scrapeTarget" value={f.qty ?? ''} />
+      <input type="hidden" name="scrapeGender" value={f.gender || 'ไม่ระบุ'} />
+      <input type="hidden" name="scrapeEducation" value={f.education || 'ไม่ระบุ'} />
+      <input type="hidden" name="scrapeSalaryMin" value={f.salary_min ?? ''} />
+      <input type="hidden" name="scrapeSalaryMax" value={f.salary_max ?? ''} />
+      <input type="hidden" name="scrapeAgeMin" value={f.age_min ?? ''} />
+      <input type="hidden" name="scrapeAgeMax" value={f.age_max ?? ''} />
+      <p className="text-xs text-subtle">จะค้น: {scrapePlanSummary(f)}</p>
+      <div className="flex flex-wrap items-end gap-2">
+        <div className="min-w-[200px] flex-1">
+          <label className="label" htmlFor={`connector-quick-${item.id}`}>บัญชีค้นหา</label>
+          <select
+            id={`connector-quick-${item.id}`}
+            name="connectorId"
+            required
+            defaultValue={defaultConnector}
+            className="field"
+          >
+            <option value="" disabled>เลือก JobBKK / JobThai…</option>
+            {connectors.map((c) => (
+              <option key={c.id} value={c.id} disabled={!c.available}>
+                {c.label}{c.available ? '' : ` — ${c.blockReason}`}
+              </option>
+            ))}
+          </select>
+        </div>
+        <button className="btn-primary" disabled={!canRun}>เริ่มค้นหาเลย</button>
+        {!canRun && (
+          <Link href="/settings/connectors" className="text-xs text-accent hover:underline">เพิ่มบัญชีก่อน</Link>
+        )}
+      </div>
+    </form>
+  );
+}
+
 function ScrapeIntakeForm({ item, connectors }: { item: WorkCenterItem; connectors: Option[] }) {
   const f = item.requestFields ?? {};
   return (
     <form action={startSoRecruitScrapeAction} className="space-y-3" data-pause-refresh="1">
       <input type="hidden" name="requestNo" value={item.requestNo ?? ''} />
       <div className="rounded-xl border border-line bg-black/[0.02] px-3 py-3">
-        <div className="text-sm font-medium text-ink">แผนการค้น — แก้ได้ก่อนกดรับงาน</div>
+        <div className="text-sm font-medium text-ink">แก้แผนการค้น แล้วกดเริ่ม</div>
         <div className="mt-2 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
           <div>
             <label className="label" htmlFor={`sp-pos-${item.id}`}>ตำแหน่ง</label>
@@ -288,7 +345,7 @@ function ScrapeIntakeForm({ item, connectors }: { item: WorkCenterItem; connecto
             ))}
           </select>
         </div>
-        <button className="btn-primary" disabled={!connectors.some((c) => c.available)}>รับงานและเริ่มค้นหา</button>
+        <button className="btn-primary" disabled={!connectors.some((c) => c.available)}>เริ่มค้นหาเลย</button>
       </div>
     </form>
   );
@@ -298,13 +355,13 @@ function WorkAction({
   item,
   connectors,
   expanded,
-  onExpand,
+  onTogglePlan,
 }: {
   item: WorkCenterItem;
   connectors: Option[];
   facebookAccounts: FbAccountOption[];
   expanded: boolean;
-  onExpand: () => void;
+  onTogglePlan: () => void;
 }) {
   if (item.campaignId && item.nextAction === 'retry_draft') {
     return (
@@ -361,18 +418,25 @@ function WorkAction({
       );
     }
 
-    // scraping intake — กดก่อน ค่อยกางแผน (ลดความรก)
-    if (!expanded) {
-      return (
-        <div className="flex flex-wrap gap-2">
-          <button type="button" className="btn-primary" onClick={onExpand}>รับงานนี้</button>
-          {item.href && <Link href={item.href} className="btn-secondary">ดูใบงาน</Link>}
-        </div>
-      );
-    }
+    // scraping intake — รันจากหน้านี้ได้เลย; กางแผนเฉพาะตอนอยากแก้
     return (
-      <div className="w-full space-y-3">
-        <ScrapeIntakeForm item={item} connectors={connectors} />
+      <div className="w-full space-y-3" data-pause-refresh="1">
+        {expanded ? (
+          <ScrapeIntakeForm item={item} connectors={connectors} />
+        ) : (
+          <ScrapeQuickRunForm item={item} connectors={connectors} />
+        )}
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            className="btn-ghost btn-sm"
+            onClick={onExpand}
+            disabled={expanded}
+          >
+            {expanded ? 'กำลังแก้แผนด้านบน' : 'แก้แผนก่อนรัน'}
+          </button>
+          {item.href && <Link href={item.href} className="btn-ghost btn-sm">ดูใบงาน</Link>}
+        </div>
         <RejectBlock item={item} />
       </div>
     );
