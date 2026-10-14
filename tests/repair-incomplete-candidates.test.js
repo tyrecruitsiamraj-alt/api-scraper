@@ -306,3 +306,110 @@ test('needsRepair ignores real work rows that mention เข้าสู่ร�
     }],
   }), false);
 });
+
+test('needsRepair detects blank prefix when full_name has a title', () => {
+  assert.equal(needsRepair({
+    phone: '0811111111',
+    email: 'a@b.com',
+    gender: 'ชาย',
+    age: '30',
+    address: 'นนทบุรี',
+    province: 'นนทบุรี',
+    desired_positions: 'พนักงานขับรถ',
+    expected_salary: '18000',
+    full_name: 'นาย สมชาย ใจดี',
+    prefix: '',
+    first_name: 'สมชาย',
+    last_name: 'ใจดี',
+    education: [{ institution: 'มหาวิทยาลัยก', degree: 'ปริญญาตรี' }],
+    work_experience: [{ company: 'บริษัท ก', position: 'ขับ' }],
+  }), true);
+});
+
+test('repairIncompleteCandidates fills blank prefix from full_name', async () => {
+  const row = {
+    id: '66666666-6666-6666-6666-666666666666',
+    full_name: 'นายสมชาย ใจดี',
+    prefix: '',
+    first_name: '',
+    last_name: '',
+    phone: '0811111111',
+    email: 'name@example.com',
+    gender: 'ชาย',
+    age: '30',
+    address: 'นนทบุรี',
+    province: 'นนทบุรี',
+    desired_positions: 'พนักงานขับรถ',
+    expected_salary: '18000',
+    education: [{ institution: 'มหาวิทยาลัยก', degree: 'ปริญญาตรี' }],
+    work_experience: [{ company: 'บริษัท ก', position: 'ขับ' }],
+    hard_skills: [],
+    soft_skills: [],
+    language_skills: [],
+    platform: 'jobbkk',
+    source_raw_text: 'ชื่อ นายสมชาย ใจดี',
+    ocr_text: '',
+  };
+  let updated = null;
+  const db = {
+    async query() { return { rows: [row] }; },
+    async withTransaction(fn) {
+      return fn({
+        async query(sql, params) {
+          if (/UPDATE candidates/i.test(sql)) updated = { sql, params };
+          return { rows: [] };
+        },
+      });
+    },
+  };
+  const result = await repairIncompleteCandidates(db, { limit: 10 });
+  assert.equal(result.repaired, 1);
+  assert.ok(result.sample[0].fields.includes('prefix'));
+  assert.match(String(updated.params.join(' ')), /นาย/);
+  assert.match(String(updated.params.join(' ')), /สมชาย/);
+  assert.match(String(updated.params.join(' ')), /ใจดี/);
+});
+
+test('repairIncompleteCandidates rewrites mangled glued prefix', async () => {
+  const row = {
+    id: '77777777-7777-7777-7777-777777777777',
+    full_name: 'นายสมชาย ใจดี',
+    prefix: 'นายสมชาย',
+    first_name: 'ใจดี',
+    last_name: '',
+    phone: '0811111111',
+    email: 'name2@example.com',
+    gender: 'ชาย',
+    age: '30',
+    address: 'นนทบุรี',
+    province: 'นนทบุรี',
+    desired_positions: 'พนักงานขับรถ',
+    expected_salary: '18000',
+    education: [{ institution: 'มหาวิทยาลัยก', degree: 'ปริญญาตรี' }],
+    work_experience: [{ company: 'บริษัท ก', position: 'ขับ' }],
+    hard_skills: [],
+    soft_skills: [],
+    language_skills: [],
+    platform: 'jobbkk',
+    source_raw_text: 'ชื่อ นายสมชาย ใจดี',
+    ocr_text: '',
+  };
+  let updated = null;
+  const db = {
+    async query() { return { rows: [row] }; },
+    async withTransaction(fn) {
+      return fn({
+        async query(sql, params) {
+          if (/UPDATE candidates/i.test(sql)) updated = { sql, params };
+          return { rows: [] };
+        },
+      });
+    },
+  };
+  const result = await repairIncompleteCandidates(db, { limit: 10 });
+  assert.equal(result.repaired, 1);
+  assert.ok(result.sample[0].fields.includes('prefix'));
+  const joined = String(updated.params.join(' '));
+  assert.match(joined, /\bนาย\b|นาย /);
+  assert.doesNotMatch(joined, /นายสมชาย/);
+});

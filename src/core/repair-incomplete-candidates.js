@@ -8,6 +8,10 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { contactsFromText } from './contacts.js';
 import {
+  applyThaiNameSplit,
+  namePrefixNeedsFix,
+} from './thai-name.js';
+import {
   finalizeCandidateRecord,
   hasUsefulEducation,
   hasUsefulWorkExperience,
@@ -119,6 +123,7 @@ export function needsRepair(row) {
   return blank(row.phone) || blank(row.email) || blank(row.gender) || blank(row.age)
     || blank(row.address) || junkAddress || isJunkText(row.province) || blank(row.desired_positions)
     || blank(row.expected_salary)
+    || namePrefixNeedsFix(row)
     || !hasUsefulEducation(row.education)
     || !hasUsefulWorkExperience(row.work_experience)
     || hasJunkWork
@@ -234,6 +239,12 @@ async function patchCandidateById(client, id, parsed) {
           THEN ''
         ELSE ${col}
       END`);
+    } else if (col === 'prefix' || col === 'first_name' || col === 'last_name' || col === 'full_name') {
+      // Allow correcting mangled titles (e.g. prefix="นายสมชาย") not only blanks.
+      sets.push(`${col} = CASE
+        WHEN $${params.length} <> '' THEN $${params.length}
+        ELSE ${col}
+      END`);
     } else {
       sets.push(`${col} = COALESCE(NULLIF($${params.length}, ''), ${col})`);
     }
@@ -295,6 +306,8 @@ const INCOMPLETE_SQL = `
        -- Province-only repair can use address / desired_work_area without long raw_text.
        OR NULLIF(trim(COALESCE(c.address, '')), '') IS NOT NULL
        OR NULLIF(trim(COALESCE(c.desired_work_area, '')), '') IS NOT NULL
+       -- Name-prefix repair only needs full_name on the row.
+       OR NULLIF(trim(COALESCE(c.full_name, '')), '') IS NOT NULL
      )
      AND (
        COALESCE(NULLIF(trim(c.phone), ''), '') = ''
@@ -309,6 +322,17 @@ const INCOMPLETE_SQL = `
        )
        OR COALESCE(NULLIF(trim(c.desired_positions), ''), '') = ''
        OR COALESCE(NULLIF(trim(c.expected_salary), ''), '') = ''
+       OR (
+         NULLIF(trim(c.full_name), '') IS NOT NULL
+         AND trim(c.full_name) ~ '^(นางสาว|น\\.ส\\.?|นาย|นาง|Mr\\.?|Mrs\\.?|Miss|Ms\\.?|ดร\\.?|Dr\\.)'
+         AND (
+           COALESCE(NULLIF(trim(c.prefix), ''), '') = ''
+           OR (
+             trim(c.prefix) ~ '^(นางสาว|น\\.ส\\.?|นาย|นาง|Mr\\.?|Mrs\\.?|Miss|Ms\\.?|ดร\\.?|Dr\\.)'
+             AND trim(c.prefix) !~ '^(นางสาว|น\\.ส\\.|น\\.ส|นาย|นาง|Mr\\.|Mrs\\.|Miss|Ms\\.|ดร\\.|Dr\\.)$'
+           )
+         )
+       )
        OR COALESCE(jsonb_array_length(c.education), 0) = 0
        OR NOT EXISTS (
          SELECT 1 FROM jsonb_array_elements(COALESCE(c.education, '[]'::jsonb)) e
@@ -341,15 +365,21 @@ const INCOMPLETE_SQL = `
 
 function remainingGaps(row, parsed) {
   const gaps = [];
-  for (const key of ['phone', 'email', 'gender', 'age', 'address', 'province', 'desired_positions', 'expected_salary']) {
+  for (const key of ['phone', 'email', 'gender', 'age', 'address', 'province', 'desired_positions', 'expected_salary', 'prefix']) {
     const after = key === 'full_name' ? parsed.name : parsed[key];
     const before = row[key];
     const beforeEmpty = key === 'province' ? isJunkText(before)
       : key === 'address' ? (blank(before) || isJunkAddress(before))
-        : blank(before);
+        : key === 'prefix' ? namePrefixNeedsFix(row)
+          : blank(before);
     const afterEmpty = key === 'province' ? isJunkText(after)
       : key === 'address' ? (blank(after) || isJunkAddress(after))
-        : blank(after);
+        : key === 'prefix' ? namePrefixNeedsFix({
+          prefix: parsed.prefix,
+          first_name: parsed.first_name,
+          full_name: parsed.name || row.full_name,
+        })
+          : blank(after);
     if (beforeEmpty && afterEmpty) gaps.push(key);
   }
   if (!hasUsefulEducation(parsed.education)) gaps.push('education');
@@ -384,8 +414,10 @@ function applyOcrAndPrefixFills(parsed, row, combinedText) {
     else if (/^female$/i.test(fromLabel)) parsed.gender = 'หญิง';
     else if (fromLabel) parsed.gender = fromLabel;
   }
+  // Recover blank/mangled คำนำหน้า from full_name (never invent a title).
+  applyThaiNameSplit(parsed);
   if (blank(parsed.gender)) {
-    parsed.gender = genderFromPrefix(row.prefix || parsed.prefix, row.full_name || parsed.name);
+    parsed.gender = genderFromPrefix(parsed.prefix || row.prefix, parsed.name || row.full_name);
   }
 
   if (blank(parsed.expected_salary)) {
@@ -484,11 +516,21 @@ export async function repairIncompleteCandidates(db, opts = {}) {
           || /JOBBKK\s*TEST|เทสระบบสมัครงาน|เรซูเม่นี้สำหรับใช้ทดสอบระบบ/i.test(String(beforeVal || '')))
         : key === 'desired_positions'
           && /JOBBKK\s*TEST|เทสระบบสมัครงาน|เรซูเม่นี้สำหรับใช้ทดสอบระบบ/i.test(String(beforeVal || ''));
-      const beforeEmpty = key === 'province' ? isJunkText(beforeVal) : (blank(beforeVal) || beforeJunkTest);
+      const nameKey = key === 'prefix' || key === 'first_name' || key === 'last_name' || key === 'full_name';
+      const beforeEmpty = key === 'province' ? isJunkText(beforeVal)
+        : nameKey ? (blank(beforeVal) || namePrefixNeedsFix(before))
+          : (blank(beforeVal) || beforeJunkTest);
       const nextOk = key === 'province' ? !isJunkText(next)
         : key === 'address' ? (!blank(next) && !isJunkAddress(next))
           : !blank(next);
-      if (beforeEmpty && nextOk) changed.push(key);
+      const nameImproved = nameKey && namePrefixNeedsFix(before) && !namePrefixNeedsFix({
+        ...before,
+        prefix: key === 'prefix' ? next : parsed.prefix,
+        first_name: key === 'first_name' ? next : parsed.first_name,
+        last_name: key === 'last_name' ? next : parsed.last_name,
+        full_name: key === 'full_name' ? next : (parsed.name || before.full_name),
+      });
+      if ((beforeEmpty && nextOk) || nameImproved) changed.push(key);
       else if (beforeJunkTest && blank(next)) changed.push(key);
     }
     if ((!beforeUsefulEdu && hasUsefulEducation(parsed.education))

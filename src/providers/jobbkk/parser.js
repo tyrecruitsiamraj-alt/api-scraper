@@ -1,12 +1,8 @@
 import * as cheerio from 'cheerio';
 import { extractLineId, validLineId } from '../../core/contacts.js';
+import { applyThaiNameSplit, splitThaiFullName } from '../../core/thai-name.js';
 
 const BASE = 'https://www.jobbkk.com';
-
-const THAI_NAME_PREFIXES = [
-  'นางสาว', 'Mr.', 'Mrs.', 'Miss', 'Ms.', 'Dr.', 'ดร.',
-  'น.ส.', 'น.ส', 'ด.ช.', 'ด.ญ.', 'ดช.', 'ดญ.', 'นาย', 'นาง',
-];
 
 const CONTACT_ICON_MAP = {
   'phone.svg': 'phone',
@@ -62,24 +58,6 @@ function normalizePhone(value) {
   return digits || clean(value);
 }
 const stripLeadingDash = (v) => clean(v).replace(/^[-–—]\s*/, '');
-
-function splitThaiFullName(fullName) {
-  let parts = clean(fullName).split(/\s+/).filter(Boolean);
-  let prefix = '';
-  if (parts.length) {
-    const sorted = [...THAI_NAME_PREFIXES].sort((a, b) => b.length - a.length);
-    for (const c of sorted) {
-      if (parts[0] === c || parts[0].startsWith(c)) {
-        prefix = parts.shift();
-        break;
-      }
-    }
-  }
-  const first_name = parts[0] ?? '';
-  const last_name = parts.length > 1 ? parts.slice(1).join(' ') : '';
-  const name = [prefix, first_name, last_name].filter(Boolean).join(' ');
-  return { prefix, first_name, last_name, name };
-}
 
 function extractPhoneFromText(text) {
   return firstMatch(text, [/(?:เบอร์|โทร|Tel|Phone)\s*[:.]?\s*([0-9\-]{9,15})/iu, /\b(0\d[\d\-]{8,12})\b/]);
@@ -1066,12 +1044,13 @@ export function parseResumeHtml(html, { sourceUrl, index, focusPosition = '-' })
   if (!record.line_id) record.line_id = extractLineFromText(rawText);
   record.line_id = validLineId(record.line_id); // reject phone/CSS-class/error leakage from any source
 
-  // name split
+  // name split — always prefer a clean title + given/family split
   const split = splitThaiFullName(record.name);
-  record.prefix = split.prefix;
-  record.first_name = record.first_name || split.first_name;
-  record.last_name = record.last_name || split.last_name;
+  record.prefix = split.prefix || record.prefix;
+  record.first_name = split.first_name || record.first_name;
+  record.last_name = split.last_name || record.last_name;
   record.name = split.name || record.name;
+  applyThaiNameSplit(record);
 
   // province
   if (record.address && !record.province) record.province = extractProvinceFromAddress(record.address);
@@ -1153,6 +1132,7 @@ export function finalizeCandidateRecord(record = {}) {
   }
   if (isJunkPersonalField(next.marital_status)) next.marital_status = '';
   if (isJunkPersonalField(next.military_status)) next.military_status = '';
+  applyThaiNameSplit(next);
   next.parse_status = parseStatus(next, next.raw_text || '');
   return next;
 }

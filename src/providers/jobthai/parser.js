@@ -1,6 +1,6 @@
 import * as cheerio from 'cheerio';
+import { applyThaiNameSplit, splitThaiFullName } from '../../core/thai-name.js';
 
-const THAI_NAME_PREFIXES = ['นางสาว', 'น.ส.', 'นาย', 'นาง', 'ดร.', 'Mr.', 'Mrs.', 'Miss', 'Ms.'];
 const clean = (v) => (v == null ? '' : String(v).replace(/ /g, ' ').replace(/[ \t]+/g, ' ').replace(/\s*\n\s*/g, '\n').trim());
 
 function firstMatch(text, patterns) {
@@ -9,21 +9,6 @@ function firstMatch(text, patterns) {
     if (m?.[1]) return clean(m[1]).replace(/\n/g, ' ').trim();
   }
   return '';
-}
-
-function splitThaiFullName(full) {
-  let parts = clean(full).replace(/\n/g, ' ').split(/\s+/).filter(Boolean);
-  let prefix = '';
-  if (parts.length) {
-    const sorted = [...THAI_NAME_PREFIXES].sort((a, b) => b.length - a.length);
-    for (const c of sorted) {
-      if (parts[0] === c) { prefix = parts.shift(); break; }
-      if (parts[0].startsWith(c)) { prefix = c; parts[0] = parts[0].slice(c.length); break; } // glued prefix
-    }
-  }
-  const first_name = parts[0] ?? '';
-  const last_name = parts.length > 1 ? parts.slice(1).join(' ') : '';
-  return { prefix, first_name, last_name, name: [prefix, first_name, last_name].filter(Boolean).join(' ') };
 }
 
 /** Convert a cheerio region to text with block structure preserved as newlines. */
@@ -333,6 +318,8 @@ export function parseResumeHtml(html, { sourceUrl, index, focusPosition = '-' })
     rec.prefix = '';
     rec.first_name = '';
     rec.last_name = '';
+  } else {
+    applyThaiNameSplit(rec);
   }
   rec.address = firstMatch(text, [/ที่อยู่\s*[:：]?\s*([^\n]+(?:\n[^\n]+)?)/u]);
   rec.province = extractProvince(rec.address);
