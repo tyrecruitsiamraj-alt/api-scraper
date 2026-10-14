@@ -36,11 +36,11 @@ type Props = {
 function ActionButtons({ canApprove }: { canApprove: boolean }) {
   const { pending } = useFormStatus();
   return (
-    <div className="flex items-center justify-end gap-6">
-      <button formAction={saveContentWorkspaceAction} className="inline-flex h-14 min-w-40 items-center justify-center gap-2 rounded-md border border-[#0a3970] bg-white px-7 text-[15px] font-medium text-[#082b62] transition hover:bg-blue-50 disabled:opacity-50" disabled={pending}>
+    <div className="flex w-full flex-col-reverse gap-3 sm:w-auto sm:flex-row sm:items-center sm:justify-end sm:gap-4">
+      <button formAction={saveContentWorkspaceAction} className="inline-flex h-12 w-full items-center justify-center gap-2 rounded-md border border-[#0a3970] bg-white px-5 text-[15px] font-medium text-[#082b62] transition hover:bg-blue-50 disabled:opacity-50 sm:h-14 sm:w-auto sm:min-w-40 sm:px-7" disabled={pending}>
         <span className="text-xl">▣</span>{pending ? 'กำลังบันทึก…' : 'บันทึกร่าง'}
       </button>
-      <button formAction={saveAndApproveContentWorkspaceAction} className="inline-flex h-14 min-w-44 items-center justify-center gap-2 rounded-md bg-[#073b78] px-8 text-[16px] font-medium text-white shadow-sm transition hover:bg-[#052f61] disabled:opacity-50" disabled={pending || !canApprove}>
+      <button formAction={saveAndApproveContentWorkspaceAction} className="inline-flex h-12 w-full items-center justify-center gap-2 rounded-md bg-[#073b78] px-5 text-[16px] font-medium text-white shadow-sm transition hover:bg-[#052f61] disabled:opacity-50 sm:h-14 sm:w-auto sm:min-w-44 sm:px-8" disabled={pending || !canApprove}>
         <span className="text-xl">✓</span>{pending ? 'กำลังตรวจ…' : 'อนุมัติสื่อ'}
       </button>
     </div>
@@ -63,8 +63,8 @@ export function ContentReviewWorkspace({ campaignId, content, initialPoster, ini
       : 'text-amber-800';
 
   return (
-    <section className="grid min-h-[724px] overflow-auto rounded-xl border border-[#d6dce4] bg-white lg:grid-cols-[565px_minmax(0,1fr)]">
-      <div className="flex min-w-0 flex-col border-r border-[#d6dce4] p-4">
+    <section className="grid min-w-0 overflow-hidden rounded-xl border border-[#d6dce4] bg-white xl:min-h-[724px] xl:grid-cols-[minmax(420px,565px)_minmax(0,1fr)]">
+      <div className="flex min-w-0 flex-col border-[#d6dce4] p-3 sm:p-4 xl:border-r">
         <PosterDragCanvas
           fields={poster}
           sourceUrl={content.hasSourceImage ? source : null}
@@ -76,21 +76,21 @@ export function ContentReviewWorkspace({ campaignId, content, initialPoster, ini
         {content.hasSourceImage && (
           <PosterExtrasBar extras={poster.extras ?? []} hasSourceImage={content.hasSourceImage} onChange={(extras) => update('extras', extras)} tone="pixel" />
         )}
-        <div className="mt-auto flex items-center gap-4 pt-6">
-          <button type="button" onClick={() => { setPoster(initialPoster); setCaption(initialCaption); }} className="inline-flex h-14 min-w-44 items-center justify-center gap-3 rounded-md border border-[#0a3970] bg-white px-6 text-[16px] font-medium text-[#082b62] transition hover:bg-blue-50">
+        <div className="mt-4 flex flex-col gap-3 pt-2 sm:mt-auto sm:flex-row sm:items-center sm:gap-4 sm:pt-6">
+          <button type="button" onClick={() => { setPoster(initialPoster); setCaption(initialCaption); }} className="inline-flex h-12 w-full items-center justify-center gap-3 rounded-md border border-[#0a3970] bg-white px-5 text-[15px] font-medium text-[#082b62] transition hover:bg-blue-50 sm:h-14 sm:w-auto sm:min-w-44 sm:px-6 sm:text-[16px]">
             <span className="text-2xl">↶</span>คืนค่าเดิม
           </button>
-          <form action={regenerateContentImageAction} className="flex-1">
+          <form action={regenerateContentImageAction} className="w-full flex-1">
             <input type="hidden" name="campaignId" value={campaignId} />
             <input type="hidden" name="contentId" value={content.id} />
-            <button className="inline-flex h-14 w-full items-center justify-center gap-3 rounded-md border border-[#0a3970] bg-white px-6 text-[16px] font-medium text-[#082b62] transition hover:bg-blue-50" disabled={content.isPreview}>
+            <button className="inline-flex h-12 w-full items-center justify-center gap-3 rounded-md border border-[#0a3970] bg-white px-5 text-[15px] font-medium text-[#082b62] transition hover:bg-blue-50 sm:h-14 sm:px-6 sm:text-[16px]" disabled={content.isPreview}>
               <span className="text-xl">✦</span>ให้ AI คิดภาพใหม่
             </button>
           </form>
         </div>
       </div>
 
-      <form className="flex min-w-0 flex-col px-11 py-9">
+      <form className="flex min-w-0 flex-col px-4 py-5 sm:px-6 sm:py-7 xl:px-11 xl:py-9">
         <input type="hidden" name="campaignId" value={campaignId} />
         <input type="hidden" name="contentId" value={content.id} />
         <input type="hidden" name="posterBadge" value={poster.badge} />
@@ -98,7 +98,7 @@ export function ContentReviewWorkspace({ campaignId, content, initialPoster, ini
         <input type="hidden" name="posterLayout" value={JSON.stringify(poster.layout ?? emptyPosterLayout())} />
         <input type="hidden" name="posterExtras" value={JSON.stringify(poster.extras ?? [])} />
 
-        <div className="grid gap-x-12 gap-y-5 md:grid-cols-2">
+        <div className="grid gap-x-8 gap-y-5 md:grid-cols-2 xl:gap-x-12">
           <PixelField label="ตำแหน่ง" name="posterTitle" value={poster.title} onChange={(value) => update('title', value)} />
           <PixelField label="สถานที่ทำงาน" name="posterLocation" value={poster.location} onChange={(value) => update('location', value)} />
           <PixelField label="รายได้" name="posterSalaryTotal" value={poster.salaryTotal ?? ''} suffix="บาท/เดือน" onChange={(value) => update('salaryTotal', value)} />
@@ -133,8 +133,8 @@ export function ContentReviewWorkspace({ campaignId, content, initialPoster, ini
           </div>
         </label>
 
-        <div className="mt-auto flex items-end justify-between gap-4 pt-7">
-          <div className="space-y-2 text-sm">
+        <div className="mt-auto flex flex-col gap-5 pt-7 xl:flex-row xl:items-end xl:justify-between">
+          <div className="min-w-0 flex-1 space-y-2 text-sm">
             <label className="flex items-start gap-2 text-[#222]">
               <input type="checkbox" name="saveAsStandard" value="1" className="mt-1" />
               <span>

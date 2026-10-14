@@ -38,9 +38,13 @@ export async function WorkerStatus() {
         </div>
       </details>
       {workerNeedsRefresh && (
-        <div className="mt-2 rounded-lg border border-red-200 bg-white/70 px-3 py-2 text-red-800">
-          ที่เครื่อง Windows: ดับเบิลคลิกไฟล์ <code>start-workers.bat</code> หนึ่งครั้ง
-          ระบบจะหยุดบอทเก่า ดึงโค้ด <code>main</code> แล้วเปิด Scraper + AutoPost ใหม่ — ไม่ยอมเปิดรุ่นเก่าถ้าดึงโค้ดไม่สำเร็จ
+        <div className="mt-2 space-y-1.5 rounded-lg border border-red-200 bg-white/70 px-3 py-2 text-red-800">
+          <p>รีเฟรช Worker บนเครื่องที่รันบอท (เลือกตาม OS):</p>
+          <ul className="list-disc space-y-1 pl-5">
+            <li><b>Windows:</b> ดับเบิลคลิก <code>SO-Workers.bat</code> หรือ <code>start-workers.bat</code></li>
+            <li><b>Mac:</b> ดับเบิลคลิก <code>SO-Workers.command</code> หรือ <code>start-mac.command</code></li>
+          </ul>
+          <p>ระบบจะหยุดบอทเก่า ดึงโค้ด <code>main</code> แล้วเปิด Scraper + AutoPost ใหม่ — ไม่ยอมเปิดรุ่นเก่าถ้าดึงโค้ดไม่สำเร็จ</p>
         </div>
       )}
       {workers.length > 0 && offline.length > 0 && (

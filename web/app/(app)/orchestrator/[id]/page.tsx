@@ -70,19 +70,19 @@ function StageStrip({ status }: { status: string }) {
   const cur = STATUS_TO_STEP[status] ?? 0;
   const lowEng = status === 'low_engagement';
   return (
-    <div className="flex min-w-[640px] items-center justify-between gap-1">
+    <div className="grid grid-cols-2 gap-x-3 gap-y-3 sm:grid-cols-3 xl:flex xl:items-center xl:justify-between xl:gap-1">
       {STRIP.map((s, i) => {
         const done = i < cur;
         const active = i === cur;
         return (
-          <div key={s.label} className={`flex min-w-0 flex-1 items-center ${i === STRIP.length - 1 ? '' : 'gap-2'}`}>
-            <div className="flex shrink-0 items-center gap-2">
-              <span className={`grid h-8 w-8 place-items-center rounded-full border text-sm font-semibold ${active ? (lowEng ? 'border-red-500 bg-red-500 text-white' : 'border-blue-600 bg-blue-600 text-white') : done ? 'border-blue-600 bg-blue-600 text-white' : 'border-slate-300 bg-white text-slate-400'}`}>
+          <div key={s.label} className={`flex min-w-0 items-center ${i === STRIP.length - 1 ? '' : 'xl:flex-1 xl:gap-2'}`}>
+            <div className="flex min-w-0 shrink-0 items-center gap-2">
+              <span className={`grid h-8 w-8 shrink-0 place-items-center rounded-full border text-sm font-semibold ${active ? (lowEng ? 'border-red-500 bg-red-500 text-white' : 'border-blue-600 bg-blue-600 text-white') : done ? 'border-blue-600 bg-blue-600 text-white' : 'border-slate-300 bg-white text-slate-400'}`}>
                 {done ? '✓' : i + 1}
               </span>
-              <span className={`whitespace-nowrap text-sm ${active ? 'font-semibold text-blue-700' : done ? 'font-medium text-ink' : 'text-subtle'}`}>{s.label}</span>
+              <span className={`truncate text-sm ${active ? 'font-semibold text-blue-700' : done ? 'font-medium text-ink' : 'text-subtle'}`}>{s.label}</span>
             </div>
-            {i < STRIP.length - 1 && <span className={`h-px min-w-5 flex-1 ${done ? 'bg-blue-500' : 'bg-slate-200'}`} />}
+            {i < STRIP.length - 1 && <span className={`ml-2 hidden h-px min-w-5 flex-1 xl:block ${done ? 'bg-blue-500' : 'bg-slate-200'}`} />}
           </div>
         );
       })}
@@ -282,16 +282,16 @@ async function renderCampaignDetail({ params, searchParams }: { params: { id: st
       <div className="pb-1">
         <header>
           <Link href="/orchestrator" className="text-[13px] text-[#6f7782] hover:text-[#0d5fb8]">ศูนย์งาน&nbsp;&nbsp;/&nbsp;&nbsp;เวิร์กออเดอร์&nbsp;&nbsp;/&nbsp;&nbsp;{c.request_no || 'ใบงาน'}</Link>
-          <div className="mt-3 flex items-end justify-between gap-6">
-            <h1 className="text-[30px] font-semibold leading-none tracking-[-0.025em] text-[#191919]">{c.request_no || 'ใบงาน'} <span className="mx-3 font-normal text-[#c5c9ce]">|</span> {c.title || 'งานรับสมัคร'}</h1>
-            <div className="flex items-center gap-4 pb-0.5">
+          <div className="mt-3 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between sm:gap-6">
+            <h1 className="text-[22px] font-semibold leading-tight tracking-[-0.025em] text-[#191919] sm:text-[30px] sm:leading-none">{c.request_no || 'ใบงาน'} <span className="mx-2 font-normal text-[#c5c9ce] sm:mx-3">|</span> {c.title || 'งานรับสมัคร'}</h1>
+            <div className="flex flex-wrap items-center gap-3 pb-0.5 sm:gap-4">
               <span className="inline-flex items-center gap-2 text-[15px]"><span className={`h-3.5 w-3.5 rounded-full ${qualityDot}`} />{qualityLabel}</span>
-              <span className="h-7 w-px bg-[#d6d9de]" />
-              <span className="text-[14px] text-[#444]">Quality <b className={`ml-2 text-[29px] font-medium leading-none ${qualityScoreClass}`}>{focusedContent.quality_score ?? '—'}</b></span>
+              <span className="hidden h-7 w-px bg-[#d6d9de] sm:block" />
+              <span className="text-[14px] text-[#444]">Quality <b className={`ml-2 text-[24px] font-medium leading-none sm:text-[29px] ${qualityScoreClass}`}>{focusedContent.quality_score ?? '—'}</b></span>
             </div>
           </div>
         </header>
-        <div className="mt-6 overflow-x-auto rounded-xl border border-[#d6dce4] bg-white px-12 py-4"><StageStrip status={c.status} /></div>
+        <div className="mt-4 rounded-xl border border-[#d6dce4] bg-white px-4 py-4 sm:mt-6 sm:px-6 xl:px-12"><StageStrip status={c.status} /></div>
         <div className="mt-3 space-y-3">
           {contentError && <div role="alert" className="rounded-md border border-red-200 bg-red-50 px-4 py-2 text-sm text-red-800">{contentError}</div>}
           <ContentReviewWorkspace
@@ -357,7 +357,7 @@ async function renderCampaignDetail({ params, searchParams }: { params: { id: st
           </div>
         </div>
         <div className="mt-4">
-          <div className="overflow-x-auto pb-1"><StageStrip status={c.status} /></div>
+          <div className="pb-1"><StageStrip status={c.status} /></div>
         </div>
         <div className="mt-4"><WorkActionCenter campaignId={c.id} status={c.status} statusNote={c.status_note} queue={draftQueue} /></div>
         {nextAction && !liveDraft && c.status !== 'needs_input' && (
