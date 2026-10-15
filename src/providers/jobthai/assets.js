@@ -20,11 +20,24 @@ function imageExt(buffer, contentType) {
 export async function collectAssetsForDb(request, record, _options = {}) {
   const id = externalId(record.source_url);
   if (!id) return [];
-  const gender = /หญิง/.test(record.gender || '') ? 'f' : 'm';
-  const url = `${BASE}/service/resume_image.php?code=${id}&gender=${gender}&size=normal&unlock=1`;
+  // Only pick a gender silhouette when gender is known — unknown defaults to
+  // male and was attaching the wrong placeholder face for many women.
+  const gender = /หญิง/.test(record.gender || '')
+    ? 'f'
+    : /ชาย/.test(record.gender || '')
+      ? 'm'
+      : '';
+  const url = gender
+    ? `${BASE}/service/resume_image.php?code=${id}&gender=${gender}&size=normal&unlock=1`
+    : `${BASE}/service/resume_image.php?code=${id}&size=normal&unlock=1`;
+  record.profile_image_url = url;
   try {
     const { buffer, contentType } = await fetchAsset(request, url, record.source_url);
-    if (!buffer || buffer.length < 64) return []; // empty/placeholder
+    // Real JobThai photos are larger; tiny buffers are empty/gender silhouettes.
+    if (!buffer || buffer.length < 2_048) {
+      record.profile_image_url = '';
+      return [];
+    }
     const { ext, mime } = imageExt(buffer, contentType);
     return [{
       kind: 'profile', title: 'profile', source_url: url,

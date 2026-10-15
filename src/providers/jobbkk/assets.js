@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { extname, join } from 'node:path';
+import { isRejectedProfileUrl } from '../../core/profile-photo.js';
 import { fetchAsset } from './client.js';
 
 const sha256 = (buf) => createHash('sha256').update(buf).digest('hex');
@@ -18,12 +19,14 @@ export async function collectAssetsForDb(request, record, options = {}) {
   const profileOnly = options?.profileOnly === true;
   const assets = [];
 
-  if (record.profile_image_url) {
+  if (record.profile_image_url && !isRejectedProfileUrl(record.profile_image_url)) {
     try {
       const url = new URL(record.profile_image_url, 'https://www.jobbkk.com/').href;
+      if (isRejectedProfileUrl(url)) throw new Error('placeholder_profile_url');
       const { buffer, contentType } = await fetchAsset(request, url, record.source_url);
       const insp = inspectBuffer(buffer);
       if (!insp.valid) throw new Error(insp.kind === 'html' ? 'html_instead_of_image' : `invalid_image:${insp.kind}`);
+      if (!['jpeg', 'png', 'gif', 'webp'].includes(insp.kind)) throw new Error(`not_image:${insp.kind}`);
       const ext = insp.ext.replace('.', '');
       assets.push({
         kind: 'profile', title: 'profile', source_url: url,
@@ -33,6 +36,9 @@ export async function collectAssetsForDb(request, record, options = {}) {
     } catch (e) {
       assets.push({ kind: 'profile', title: 'profile', source_url: record.profile_image_url, download_status: `error:${e.message}` });
     }
+  } else if (record.profile_image_url && isRejectedProfileUrl(record.profile_image_url)) {
+    // Clear so completeness does not demand a known-bad site default avatar.
+    record.profile_image_url = '';
   }
 
   if (profileOnly) return assets;
@@ -112,10 +118,14 @@ export async function downloadAssets(request, record, candidateNo, outputDir) {
   // profile image
   record.profile_image_local = '';
   record.profile_image_download_status = record.profile_image_url ? 'pending' : 'skipped';
-  if (record.profile_image_url) {
+  if (record.profile_image_url && !isRejectedProfileUrl(record.profile_image_url)) {
     try {
       const { buffer, contentType } = await fetchAsset(request, new URL(record.profile_image_url, 'https://www.jobbkk.com/').href, record.source_url);
-      const ext = extFromUrl(record.profile_image_url, contentType) || '.jpg';
+      const insp = inspectBuffer(buffer);
+      if (!insp.valid || !['jpeg', 'png', 'gif', 'webp'].includes(insp.kind)) {
+        throw new Error(insp.kind === 'html' ? 'html_instead_of_image' : `invalid_image:${insp.kind}`);
+      }
+      const ext = insp.ext || extFromUrl(record.profile_image_url, contentType) || '.jpg';
       const dest = join(candidateDir, `profile${ext}`);
       await writeFile(dest, buffer);
       record.profile_image_local = `output/candidates/${candidateNo}/profile${ext}`;
@@ -123,6 +133,9 @@ export async function downloadAssets(request, record, candidateNo, outputDir) {
     } catch (e) {
       record.profile_image_download_status = `error:${e.message}`;
     }
+  } else if (isRejectedProfileUrl(record.profile_image_url)) {
+    record.profile_image_url = '';
+    record.profile_image_download_status = 'skipped';
   }
 
   // attachments

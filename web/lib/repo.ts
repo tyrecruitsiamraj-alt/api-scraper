@@ -435,8 +435,14 @@ export async function getCandidate(id: string) {
   );
   const assets = await q<any>(
     `SELECT id, kind, title, file_type, mime, byte_size, download_status,
-            extract_status, extracted_text
-       FROM candidate_assets WHERE candidate_id = $1 ORDER BY kind, title`,
+            extract_status, extracted_text, created_at
+       FROM candidate_assets
+      WHERE candidate_id = $1
+      ORDER BY
+        CASE WHEN kind = 'profile' THEN 0 ELSE 1 END,
+        CASE WHEN download_status = 'success' THEN 0 ELSE 1 END,
+        created_at DESC NULLS LAST,
+        id DESC`,
     [id],
   );
   const activity = await q<any>(

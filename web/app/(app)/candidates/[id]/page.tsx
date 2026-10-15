@@ -48,7 +48,10 @@ export default async function CandidateDetail({ params }: { params: { id: string
     viewedBy = actor;
   }
 
-  const profile = (c.assets ?? []).find((a: any) => a.kind === 'profile');
+  // Newest successful face only — never an older superseded/merged photo.
+  const profile = (c.assets ?? []).find((a: any) => (
+    a.kind === 'profile' && a.download_status === 'success'
+  ));
 
   const education: any[] = Array.isArray(c.education) ? c.education : [];
   const work: any[] = Array.isArray(c.work_experience) ? c.work_experience : [];

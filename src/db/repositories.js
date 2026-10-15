@@ -717,13 +717,56 @@ export async function saveAsset(client, candidateId, sourceId, asset) {
      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'db',$10,$11)
      ON CONFLICT (candidate_id, sha256) DO UPDATE
        SET candidate_source_id = EXCLUDED.candidate_source_id, title = EXCLUDED.title,
-           download_status = EXCLUDED.download_status`,
+           download_status = EXCLUDED.download_status,
+           source_url = COALESCE(EXCLUDED.source_url, candidate_assets.source_url)`,
     [
       candidateId, sourceId ?? null, asset.kind, asset.title ?? null, asset.source_url ?? null,
       asset.file_type ?? null, asset.mime ?? null, asset.byte_size ?? null, asset.sha256 ?? null,
       asset.content ?? null, asset.download_status ?? 'pending',
     ],
   );
+  // One current face per candidate: keep only this successful profile active.
+  // Older faces stay in DB (OCR/history) but UI must not pick them.
+  if (asset.kind === 'profile' && asset.download_status === 'success' && asset.sha256) {
+    await client.query(
+      `UPDATE candidate_assets
+          SET download_status = 'superseded'
+        WHERE candidate_id = $1
+          AND kind = 'profile'
+          AND download_status = 'success'
+          AND sha256 IS DISTINCT FROM $2`,
+      [candidateId, asset.sha256],
+    );
+  }
+}
+
+/**
+ * Keep only the newest successful profile photo active per candidate.
+ * Safe cleanup for rows that accumulated multiple faces from merges/rescrapes.
+ */
+export async function supersedeStaleProfilePhotos(client, { limit = 5000 } = {}) {
+  const { rowCount } = await client.query(
+    `WITH ranked AS (
+       SELECT id, candidate_id,
+              row_number() OVER (
+                PARTITION BY candidate_id
+                ORDER BY created_at DESC NULLS LAST, id DESC
+              ) AS rn
+         FROM candidate_assets
+        WHERE kind = 'profile'
+          AND download_status = 'success'
+          AND content IS NOT NULL
+     ),
+     stale AS (
+       SELECT id FROM ranked WHERE rn > 1 LIMIT $1
+     )
+     UPDATE candidate_assets a
+        SET download_status = 'superseded'
+       FROM stale
+      WHERE a.id = stale.id`,
+    [Math.min(Math.max(Number(limit) || 5000, 1), 20000)],
+  );
+  return { superseded: rowCount || 0 };
 }
 
 // ---------------------------------------------------------------------------

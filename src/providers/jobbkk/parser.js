@@ -1,5 +1,6 @@
 import * as cheerio from 'cheerio';
 import { extractLineId, validLineId } from '../../core/contacts.js';
+import { pickJobbkkProfileImageUrl } from '../../core/profile-photo.js';
 import { applyThaiNameSplit, splitThaiFullName } from '../../core/thai-name.js';
 
 const BASE = 'https://www.jobbkk.com';
@@ -980,7 +981,7 @@ export function parseResumeHtml(html, { sourceUrl, index, focusPosition = '-' })
 
   if (classicName) {
     record.name = classicName;
-    record.profile_image_url = $('.img-profile').first().attr('src') ?? '';
+    record.profile_image_url = pickJobbkkProfileImageUrl($);
     Object.assign(record, extractContactsByIcon($));
     record.intro = clean($('#introduce_yourself p:last-child, #rsm-introduce p').first().text());
 
@@ -1033,7 +1034,8 @@ export function parseResumeHtml(html, { sourceUrl, index, focusPosition = '-' })
     record.available_start = pick('ระยะเวลาเริ่มงาน') || record.available_start;
     record.job_type = pick('รูปแบบงาน', 'ประเภทงาน') || record.job_type;
     record.intro = clean($('.header-name .flex-column p.break_word, .introduce p').first().text()) || record.intro;
-    record.profile_image_url = $('.pic-profile img, .main-name img').first().attr('src') ?? '';
+    // Never use bare `.main-name img` — that can grab chrome/ads, not the face.
+    record.profile_image_url = pickJobbkkProfileImageUrl($);
     record.hard_skills = listText($, '.hard-skill li');
     record.soft_skills = listText($, '.soft-skill li');
   }

@@ -2,6 +2,8 @@
  * Repair incomplete candidate rows from stored source raw_text / OCR.
  * Fills blank/mangled คำนำหน้า and missing/weak ประสบการณ์ทำงาน when the
  * stored text already has them — never invents values.
+ * Also keeps only the newest successful profile photo active per candidate
+ * (older faces from merges/rescrapes are marked superseded, not deleted).
  *
  * Usage (on the worker with .env, after git pull main):
  *   node scripts/repair-incomplete-candidates.mjs
@@ -49,17 +51,20 @@ async function main() {
   let getPool;
   let closePool;
   let withTransaction;
+  let supersedeStaleProfilePhotos;
   try {
     const mods = await Promise.all([
       import('dotenv'),
       import('../src/core/repair-incomplete-candidates.js'),
       import('../src/db/pool.js'),
+      import('../src/db/repositories.js'),
     ]);
     dotenv = mods[0].default;
     repairIncompleteCandidates = mods[1].repairIncompleteCandidates;
     getPool = mods[2].getPool;
     closePool = mods[2].closePool;
     withTransaction = mods[2].withTransaction;
+    supersedeStaleProfilePhotos = mods[3].supersedeStaleProfilePhotos;
   } finally {
     clearInterval(heartbeat);
   }
@@ -104,6 +109,7 @@ async function main() {
     sample: [],
     errors: [],
     unrepairedGapCounts: {},
+    photosSuperseded: 0,
   };
 
   try {
@@ -111,6 +117,15 @@ async function main() {
       query: (text, params) => pool.query(text, params),
       withTransaction,
     };
+
+    if (!dryRun) {
+      say('[repair] cleaning stale profile photos (keep newest face only)...');
+      const photoResult = await withTransaction(async (client) => supersedeStaleProfilePhotos(client));
+      totals.photosSuperseded = photoResult.superseded || 0;
+      say(`[repair] superseded ${totals.photosSuperseded} older profile photo(s)`);
+    } else {
+      say('[repair] dry-run — skip profile photo supersede');
+    }
 
     for (let round = 1; round <= maxRounds; round += 1) {
       say(`[repair] round ${round}/${maxRounds} (batch ≤ ${batchLimit})...`);
