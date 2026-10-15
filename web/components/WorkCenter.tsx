@@ -194,7 +194,7 @@ function RejectBlock({ item }: { item: WorkCenterItem }) {
           </div>
         )}
         <div className="flex flex-wrap gap-2">
-          <input name="reason" placeholder="เหตุผลเพิ่มเติม (ไม่บังคับ)" className="field min-w-[200px] flex-1" />
+          <input name="reason" placeholder="เหตุผลเพิ่มเติม (ไม่บังคับ)" className="field min-w-0 flex-1 basis-full sm:min-w-[200px] sm:basis-auto" />
           <button className="btn-secondary">ตีกลับ</button>
         </div>
       </form>
@@ -233,7 +233,7 @@ function ScrapeQuickRunForm({ item, connectors }: { item: WorkCenterItem; connec
       <input type="hidden" name="scrapeAgeMax" value={f.age_max ?? ''} />
       <p className="text-xs text-subtle">จะค้น: {scrapePlanSummary(f)}</p>
       <div className="flex flex-wrap items-end gap-2">
-        <div className="min-w-[200px] flex-1">
+        <div className="min-w-0 flex-1 basis-full sm:min-w-[200px] sm:basis-auto">
           <label className="label" htmlFor={`connector-quick-${item.id}`}>บัญชีค้นหา</label>
           <select
             id={`connector-quick-${item.id}`}
@@ -328,7 +328,7 @@ function ScrapeIntakeForm({ item, connectors }: { item: WorkCenterItem; connecto
         </div>
       </div>
       <div className="flex flex-wrap items-end gap-2">
-        <div className="min-w-[220px] flex-1">
+        <div className="min-w-0 flex-1 basis-full sm:min-w-[220px] sm:basis-auto">
           <label className="label" htmlFor={`connector-${item.id}`}>บัญชีค้นหา</label>
           <select
             id={`connector-${item.id}`}
@@ -464,7 +464,7 @@ function WorkAction({
               <option value="poor_visual">รูปไม่เหมาะสม</option>
               <option value="other">อื่น ๆ</option>
             </select>
-            <input name="reason" placeholder="รายละเอียด" className="field min-w-[180px] flex-1" />
+            <input name="reason" placeholder="รายละเอียด" className="field min-w-0 flex-1 basis-full sm:min-w-[180px] sm:basis-auto" />
             <button className="btn-secondary">ตีกลับ</button>
           </form>
         </details>

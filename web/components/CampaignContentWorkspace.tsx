@@ -92,8 +92,8 @@ export function CampaignContentWorkspace({ campaignId, content, initialPoster, i
         <span className="pill bg-blue-50 text-blue-700">ยังไม่โพสต์จริง</span>
       </div>
 
-      <div className="grid items-start gap-6 p-5 xl:grid-cols-[minmax(360px,45fr)_minmax(460px,55fr)]">
-        <div className="xl:sticky xl:top-5">
+      <div className="grid items-start gap-6 p-4 sm:p-5 xl:grid-cols-[minmax(360px,45fr)_minmax(0,55fr)]">
+        <div className="min-w-0 xl:sticky xl:top-5">
           <PosterPreview fields={poster} content={content} onLayoutChange={(layout) => update('layout', layout)} onExtrasChange={(extras) => update('extras', extras)} />
           {content.hasSourceImage && (
             <PosterExtrasBar extras={poster.extras ?? []} hasSourceImage={content.hasSourceImage} onChange={(extras) => update('extras', extras)} />
