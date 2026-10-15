@@ -413,3 +413,45 @@ test('repairIncompleteCandidates rewrites mangled glued prefix', async () => {
   assert.match(joined, /\bนาย\b|นาย /);
   assert.doesNotMatch(joined, /นายสมชาย/);
 });
+
+test('repairIncompleteCandidates fills JobThai prefix from คำนำหน้า in raw_text', async () => {
+  const row = {
+    id: '88888888-8888-8888-8888-888888888888',
+    full_name: 'สมชาย ใจดี',
+    prefix: '',
+    first_name: 'สมชาย',
+    last_name: 'ใจดี',
+    phone: '0811111111',
+    email: 'jt@example.com',
+    gender: 'ชาย',
+    age: '30',
+    address: 'นนทบุรี',
+    province: 'นนทบุรี',
+    desired_positions: 'พนักงานขับรถ',
+    expected_salary: '18000',
+    education: [{ institution: 'มหาวิทยาลัยก', degree: 'ปริญญาตรี' }],
+    work_experience: [{ company: 'บริษัท ก', position: 'ขับ' }],
+    hard_skills: [],
+    soft_skills: [],
+    language_skills: [],
+    platform: 'jobthai',
+    source_raw_text: 'คำนำหน้า นาย\nชื่อ สมชาย\nนามสกุล ใจดี\nที่อยู่ นนทบุรี',
+    ocr_text: '',
+  };
+  let updated = null;
+  const db = {
+    async query() { return { rows: [row] }; },
+    async withTransaction(fn) {
+      return fn({
+        async query(sql, params) {
+          if (/UPDATE candidates/i.test(sql)) updated = { sql, params };
+          return { rows: [] };
+        },
+      });
+    },
+  };
+  const result = await repairIncompleteCandidates(db, { limit: 10 });
+  assert.equal(result.repaired, 1);
+  assert.ok(result.sample[0].fields.includes('prefix'));
+  assert.match(String(updated.params.join(' ')), /นาย/);
+});

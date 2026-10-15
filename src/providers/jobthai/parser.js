@@ -1,5 +1,11 @@
 import * as cheerio from 'cheerio';
-import { applyThaiNameSplit, splitThaiFullName } from '../../core/thai-name.js';
+import {
+  applyThaiNameSplit,
+  extractExplicitNamePrefix,
+  isKnownNamePrefix,
+  normalizeNamePrefix,
+  splitThaiFullName,
+} from '../../core/thai-name.js';
 
 const clean = (v) => (v == null ? '' : String(v).replace(/ /g, ' ').replace(/[ \t]+/g, ' ').replace(/\s*\n\s*/g, '\n').trim());
 
@@ -9,6 +15,79 @@ function firstMatch(text, patterns) {
     if (m?.[1]) return clean(m[1]).replace(/\n/g, ' ').trim();
   }
   return '';
+}
+
+/**
+ * JobThai often stores คำนำหน้า separately from ชื่อ/นามสกุล, and may also
+ * put a titled full name in head1. Prefer labeled fields, then merge a real
+ * title from any of those sources (never invent one).
+ */
+export function extractJobThaiName(text, $) {
+  const prefixLabeled = normalizeNamePrefix(extractExplicitNamePrefix(text));
+
+  let given = '';
+  let family = '';
+  const sameLine = String(text).match(/ชื่อ\s+([^\n]+?)\s+นามสกุล\s+([^\n]+)/u);
+  if (sameLine) {
+    given = clean(sameLine[1]);
+    family = clean(sameLine[2]);
+  } else {
+    given = firstMatch(text, [
+      /ชื่อ\s*[:：]?\s*\n\s*([^\n]+)/u,
+      /ชื่อ\s*[:：]\s*([^\n]+)/u,
+    ]);
+    family = firstMatch(text, [
+      /นามสกุล\s*[:：]?\s*\n\s*([^\n]+)/u,
+      /นามสกุล\s*[:：]\s*([^\n]+)/u,
+    ]);
+  }
+
+  const headParts = [];
+  if ($) {
+    $('#detailshow span.head1.black, span.head1.black, #detailshow .head1').each((_, el) => {
+      const part = clean($(el).text());
+      if (part && !/เจ้าของเรซูเม่ปิด|ปิดข้อมูลนี้/.test(part)) headParts.push(part);
+    });
+  }
+  const headJoined = headParts.join(' ');
+
+  const fromGiven = splitThaiFullName(given);
+  const fromCombo = splitThaiFullName([given, family].filter(Boolean).join(' '));
+  const fromHead = splitThaiFullName(headJoined);
+
+  const prefix = prefixLabeled
+    || fromGiven.prefix
+    || fromCombo.prefix
+    || fromHead.prefix
+    || '';
+
+  let first_name = '';
+  let last_name = '';
+  if (fromGiven.prefix) {
+    first_name = fromGiven.first_name;
+    last_name = family || fromGiven.last_name || fromCombo.last_name || fromHead.last_name;
+  } else if (fromCombo.prefix) {
+    first_name = fromCombo.first_name;
+    last_name = fromCombo.last_name || family;
+  } else if (given || family) {
+    first_name = given;
+    last_name = family;
+  } else {
+    first_name = fromHead.first_name;
+    last_name = fromHead.last_name;
+  }
+
+  // head1 sometimes is only the title-bearing full name while labels are bare.
+  if (prefix && !first_name && fromHead.first_name) first_name = fromHead.first_name;
+  if (prefix && !last_name && fromHead.last_name) last_name = fromHead.last_name;
+
+  const name = [prefix, first_name, last_name].filter(Boolean).join(' ');
+  return {
+    prefix: isKnownNamePrefix(prefix) ? prefix : '',
+    first_name,
+    last_name,
+    name,
+  };
 }
 
 /** Convert a cheerio region to text with block structure preserved as newlines. */
@@ -304,22 +383,17 @@ export function parseResumeHtml(html, { sourceUrl, index, focusPosition = '-' })
     hard_skills: [], soft_skills: [], language_skills: [], province: '',
   };
 
-  // name + address
-  const nm = text.match(/ชื่อ\s+([^\n]+?)\s+นามสกุล\s+([^\n]+)/u);
-  if (nm) Object.assign(rec, splitThaiFullName(`${clean(nm[1])} ${clean(nm[2])}`));
-  if (!rec.name) {
-    const h = clean($('.head1.black, span.head1.black, #detailshow .head1').first().text());
-    if (h) Object.assign(rec, splitThaiFullName(h));
-  }
+  // name + address — merge คำนำหน้า / ชื่อ / นามสกุล / head1
+  Object.assign(rec, extractJobThaiName(text, $));
   // JobThai shows "เจ้าของเรซูเม่ปิดข้อมูลนี้" for private resumes — that's a
   // placeholder, not a name. Leave it blank rather than store the placeholder.
-  if (/เจ้าของเรซูเม่ปิด|ปิดข้อมูลนี้/.test(rec.name)) {
+  if (/เจ้าของเรซูเม่ปิด|ปิดข้อมูลนี้/.test(rec.name) || /เจ้าของเรซูเม่ปิด|ปิดข้อมูลนี้/.test(rec.first_name)) {
     rec.name = '';
     rec.prefix = '';
     rec.first_name = '';
     rec.last_name = '';
   } else {
-    applyThaiNameSplit(rec);
+    applyThaiNameSplit(rec, text);
   }
   rec.address = firstMatch(text, [/ที่อยู่\s*[:：]?\s*([^\n]+(?:\n[^\n]+)?)/u]);
   rec.province = extractProvince(rec.address);

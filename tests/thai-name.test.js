@@ -74,3 +74,24 @@ test('applyThaiNameSplit repairs mangled JobBKK-style rows', () => {
   assert.equal(row.last_name, 'ใจดี');
   assert.equal(row.name, 'นาย สมชาย ใจดี');
 });
+
+test('extractExplicitNamePrefix reads JobThai คำนำหน้า label', async () => {
+  const { extractExplicitNamePrefix, applyThaiNameSplit, namePrefixNeedsFix } = await import('../src/core/thai-name.js');
+  assert.equal(extractExplicitNamePrefix('คำนำหน้า นาย\nชื่อ สมชาย\nนามสกุล ใจดี'), 'นาย');
+  assert.equal(extractExplicitNamePrefix('คำนำหน้า\nนางสาว\nชื่อ สมใจ'), 'นางสาว');
+  assert.equal(namePrefixNeedsFix({
+    full_name: 'สมชาย ใจดี',
+    prefix: '',
+    first_name: 'สมชาย',
+    last_name: 'ใจดี',
+  }, 'คำนำหน้า นาย\nชื่อ สมชาย\nนามสกุล ใจดี'), true);
+  const row = {
+    name: 'สมชาย ใจดี',
+    prefix: '',
+    first_name: 'สมชาย',
+    last_name: 'ใจดี',
+  };
+  applyThaiNameSplit(row, 'คำนำหน้า นาย\nชื่อ สมชาย\nนามสกุล ใจดี');
+  assert.equal(row.prefix, 'นาย');
+  assert.equal(row.name, 'นาย สมชาย ใจดี');
+});
