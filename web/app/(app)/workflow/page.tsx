@@ -95,13 +95,13 @@ export default function WorkflowPage() {
         <h2 className="text-lg font-semibold">เมื่อ Login แล้ว คุณใช้แค่ 3 จุดนี้</h2>
         <div className="mt-4 grid gap-3 md:grid-cols-3">
           <Link href="/orchestrator" className="rounded-xl border border-hairline p-4 transition hover:border-accent/50 hover:bg-accent/[0.03]">
-            <span className="block text-sm font-semibold">ศูนย์งาน</span><span className="mt-1 block text-xs leading-5 text-subtle">รับงานค้นหา ตรวจใบขอ ติดตามงานค้าง</span>
+            <span className="block text-sm font-semibold">ศูนย์งาน · ค้นหา</span><span className="mt-1 block text-xs leading-5 text-subtle">ใบรอเริ่ม · กำลังค้น · รอตรวจรับ</span>
           </Link>
           <Link href="/scraping" className="rounded-xl border border-hairline p-4 transition hover:border-accent/50 hover:bg-accent/[0.03]">
-            <span className="block text-sm font-semibold">ค้นหาผู้สมัคร</span><span className="mt-1 block text-xs leading-5 text-subtle">ดูความคืบหน้าและผล Resume ที่ได้</span>
+            <span className="block text-sm font-semibold">รายการงานค้นหา</span><span className="mt-1 block text-xs leading-5 text-subtle">ดูความคืบหน้าและผล Resume</span>
           </Link>
           <Link href="/autopost" className="rounded-xl border border-hairline p-4 transition hover:border-accent/50 hover:bg-accent/[0.03]">
-            <span className="block text-sm font-semibold">โพสต์และติดตามผล</span><span className="mt-1 block text-xs leading-5 text-subtle">ดูคิวโพสต์ จำนวนกลุ่ม และผลตอบรับ</span>
+            <span className="block text-sm font-semibold">ห้องโพสต์ Facebook</span><span className="mt-1 block text-xs leading-5 text-subtle">caption + รูป · คิว · ผลตอบรับ</span>
           </Link>
         </div>
       </section>

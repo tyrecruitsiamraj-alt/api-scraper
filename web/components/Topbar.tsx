@@ -8,19 +8,18 @@ import { useEffect, useState } from 'react';
 
 // เมนูย้ายไปเป็น drawer ด้านข้าง (hamburger) — รวมตั้งค่าเข้ามาในลิสต์เดียว
 const NAV: { href: string; label: string; also?: string[] }[] = [
-  { href: '/orchestrator', label: 'ศูนย์งาน' },
+  { href: '/orchestrator', label: 'ค้นหาผู้สมัคร' },
   { href: '/workflow', label: 'ดูการไหลของงาน' },
-  { href: '/scraping', label: 'ค้นหาผู้สมัคร', also: ['/candidates'] },
-  { href: '/autopost', label: 'โพสต์และติดตามผล' },
+  { href: '/scraping', label: 'รายการงานค้นหา', also: ['/candidates'] },
+  { href: '/autopost', label: 'โพสต์ Facebook' },
   { href: '/settings', label: 'ตั้งค่า', also: ['/connectors'] },
 ];
 
-// Shell หลักบน Desktop ใช้เมนูสั้นตาม Workflow ที่คนทำงานใช้จริง.
-// หน้าค้นหาและการโพสต์เป็นขั้นย่อยที่เข้าจากศูนย์งาน ไม่บังคับให้คนจำหลายหน้า.
+// Shell หลักบน Desktop — แยกห้องค้นหา / โพสต์ชัด ๆ
 const DESKTOP_NAV = [
-  { href: '/orchestrator', label: 'ศูนย์งาน', icon: 'work' },
+  { href: '/orchestrator', label: 'ค้นหา', icon: 'work' },
   { href: '/candidates', label: 'คลังผู้สมัคร', icon: 'people', also: ['/scraping'] },
-  { href: '/autopost/results', label: 'ผลลัพธ์', icon: 'chart', also: ['/autopost'] },
+  { href: '/autopost', label: 'โพสต์ FB', icon: 'chart', also: ['/autopost/results'] },
   { href: '/settings', label: 'ตั้งค่า', icon: 'settings', also: ['/connectors'] },
 ];
 

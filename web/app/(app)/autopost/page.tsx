@@ -103,12 +103,19 @@ export default async function AutopostOverviewPage() {
         </>
       )}
 
-      {/* การอนุมัติรวมไว้ที่ Work Center จุดเดียว เพื่อลดเส้นทางซ้ำและลดการกดผิดหน้า. */}
+      {/* Content AI ปิดแล้ว — โพสต์ใช้ caption/รูปที่คนเตรียมในหน้างานโพสต์ */}
       <div>
-        <h2 className="mb-3 text-base font-semibold">ประกาศที่รอตรวจ ({pending.length})</h2>
+        <h2 className="mb-3 text-base font-semibold">เริ่มโพสต์</h2>
         <div className="card px-5 py-8 text-center text-sm text-subtle">
-          <p>{pending.length > 0 ? `มี ${pending.length} งานรอตรวจและเลือกบัญชีที่จะใช้โพสต์` : 'ตอนนี้ไม่มีประกาศรอตรวจ'}</p>
-          <Link href="/orchestrator" className="btn-primary btn-sm mt-3 inline-flex">ไปจัดการที่ศูนย์งาน</Link>
+          <p>
+            {pending.length > 0
+              ? `มีร่างเก่าค้าง ${pending.length} ใบ — ระบบไม่สร้างประกาศใหม่อัตโนมัติแล้ว ให้เตรียม caption/รูปในงานโพสต์`
+              : 'เตรียม caption + รูป แล้วสั่งโพสต์จากหน้างานโพสต์'}
+          </p>
+          <div className="mt-3 flex flex-wrap justify-center gap-2">
+            <Link href="/autopost/jobs" className="btn-primary btn-sm inline-flex">ไปงานโพสต์</Link>
+            <Link href="/orchestrator" className="btn-ghost btn-sm inline-flex">ห้องค้นหาผู้สมัคร</Link>
+          </div>
         </div>
       </div>
 

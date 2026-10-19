@@ -1,72 +1,22 @@
 import {
   listSoRecruitPostingRequests,
-  listCampaigns,
-  listPendingApprovalContents,
   listFacebookAccounts,
   listConnectorOptions,
   listTasks,
-  listCampaignPostQueueStates,
-  listCampaignPendingAdminCounts,
-  getContentBrainSummary,
 } from '@/lib/repo';
 import { AutoRefresh } from '@/components/AutoRefresh';
 import { WorkerStatus } from '@/components/WorkerStatus';
 import { WorkCenter, type WorkCenterItem, type WorkCenterStage, type Step } from '@/components/WorkCenter';
 import { humanizeOperatorError, operatorJobTitle } from '@/lib/operator-copy';
 import { prefillScrapePlan } from '@/lib/scrape-intake.js';
-import { CONTENT_DISABLED_OPERATOR_MESSAGE, isContentGenerationEnabled, productScopeSummary } from '@/lib/product-scope';
+import { isContentGenerationEnabled, productScopeSummary } from '@/lib/product-scope';
 
 export const dynamic = 'force-dynamic';
 
-const STATUS_TH: Record<string, string> = {
-  new: 'เพิ่งเริ่ม',
-  needs_input: 'ต้องยืนยันข้อมูล',
-  researching: 'สำรวจแนว',
-  drafting: 'AI กำลังคิด',
-  draft_error: 'สร้างประกาศไม่สำเร็จ',
-  low_engagement: 'คนสนใจน้อย — คิดใหม่',
-  pending_approval: 'รอตรวจ',
-  approved: 'รอสรุปก่อน Auto-post',
-  posting: 'กำลังโพสต์',
-  measuring: 'วัดผล',
-  done: 'เสร็จ',
-};
-
-// เส้นทางงาน 6 ป้ายเดียวกันทุกงาน — งานไหนไม่ใช้ขั้นไหน = 'skip' (วิ่งทะลุผ่านให้เห็น)
 const STEP_LABELS = ['รับงาน', 'เตรียมงาน', 'ตรวจงาน', 'หาผู้สมัคร', 'เผยแพร่', 'เห็นผล'] as const;
 type S = Step['state'];
 const mkSteps = (states: [S, S, S, S, S, S]): Step[] =>
   STEP_LABELS.map((label, i) => ({ label, state: states[i] }));
-
-function campaignStage(status: string, postStatus?: string): WorkCenterStage {
-  if (postStatus === 'failed' || postStatus === 'cancelled') return 'attention';
-  if (status === 'pending_approval' || status === 'approved') return 'review';
-  if (status === 'done') return 'completed';
-  if (status === 'low_engagement' || status === 'draft_error' || status === 'needs_input') return 'attention';
-  return 'working';
-}
-
-/** Content: รับงาน → เตรียมของ(AI) → อนุมัติ → [Scrape ข้าม] → Auto post → เสร็จ */
-function contentSteps(status: string, postStatus?: string): Step[] {
-  let draft: S = 'done';
-  if (['new', 'researching', 'drafting'].includes(status)) draft = 'active';
-  else if (status === 'draft_error' || status === 'needs_input') draft = 'failed';
-
-  let approve: S = 'todo';
-  if (status === 'pending_approval' || status === 'approved') approve = 'active';
-  else if (['posting', 'measuring', 'done'].includes(status)) approve = 'done';
-
-  let post: S = 'todo';
-  if (postStatus === 'failed' || postStatus === 'cancelled') post = 'failed';
-  else if (postStatus === 'queued' || postStatus === 'running' || status === 'posting') post = 'active';
-  else if (postStatus === 'completed' || ['measuring', 'done'].includes(status)) post = 'done';
-
-  let done: S = 'todo';
-  if (status === 'done') done = 'done';
-  else if (status === 'measuring') done = 'active';
-
-  return mkSteps(['done', draft, approve, 'skip', post, done]);
-}
 
 /** Scraping: รับงาน → เตรียมของ → อนุมัติ → Scrape → [Auto post ข้าม] → เสร็จ */
 function scrapeSteps(status: string, reviewStatus?: string): Step[] {
@@ -81,32 +31,26 @@ function scrapeSteps(status: string, reviewStatus?: string): Step[] {
   return mkSteps(['done', 'done', 'done', scrape, 'skip', done]);
 }
 
-/** คำขอที่ยังไม่รับ — ป้ายแรกกำลังรอ, ที่เหลือ todo, ข้ามตามชนิดงาน */
-function intakeSteps(kind: 'content' | 'scraping'): Step[] {
-  const scrape: S = kind === 'scraping' ? 'todo' : 'skip';
-  const post: S = kind === 'content' ? 'todo' : 'skip';
-  return mkSteps(['active', 'todo', 'todo', scrape, post, 'todo']);
+function intakeSteps(): Step[] {
+  return mkSteps(['active', 'todo', 'todo', 'todo', 'skip', 'todo']);
 }
 
 export default async function OrchestratorPage({ searchParams }: { searchParams?: { notice?: string } }) {
-  const [reqs, campaigns, pending, fb, connectors, tasks, postStates, pendingAdmin, contentBrain] = await Promise.all([
+  const [reqs, fb, connectors, tasks] = await Promise.all([
     listSoRecruitPostingRequests(),
-    listCampaigns(),
-    listPendingApprovalContents(),
     listFacebookAccounts(),
     listConnectorOptions(),
     listTasks(),
-    listCampaignPostQueueStates(),
-    listCampaignPendingAdminCounts(),
-    getContentBrainSummary(),
   ]);
-  const contentByCampaign = new Map(pending.map((content) => [content.campaign_id, content]));
-  const postByCampaign = new Map(postStates.map((state) => [state.campaign_id, state]));
-  const pendingAdminByCampaign = new Map(pendingAdmin.map((x) => [x.campaign_id, x.pending]));
   const contentEnabled = isContentGenerationEnabled();
+
+  const scrapingReqs = reqs.filter((r) => r.request_type === 'scraping');
+  const disabledContentReqs = contentEnabled
+    ? []
+    : reqs.filter((r) => r.request_type === 'content');
+
   const items: WorkCenterItem[] = [
-    ...reqs.map((request): WorkCenterItem => {
-      // ใบตรวจข้อมูล: ช่องไหนมี/ขาด — คนตรวจเห็นก่อนกดรับ/ตีกลับ (ขาดเยอะ = ตีกลับพร้อมบอกได้เลย)
+    ...scrapingReqs.map((request): WorkCenterItem => {
       const js = (request.job_snapshot ?? {}) as Record<string, unknown>;
       const has = (v: unknown) => String(v ?? '').trim() !== '' && v !== null;
       const checklist = [
@@ -116,82 +60,27 @@ export default async function OrchestratorPage({ searchParams }: { searchParams?
         { label: 'จำนวน', ok: has(js.qty) || has(request.erp_qty) },
         { label: 'เวลางาน', ok: has(js.work_schedule) },
       ];
-      // ข้อมูลใบขอเต็ม (snapshot + ERP fallback) — โชว์บนการ์ด + prefill แผนการค้นก่อนรับงาน
       const requestFields = prefillScrapePlan(js, {
         position: request.erp_title && request.erp_title !== request.request_no ? request.erp_title : '',
         location: request.erp_province || '',
         qty: request.erp_qty ? String(request.erp_qty) : '',
       });
-      const isDisabledContent = !contentEnabled && request.request_type === 'content';
       return {
         id: `request:${request.id}`,
-        kind: request.request_type,
+        kind: 'scraping',
         stage: 'intake',
         title: operatorJobTitle({ position: requestFields.position, title: request.erp_title, requestNo: request.request_no }),
         requestNo: request.request_no,
-        detail: isDisabledContent ? CONTENT_DISABLED_OPERATOR_MESSAGE : (request.reason || request.notes),
+        detail: request.reason || request.notes,
         requester: request.requested_by_name,
         connector: null,
-        statusLabel: isDisabledContent ? 'ไม่รับงานสร้างประกาศ' : 'รออนุมัติรับงาน',
+        statusLabel: 'รอเริ่มค้นหา',
         createdAt: request.created_at,
-        href: '/orchestrator/imports',
+        href: null,
         context: requestFields.location || request.requested_by_name,
-        steps: intakeSteps(request.request_type),
+        steps: intakeSteps(),
         checklist,
         requestFields,
-      };
-    }),
-    ...(contentEnabled
-      ? campaigns
-      : campaigns.filter((campaign) => ['approved', 'posting', 'measuring', 'done'].includes(campaign.status)))
-      .map((campaign): WorkCenterItem => {
-      const content = contentByCampaign.get(campaign.id);
-      const post = postByCampaign.get(campaign.id);
-      const postFailed = post?.status === 'failed' || post?.status === 'cancelled';
-      const canMeasure = post?.status === 'completed' && ['posting', 'measuring'].includes(campaign.status);
-      // โพสต์ลงกลุ่มแล้วแต่แอดมินกลุ่มยังไม่ปล่อย — บอกตรง ๆ จะได้ไม่รอเก้อ
-      const adminPending = pendingAdminByCampaign.get(campaign.id) ?? 0;
-      const adminSuffix = adminPending > 0 ? ` · รอแอดมินกลุ่มอนุมัติ ${adminPending} โพสต์` : '';
-      const statusLabel = (postFailed
-        ? (post.status === 'cancelled' ? 'คิวโพสต์ถูกยกเลิก' : 'โพสต์ไม่สำเร็จ')
-        : post?.status === 'queued'
-          ? 'รอคิวโพสต์'
-          : post?.status === 'running'
-            ? 'กำลังโพสต์'
-            : canMeasure
-              ? (campaign.status === 'measuring' ? 'รอเก็บผลตอบรับ' : 'โพสต์แล้ว · รอตรวจผล')
-              : STATUS_TH[campaign.status] || campaign.status) + adminSuffix;
-      return {
-        id: `content:${campaign.id}`,
-        kind: 'content',
-        stage: campaignStage(campaign.status, post?.status),
-        title: operatorJobTitle({ position: campaign.title, title: campaign.title, requestNo: campaign.request_no }),
-        requestNo: campaign.request_no,
-        detail: postFailed ? (post.error || 'งานโพสต์หยุดก่อนสำเร็จ กดลองใหม่ได้') : (content?.caption || campaign.status_note),
-        requester: campaign.created_by,
-        connector: null,
-        statusLabel,
-        createdAt: campaign.created_at,
-        href: contentEnabled ? `/orchestrator/${campaign.id}` : '/autopost',
-        context: campaign.province || campaign.created_by,
-        content: content ? {
-          id: content.id,
-          campaignId: campaign.id,
-          caption: content.caption,
-          hasImage: content.has_image,
-          qualityStatus: content.quality_status,
-          qualityScore: content.quality_score,
-          qualitySummary: content.quality_checks?.summary ?? null,
-        } : null,
-        campaignId: campaign.id,
-        nextAction: postFailed
-          ? 'retry_post'
-          : contentEnabled && (campaign.status === 'draft_error' || (campaign.status === 'new' && !!campaign.status_note))
-            ? 'retry_draft'
-            : canMeasure
-              ? 'measure'
-              : null,
-        steps: contentSteps(campaign.status, post?.status),
       };
     }),
     ...tasks.filter((task) => task.status !== 'idle' || task.source_request_no).map((task): WorkCenterItem => {
@@ -243,25 +132,22 @@ export default async function OrchestratorPage({ searchParams }: { searchParams?
       )}
       <details className="rounded-xl border border-line bg-white px-4 py-2.5">
         <summary className="cursor-pointer text-sm text-subtle">
-          สถานะเครื่อง / ขอบเขตระบบ
-          {!contentEnabled ? ` · ${productScopeSummary()}` : ''}
+          สถานะเครื่อง · {productScopeSummary()}
         </summary>
-        <div className="mt-3 space-y-3">
-          {!contentEnabled && (
-            <p className="rounded-lg bg-sky-50 px-3 py-2 text-sm text-sky-950">
-              ตอนนี้ใช้ศูนย์งานสำหรับ<strong>ค้นหาผู้สมัคร</strong> และหน้าโพสต์ Facebook สำหรับ Autopost — ไม่รับงานสร้างประกาศใหม่
-            </p>
-          )}
+        <div className="mt-3">
           <WorkerStatus />
-          {contentEnabled && (
-            <div className="rounded-lg border border-violet-100 bg-violet-50 px-3 py-2 text-sm text-violet-950">
-              สมอง Content: หลักฐาน {contentBrain.learning_events} · ยืนยันแล้ว {contentBrain.proven_patterns}
-            </div>
-          )}
         </div>
       </details>
       <WorkCenter
         items={items}
+        disabledContentRequests={disabledContentReqs.map((r) => ({
+          requestNo: r.request_no,
+          title: operatorJobTitle({
+            position: String((r.job_snapshot as Record<string, unknown> | null)?.position ?? ''),
+            title: r.erp_title,
+            requestNo: r.request_no,
+          }),
+        }))}
         connectors={connectors.map((connector) => ({
           id: connector.id,
           label: `${connector.platform === 'jobthai' ? 'JobThai' : connector.platform === 'jobbkk' ? 'JobBKK' : connector.platform} · ${connector.label}`,

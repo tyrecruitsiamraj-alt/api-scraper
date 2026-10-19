@@ -2,19 +2,13 @@
 
 import { useMemo, useState } from 'react';
 import Link from 'next/link';
-import { CaptionViewer } from '@/components/CaptionViewer';
 import {
   approveScrapeResultAction,
-  measureCampaignAction,
-  rejectContentAction,
+  rejectDisabledContentRequestsAction,
   rejectRequestAction,
-  retryCampaignDraftAction,
-  retryCampaignPostAction,
-  startCampaignAction,
   startSoRecruitScrapeAction,
 } from '@/lib/actions';
 import { EDUCATION_LEVELS, GENDERS, PROVINCES, SALARY_LABELS, SALARY_STEPS } from '@/lib/filter-options';
-import { CONTENT_DISABLED_OPERATOR_MESSAGE, isContentGenerationEnabled } from '@/lib/product-scope';
 
 export type WorkCenterStage = 'intake' | 'working' | 'review' | 'completed' | 'attention';
 
@@ -65,16 +59,12 @@ export type FbAccountOption = {
   preflightVerified: boolean;
 };
 
-type TabKey = 'todo' | 'running' | 'done' | 'all';
+export type DisabledContentRequest = {
+  requestNo: string;
+  title: string;
+};
 
-function facebookAccountProblem(account: FbAccountOption): string | null {
-  if (account.groupCount <= 0) return 'ยังไม่มีกลุ่ม';
-  if (!account.preferredWorker) return 'ยังไม่ผูกเครื่อง';
-  if (!account.workerOnline) return 'เครื่องออฟไลน์';
-  if (!account.preflightReady) return 'Worker ยังเป็นรุ่นเดิม';
-  if (!account.preflightVerified) return 'ยังไม่ผ่านการทดสอบ';
-  return null;
-}
+type TabKey = 'todo' | 'running' | 'done';
 
 const STAGE_PRIORITY: Record<WorkCenterStage, number> = {
   attention: 0,
@@ -85,11 +75,11 @@ const STAGE_PRIORITY: Record<WorkCenterStage, number> = {
 };
 
 const STAGE_PILL: Record<WorkCenterStage, string> = {
-  intake: 'bg-amber-50 text-amber-700',
-  working: 'bg-blue-50 text-blue-700',
-  review: 'bg-orange-50 text-orange-700',
-  completed: 'bg-green-50 text-green-700',
-  attention: 'bg-red-50 text-red-700',
+  intake: 'bg-amber-50 text-amber-800',
+  working: 'bg-sky-50 text-sky-800',
+  review: 'bg-orange-50 text-orange-800',
+  completed: 'bg-emerald-50 text-emerald-800',
+  attention: 'bg-red-50 text-red-800',
 };
 
 function fmtDate(value: string) {
@@ -110,69 +100,61 @@ function salaryLabel(step: string) {
   return SALARY_LABELS[step] ?? Number(step).toLocaleString('en-US');
 }
 
-function Readiness({ facebookAccounts }: { facebookAccounts: FbAccountOption[] }) {
-  const problems: { text: string; href: string; btn: string }[] = [];
-  if (facebookAccounts.length === 0) {
-    problems.push({
-      text: 'ยังไม่มีบัญชี Facebook สำหรับเผยแพร่',
-      href: '/settings/connectors',
-      btn: 'เพิ่มบัญชี',
-    });
-  } else {
-    const notReady = facebookAccounts.filter((account) => !!facebookAccountProblem(account));
-    if (notReady.length > 0) {
-      problems.push({
-        text: `บัญชียังไม่พร้อม: ${notReady.map((a) => `${a.label} (${facebookAccountProblem(a)})`).join(', ')}`,
-        href: '/settings/connectors',
-        btn: 'เตรียมบัญชี',
-      });
-    }
-  }
-  if (problems.length === 0) return null;
+function scrapePlanSummary(f: Record<string, string>) {
+  const bits = [
+    f.position,
+    f.location,
+    f.qty ? `เป้า ${f.qty} คน` : '',
+    f.gender && f.gender !== 'ไม่ระบุ' ? f.gender : '',
+  ].filter(Boolean);
+  return bits.join(' · ') || 'ตามใบขอ';
+}
+
+function RoomSwitcher() {
   return (
-    <div className="space-y-2">
-      {problems.map((p) => (
-        <div key={p.text} className="flex flex-wrap items-center gap-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3">
-          <div className="min-w-0 flex-1 text-sm text-amber-900">{p.text}</div>
-          <Link href={p.href} className="btn-primary btn-sm shrink-0 !bg-amber-600 hover:!bg-amber-700">{p.btn}</Link>
-        </div>
-      ))}
+    <div className="grid gap-3 sm:grid-cols-2">
+      <div className="rounded-2xl border-2 border-emerald-600 bg-emerald-50 px-4 py-4">
+        <p className="text-xs font-semibold uppercase tracking-wide text-emerald-800">ห้องนี้</p>
+        <h2 className="mt-1 text-lg font-semibold text-emerald-950">ค้นหาผู้สมัคร</h2>
+        <p className="mt-1 text-sm text-emerald-900/80">รับใบขอ → เลือก JobBKK/JobThai → เริ่มค้นหา</p>
+      </div>
+      <Link
+        href="/autopost"
+        className="rounded-2xl border border-sky-200 bg-sky-50 px-4 py-4 transition hover:border-sky-400 hover:bg-sky-100"
+      >
+        <p className="text-xs font-semibold uppercase tracking-wide text-sky-800">ไปอีกห้อง</p>
+        <h2 className="mt-1 text-lg font-semibold text-sky-950">โพสต์ Facebook →</h2>
+        <p className="mt-1 text-sm text-sky-900/80">ใส่ caption + รูป แล้วสั่งโพสต์ที่ Autopost</p>
+      </Link>
     </div>
   );
 }
 
-function RequestFieldsEditor({ fields, formId }: { fields: Record<string, string>; formId: string }) {
-  const age = [fields.age_min, fields.age_max].filter(Boolean).join('–');
-  const view = [
-    { label: 'ตำแหน่ง', value: fields.position ?? '' },
-    { label: 'พื้นที่', value: fields.location ?? '' },
-    { label: 'จำนวน', value: fields.qty ?? '' },
-    { label: 'เวลางาน', value: fields.work_schedule ?? '' },
-    { label: 'เพศ', value: fields.gender ?? '' },
-    { label: 'อายุ', value: age },
-  ];
+function DisabledContentBanner({ requests }: { requests: DisabledContentRequest[] }) {
+  if (requests.length === 0) return null;
   return (
-    <details className="rounded-xl border border-line bg-black/[0.02] px-3 py-2">
-      <summary className="cursor-pointer text-sm font-medium text-ink">ดูรายละเอียดใบขอ</summary>
-      <div className="mt-2 grid gap-2 sm:grid-cols-2">
-        {view.map((v) => (
-          <div key={v.label} className="flex justify-between gap-2 border-b border-line/40 pb-1 text-sm">
-            <span className="text-subtle">{v.label}</span>
-            <span className={v.value ? 'text-ink' : 'text-red-500'}>{v.value || '—'}</span>
-          </div>
-        ))}
-      </div>
-      <div className="mt-3 grid gap-2 sm:grid-cols-2">
-        <div>
-          <label className="label" htmlFor={`${formId}-income`}>รายได้ (แก้ได้)</label>
-          <input id={`${formId}-income`} name="ov_income" form={formId} defaultValue={fields.income ?? ''} className="field" />
+    <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0 flex-1">
+          <p className="text-sm font-medium text-amber-950">
+            มี {requests.length} คำขอสร้างประกาศ — ระบบนี้ไม่รับแล้ว
+          </p>
+          <p className="mt-1 text-xs text-amber-900/80">
+            {requests.slice(0, 3).map((r) => r.title || r.requestNo).join(' · ')}
+            {requests.length > 3 ? ` · +${requests.length - 3}` : ''}
+          </p>
         </div>
-        <div>
-          <label className="label" htmlFor={`${formId}-note`}>สวัสดิการ (เติมได้)</label>
-          <input id={`${formId}-note`} name="ov_note" form={formId} defaultValue={fields.note ?? ''} className="field" />
+        <div className="flex flex-wrap gap-2">
+          <Link href="/autopost" className="btn-ghost btn-sm">ไปโพสต์ Facebook</Link>
+          <form action={rejectDisabledContentRequestsAction}>
+            {requests.map((r) => (
+              <input key={r.requestNo} type="hidden" name="requestNo" value={r.requestNo} />
+            ))}
+            <button className="btn-secondary btn-sm">ตีกลับทั้งหมด</button>
+          </form>
         </div>
       </div>
-    </details>
+    </div>
   );
 }
 
@@ -202,23 +184,12 @@ function RejectBlock({ item }: { item: WorkCenterItem }) {
   );
 }
 
-function scrapePlanSummary(f: Record<string, string>) {
-  const bits = [
-    f.position,
-    f.location,
-    f.qty ? `เป้า ${f.qty} คน` : '',
-    f.gender && f.gender !== 'ไม่ระบุ' ? f.gender : '',
-  ].filter(Boolean);
-  return bits.join(' · ') || 'ตามใบขอ';
-}
-
-/** ฟอร์มรันทันทีจากค่าใบขอ — ไม่ต้องกางแผนก่อน */
 function ScrapeQuickRunForm({ item, connectors }: { item: WorkCenterItem; connectors: Option[] }) {
   const f = item.requestFields ?? {};
   const defaultConnector = connectors.find((c) => c.available)?.id ?? '';
   const canRun = Boolean(defaultConnector);
   return (
-    <form action={startSoRecruitScrapeAction} className="space-y-2" data-pause-refresh="1">
+    <form action={startSoRecruitScrapeAction} className="space-y-3" data-pause-refresh="1">
       <input type="hidden" name="requestNo" value={item.requestNo ?? ''} />
       <input type="hidden" name="scrapePosition" value={f.position ?? ''} />
       <input type="hidden" name="scrapeKeyword" value={f.keyword ?? ''} />
@@ -231,7 +202,6 @@ function ScrapeQuickRunForm({ item, connectors }: { item: WorkCenterItem; connec
       <input type="hidden" name="scrapeSalaryMax" value={f.salary_max ?? ''} />
       <input type="hidden" name="scrapeAgeMin" value={f.age_min ?? ''} />
       <input type="hidden" name="scrapeAgeMax" value={f.age_max ?? ''} />
-      <p className="text-xs text-subtle">จะค้น: {scrapePlanSummary(f)}</p>
       <div className="flex flex-wrap items-end gap-2">
         <div className="min-w-[200px] flex-1">
           <label className="label" htmlFor={`connector-quick-${item.id}`}>บัญชีค้นหา</label>
@@ -250,11 +220,11 @@ function ScrapeQuickRunForm({ item, connectors }: { item: WorkCenterItem; connec
             ))}
           </select>
         </div>
-        <button className="btn-primary" disabled={!canRun}>เริ่มค้นหาเลย</button>
-        {!canRun && (
-          <Link href="/settings/connectors" className="text-xs text-accent hover:underline">เพิ่มบัญชีก่อน</Link>
-        )}
+        <button className="btn-primary" disabled={!canRun}>เริ่มค้นหา</button>
       </div>
+      {!canRun && (
+        <Link href="/settings/connectors" className="text-xs text-accent hover:underline">เพิ่มบัญชีค้นหาก่อน</Link>
+      )}
     </form>
   );
 }
@@ -265,7 +235,7 @@ function ScrapeIntakeForm({ item, connectors }: { item: WorkCenterItem; connecto
     <form action={startSoRecruitScrapeAction} className="space-y-3" data-pause-refresh="1">
       <input type="hidden" name="requestNo" value={item.requestNo ?? ''} />
       <div className="rounded-xl border border-line bg-black/[0.02] px-3 py-3">
-        <div className="text-sm font-medium text-ink">แก้แผนการค้น แล้วกดเริ่ม</div>
+        <div className="text-sm font-medium text-ink">แก้แผนก่อนเริ่ม</div>
         <div className="mt-2 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
           <div>
             <label className="label" htmlFor={`sp-pos-${item.id}`}>ตำแหน่ง</label>
@@ -345,7 +315,7 @@ function ScrapeIntakeForm({ item, connectors }: { item: WorkCenterItem; connecto
             ))}
           </select>
         </div>
-        <button className="btn-primary" disabled={!connectors.some((c) => c.available)}>เริ่มค้นหาเลย</button>
+        <button className="btn-primary" disabled={!connectors.some((c) => c.available)}>เริ่มค้นหา</button>
       </div>
     </form>
   );
@@ -359,66 +329,10 @@ function WorkAction({
 }: {
   item: WorkCenterItem;
   connectors: Option[];
-  facebookAccounts: FbAccountOption[];
   expanded: boolean;
   onTogglePlan: () => void;
 }) {
-  if (item.campaignId && item.nextAction === 'retry_draft') {
-    return (
-      <form action={retryCampaignDraftAction}>
-        <input type="hidden" name="campaignId" value={item.campaignId} />
-        <button className="btn-primary">ลองสร้างประกาศใหม่</button>
-      </form>
-    );
-  }
-  if (item.campaignId && item.nextAction === 'retry_post') {
-    return (
-      <form action={retryCampaignPostAction}>
-        <input type="hidden" name="campaignId" value={item.campaignId} />
-        <button className="btn-primary">ลองโพสต์ใหม่</button>
-      </form>
-    );
-  }
-  if (item.campaignId && item.nextAction === 'measure') {
-    return (
-      <form action={measureCampaignAction}>
-        <input type="hidden" name="campaignId" value={item.campaignId} />
-        <button className="btn-primary">ตรวจผลตอบรับ</button>
-      </form>
-    );
-  }
-
-  if (item.stage === 'intake' && item.requestNo) {
-    if (item.kind === 'content') {
-      if (!isContentGenerationEnabled()) {
-        return (
-          <div className="space-y-2" data-pause-refresh="1">
-            <p className="text-sm text-amber-800">{CONTENT_DISABLED_OPERATOR_MESSAGE}</p>
-            <div className="flex flex-wrap gap-2">
-              <form action={rejectRequestAction}>
-                <input type="hidden" name="requestNo" value={item.requestNo} />
-                <input type="hidden" name="reason" value={CONTENT_DISABLED_OPERATOR_MESSAGE} />
-                <button className="btn-secondary">ตีกลับคำขอสร้างประกาศ</button>
-              </form>
-              <Link href="/autopost" className="btn-ghost btn-sm">ไปหน้าโพสต์ Facebook</Link>
-            </div>
-          </div>
-        );
-      }
-      const formId = `approve-req-${item.id}`;
-      return (
-        <div className="w-full space-y-3" data-pause-refresh="1">
-          {item.requestFields && <RequestFieldsEditor fields={item.requestFields} formId={formId} />}
-          <form id={formId} action={startCampaignAction}>
-            <input type="hidden" name="requestNo" value={item.requestNo} />
-            <button className="btn-primary">รับงานและเริ่มสร้างประกาศ</button>
-          </form>
-          <RejectBlock item={item} />
-        </div>
-      );
-    }
-
-    // scraping intake — รันจากหน้านี้ได้เลย; กางแผนเฉพาะตอนอยากแก้
+  if (item.stage === 'intake' && item.requestNo && item.kind === 'scraping') {
     return (
       <div className="w-full space-y-3" data-pause-refresh="1">
         {expanded ? (
@@ -428,46 +342,10 @@ function WorkAction({
         )}
         <div className="flex flex-wrap gap-2">
           <button type="button" className="btn-ghost btn-sm" onClick={onTogglePlan}>
-            {expanded ? 'ใช้แผนจากใบขอ (ย่อ)' : 'แก้แผนก่อนรัน'}
+            {expanded ? 'ย่อแผน' : 'แก้แผนก่อนรัน'}
           </button>
-          {item.href && <Link href={item.href} className="btn-ghost btn-sm">ดูใบงาน</Link>}
+          <RejectBlock item={item} />
         </div>
-        <RejectBlock item={item} />
-      </div>
-    );
-  }
-
-  if (item.stage === 'review' && item.kind === 'content' && item.content) {
-    return (
-      <div className="w-full space-y-3" data-pause-refresh="1">
-        <div className={`rounded-lg border px-3 py-2 text-sm ${
-          item.content.qualityStatus === 'fail' ? 'border-red-200 bg-red-50 text-red-700'
-            : item.content.qualityStatus === 'pass' ? 'border-green-200 bg-green-50 text-green-700'
-              : 'border-amber-200 bg-amber-50 text-amber-700'
-        }`}>
-          {item.content.qualityStatus === 'fail' ? 'ยังอนุมัติไม่ได้' : item.content.qualityStatus === 'pass' ? 'พร้อมตรวจ' : 'ควรตรวจเพิ่ม'}
-          {item.content.qualitySummary ? ` — ${item.content.qualitySummary}` : ''}
-        </div>
-        <Link href={`/orchestrator/${item.content.campaignId}`} className="btn-primary">เปิดตรวจรูป + Caption</Link>
-        <details className="rounded-xl border border-line px-3 py-2">
-          <summary className="cursor-pointer text-sm text-subtle">ตีกลับให้แก้ใหม่</summary>
-          <form action={rejectContentAction} className="mt-2 flex flex-wrap items-end gap-2">
-            <input type="hidden" name="contentId" value={item.content.id} />
-            <input type="hidden" name="campaignId" value={item.content.campaignId} />
-            <select name="reasonCode" required defaultValue="" className="field max-w-[220px]">
-              <option value="" disabled>เลือกเหตุผล…</option>
-              <option value="incorrect_info">ข้อมูลไม่ถูกต้อง</option>
-              <option value="weak_hook">ประโยคเปิดไม่น่าสนใจ</option>
-              <option value="too_long">เนื้อหายาวเกินไป</option>
-              <option value="missing_details">ข้อมูลสำคัญไม่ครบ</option>
-              <option value="wrong_tone">ภาษาไม่เหมาะ</option>
-              <option value="poor_visual">รูปไม่เหมาะสม</option>
-              <option value="other">อื่น ๆ</option>
-            </select>
-            <input name="reason" placeholder="รายละเอียด" className="field min-w-[180px] flex-1" />
-            <button className="btn-secondary">ตีกลับ</button>
-          </form>
-        </details>
       </div>
     );
   }
@@ -493,19 +371,23 @@ function WorkAction({
 function WorkItemCard({
   item,
   connectors,
-  facebookAccounts,
   defaultExpanded,
 }: {
   item: WorkCenterItem;
   connectors: Option[];
-  facebookAccounts: FbAccountOption[];
   defaultExpanded?: boolean;
 }) {
   const [expanded, setExpanded] = useState(Boolean(defaultExpanded));
+  const f = item.requestFields ?? {};
   const missing = item.checklist?.filter((c) => !c.ok) ?? [];
+  const metaBits = [
+    item.requestNo,
+    item.stage === 'intake' ? scrapePlanSummary(f) : item.context,
+    fmtDate(item.createdAt),
+  ].filter(Boolean);
 
   return (
-    <article className="rounded-2xl border border-line bg-white p-4 shadow-card sm:p-5">
+    <article className="rounded-2xl border border-line bg-white p-4 sm:p-5">
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div className="min-w-0 flex-1">
           <h3 className="text-base font-semibold text-ink">
@@ -515,12 +397,7 @@ function WorkItemCard({
               </Link>
             ) : item.title}
           </h3>
-          <p className="mt-1 text-xs text-subtle">
-            {item.requestNo || '—'}
-            {item.context ? ` · ${item.context}` : ''}
-            {' · '}{fmtDate(item.createdAt)}
-            {' · '}{item.kind === 'scraping' ? 'ค้นหาผู้สมัคร' : 'สร้างประกาศ'}
-          </p>
+          <p className="mt-1 text-xs text-subtle">{metaBits.join(' · ')}</p>
         </div>
         <span className={`pill shrink-0 ${STAGE_PILL[item.stage]}`}>{item.statusLabel}</span>
       </div>
@@ -529,13 +406,9 @@ function WorkItemCard({
         <p className="mt-2 text-xs text-red-600">ขาดในใบขอ: {missing.map((m) => m.label).join(', ')}</p>
       )}
 
-      {item.detail && (
-        <p className={`mt-3 whitespace-pre-wrap text-sm leading-relaxed ${
-          item.stage === 'attention' ? 'rounded-lg border-l-2 border-accent bg-red-50 px-3 py-2 text-red-700' : 'text-ink/75'
-        }`}>
-          {item.stage === 'review' && item.kind === 'content'
-            ? <CaptionViewer caption={item.content?.caption ?? item.detail} />
-            : (item.detail.length > 280 ? `${item.detail.slice(0, 280)}…` : item.detail)}
+      {item.detail && item.stage === 'attention' && (
+        <p className="mt-3 whitespace-pre-wrap rounded-lg border-l-2 border-red-400 bg-red-50 px-3 py-2 text-sm text-red-800">
+          {item.detail.length > 280 ? `${item.detail.slice(0, 280)}…` : item.detail}
         </p>
       )}
 
@@ -558,7 +431,6 @@ function WorkItemCard({
         <WorkAction
           item={item}
           connectors={connectors}
-          facebookAccounts={facebookAccounts}
           expanded={expanded}
           onTogglePlan={() => setExpanded((v) => !v)}
         />
@@ -567,10 +439,16 @@ function WorkItemCard({
   );
 }
 
-export function WorkCenter({ items, connectors, facebookAccounts }: {
+export function WorkCenter({
+  items,
+  connectors,
+  facebookAccounts,
+  disabledContentRequests = [],
+}: {
   items: WorkCenterItem[];
   connectors: Option[];
   facebookAccounts: FbAccountOption[];
+  disabledContentRequests?: DisabledContentRequest[];
 }) {
   const [tab, setTab] = useState<TabKey>('todo');
 
@@ -590,29 +468,45 @@ export function WorkCenter({ items, connectors, facebookAccounts }: {
 
   const visible = tab === 'todo' ? todo
     : tab === 'running' ? running
-      : tab === 'done' ? done
-        : sorted;
+      : done;
 
   const tabs: { key: TabKey; label: string; count: number }[] = [
-    { key: 'todo', label: 'ต้องทำ', count: todo.length },
-    { key: 'running', label: 'กำลังทำ', count: running.length },
+    { key: 'todo', label: 'ต้องทำวันนี้', count: todo.length },
+    { key: 'running', label: 'กำลังค้นหา', count: running.length },
     { key: 'done', label: 'เสร็จแล้ว', count: done.length },
-    { key: 'all', label: 'ทั้งหมด', count: sorted.length },
   ];
+
+  const fbProblems = facebookAccounts.filter((a) => (
+    a.groupCount <= 0
+    || !a.preferredWorker
+    || !a.workerOnline
+    || !a.preflightReady
+    || !a.preflightVerified
+  )).length;
 
   return (
     <div className="space-y-5">
       <div>
         <h1 className="text-2xl font-semibold tracking-tight text-ink">ศูนย์งาน</h1>
-        <p className="mt-1 text-sm text-subtle">เลือกแท็บ → เปิดการ์ด → กดปุ่มหลักเพียงปุ่มเดียว</p>
+        <p className="mt-1 text-sm text-subtle">โฟกัสงานค้นหาผู้สมัคร — โพสต์ Facebook อยู่อีกห้อง</p>
       </div>
 
-      <details className="rounded-xl border border-line bg-white px-4 py-3">
-        <summary className="cursor-pointer text-sm text-subtle">ตั้งค่าที่อาจทำให้งานค้าง (ผู้ดูแล)</summary>
-        <div className="mt-3"><Readiness facebookAccounts={facebookAccounts} /></div>
-      </details>
+      <RoomSwitcher />
+      <DisabledContentBanner requests={disabledContentRequests} />
 
-      <div className="flex flex-wrap gap-2" role="tablist" aria-label="กรองงาน">
+      {(fbProblems > 0 || facebookAccounts.length === 0) && (
+        <details className="rounded-xl border border-line bg-white px-4 py-3">
+          <summary className="cursor-pointer text-sm text-subtle">
+            บัญชี Facebook ยังไม่พร้อม {facebookAccounts.length === 0 ? '(ยังไม่มีบัญชี)' : `(${fbProblems} บัญชี)`} — กดดูถ้าจะโพสต์
+          </summary>
+          <div className="mt-3 flex flex-wrap gap-2">
+            <Link href="/autopost/accounts" className="btn-secondary btn-sm">ไปเตรียมบัญชี</Link>
+            <Link href="/settings/connectors" className="btn-ghost btn-sm">ตั้งค่าบัญชี</Link>
+          </div>
+        </details>
+      )}
+
+      <div className="flex flex-wrap gap-2" role="tablist" aria-label="กรองงานค้นหา">
         {tabs.map((t) => (
           <button
             key={t.key}
@@ -634,7 +528,7 @@ export function WorkCenter({ items, connectors, facebookAccounts }: {
 
       {visible.length === 0 ? (
         <div className="rounded-2xl border border-dashed border-line bg-white px-5 py-12 text-center text-sm text-subtle">
-          {tab === 'todo' ? 'ไม่มีงานที่รอคุณทำตอนนี้' : tab === 'running' ? 'ไม่มีงานที่ระบบกำลังทำ' : tab === 'done' ? 'ยังไม่มีงานที่เสร็จ' : 'ยังไม่มีงาน'}
+          {tab === 'todo' ? 'ไม่มีงานค้นหาที่ต้องทำตอนนี้' : tab === 'running' ? 'ไม่มีงานที่กำลังค้นหา' : 'ยังไม่มีงานที่เสร็จ'}
         </div>
       ) : (
         <div className="space-y-3">
@@ -643,7 +537,6 @@ export function WorkCenter({ items, connectors, facebookAccounts }: {
               key={item.id}
               item={item}
               connectors={connectors}
-              facebookAccounts={facebookAccounts}
               defaultExpanded={tab === 'todo' && todo.length === 1 && index === 0 && item.stage === 'intake'}
             />
           ))}

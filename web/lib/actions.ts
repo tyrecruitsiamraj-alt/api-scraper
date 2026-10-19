@@ -450,6 +450,20 @@ export async function rejectRequestAction(formData: FormData) {
   revalidatePath('/orchestrator');
 }
 
+/** ตีกลับคำขอสร้างประกาศที่ระบบไม่รับแล้ว (ทีละหลายใบจากแถบบนศูนย์งาน). */
+export async function rejectDisabledContentRequestsAction(formData: FormData) {
+  await requireSession();
+  if (isContentGenerationEnabled()) {
+    redirect(`/orchestrator?notice=${encodeURIComponent('ระบบเปิดสร้างประกาศอยู่ — ใช้ปุ่มตีกลับรายใบแทน')}`);
+  }
+  const requestNos = formData.getAll('requestNo').map((v) => String(v).trim()).filter(Boolean);
+  for (const requestNo of requestNos) {
+    await rejectSoRecruitRequest(requestNo, CONTENT_DISABLED_OPERATOR_MESSAGE);
+  }
+  revalidatePath('/orchestrator/imports');
+  revalidatePath('/orchestrator');
+}
+
 /** อนุมัติรับคำขอ Scraping จาก So Recruit → สร้าง task, ผูก Connector และส่งเข้า worker queue. */
 export async function startSoRecruitScrapeAction(formData: FormData) {
   const session = await getServerSession(authOptions);
