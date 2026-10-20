@@ -28,6 +28,8 @@ async function activateNormalMode(page) {
   )).catch(() => false);
   if (!alreadyActive) await clickWithoutNavigationWait(mode);
   await sleep(500);
+  // The banner dialog opens right after Normal Search is active.
+  await dismissJobbkkOverlays(page);
 }
 
 async function visibleOpenLayer(page) {
@@ -204,6 +206,55 @@ async function applySearchableChecks(page, openerPattern, values, field, report)
   }
 }
 
+/**
+ * Live JobBKK (20 Oct 2026): province is a readOnly input#province that opens an
+ * .ant-dropdown with a search box and an .ant-tree of checkboxes. After ticking,
+ * the input value reads e.g. "สมุทรปราการ ทั้งหมด" — that value is the proof.
+ * Returns null when this control is absent so the caller can use the older path.
+ */
+async function applyProvinceTree(page, aliases, report) {
+  const opener = await firstVisibleLocator([
+    page.locator('input[name="province"]'),
+    page.locator('input#province'),
+  ]);
+  if (!opener) return null;
+  const bareNames = [...new Set(aliases.map((alias) => String(alias).replace(/^จังหวัด\s*/u, '').trim()).filter(Boolean))];
+  for (const name of bareNames) {
+    await clickWithoutNavigationWait(opener);
+    const layer = page.locator('.ant-dropdown:visible').first();
+    await layer.waitFor({ state: 'visible', timeout: 5_000 }).catch(() => {});
+    if (!(await layer.isVisible().catch(() => false))) break;
+    const search = await firstEditableLocator([layer.locator('input[placeholder]'), layer.locator('input.ant-input')]);
+    if (search) {
+      await search.fill('');
+      await search.fill(name);
+      await sleep(400);
+    }
+    const node = await firstVisibleLocator([
+      layer.locator('[role="treeitem"]').filter({
+        has: page.locator('.ant-tree-title', { hasText: new RegExp(`^\\s*${escapeRegExp(name)}\\s*$`, 'u') }),
+      }),
+    ]);
+    if (node) {
+      const box = node.locator('.ant-tree-checkbox').first();
+      if ((await box.getAttribute('aria-checked').catch(() => null)) !== 'true') {
+        await clickWithoutNavigationWait(box);
+        await sleep(250);
+      }
+    }
+    await closeOpenLayer(page);
+    await page.keyboard.press('Escape').catch(() => {});
+    await layer.waitFor({ state: 'hidden', timeout: 2_000 }).catch(() => {});
+    const shown = await opener.inputValue().catch(() => '');
+    if (shown.includes(name)) {
+      report.applied.push('province');
+      return true;
+    }
+  }
+  report.skipped.push('province');
+  return false;
+}
+
 async function openFilterRow(page, labelPattern) {
   return firstVisibleLocator([
     page.getByRole('button', { name: labelPattern }),
@@ -265,6 +316,7 @@ async function applyPlannedFilter(page, step, report) {
     case 'province': {
       // Try bare name first, then จังหวัด… aliases — stop once the select shows a real tag.
       const aliases = provinceSearchAliases(step.value);
+      if ((await applyProvinceTree(page, aliases, report)) !== null) return;
       for (const alias of aliases) {
         const before = report.applied.length;
         await applySearchableChecks(
@@ -346,6 +398,7 @@ export async function runNormalSearch(page, criteria, { need = 15 } = {}) {
   const report = { applied: [], skipped: [] };
   const plan = planTalentNormalFilters(criteria);
   for (const step of plan) {
+    await dismissJobbkkOverlays(page);
     await applyPlannedFilter(page, step, report);
     await dismissJobbkkOverlays(page);
   }

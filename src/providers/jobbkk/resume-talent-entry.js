@@ -48,6 +48,20 @@ export async function dismissJobbkkOverlays(page) {
   await page.getByRole('button', { name: /ยอมรับ|ตกลง|ปิด/u }).click({ timeout: 1500 }).catch(() => {});
   const close = page.locator('[aria-label="Close"], button.close, .ant-modal-close').first();
   if (await close.isVisible().catch(() => false)) await close.click({ timeout: 1000 }).catch(() => {});
+  // Banner ads open as a full-screen Radix dialog (seen 20 Oct 2026: "CLS JOBBKK
+  // FAIR 2026") right after Normal Search. Its own <button> is hidden, so a click on
+  // any filter lands on the banner. Escape closes it; the round .icon-button is the
+  // visible X when Escape is ignored.
+  const promo = page.locator('[role="dialog"][data-state="open"]').first();
+  for (let i = 0; i < 3; i += 1) {
+    if (!(await promo.isVisible().catch(() => false))) return;
+    await page.keyboard.press('Escape').catch(() => {});
+    await promo.waitFor({ state: 'hidden', timeout: 1500 }).catch(() => {});
+    if (await promo.isVisible().catch(() => false)) {
+      await promo.locator('.icon-button').first().click({ timeout: 1500 }).catch(() => {});
+      await promo.waitFor({ state: 'hidden', timeout: 1500 }).catch(() => {});
+    }
+  }
 }
 
 export async function isTalentNormalUi(page) {

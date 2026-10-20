@@ -8,12 +8,26 @@ const FIXTURE = `<!doctype html>
   <button class="bg-Primary text-white">Normal Search</button>
   <button>AI SEARCH</button>
 
-  <!-- Live JobBKK (20 Oct 2026) also tags this wrapper div with the search-input class. -->
-  <div class="ant-select" id="province-select">
-    <button>สถานที่ทำงานทั้งหมด</button>
-    <div class="ant-select-selection-search-input">พิมพ์ค้นหา</div>
+  <!-- Live JobBKK (20 Oct 2026): a banner dialog covers the page after Normal Search. -->
+  <div role="dialog" data-state="open" id="promo"
+       style="position:fixed;inset:0;z-index:1000;background:rgba(0,0,0,.45)">
+    <div class="icon-button" style="position:absolute;top:8px;right:8px">X</div>
   </div>
-  <div class="ant-select-item-option-content" id="province-option">สมุทรปราการ</div>
+
+  <!-- Live JobBKK: resume cards repeat the province wording; never click these. -->
+  <p>พื้นที่ที่ต้องการทำงาน : กรุงเทพฯ / ทั้งหมด</p>
+
+  <!-- Live JobBKK: province is a readOnly input that opens an .ant-dropdown tree. -->
+  <span class="ant-input-affix-wrapper ant-dropdown-trigger">
+    <input id="province" name="province" class="ant-input" placeholder="สถานที่ทำงานทั้งหมด" readonly />
+  </span>
+  <div class="ant-dropdown" id="province-dropdown" style="display:none">
+    <input placeholder="สถานที่ทำงานทั้งหมด" class="ant-input" />
+    <div role="treeitem" class="ant-tree-treenode">
+      <span class="ant-tree-checkbox" role="checkbox" aria-checked="false" style="display:inline-block;width:16px;height:16px;border:1px solid"></span>
+      <span class="ant-tree-title">สมุทรปราการ</span>
+    </div>
+  </div>
 
   <div class="ant-row ant-form-item-row" multiple readOnly placeholder="ค้นหาชื่อตำแหน่งงาน">
     <div class="ant-select">
@@ -32,6 +46,8 @@ const FIXTURE = `<!doctype html>
   <div class="ant-select-item-option-content">ขาย</div>
 
   <button>ประเภทงาน (สาขาอาชีพ)</button>
+  <!-- Live JobBKK also tags this wrapper div with the search-input class. -->
+  <div class="ant-select-selection-search-input">พิมพ์ค้นหา</div>
   <div>การขาย</div>
 
   <button>วุฒิการศึกษา</button>
@@ -51,11 +67,17 @@ const FIXTURE = `<!doctype html>
   <div id="count">ผลการค้นหา 0 เรซูเม่</div>
   <div id="results"></div>
   <script>
-    document.getElementById('province-option').addEventListener('click', () => {
-      const tag = document.createElement('span');
-      tag.className = 'ant-select-selection-item';
-      tag.textContent = 'สมุทรปราการ';
-      document.getElementById('province-select').appendChild(tag);
+    document.addEventListener('keydown', (event) => {
+      if (event.key !== 'Escape') return;
+      document.getElementById('promo').remove?.();
+      document.getElementById('province-dropdown').style.display = 'none';
+    });
+    document.getElementById('province').addEventListener('click', () => {
+      document.getElementById('province-dropdown').style.display = 'block';
+    });
+    document.querySelector('#province-dropdown .ant-tree-checkbox').addEventListener('click', (event) => {
+      event.currentTarget.setAttribute('aria-checked', 'true');
+      document.getElementById('province').value = 'สมุทรปราการ ทั้งหมด';
     });
     document.getElementById('search').addEventListener('click', () => {
       document.getElementById('count').textContent = 'ผลการค้นหา 1 เรซูเม่';
