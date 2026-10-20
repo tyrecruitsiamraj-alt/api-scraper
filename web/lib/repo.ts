@@ -3259,7 +3259,10 @@ export async function listPostAssignments(): Promise<PostAssignment[]> {
               EXISTS (SELECT 1 FROM ${AP}.workers w
                        WHERE w.name=u.preferred_worker AND w.last_seen > now() - interval '2 minutes') AS worker_online,
               (u.paused_until IS NOT NULL AND u.paused_until > now()) AS paused,
-              COALESCE(jsonb_array_length(CASE WHEN jsonb_typeof(a.group_ids::jsonb)='array' THEN a.group_ids::jsonb ELSE '[]'::jsonb END), 0)::int AS group_count,
+              -- Worker (loadConfig.ts) uses the assignment's groups, or the account's when that list is empty.
+              COALESCE(NULLIF(jsonb_array_length(CASE WHEN jsonb_typeof(a.group_ids::jsonb)='array' THEN a.group_ids::jsonb ELSE '[]'::jsonb END), 0),
+                       jsonb_array_length(CASE WHEN jsonb_typeof(u.group_ids::jsonb)='array' THEN u.group_ids::jsonb ELSE '[]'::jsonb END),
+                       0)::int AS group_count,
               lq.status AS last_queue_status,
               lq.created_at AS last_queue_at
          FROM ${AP}.assignments a
