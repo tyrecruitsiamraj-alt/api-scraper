@@ -1013,6 +1013,16 @@ export function parseResumeHtml(html, { sourceUrl, index, focusPosition = '-' })
     // preview_new layout
     const jsName = clean($('h3.jobseeker-name').first().text());
     if (jsName) record.name = jsName;
+    // Oct 2026 layout: the name is the <h3> right above "ความสมบูรณ์ของ ใบสมัครงาน",
+    // and gender/marital status are icon cards (.resume-card) with a bare value.
+    if (!record.name) {
+      const completeness = $('p').filter((_, el) => /ความสมบูรณ์ของ\s*ใบสมัครงาน/u.test($(el).text())).first();
+      const heading = completeness.parent().prevAll('h3').first();
+      record.name = clean(heading.text());
+    }
+    const cardValues = $('.resume-card > span').map((_, el) => clean($(el).text())).get();
+    if (!record.gender) record.gender = cardValues.find((v) => /^(ชาย|หญิง)$/u.test(v)) || '';
+    if (!record.marital_status) record.marital_status = cardValues.find((v) => /^(โสด|สมรส|หย่าร้าง|หม้าย|แยกกันอยู่)$/u.test(v)) || '';
     const header = $('.header-name').first();
     const labeled = labeledHeaderValues($, header.length ? header : $('body'));
     const pick = (...labels) => labels.map((label) => labeled[label]).find(Boolean) || '';

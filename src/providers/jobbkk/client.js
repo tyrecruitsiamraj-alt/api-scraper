@@ -45,7 +45,10 @@ export function isResumeAuthBlocked(html, finalUrl = '') {
  * so callers should log it and keep the partial record rather than storm the login.
  */
 export function isResumeMasked(html) {
-  const s = String(html ?? '');
+  // The Next.js page (Oct 2026) embeds its i18n strings, including the guest
+  // prompt "กรุณาล็อกอินเพื่อดูข้อมูลการติดต่อ", inside <script> tags on every
+  // resume. Only rendered markup counts as masked.
+  const s = String(html ?? '').replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, '');
   return /class=["'][^"']*\bownerNoLogin\b/.test(s) || /เพื่อดูข้อมูลการติดต่อ/u.test(s);
 }
 

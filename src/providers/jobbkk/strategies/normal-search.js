@@ -391,7 +391,16 @@ async function collectPages(page, pool, need) {
   const seen = new Set(pool.map((item) => item.id));
   let pagesScanned = 1;
   while (pool.length < need && pagesScanned < 40) {
+    // Live JobBKK (Oct 2026) pages results with an Ant radio group of page numbers
+    // plus arrow icons, not links. Click the next page number.
+    const pager = page.locator('.ant-radio-group').filter({
+      has: page.locator('.ant-radio-button-label', { hasText: /^\s*2\s*$/u }),
+    }).last();
+    const nextNumber = pager.locator('label.ant-radio-button-wrapper').filter({
+      has: page.locator('.ant-radio-button-label', { hasText: new RegExp(`^\\s*${pagesScanned + 1}\\s*$`, 'u') }),
+    });
     const next = await firstVisibleLocator([
+      nextNumber,
       page.locator('a[rel="next"]'),
       page.getByRole('link', { name: /^(?:ถัดไป|next|>)$/i }),
       page.getByRole('button', { name: /^(?:ถัดไป|next|>)$/i }),

@@ -106,5 +106,10 @@ export async function ensureLatestUpdatedSort(page) {
 
   const evidence = await visibleUpdateEvidence(page);
   if (isDescendingLatest(evidence)) return { guaranteed: true, method: 'verified_card_dates' };
+
+  // Resume Search Talent (Oct 2026) has no <select>; its sort dropdown shows the
+  // chosen order as "เรียงลำดับตาม : อัปเดตล่าสุด".
+  const sortLabel = page.getByText(/เรียงลำดับตาม\s*[:：]?\s*(?:อัปเดต|อัพเดท)\s*ล่าสุด/u).first();
+  if (await sortLabel.isVisible().catch(() => false)) return { guaranteed: true, method: 'talent_sort_label' };
   throw new Error('JobBKK ไม่พบหลักฐานว่าเรียง Resume อัปเดตล่าสุด — หยุดเพื่อไม่เปิดคนผิดลำดับ');
 }

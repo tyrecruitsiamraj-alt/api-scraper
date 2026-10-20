@@ -65,7 +65,14 @@ const FIXTURE = `<!doctype html>
 
   <button id="search">ค้นหาผู้สมัครงาน</button>
   <div id="count">ผลการค้นหา 0 เรซูเม่</div>
+  <!-- Live JobBKK: the sort is a custom dropdown showing the chosen order. -->
+  <button type="button">เรียงลำดับตาม : อัปเดตล่าสุด</button>
   <div id="results"></div>
+  <!-- Live JobBKK: results are paged by an Ant radio group of page numbers. -->
+  <div class="ant-radio-group" id="pager" style="display:none">
+    <label class="ant-radio-button-wrapper"><span class="ant-radio-button-label">1</span></label>
+    <label class="ant-radio-button-wrapper" id="page-2"><span class="ant-radio-button-label">2</span></label>
+  </div>
   <script>
     document.addEventListener('keydown', (event) => {
       if (event.key !== 'Escape') return;
@@ -83,6 +90,11 @@ const FIXTURE = `<!doctype html>
       document.getElementById('count').textContent = 'ผลการค้นหา 1 เรซูเม่';
       document.getElementById('results').innerHTML =
         '<a href="https://www.jobbkk.com/resumes/preview_new/100001">อ่านรายละเอียด</a>';
+      document.getElementById('pager').style.display = 'block';
+    });
+    document.getElementById('page-2').addEventListener('click', () => {
+      document.getElementById('results').innerHTML =
+        '<a href="https://www.jobbkk.com/resumes/preview_new/100002">อ่านรายละเอียด</a>';
     });
   </script>
 </body></html>`;
@@ -110,6 +122,8 @@ test('Talent Normal Search fills every requested filter then reads a Resume ID',
   assert.deepEqual(result.report.applied.sort(), [
     'age', 'education', 'jobTypes', 'keyword', 'position', 'province', 'salary',
   ].sort());
-  assert.deepEqual(result.pool.map((item) => item.id), ['100001']);
+  assert.deepEqual(result.pool.map((item) => item.id), ['100001', '100002']);
+  assert.equal(result.pagesScanned, 2);
+  assert.equal(result.latest.method, 'talent_sort_label');
   assert.equal(result.strategy, 'normal');
 });
