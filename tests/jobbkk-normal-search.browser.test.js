@@ -8,6 +8,13 @@ const FIXTURE = `<!doctype html>
   <button class="bg-Primary text-white">Normal Search</button>
   <button>AI SEARCH</button>
 
+  <!-- Live JobBKK (20 Oct 2026) also tags this wrapper div with the search-input class. -->
+  <div class="ant-select" id="province-select">
+    <button>สถานที่ทำงานทั้งหมด</button>
+    <div class="ant-select-selection-search-input">พิมพ์ค้นหา</div>
+  </div>
+  <div class="ant-select-item-option-content" id="province-option">สมุทรปราการ</div>
+
   <div class="ant-row ant-form-item-row" multiple readOnly placeholder="ค้นหาชื่อตำแหน่งงาน">
     <div class="ant-select">
       <div class="ant-select-selection-wrap">
@@ -27,9 +34,6 @@ const FIXTURE = `<!doctype html>
   <button>ประเภทงาน (สาขาอาชีพ)</button>
   <div>การขาย</div>
 
-  <button>สถานที่ทำงานทั้งหมด</button>
-  <div>สมุทรปราการ</div>
-
   <button>วุฒิการศึกษา</button>
   <span>ต่ำสุด</span>
   <span>สูงสุด</span>
@@ -47,6 +51,12 @@ const FIXTURE = `<!doctype html>
   <div id="count">ผลการค้นหา 0 เรซูเม่</div>
   <div id="results"></div>
   <script>
+    document.getElementById('province-option').addEventListener('click', () => {
+      const tag = document.createElement('span');
+      tag.className = 'ant-select-selection-item';
+      tag.textContent = 'สมุทรปราการ';
+      document.getElementById('province-select').appendChild(tag);
+    });
     document.getElementById('search').addEventListener('click', () => {
       document.getElementById('count').textContent = 'ผลการค้นหา 1 เรซูเม่';
       document.getElementById('results').innerHTML =

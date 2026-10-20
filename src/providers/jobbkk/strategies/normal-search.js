@@ -115,10 +115,12 @@ async function clearJunkSelectTags(page, openerPattern) {
 }
 
 async function pickSearchableValue(page, value) {
-  const search = await firstVisibleLocator([
+  // JobBKK's Ant Design build also puts .ant-select-selection-search-input on a
+  // wrapper div; fill() on that throws, so only accept real typeable controls.
+  const search = await firstEditableLocator([
     page.locator('.ant-select-dropdown:visible input'),
     page.locator('.ant-tree-select-dropdown:visible input'),
-    page.locator('.ant-select-selection-search-input:visible'),
+    page.locator('input.ant-select-selection-search-input:visible'),
     page.locator('[role="dialog"]:visible input[type="search"], [role="dialog"]:visible input[type="text"]'),
   ]);
   if (search) {

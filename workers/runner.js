@@ -218,7 +218,7 @@ async function recoverStale() {
     [STALE_SECONDS],
   );
   if (rowCount) console.log(`  ↻ recovered ${rowCount} stale job(s)`);
-  const recoveredTasks = await recoverStaleRunningTasks(10);
+  const recoveredTasks = await recoverStaleRunningTasks(10, { requeue: false });
   for (const task of recoveredTasks) console.log(`  ↻ recovered stale scrape task: ${task.name}`);
 }
 

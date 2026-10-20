@@ -175,14 +175,22 @@ export async function touchTask(id) {
 export async function setTaskProgressTarget(id, target) {
   await query(`UPDATE scrape_tasks SET progress_target=$2, updated_at=now() WHERE id=$1`, [id, target]);
 }
-/** Unstick tasks whose worker died or hung (no heartbeat for maxStaleMin). */
-export async function recoverStaleRunningTasks(maxStaleMin = 10) {
+/**
+ * Unstick tasks whose worker died or hung (no heartbeat for maxStaleMin).
+ * The legacy tasks-worker polls scrape_tasks itself, so it requeues. The
+ * unified runner only executes work_queue rows: a task set to 'queued' with no
+ * queued job would sit forever, so with requeue=false it becomes 'error' and
+ * the web shows "รันตอนนี้" again — unless a queued job is already waiting.
+ */
+export async function recoverStaleRunningTasks(maxStaleMin = 10, { requeue = true } = {}) {
   const { rows } = await query(
-    `WITH recovered AS (
-       UPDATE scrape_tasks t
-          SET status='queued', phase='idle', progress_got=0,
-              progress_target=COALESCE(t.target_count, 0), last_error=$2,
-              updated_at=now()
+    `WITH stale AS (
+       SELECT t.id,
+              ($3::boolean OR EXISTS (
+                SELECT 1 FROM work_queue w
+                 WHERE w.type='scrape' AND w.ref_id=t.id::text AND w.status='queued'
+              )) AS requeue
+         FROM scrape_tasks t
         WHERE t.status='running'
           AND t.updated_at < now() - ($1::text || ' minutes')::interval
           -- A unified queue worker renews its lease while the browser is alive.
@@ -194,6 +202,17 @@ export async function recoverStaleRunningTasks(maxStaleMin = 10) {
                AND w.ref_id=t.id::text
                AND w.status='running'
           )
+        FOR UPDATE OF t
+     ), recovered AS (
+       UPDATE scrape_tasks t
+          SET status=CASE WHEN s.requeue THEN 'queued' ELSE 'error' END,
+              phase=CASE WHEN s.requeue THEN 'idle' ELSE 'error' END,
+              progress_got=0,
+              progress_target=COALESCE(t.target_count, 0),
+              last_error=CASE WHEN s.requeue THEN $2 ELSE $4 END,
+              updated_at=now()
+         FROM stale s
+        WHERE t.id = s.id
         RETURNING t.id, t.name
      ), abandoned_runs AS (
        UPDATE scrape_runs r
@@ -204,7 +223,12 @@ export async function recoverStaleRunningTasks(maxStaleMin = 10) {
         RETURNING r.id
      )
      SELECT id, name FROM recovered`,
-    [String(maxStaleMin), `ค้างนานเกิน ${maxStaleMin} นาที — จะลองรันใหม่อัตโนมัติ`],
+    [
+      String(maxStaleMin),
+      `ค้างนานเกิน ${maxStaleMin} นาที — จะลองรันใหม่อัตโนมัติ`,
+      requeue,
+      `ค้างนานเกิน ${maxStaleMin} นาทีและไม่มีงานรอในคิว — กด “รันตอนนี้” เพื่อลองใหม่`,
+    ],
   );
   return rows;
 }
