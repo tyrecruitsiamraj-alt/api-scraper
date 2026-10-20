@@ -218,13 +218,28 @@ async function applyProvinceTree(page, aliases, report) {
     page.locator('input#province'),
   ]);
   if (!opener) return null;
+  const debug = process.env.JOBBKK_DEBUG_FILTERS === '1' ? (...args) => console.log('  [province]', ...args) : () => {};
   const bareNames = [...new Set(aliases.map((alias) => String(alias).replace(/^จังหวัด\s*/u, '').trim()).filter(Boolean))];
   for (const name of bareNames) {
-    await clickWithoutNavigationWait(opener);
     const layer = page.locator('.ant-dropdown:visible').first();
-    await layer.waitFor({ state: 'visible', timeout: 5_000 }).catch(() => {});
-    if (!(await layer.isVisible().catch(() => false))) break;
+    // A popup left open by the previous filter swallows the first click, so
+    // retry: close leftovers with Escape, then click the dropdown trigger wrapper.
+    const triggers = [opener, opener.locator('xpath=ancestor::*[contains(@class,"ant-dropdown-trigger")][1]')];
+    let layerOpen = false;
+    for (let attempt = 0; attempt < 3 && !layerOpen; attempt += 1) {
+      await dismissJobbkkOverlays(page);
+      if (attempt > 0) {
+        await page.keyboard.press('Escape').catch(() => {});
+        await sleep(300);
+      }
+      await clickWithoutNavigationWait(triggers[Math.min(attempt, 1)]).catch(() => {});
+      await layer.waitFor({ state: 'visible', timeout: 3_000 }).catch(() => {});
+      layerOpen = await layer.isVisible().catch(() => false);
+    }
+    debug(name, 'dropdown open:', layerOpen);
+    if (!layerOpen) break;
     const search = await firstEditableLocator([layer.locator('input[placeholder]'), layer.locator('input.ant-input')]);
+    debug('search box:', Boolean(search));
     if (search) {
       await search.fill('');
       await search.fill(name);
@@ -235,17 +250,20 @@ async function applyProvinceTree(page, aliases, report) {
         has: page.locator('.ant-tree-title', { hasText: new RegExp(`^\\s*${escapeRegExp(name)}\\s*$`, 'u') }),
       }),
     ]);
+    debug('tree node:', Boolean(node));
     if (node) {
       const box = node.locator('.ant-tree-checkbox').first();
       if ((await box.getAttribute('aria-checked').catch(() => null)) !== 'true') {
         await clickWithoutNavigationWait(box);
         await sleep(250);
       }
+      debug('checked:', await box.getAttribute('aria-checked').catch(() => null));
     }
     await closeOpenLayer(page);
     await page.keyboard.press('Escape').catch(() => {});
     await layer.waitFor({ state: 'hidden', timeout: 2_000 }).catch(() => {});
     const shown = await opener.inputValue().catch(() => '');
+    debug('input value:', JSON.stringify(shown));
     if (shown.includes(name)) {
       report.applied.push('province');
       return true;
