@@ -62,6 +62,7 @@ import {
   getWorkflowSelfTest,
   getConnectorOption,
   enqueueFacebookPreflight,
+  enqueueAssignmentPost,
   recordCandidateActivity,
   reassessCandidateJob,
 } from './repo';
@@ -86,6 +87,25 @@ export async function runWorkflowSelfTestAction() {
     await new Promise((resolve) => setTimeout(resolve, 300));
   }
   revalidatePath('/orchestrator');
+}
+
+export async function postAssignmentNowAction(formData: FormData) {
+  const session = await getServerSession(authOptions);
+  if (!session) throw new Error('unauthorized');
+  const assignmentId = String(formData.get('assignmentId') ?? '').trim();
+  let notice = 'ส่งงานเข้าคิวโพสต์แล้ว รอเครื่อง Worker รับงาน';
+  if (!assignmentId) notice = 'ไม่พบงานโพสต์ที่เลือก';
+  else if (formData.get('confirm') !== 'yes') notice = 'ติ๊กยืนยันก่อนว่าจะโพสต์จริงลงกลุ่ม';
+  else {
+    try {
+      await enqueueAssignmentPost(assignmentId, session.user?.email ?? session.user?.name ?? null);
+    } catch (error) {
+      notice = error instanceof Error ? error.message : String(error);
+    }
+  }
+  revalidatePath('/autopost');
+  revalidatePath('/autopost/jobs');
+  redirect(`/autopost/jobs?notice=${encodeURIComponent(notice)}`);
 }
 
 export async function runFacebookPreflightAction(formData: FormData) {

@@ -3229,6 +3229,82 @@ function autopostId(): string {
   return Date.now().toString(36) + Math.random().toString(36).slice(2);
 }
 
+/** งานโพสต์ที่ผูกบัญชี+กลุ่มไว้แล้วใน Auto-Post — ให้สั่งโพสต์จากหน้าเว็บได้โดยตรง */
+export type PostAssignment = {
+  id: string;
+  job_titles: string;
+  caption_preview: string;
+  has_image: boolean;
+  account_id: string | null;
+  account_label: string | null;
+  preferred_worker: string | null;
+  worker_online: boolean;
+  paused: boolean;
+  group_count: number;
+  last_queue_status: string | null;
+  last_queue_at: string | null;
+};
+
+export async function listPostAssignments(): Promise<PostAssignment[]> {
+  try {
+    return await q<PostAssignment>(
+      `SELECT a.id,
+              COALESCE((SELECT string_agg(COALESCE(NULLIF(TRIM(j.title), ''), j.id), ', ')
+                          FROM ${AP}.jobs j WHERE a.job_ids::jsonb ? j.id), '-') AS job_titles,
+              COALESCE((SELECT left(j.caption, 160) FROM ${AP}.jobs j WHERE a.job_ids::jsonb ? j.id LIMIT 1), '') AS caption_preview,
+              EXISTS (SELECT 1 FROM ${AP}.jobs j WHERE a.job_ids::jsonb ? j.id AND COALESCE(j.image_ref, '') <> '') AS has_image,
+              u.id AS account_id,
+              COALESCE(NULLIF(TRIM(u.name), ''), u.env_key, u.id) AS account_label,
+              u.preferred_worker,
+              EXISTS (SELECT 1 FROM ${AP}.workers w
+                       WHERE w.name=u.preferred_worker AND w.last_seen > now() - interval '2 minutes') AS worker_online,
+              (u.paused_until IS NOT NULL AND u.paused_until > now()) AS paused,
+              COALESCE(jsonb_array_length(CASE WHEN jsonb_typeof(a.group_ids::jsonb)='array' THEN a.group_ids::jsonb ELSE '[]'::jsonb END), 0)::int AS group_count,
+              lq.status AS last_queue_status,
+              lq.created_at AS last_queue_at
+         FROM ${AP}.assignments a
+         LEFT JOIN ${AP}.users u ON u.id = a.user_id
+         LEFT JOIN LATERAL (
+           SELECT q.status, q.created_at FROM ${AP}.post_run_queue q
+            WHERE q.assignment_ids::jsonb ? a.id AND COALESCE(q.mode, 'post') = 'post'
+            ORDER BY q.created_at DESC LIMIT 1
+         ) lq ON true
+        ORDER BY a.id`,
+    );
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * สั่งโพสต์จริง 1 งาน (assignment) เข้าคิว Auto-Post. ตรวจให้ก่อนว่าบัญชีพร้อม
+ * เครื่องที่ผูกออนไลน์ มีกลุ่ม และบัญชีนี้ยังไม่มีคิวค้าง — กันกดซ้ำแล้วโพสต์ซ้ำ.
+ */
+export async function enqueueAssignmentPost(assignmentId: string, requestedBy: string | null): Promise<string> {
+  const rows = (await listPostAssignments()).filter((row) => row.id === assignmentId);
+  const row = rows[0];
+  if (!row) throw new Error('ไม่พบงานโพสต์นี้');
+  if (!row.account_id) throw new Error('งานโพสต์นี้ยังไม่ได้ผูกบัญชี Facebook');
+  if (row.group_count <= 0) throw new Error('งานโพสต์นี้ยังไม่ได้เลือกกลุ่ม');
+  if (row.paused) throw new Error('บัญชี Facebook นี้ถูกพักชั่วคราว');
+  if (!row.preferred_worker) throw new Error('บัญชี Facebook นี้ยังไม่ได้ผูกกับเครื่อง Worker');
+  if (!row.worker_online) throw new Error(`เครื่อง ${row.preferred_worker} ยังออฟไลน์ เปิด Autopost บนเครื่องนั้นก่อน`);
+  const busy = await q<{ n: number }>(
+    `SELECT count(*)::int AS n FROM ${AP}.post_run_queue
+      WHERE user_id=$1 AND status IN ('queued', 'running')`,
+    [row.account_id],
+  );
+  if ((busy[0]?.n ?? 0) > 0) throw new Error('บัญชีนี้มีงานโพสต์รอคิวหรือกำลังโพสต์อยู่แล้ว');
+  const id = autopostId();
+  // requested_by ≠ 'auto-daily' → worker ข้ามเพดานรายวันได้ เพราะคนสั่งเอง
+  await q(
+    `INSERT INTO ${AP}.post_run_queue (id, assignment_ids, user_id, status, requested_by, message)
+     VALUES ($1, $2::jsonb, $3, 'queued', $4, $5)`,
+    [id, JSON.stringify([assignmentId]), row.account_id, requestedBy || 'web', `สั่งโพสต์จากหน้าเว็บ: ${row.job_titles}`],
+  );
+  return id;
+}
+
 // ---------------------------------------------------------------------------
 // จัดการกลุ่มโพสต์ + ผูกกลุ่มเข้าบัญชี (native — แทน iframe เดิม)
 // ---------------------------------------------------------------------------
