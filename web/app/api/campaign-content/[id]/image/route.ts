@@ -4,7 +4,8 @@ import { getContentImageBytes } from '@/lib/repo';
 
 // สตรีมรูปที่ AI สร้าง (campaign_contents.image_bytes bytea) ให้หน้า approval แสดง.
 // Auth-gated: เฉพาะผู้ล็อกอินเท่านั้น.
-export async function GET(_req: Request, { params }: { params: { id: string } }) {
+export async function GET(_req: Request, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const session = await getServerSession(authOptions);
   if (!session) return new Response('Unauthorized', { status: 401 });
 

@@ -52,7 +52,8 @@ function MetricCard({ label, m }: { label: string; m: ReportMetric }) {
   );
 }
 
-export default async function WeeklyReportPage({ searchParams }: { searchParams?: { w?: string } }) {
+export default async function WeeklyReportPage(props: { searchParams?: Promise<{ w?: string }> }) {
+  const searchParams = await props.searchParams;
   const offset = Math.max(0, Math.min(52, parseInt(searchParams?.w ?? '0', 10) || 0));
   const report = await weeklyReport(offset);
 

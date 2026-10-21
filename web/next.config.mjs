@@ -5,23 +5,24 @@ const require = createRequire(import.meta.url);
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
+  // Next 15: ย้าย 2 ค่านี้ออกจาก experimental
+  serverExternalPackages: [
+    'pg',
+    'playwright',
+    'cheerio',
+    'dotenv',
+    'puppeteer-core',
+    '@sparticuz/chromium-min',
+  ],
+  outputFileTracingIncludes: {
+    '/api/candidates/[id]/pdf': ['./node_modules/@sparticuz/chromium-min/**/*'],
+    '/orchestrator/[id]/page': ['./node_modules/@sparticuz/chromium-min/**/*'],
+    '/(app)/orchestrator/[id]/page': ['./node_modules/@sparticuz/chromium-min/**/*'],
+  },
   experimental: {
     externalDir: true,
-    serverComponentsExternalPackages: [
-      'pg',
-      'playwright',
-      'cheerio',
-      'dotenv',
-      'puppeteer-core',
-      '@sparticuz/chromium-min',
-    ],
     serverActions: {
       bodySizeLimit: '4mb',
-    },
-    outputFileTracingIncludes: {
-      '/api/candidates/[id]/pdf': ['./node_modules/@sparticuz/chromium-min/**/*'],
-      '/orchestrator/[id]/page': ['./node_modules/@sparticuz/chromium-min/**/*'],
-      '/(app)/orchestrator/[id]/page': ['./node_modules/@sparticuz/chromium-min/**/*'],
     },
   },
   webpack(config) {

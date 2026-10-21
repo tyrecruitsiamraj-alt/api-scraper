@@ -60,11 +60,12 @@ function activityTime(s: string | null, by: string | null) {
   return `${relTime(s)}${by ? ` · ${by}` : ''}`;
 }
 
-export default async function CandidatesPage({
-  searchParams,
-}: {
-  searchParams: { q?: string; platform?: string; position?: string; province?: string; updated?: string; activity?: string; page?: string };
-}) {
+export default async function CandidatesPage(
+  props: {
+    searchParams: Promise<{ q?: string; platform?: string; position?: string; province?: string; updated?: string; activity?: string; page?: string }>;
+  }
+) {
+  const searchParams = await props.searchParams;
   const search = searchParams.q?.trim() || undefined;
   const platform = searchParams.platform || undefined;
   const position = searchParams.position?.trim() || undefined;

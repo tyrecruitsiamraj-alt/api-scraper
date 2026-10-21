@@ -57,7 +57,11 @@ function fmt(value: string | null) {
   return value ? new Intl.DateTimeFormat('th-TH', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(value)) : '—';
 }
 
-export default async function CandidateJobDetailPage({ params, searchParams }: { params: { taskId: string }; searchParams?: { rescored?: string } }) {
+export default async function CandidateJobDetailPage(
+  props: { params: Promise<{ taskId: string }>; searchParams?: Promise<{ rescored?: string }> }
+) {
+  const searchParams = await props.searchParams;
+  const params = await props.params;
   const [job, rows] = await Promise.all([getCandidateJobGroup(params.taskId), listCandidateJobMatches(params.taskId)]);
   if (!job) notFound();
   const title = operatorJobTitle({ position: job.position, title: job.name, requestNo: job.source_request_no });

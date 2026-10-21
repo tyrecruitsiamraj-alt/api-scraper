@@ -3,7 +3,8 @@ import { authOptions } from '@/lib/auth';
 import { getContentSourceImageBytes } from '@/lib/repo';
 
 /** ภาพก่อนวางข้อความบนโปสเตอร์ ใช้เฉพาะพื้นที่แก้สื่อของผู้ใช้ที่ล็อกอินแล้ว. */
-export async function GET(_req: Request, { params }: { params: { id: string } }) {
+export async function GET(_req: Request, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const session = await getServerSession(authOptions);
   if (!session) return new Response('Unauthorized', { status: 401 });
   if (!/^[0-9a-f-]{36}$/i.test(params.id)) return new Response('Bad id', { status: 400 });

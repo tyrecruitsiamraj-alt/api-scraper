@@ -42,7 +42,8 @@ function fmtActivity(s: string | null) {
   return s ? new Date(s).toLocaleString('th-TH', { timeZone: 'Asia/Bangkok', dateStyle: 'medium', timeStyle: 'short' }) : '';
 }
 
-export default async function CandidateDetail({ params }: { params: { id: string } }) {
+export default async function CandidateDetail(props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const c = await getCandidate(params.id);
   if (!c) notFound();
 

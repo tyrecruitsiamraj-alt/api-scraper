@@ -1,7 +1,6 @@
 import { Breadcrumb, BreadcrumbItem, BreadcrumbLink, BreadcrumbList, BreadcrumbPage, BreadcrumbSeparator } from '@/components/ui/breadcrumb';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
-import nextDynamic from 'next/dynamic';
 import {
   ArrowLeftIcon,
   CheckIcon,
@@ -35,19 +34,8 @@ import { Separator } from '@/components/ui/separator';
 import { Spinner } from '@/components/ui/spinner';
 import { Textarea } from '@/components/ui/textarea';
 import { cn } from '@/lib/utils';
+import { ContentReviewWorkspace } from '@/components/ContentReviewWorkspaceLazy';
 
-const ContentReviewWorkspace = nextDynamic(
-  () => import('@/components/ContentReviewWorkspace').then((mod) => mod.ContentReviewWorkspace),
-  {
-    ssr: false,
-    loading: () => (
-      <div className="flex items-center gap-2 rounded-xl border p-6 text-sm text-muted-foreground">
-        <Spinner />
-        กำลังเปิดตัวแก้รูป
-      </div>
-    ),
-  },
-);
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
@@ -239,7 +227,11 @@ function aggregateByContent(posts: CampaignPostRow[]): Map<string, Engagement> {
   return map;
 }
 
-export default async function CampaignDetail({ params, searchParams }: { params: { id: string }; searchParams?: { contentError?: string; contentSaved?: string; standard?: string } }) {
+export default async function CampaignDetail(
+  props: { params: Promise<{ id: string }>; searchParams?: Promise<{ contentError?: string; contentSaved?: string; standard?: string }> }
+) {
+  const searchParams = await props.searchParams;
+  const params = await props.params;
   try {
     return await renderCampaignDetail({ params, searchParams });
   } catch (error) {

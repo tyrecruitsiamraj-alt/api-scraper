@@ -32,11 +32,12 @@ function Stat({ label, value, sub }: { label: string; value: string | number; su
   );
 }
 
-export default async function AutopostResultsPage({
-  searchParams,
-}: {
-  searchParams?: { days?: string };
-}) {
+export default async function AutopostResultsPage(
+  props: {
+    searchParams?: Promise<{ days?: string }>;
+  }
+) {
+  const searchParams = await props.searchParams;
   const rangeKey = searchParams?.days && RANGES.some((r) => r.key === searchParams.days) ? searchParams.days : 'all';
   const range = RANGES.find((r) => r.key === rangeKey)!;
 

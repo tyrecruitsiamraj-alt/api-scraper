@@ -4,7 +4,8 @@ import { getAssetBytes } from '@/lib/repo';
 
 // Stream a candidate asset (image/pdf) from Postgres bytea.
 // Auth-gated: only signed-in users may fetch candidate files.
-export async function GET(_req: Request, { params }: { params: { id: string } }) {
+export async function GET(_req: Request, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const session = await getServerSession(authOptions);
   if (!session) return new Response('Unauthorized', { status: 401 });
 

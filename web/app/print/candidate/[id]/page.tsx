@@ -42,7 +42,8 @@ function Field({ label, value }: { label: string; value?: unknown }) {
   );
 }
 
-export default async function PrintResume({ params }: { params: { id: string } }) {
+export default async function PrintResume(props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const session = await getServerSession(authOptions);
   if (!session) redirect('/');
   if (!/^[0-9a-f-]{36}$/i.test(params.id)) notFound();
