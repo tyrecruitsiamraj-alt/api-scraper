@@ -3270,7 +3270,23 @@ export type JarvisPostOrder = {
   queue_status: string | null;
   queue_at: string | null;
   post_link: string | null;
+  /** โพสต์ที่ worker ยืนยันว่ากดโพสต์สำเร็จ (ล่าสุดก่อน) */
+  posts: JarvisPostRecord[];
+  /** กลุ่มที่เลือกได้ตอนสั่งโพสต์ซ้ำ */
+  repost_groups: JarvisRepostGroup[];
 };
+
+export type JarvisPostRecord = { at: string; group_name: string; worker: string | null };
+export type JarvisRepostGroup = {
+  id: string;
+  name: string;
+  account_label: string | null;
+  /** โพสต์งานนี้ลงกลุ่มนี้ได้อีกเมื่อไร (null = ได้เลย) */
+  blocked_until: string | null;
+};
+
+/** worker ข้ามคู่ งาน+กลุ่ม ที่โพสต์ไปไม่ถึงกี่วัน (POST_REPOST_MIN_GAP_DAYS ฝั่ง Auto-Post) */
+export const REPOST_MIN_GAP_DAYS = 2;
 
 const POST_MODE_LABEL: Record<string, string> = {
   caption_only: 'caption อย่างเดียว',
@@ -3325,9 +3341,16 @@ export async function listJarvisPostOrders(): Promise<JarvisPostOrder[]> {
   } catch {
     return [];
   }
-  const groupNames = new Map(
-    (await q<{ id: string; name: string }>(`SELECT id, name FROM ${AP}.groups`).catch(() => [])).map((g) => [g.id, g.name]),
-  );
+  const groupRows = await q<{ id: string; name: string; fb_group_id: string; account_label: string | null }>(
+    `SELECT g.id, g.name, g.fb_group_id,
+            (SELECT COALESCE(NULLIF(TRIM(u.name), ''), u.env_key, u.id) FROM ${AP}.users u
+              WHERE COALESCE(u.group_ids::jsonb, '[]'::jsonb) ? g.id
+                AND (u.paused_until IS NULL OR u.paused_until <= now())
+              ORDER BY 1 LIMIT 1) AS account_label
+       FROM ${AP}.groups g ORDER BY g.name`,
+  ).catch(() => []);
+  const groupNames = new Map(groupRows.map((g) => [g.id, g.name]));
+  const groupNamesByFb = new Map(groupRows.map((g) => [String(g.fb_group_id), g.name]));
   const out: JarvisPostOrder[] = [];
   for (const row of rows) {
     const s = row.snapshot ?? {};
@@ -3340,11 +3363,44 @@ export async function listJarvisPostOrders(): Promise<JarvisPostOrder[]> {
     if (!groupIds.length) issues.push('ยังไม่ได้เลือกกลุ่มใน Jarvis');
     const account = await pickPostAccount(groupIds);
     if (groupIds.length && !account) issues.push('ไม่มีบัญชี Facebook ที่ผูกกับกลุ่มนี้');
+    // รวมรอบโพสต์ซ้ำ (assignment jv-…-rN) ด้วย
     const queue = await q<{ status: string; created_at: string }>(
       `SELECT status, created_at FROM ${AP}.post_run_queue
-        WHERE assignment_ids::jsonb ? $1 ORDER BY created_at DESC LIMIT 1`,
+        WHERE EXISTS (SELECT 1 FROM jsonb_array_elements_text(assignment_ids::jsonb) a
+                       WHERE a = $1 OR a LIKE $1 || '-r%')
+        ORDER BY created_at DESC LIMIT 1`,
       [jobId],
     ).catch(() => []);
+    const postRows = await q<{ at: string; group_id: string | null; worker_id: string | null }>(
+      `SELECT l.created_at AS at, l.group_id, pq.worker_id
+         FROM ${AP}.run_logs l
+         LEFT JOIN ${AP}.post_run_queue pq ON pq.run_id = l.run_id
+        WHERE l.job_id = $1 AND l.level = 'success'
+        ORDER BY l.created_at DESC`,
+      [jobId],
+    ).catch(() => []);
+    const posts: JarvisPostRecord[] = postRows.map((p) => ({
+      at: p.at,
+      group_name: groupNamesByFb.get(String(p.group_id ?? '')) ?? String(p.group_id ?? '-'),
+      // worker_id = ชื่อเครื่อง-pid
+      worker: p.worker_id ? p.worker_id.replace(/-\d+$/, '') : null,
+    }));
+    const lastPostByFb = new Map<string, number>();
+    for (const p of postRows) {
+      const key = String(p.group_id ?? '');
+      const t = new Date(p.at).getTime();
+      if (t > (lastPostByFb.get(key) ?? 0)) lastPostByFb.set(key, t);
+    }
+    const repostGroups: JarvisRepostGroup[] = groupRows.map((g) => {
+      const last = lastPostByFb.get(String(g.fb_group_id));
+      const until = last ? last + REPOST_MIN_GAP_DAYS * 86_400_000 : 0;
+      return {
+        id: g.id,
+        name: g.name,
+        account_label: g.account_label,
+        blocked_until: until > Date.now() ? new Date(until).toISOString() : null,
+      };
+    });
     const posted = await q<{ post_link: string | null }>(
       `SELECT post_link FROM ${AP}.post_logs
         WHERE job_id = $1 AND COALESCE(post_link, '') <> '' ORDER BY created_at DESC LIMIT 1`,
@@ -3381,9 +3437,83 @@ export async function listJarvisPostOrders(): Promise<JarvisPostOrder[]> {
       queue_status: queue[0]?.status ?? null,
       queue_at: queue[0]?.created_at ?? null,
       post_link: posted[0]?.post_link ?? null,
+      posts,
+      repost_groups: repostGroups,
     });
   }
   return out;
+}
+
+/**
+ * โพสต์คำสั่งจาก Jarvis ที่โพสต์ไปแล้วซ้ำอีกรอบ ลงกลุ่มที่เลือกเอง: ใช้ job เดิม (อัปเดต caption
+ * เป็นฉบับล่าสุดจาก Jarvis) + assignment ใหม่ jv-…-rN แล้วเข้าคิวโพสต์ สถานะใน Jarvis คงเป็น posted.
+ */
+export async function repostJarvisOrder(requestNo: string, groupIds: string[], requestedBy: string | null): Promise<string> {
+  const order = (await listJarvisPostOrders()).find((o) => o.request_no === requestNo);
+  if (!order) throw new Error(`ไม่พบคำสั่งโพสต์ ${requestNo}`);
+  if (order.jarvis_status === 'pending') throw new Error('ใบนี้ยังไม่เคยโพสต์ ใช้ปุ่มโพสต์ปกติก่อน');
+  if (order.queue_status === 'queued' || order.queue_status === 'running') throw new Error('ใบนี้มีรอบโพสต์รอคิวหรือกำลังโพสต์อยู่');
+  const captionIssues = postCaptionIssues(order.caption);
+  if (order.post_mode !== 'caption_only') captionIssues.push(`ชนิด "${postModeLabel(order.post_mode)}" ยังต้องรอระบบแนบรูป`);
+  if (captionIssues.length) throw new Error(`ยังโพสต์ไม่ได้: ${captionIssues.join(', ')}`);
+
+  const wanted = [...new Set(groupIds.map(String).filter(Boolean))];
+  if (!wanted.length) throw new Error('เลือกกลุ่มอย่างน้อย 1 กลุ่ม');
+  const known = new Map(order.repost_groups.map((g) => [g.id, g]));
+  const unknown = wanted.filter((id) => !known.has(id));
+  if (unknown.length) throw new Error('มีกลุ่มที่ไม่อยู่ในระบบ ลองโหลดหน้าใหม่');
+  const blocked = wanted.map((id) => known.get(id)!).filter((g) => g.blocked_until);
+  if (blocked.length) {
+    throw new Error(`งานนี้เพิ่งโพสต์ลง ${blocked.map((g) => g.name).join(', ')} ต้องเว้น ${REPOST_MIN_GAP_DAYS} วันก่อนโพสต์ซ้ำกลุ่มเดิม`);
+  }
+
+  const account = await pickPostAccount(wanted);
+  if (!account) throw new Error('ไม่มีบัญชี Facebook ที่ผูกกับกลุ่มที่เลือก');
+  const accountGroups = new Set((account.group_ids ?? []).map(String));
+  const otherAccount = wanted.filter((id) => !accountGroups.has(id));
+  if (otherAccount.length) {
+    throw new Error(`กลุ่ม ${otherAccount.map((id) => known.get(id)!.name).join(', ')} ใช้คนละบัญชีกับ ${account.label} — สั่งแยกทีละบัญชี`);
+  }
+  if (!account.worker_online) throw new Error('เครื่องที่ผูกกับบัญชี Facebook ยังออฟไลน์ เปิด Autopost บนเครื่องนั้นก่อน');
+
+  const jobId = jarvisPostJobId(requestNo);
+  const queueId = autopostId();
+  const client = await pool().connect();
+  try {
+    await client.query('BEGIN');
+    const busy = await client.query<{ n: number }>(
+      `SELECT count(*)::int AS n FROM ${AP}.post_run_queue WHERE user_id=$1 AND status IN ('queued', 'running')`,
+      [account.id],
+    );
+    if ((busy.rows[0]?.n ?? 0) > 0) throw new Error('บัญชีนี้มีงานโพสต์รอคิวหรือกำลังโพสต์อยู่แล้ว ลองใหม่เมื่อเสร็จ');
+    await client.query(
+      `INSERT INTO ${AP}.jobs (id, title, owner, company, caption, status)
+       VALUES ($1, $2, 'SO Recruitment', 'SO Recruitment', $3, 'pending')
+       ON CONFLICT (id) DO UPDATE SET caption = EXCLUDED.caption`,
+      [jobId, `${order.position} · ${requestNo}`, order.caption],
+    );
+    const prior = await client.query<{ n: number }>(
+      `SELECT count(*)::int AS n FROM ${AP}.assignments WHERE id = $1 OR id LIKE $1 || '-r%'`,
+      [jobId],
+    );
+    const assignmentId = `${jobId}-r${(prior.rows[0]?.n ?? 0) + 1}`;
+    await client.query(
+      `INSERT INTO ${AP}.assignments (id, job_ids, group_ids, user_id) VALUES ($1, $2::jsonb, $3::jsonb, $4)`,
+      [assignmentId, JSON.stringify([jobId]), JSON.stringify(wanted), account.id],
+    );
+    await client.query(
+      `INSERT INTO ${AP}.post_run_queue (id, assignment_ids, user_id, status, requested_by, message)
+       VALUES ($1, $2::jsonb, $3, 'queued', $4, $5)`,
+      [queueId, JSON.stringify([assignmentId]), account.id, requestedBy || 'web', `Jarvis ${requestNo} (โพสต์ซ้ำ)`],
+    );
+    await client.query('COMMIT');
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally {
+    client.release();
+  }
+  return queueId;
 }
 
 /**

@@ -1,7 +1,7 @@
 import Link from 'next/link';
-import { listJarvisPostOrders, listPostAssignments, postModeLabel } from '@/lib/repo';
+import { listJarvisPostOrders, listPostAssignments, postModeLabel, REPOST_MIN_GAP_DAYS } from '@/lib/repo';
 import type { JarvisPostOrder } from '@/lib/repo';
-import { postAssignmentNowAction, postJarvisOrderAction, runFacebookPreflightAction } from '@/lib/actions';
+import { postAssignmentNowAction, postJarvisOrderAction, repostJarvisOrderAction, runFacebookPreflightAction } from '@/lib/actions';
 import { AutopostNav } from '@/components/AutopostNav';
 
 export const dynamic = 'force-dynamic';
@@ -11,6 +11,55 @@ const JARVIS_STATUS: Record<string, { label: string; cls: string }> = {
   in_progress: { label: 'กำลังโพสต์', cls: 'bg-blue-50 text-blue-700' },
   posted: { label: 'โพสต์แล้ว', cls: 'bg-emerald-50 text-emerald-700' },
 };
+
+// เซิร์ฟเวอร์ Vercel เป็น UTC — บังคับเวลาไทย
+function thaiTime(value: string | null): string {
+  if (!value) return '-';
+  return new Date(value).toLocaleString('th-TH', {
+    timeZone: 'Asia/Bangkok', day: 'numeric', month: 'short', year: '2-digit', hour: '2-digit', minute: '2-digit',
+  });
+}
+
+function RepostForm({ order }: { order: JarvisPostOrder }) {
+  const busy = order.queue_status === 'queued' || order.queue_status === 'running';
+  const pickable = order.repost_groups.filter((g) => g.account_label && !g.blocked_until);
+  return (
+    <details className="rounded-lg border border-line px-3 py-2">
+      <summary className="cursor-pointer text-sm font-medium">โพสต์ซ้ำ</summary>
+      <form action={repostJarvisOrderAction} className="mt-3 space-y-3">
+        <input type="hidden" name="requestNo" value={order.request_no} />
+        <div className="space-y-1.5">
+          <div className="text-xs text-subtle">เลือกกลุ่ม</div>
+          {order.repost_groups.map((g) => (
+            <label key={g.id} className="flex flex-wrap items-center gap-2 text-sm">
+              <input type="checkbox" name="groupId" value={g.id} disabled={busy || !g.account_label || Boolean(g.blocked_until)} />
+              <span>{g.name}</span>
+              <span className="text-xs text-subtle">
+                {!g.account_label
+                  ? 'ยังไม่มีบัญชี Facebook ที่ผูกกลุ่มนี้'
+                  : g.blocked_until
+                    ? `โพสต์งานนี้ไปแล้ว โพสต์ซ้ำได้หลัง ${thaiTime(g.blocked_until)}`
+                    : `โพสต์ด้วย ${g.account_label}`}
+              </span>
+            </label>
+          ))}
+          <p className="text-xs text-subtle">
+            กลุ่มเดิมต้องเว้น {REPOST_MIN_GAP_DAYS} วัน · เพิ่มกลุ่มได้ที่{' '}
+            <Link href="/settings/posting" className="underline">ตั้งค่าการโพสต์</Link>
+          </p>
+        </div>
+        {busy && <p className="text-sm text-amber-700">มีรอบโพสต์ของใบนี้รอคิวอยู่ รอให้เสร็จก่อน</p>}
+        <div className="flex flex-wrap items-center gap-3">
+          <label className="flex items-center gap-2 text-sm">
+            <input type="checkbox" name="confirm" value="yes" required disabled={busy || !pickable.length} />
+            ยืนยันว่าจะโพสต์จริงลงกลุ่ม
+          </label>
+          <button className="btn-primary btn-sm" disabled={busy || !pickable.length}>โพสต์ซ้ำ</button>
+        </div>
+      </form>
+    </details>
+  );
+}
 
 function JarvisOrderCard({ order }: { order: JarvisPostOrder }) {
   const status = JARVIS_STATUS[order.jarvis_status] ?? { label: order.jarvis_status, cls: 'bg-black/5 text-ink' };
@@ -26,6 +75,7 @@ function JarvisOrderCard({ order }: { order: JarvisPostOrder }) {
             {order.request_no} · {postModeLabel(order.post_mode)} · {order.group_names.join(', ') || 'ไม่มีกลุ่ม'}
             {order.account_label ? ` · โพสต์ด้วย ${order.account_label}` : ''}
             {order.requested_by_name ? ` · สั่งโดย ${order.requested_by_name}` : ''}
+            {` · Jarvis สั่งเมื่อ ${thaiTime(order.created_at)}`}
           </div>
         </div>
         <span className={`pill ${status.cls}`}>{status.label}</span>
@@ -33,6 +83,18 @@ function JarvisOrderCard({ order }: { order: JarvisPostOrder }) {
       <pre className="max-h-64 overflow-auto whitespace-pre-wrap rounded-lg bg-black/[0.03] p-3 font-sans text-sm">{order.caption}</pre>
       {order.post_link && (
         <a href={order.post_link} target="_blank" rel="noreferrer" className="text-sm text-accent underline">เปิดโพสต์บน Facebook</a>
+      )}
+      {order.posts.length > 0 && (
+        <div className="space-y-1">
+          <div className="text-xs font-medium text-subtle">ประวัติการโพสต์</div>
+          <ul className="space-y-0.5 text-sm">
+            {order.posts.map((p) => (
+              <li key={`${p.at}-${p.group_name}`}>
+                {thaiTime(p.at)} · {p.group_name}{p.worker ? ` · เครื่อง ${p.worker}` : ''}
+              </li>
+            ))}
+          </ul>
+        </div>
       )}
       {failed && <p className="text-sm text-red-700">โพสต์ไม่สำเร็จ ดูสาเหตุในบันทึกการโพสต์ด้านล่างหน้า "ภาพรวมการโพสต์"</p>}
       {order.jarvis_status === 'pending' && (
@@ -48,6 +110,7 @@ function JarvisOrderCard({ order }: { order: JarvisPostOrder }) {
           </form>
         </>
       )}
+      {order.jarvis_status !== 'pending' && <RepostForm order={order} />}
     </div>
   );
 }

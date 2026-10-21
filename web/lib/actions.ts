@@ -64,6 +64,7 @@ import {
   enqueueFacebookPreflight,
   enqueueAssignmentPost,
   postJarvisOrder,
+  repostJarvisOrder,
   recordCandidateActivity,
   reassessCandidateJob,
 } from './repo';
@@ -100,6 +101,26 @@ export async function postJarvisOrderAction(formData: FormData) {
   else {
     try {
       await postJarvisOrder(requestNo, session.user?.email ?? session.user?.name ?? null);
+    } catch (error) {
+      notice = error instanceof Error ? error.message : String(error);
+    }
+  }
+  revalidatePath('/autopost');
+  revalidatePath('/autopost/jobs');
+  redirect(`/autopost/jobs?notice=${encodeURIComponent(notice)}`);
+}
+
+export async function repostJarvisOrderAction(formData: FormData) {
+  const session = await getServerSession(authOptions);
+  if (!session) throw new Error('unauthorized');
+  const requestNo = String(formData.get('requestNo') ?? '').trim();
+  const groupIds = formData.getAll('groupId').map(String);
+  let notice = `ส่ง ${requestNo} เข้าคิวโพสต์ซ้ำแล้ว รอเครื่อง Worker รับงาน`;
+  if (!requestNo) notice = 'ไม่พบคำสั่งโพสต์ที่เลือก';
+  else if (formData.get('confirm') !== 'yes') notice = 'ติ๊กยืนยันก่อนว่าจะโพสต์จริงลงกลุ่ม';
+  else {
+    try {
+      await repostJarvisOrder(requestNo, groupIds, session.user?.email ?? session.user?.name ?? null);
     } catch (error) {
       notice = error instanceof Error ? error.message : String(error);
     }
