@@ -17,7 +17,7 @@ const DOW_TH = ['อา', 'จ', 'อ', 'พ', 'พฤ', 'ศ', 'ส'];
 
 function fmtDate(iso: string): string {
   const d = new Date(iso);
-  return d.toLocaleDateString('th-TH', { day: 'numeric', month: 'short', year: '2-digit' });
+  return d.toLocaleDateString('th-TH', { timeZone: 'Asia/Bangkok', day: 'numeric', month: 'short', year: '2-digit' });
 }
 
 /** เทียบสัปดาห์ก่อน (WoW) เป็น % */
@@ -70,7 +70,7 @@ export default async function WeeklyReportPage({ searchParams }: { searchParams?
         posts: hit?.posts ?? 0,
         leads: hit?.leads ?? 0,
         dow: d.getDay(),
-        label: d.toLocaleDateString('th-TH', { day: 'numeric', month: 'short' }),
+        label: d.toLocaleDateString('th-TH', { timeZone: 'Asia/Bangkok', day: 'numeric', month: 'short' }),
       });
     }
   }

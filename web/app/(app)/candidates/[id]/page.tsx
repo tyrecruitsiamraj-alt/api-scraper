@@ -39,7 +39,7 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 }
 
 function fmtActivity(s: string | null) {
-  return s ? new Date(s).toLocaleString('th-TH', { dateStyle: 'medium', timeStyle: 'short' }) : '';
+  return s ? new Date(s).toLocaleString('th-TH', { timeZone: 'Asia/Bangkok', dateStyle: 'medium', timeStyle: 'short' }) : '';
 }
 
 export default async function CandidateDetail({ params }: { params: { id: string } }) {

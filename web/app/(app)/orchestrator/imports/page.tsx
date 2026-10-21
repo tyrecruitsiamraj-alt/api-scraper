@@ -16,7 +16,7 @@ export const dynamic = 'force-dynamic';
 function fmtDate(v: string | null): string {
   if (!v) return '—';
   try {
-    return new Date(v).toLocaleDateString('th-TH', { day: '2-digit', month: 'short', year: '2-digit' });
+    return new Date(v).toLocaleDateString('th-TH', { timeZone: 'Asia/Bangkok', day: '2-digit', month: 'short', year: '2-digit' });
   } catch {
     return String(v);
   }

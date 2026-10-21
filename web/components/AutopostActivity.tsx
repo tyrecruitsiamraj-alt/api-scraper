@@ -52,7 +52,7 @@ function timeAgo(s: string | null): string {
   return `${Math.floor(h / 24)} วันก่อน`;
 }
 function fmt(s: string) {
-  return new Date(s).toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  return new Date(s).toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit', second: '2-digit', timeZone: 'Asia/Bangkok' });
 }
 
 export function AutopostActivity({ initial }: { initial: Activity | null }) {

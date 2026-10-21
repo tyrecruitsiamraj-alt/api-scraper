@@ -35,7 +35,7 @@ function RunStatus({ status }: { status: string }) {
 function fmt(v: string | null): string {
   if (!v) return '—';
   try {
-    return new Date(v).toLocaleString('th-TH', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' });
+    return new Date(v).toLocaleString('th-TH', { timeZone: 'Asia/Bangkok', day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' });
   } catch {
     return String(v);
   }

@@ -37,7 +37,7 @@ const PLATFORM_LABEL: Record<string, string> = { jobbkk: 'JobBKK', jobthai: 'Job
 /** Full timestamp for the title attribute (hover). */
 function fmtFull(s: string | null) {
   if (!s) return '—';
-  return new Date(s).toLocaleString('th-TH', { dateStyle: 'long', timeStyle: 'short' });
+  return new Date(s).toLocaleString('th-TH', { timeZone: 'Asia/Bangkok', dateStyle: 'long', timeStyle: 'short' });
 }
 
 /** Compact relative label: "เมื่อสักครู่ · 12 นาทีที่แล้ว · 3 ชม.ที่แล้ว · 30 มิ.ย." */
@@ -52,7 +52,7 @@ function relTime(s: string | null) {
   if (hr < 24) return `${hr} ชม.ที่แล้ว`;
   const day = Math.floor(hr / 24);
   if (day < 7) return `${day} วันก่อน`;
-  return d.toLocaleDateString('th-TH', { day: 'numeric', month: 'short', year: '2-digit' });
+  return d.toLocaleDateString('th-TH', { timeZone: 'Asia/Bangkok', day: 'numeric', month: 'short', year: '2-digit' });
 }
 
 function activityTime(s: string | null, by: string | null) {

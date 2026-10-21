@@ -197,7 +197,7 @@ const STAGE_BADGE: Record<WorkCenterStage, 'default' | 'secondary' | 'outline' |
 
 function fmtDate(value: string) {
   try {
-    return new Date(value).toLocaleString('th-TH', { dateStyle: 'short', timeStyle: 'short' });
+    return new Date(value).toLocaleString('th-TH', { dateStyle: 'short', timeStyle: 'short', timeZone: 'Asia/Bangkok' });
   } catch {
     return value;
   }

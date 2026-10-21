@@ -31,7 +31,7 @@ function OcrPanel({ asset }: { asset: Asset }) {
         <CardTitle>ข้อความที่อ่านได้ (OCR)</CardTitle>
         <CardAction>
           {status === 'success' ? (
-            <Badge variant="secondary">{text.length.toLocaleString()} ตัวอักษร</Badge>
+            <Badge variant="secondary">{text.length.toLocaleString('th-TH')} ตัวอักษร</Badge>
           ) : status === 'pending' ? (
             <Badge variant="outline">รอ OCR</Badge>
           ) : (

@@ -24,7 +24,7 @@ const PLATFORM: Record<string, { label: string; letter: string }> = {
 
 function fmtDate(s: string | null) {
   if (!s) return 'ยังไม่มีข้อมูล';
-  return new Date(s).toLocaleString('th-TH', { dateStyle: 'medium', timeStyle: 'short' });
+  return new Date(s).toLocaleString('th-TH', { timeZone: 'Asia/Bangkok', dateStyle: 'medium', timeStyle: 'short' });
 }
 
 export default async function SettingsConnectorsPage() {

@@ -22,7 +22,7 @@ function pct(n: number, total: number) {
 }
 function fmtDate(s: string | null) {
   if (!s) return '—';
-  return new Date(s).toLocaleString('th-TH', { dateStyle: 'short', timeStyle: 'short' });
+  return new Date(s).toLocaleString('th-TH', { timeZone: 'Asia/Bangkok', dateStyle: 'short', timeStyle: 'short' });
 }
 
 function Stat({ label, value, sub }: { label: string; value: string | number; sub?: string }) {
