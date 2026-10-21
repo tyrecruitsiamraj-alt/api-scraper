@@ -1,193 +1,280 @@
-import {
-  listSoRecruitPostingRequests,
-  listFacebookAccounts,
-  listConnectorOptions,
-  listTasks,
-  listJarvisPostOrders,
-  postModeLabel,
-} from '@/lib/repo';
-import { ChevronDownIcon } from 'lucide-react';
+import Link from 'next/link';
+import { ChevronDownIcon, ChevronRightIcon, CircleAlertIcon } from 'lucide-react';
+import { listJarvisPostOrders, listSoRecruitPostingRequests, listTasks } from '@/lib/repo';
+import { listPostTasks } from '@/lib/post-tasks';
+import type { PostTask } from '@/lib/post-tasks';
+import { listJarvisScrapRequests, scrapTaskUpdatedAt, toScrapTaskRow } from '@/lib/scrap-tasks';
+import type { ScrapTaskRowData } from '@/components/scrap/ScrapTaskRow';
+import { rejectDisabledContentRequestsAction } from '@/lib/actions';
+import { operatorJobTitle } from '@/lib/operator-copy';
+import { isContentGenerationEnabled, productScopeSummary } from '@/lib/product-scope';
 import { AutoRefresh } from '@/components/AutoRefresh';
 import { WorkerStatus } from '@/components/WorkerStatus';
-import { WorkCenter, type PostOrderSummary, type WorkCenterItem, type WorkCenterStage, type Step } from '@/components/WorkCenter';
-import { humanizeOperatorError, operatorJobTitle } from '@/lib/operator-copy';
-import { prefillScrapePlan } from '@/lib/scrape-intake.js';
-import { isContentGenerationEnabled, productScopeSummary } from '@/lib/product-scope';
-import { Alert, AlertDescription } from '@/components/ui/alert';
+import { ScrapStatusBadge } from '@/components/scrap/ScrapStatusBadge';
+import { countsLine, GroupStrip, taskStageBadge } from '@/components/post/post-ui';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
+import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
+import { Empty, EmptyHeader, EmptyTitle } from '@/components/ui/empty';
+import { Item, ItemActions, ItemContent, ItemDescription, ItemGroup, ItemTitle } from '@/components/ui/item';
 
 export const dynamic = 'force-dynamic';
 
-const STEP_LABELS = ['รับงาน', 'เตรียมงาน', 'ตรวจงาน', 'หาผู้สมัคร', 'เผยแพร่', 'เห็นผล'] as const;
-type S = Step['state'];
-const mkSteps = (states: [S, S, S, S, S, S]): Step[] =>
-  STEP_LABELS.map((label, i) => ({ label, state: states[i] }));
-
-/** Scraping: รับงาน → เตรียมของ → อนุมัติ → Scrape → [Auto post ข้าม] → เสร็จ */
-function scrapeSteps(status: string, reviewStatus?: string): Step[] {
-  let scrape: S = 'todo';
-  if (status === 'queued' || status === 'running') scrape = 'active';
-  else if (status === 'error' || status === 'partial') scrape = 'failed';
-  else if (status === 'done') scrape = 'done';
-
-  let done: S = 'todo';
-  if (status === 'done') done = reviewStatus === 'pending' ? 'active' : 'done';
-
-  return mkSteps(['done', 'done', 'done', scrape, 'skip', done]);
+function Count({ label, value, href, tone }: { label: string; value: number; href: string; tone?: 'destructive' | 'warning' }) {
+  return (
+    <Link href={href} className="flex flex-col gap-0.5 rounded-lg border p-3 transition-colors hover:bg-muted/50">
+      <span className="text-xs text-muted-foreground">{label}</span>
+      <span
+        className={`text-2xl font-semibold tabular-nums ${value > 0 && tone === 'destructive' ? 'text-destructive' : value > 0 && tone === 'warning' ? 'text-warning' : ''}`}
+      >
+        {value}
+      </span>
+    </Link>
+  );
 }
 
-function intakeSteps(): Step[] {
-  return mkSteps(['active', 'todo', 'todo', 'todo', 'skip', 'todo']);
+function ScrapRow({ task }: { task: ScrapTaskRowData }) {
+  return (
+    <Item variant="outline" size="sm" asChild>
+      <Link href={`/scraping/${task.id}`}>
+        <ItemContent className="min-w-0">
+          <ItemTitle className="flex-wrap">
+            <span className="truncate">{task.title}</span>
+            <Badge variant="outline">Scrap</Badge>
+          </ItemTitle>
+          <ItemDescription>{[task.requestNo, task.stage.stepText].filter(Boolean).join(' · ')}</ItemDescription>
+        </ItemContent>
+        <ItemActions>
+          <ScrapStatusBadge group={task.stage.group} label={task.stage.statusLabel} />
+          <ChevronRightIcon className="text-muted-foreground" />
+        </ItemActions>
+      </Link>
+    </Item>
+  );
 }
 
-export default async function OrchestratorPage({ searchParams }: { searchParams?: { notice?: string } }) {
-  const [reqs, fb, connectors, tasks, postOrders] = await Promise.all([
-    listSoRecruitPostingRequests(),
-    listFacebookAccounts(),
-    listConnectorOptions(),
+function PostRow({ task }: { task: PostTask }) {
+  return (
+    <Item variant="outline" size="sm" asChild>
+      <Link href={`/autopost/runs/${task.id}`}>
+        <ItemContent className="min-w-0 gap-1.5">
+          <ItemTitle className="flex-wrap">
+            <span className="truncate">{task.title}</span>
+            <Badge variant="outline">โพสต์</Badge>
+          </ItemTitle>
+          <ItemDescription>{countsLine(task)}</ItemDescription>
+          <GroupStrip groups={task.groups} />
+        </ItemContent>
+        <ItemActions>
+          {taskStageBadge(task)}
+          <ChevronRightIcon className="text-muted-foreground" />
+        </ItemActions>
+      </Link>
+    </Item>
+  );
+}
+
+// ศูนย์งาน = หน้าสรุปของงาน Scrap และงานโพสต์ ตัวงานจริงอยู่ในหน้าของแต่ละฝั่ง
+export default async function OrchestratorPage(props: { searchParams?: Promise<{ notice?: string }> }) {
+  const searchParams = await props.searchParams;
+  const [jarvisScrap, tasks, postOrders, postTasks, reqs] = await Promise.all([
+    listJarvisScrapRequests(),
     listTasks(),
     listJarvisPostOrders(),
+    listPostTasks(),
+    listSoRecruitPostingRequests(),
   ]);
-  const postSummary: PostOrderSummary[] = (['caption_only', 'caption_image', 'image_only'] as const).map((mode) => {
-    const ofMode = postOrders.filter((o) => o.post_mode === mode);
-    return {
-      mode,
-      label: postModeLabel(mode),
-      pending: ofMode.filter((o) => o.jarvis_status === 'pending').length,
-      inProgress: ofMode.filter((o) => o.jarvis_status === 'in_progress').length,
-      posted: ofMode.filter((o) => o.jarvis_status === 'posted').length,
-    };
-  });
-  const contentEnabled = isContentGenerationEnabled();
 
-  const scrapingReqs = reqs.filter((r) => r.request_type === 'scraping');
-  const disabledContentReqs = contentEnabled
+  // งานที่ไม่ขยับเกิน 14 วันไม่นับในหน้าสรุป (ยังดูได้ที่หน้างาน Scrap แท็บทั้งหมด)
+  const recentCutoff = Date.now() - 14 * 86_400_000;
+  const scrapRows = tasks
+    .filter((t) => t.status !== 'idle' || t.source_request_no)
+    .filter((t) => t.status === 'queued' || t.status === 'running' || new Date(scrapTaskUpdatedAt(t)).getTime() > recentCutoff)
+    .map(toScrapTaskRow);
+  const scrap = {
+    waiting: jarvisScrap.length,
+    working: scrapRows.filter((t) => t.stage.group === 'working'),
+    review: scrapRows.filter((t) => t.stage.group === 'review'),
+    attention: scrapRows.filter((t) => t.stage.group === 'attention'),
+  };
+  const weekAgo = Date.now() - 7 * 86_400_000;
+  const pendingPosts = postOrders.filter((o) => o.jarvis_status === 'pending');
+  const livePosts = postTasks.filter((t) => t.status === 'queued' || t.status === 'running');
+  const problemPosts = postTasks.filter(
+    (t) => !livePosts.includes(t) && (t.stage.state === 'failed' || t.counts.failed > 0) && new Date(t.created_at).getTime() > weekAgo,
+  );
+  const postedGroups7d = postTasks
+    .filter((t) => new Date(t.created_at).getTime() > weekAgo)
+    .reduce((n, t) => n + t.counts.posted, 0);
+
+  // คำขอสร้างประกาศแบบเดิม (ไม่มี caption) ระบบนี้ไม่ทำแล้ว ให้ตีกลับได้จากที่นี่
+  const disabledContent = isContentGenerationEnabled()
     ? []
-    // คำสั่งโพสต์แบบใหม่ (มี caption จาก Jarvis) ไปอยู่ห้อง Autopost — ไม่ใช่คำขอสร้างประกาศที่ปิดแล้ว
-    : reqs.filter((r) => r.request_type === 'content' && !String((r.job_snapshot ?? {}).caption ?? '').trim());
+    : reqs
+      .filter((r) => r.request_type === 'content' && !String((r.job_snapshot ?? {}).caption ?? '').trim())
+      .map((r) => ({
+        requestNo: r.request_no,
+        title: operatorJobTitle({
+          position: String((r.job_snapshot as Record<string, unknown> | null)?.position ?? ''),
+          title: r.erp_title,
+          requestNo: r.request_no,
+        }),
+      }));
 
-  const items: WorkCenterItem[] = [
-    ...scrapingReqs.map((request): WorkCenterItem => {
-      const js = (request.job_snapshot ?? {}) as Record<string, unknown>;
-      const has = (v: unknown) => String(v ?? '').trim() !== '' && v !== null;
-      const checklist = [
-        { label: 'ตำแหน่ง', ok: has(js.position) || has(request.erp_title && request.erp_title !== request.request_no ? request.erp_title : '') },
-        { label: 'พื้นที่', ok: has(js.location) || has(request.erp_province) },
-        { label: 'รายได้', ok: has(js.income) },
-        { label: 'จำนวน', ok: has(js.qty) || has(request.erp_qty) },
-        { label: 'เวลางาน', ok: has(js.work_schedule) },
-      ];
-      const requestFields = prefillScrapePlan(js, {
-        position: request.erp_title && request.erp_title !== request.request_no ? request.erp_title : '',
-        location: request.erp_province || '',
-        qty: request.erp_qty ? String(request.erp_qty) : '',
-      });
-      return {
-        id: `request:${request.id}`,
-        kind: 'scraping',
-        stage: 'intake',
-        title: operatorJobTitle({ position: requestFields.position, title: request.erp_title, requestNo: request.request_no }),
-        requestNo: request.request_no,
-        detail: request.reason || request.notes,
-        requester: request.requested_by_name,
-        connector: null,
-        statusLabel: 'รอเริ่มค้นหา',
-        createdAt: request.created_at,
-        href: null,
-        context: requestFields.location || request.requested_by_name,
-        steps: intakeSteps(),
-        checklist,
-        requestFields,
-        fromJarvis: true,
-      };
-    }),
-    ...tasks.filter((task) => task.status !== 'idle' || task.source_request_no).map((task): WorkCenterItem => {
-      let stage: WorkCenterStage = 'working';
-      if (task.status === 'error' || task.status === 'partial') stage = 'attention';
-      else if (task.status === 'done' && task.review_status === 'pending') stage = 'review';
-      else if (task.status === 'done') stage = 'completed';
-      const taskTitle = operatorJobTitle({ position: task.criteria.position || task.criteria.keyword, title: task.name, requestNo: task.source_request_no });
-      const taskError = humanizeOperatorError(task.last_error);
-      return {
-        id: `scraping:${task.id}`,
-        kind: 'scraping',
-        stage,
-        title: taskTitle,
-        requestNo: task.source_request_no,
-        detail: taskError
-          ? [
-            taskError.title,
-            taskError.detail,
-            `ทำต่อ: ${taskError.next}`,
-            taskError.technical ? `สาเหตุระบบ: ${taskError.technical}` : null,
-          ].filter(Boolean).join('\n')
-          : null,
-        requester: null,
-        connector: `${task.platform === 'jobthai' ? 'JobThai' : task.platform === 'jobbkk' ? 'JobBKK' : task.platform} · ${task.connector_label}`,
-        statusLabel: task.status === 'done' && task.review_status === 'pending' ? 'รอตรวจรับข้อมูล' : task.status === 'partial' ? 'ยังได้ Resume ไม่ครบ' : task.status === 'error' ? 'ค้นหาไม่สำเร็จ' : task.status === 'queued' ? 'รอเริ่มค้นหา' : task.status === 'running' ? 'กำลังค้นหาผู้สมัคร' : 'สำเร็จ',
-        createdAt: task.created_at,
-        href: `/scraping/${task.id}`,
-        context: [String(task.criteria.province || '').trim(), `${task.platform === 'jobthai' ? 'JobThai' : task.platform === 'jobbkk' ? 'JobBKK' : task.platform} · ${task.connector_label}`].filter(Boolean).join(' · ') || null,
-        progress: {
-          qualified: task.qualified_count,
-          assessed: task.assessed_total,
-          target: task.progress_target || task.target_count || 0,
-          running: task.status === 'running',
-        },
-        taskId: task.id,
-        steps: scrapeSteps(task.status, task.review_status),
-        fromJarvis: Boolean(task.source_request_no),
-      };
-    }),
-  ].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+  const live = scrap.working.length > 0 || livePosts.length > 0;
+  const nothingToDo =
+    !scrap.waiting && !scrap.review.length && !scrap.attention.length && !pendingPosts.length && !problemPosts.length;
 
   return (
-    <div className="flex flex-col gap-4">
-      <AutoRefresh seconds={20} />
+    <div className="flex flex-col gap-6">
+      <AutoRefresh seconds={live ? 15 : 30} />
+      <div className="flex flex-col gap-1">
+        <h1 className="text-2xl font-semibold">ศูนย์งาน</h1>
+        <p className="text-sm text-muted-foreground">สรุปงาน Scrap และงานโพสต์ กดตัวเลขหรือรายการเพื่อไปที่งานนั้น</p>
+      </div>
+
       {typeof searchParams?.notice === 'string' && (
         <Alert role="status">
           <AlertDescription>{searchParams.notice}</AlertDescription>
         </Alert>
       )}
+
+      <div className="grid gap-4 lg:grid-cols-2">
+        <Card>
+          <CardHeader>
+            <CardTitle>งาน Scrap</CardTitle>
+            <CardDescription>หาผู้สมัครจาก JobThai และ JobBKK</CardDescription>
+            <CardAction>
+              <Button asChild variant="outline" size="sm">
+                <Link href="/scraping">
+                  ไปหน้างาน Scrap
+                  <ChevronRightIcon data-icon="inline-end" />
+                </Link>
+              </Button>
+            </CardAction>
+          </CardHeader>
+          <CardContent className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+            <Count label="Jarvis รอกดเริ่ม" value={scrap.waiting} href="/scraping" tone="warning" />
+            <Count label="กำลังทำ" value={scrap.working.length} href="/scraping" />
+            <Count label="ต้องตรวจรับ" value={scrap.review.length} href="/scraping" tone="warning" />
+            <Count label="ติดปัญหา (14 วัน)" value={scrap.attention.length} href="/scraping" tone="destructive" />
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>งานโพสต์</CardTitle>
+            <CardDescription>โพสต์ประกาศลงกลุ่ม Facebook</CardDescription>
+            <CardAction>
+              <Button asChild variant="outline" size="sm">
+                <Link href="/autopost/jobs">
+                  ไปหน้างานโพสต์
+                  <ChevronRightIcon data-icon="inline-end" />
+                </Link>
+              </Button>
+            </CardAction>
+          </CardHeader>
+          <CardContent className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+            <Count label="Jarvis รอโพสต์" value={pendingPosts.length} href="/autopost/jobs" tone="warning" />
+            <Count label="กำลังโพสต์" value={livePosts.length} href="/autopost/jobs" />
+            <Count label="ติดปัญหา (7 วัน)" value={problemPosts.length} href="/autopost/jobs" tone="destructive" />
+            <Count label="กลุ่มที่โพสต์ได้ (7 วัน)" value={postedGroups7d} href="/autopost/jobs" />
+          </CardContent>
+        </Card>
+      </div>
+
+      <section className="flex flex-col gap-3">
+        <h2 className="text-base font-semibold">ต้องจัดการตอนนี้</h2>
+        {nothingToDo ? (
+          <Empty className="border">
+            <EmptyHeader>
+              <EmptyTitle>ไม่มีงานที่ต้องจัดการ</EmptyTitle>
+            </EmptyHeader>
+          </Empty>
+        ) : (
+          <ItemGroup className="gap-2">
+            {scrap.waiting > 0 && (
+              <Item variant="outline" size="sm" asChild>
+                <Link href="/scraping">
+                  <ItemContent>
+                    <ItemTitle>คำขอ Scrap จาก Jarvis รอกดเริ่ม {scrap.waiting} รายการ</ItemTitle>
+                    <ItemDescription>{jarvisScrap.map((r) => r.requestNo).filter(Boolean).slice(0, 5).join(' · ')}</ItemDescription>
+                  </ItemContent>
+                  <ItemActions>
+                    <ChevronRightIcon className="text-muted-foreground" />
+                  </ItemActions>
+                </Link>
+              </Item>
+            )}
+            {pendingPosts.length > 0 && (
+              <Item variant="outline" size="sm" asChild>
+                <Link href="/autopost/jobs">
+                  <ItemContent>
+                    <ItemTitle>คำสั่งโพสต์จาก Jarvis รอโพสต์ {pendingPosts.length} รายการ</ItemTitle>
+                    <ItemDescription>{pendingPosts.map((o) => o.request_no).slice(0, 5).join(' · ')}</ItemDescription>
+                  </ItemContent>
+                  <ItemActions>
+                    <ChevronRightIcon className="text-muted-foreground" />
+                  </ItemActions>
+                </Link>
+              </Item>
+            )}
+            {[...scrap.attention, ...scrap.review].map((t) => (
+              <ScrapRow key={t.id} task={t} />
+            ))}
+            {problemPosts.map((t) => (
+              <PostRow key={t.id} task={t} />
+            ))}
+          </ItemGroup>
+        )}
+      </section>
+
+      {live && (
+        <section className="flex flex-col gap-3">
+          <h2 className="text-base font-semibold">กำลังทำ</h2>
+          <ItemGroup className="gap-2">
+            {scrap.working.map((t) => (
+              <ScrapRow key={t.id} task={t} />
+            ))}
+            {livePosts.map((t) => (
+              <PostRow key={t.id} task={t} />
+            ))}
+          </ItemGroup>
+        </section>
+      )}
+
+      {disabledContent.length > 0 && (
+        <Alert>
+          <CircleAlertIcon />
+          <AlertTitle>มีคำขอสร้างประกาศ {disabledContent.length} รายการ ระบบนี้ไม่รับแล้ว</AlertTitle>
+          <AlertDescription className="flex flex-col gap-3">
+            <p>
+              {disabledContent.slice(0, 3).map((r) => r.title || r.requestNo).join(' · ')}
+              {disabledContent.length > 3 ? ` และอีก ${disabledContent.length - 3} รายการ` : ''}
+            </p>
+            <form action={rejectDisabledContentRequestsAction}>
+              {disabledContent.map((r) => (
+                <input key={r.requestNo} type="hidden" name="requestNo" value={r.requestNo} />
+              ))}
+              <Button variant="secondary" size="sm">ตีกลับทั้งหมด</Button>
+            </form>
+          </AlertDescription>
+        </Alert>
+      )}
+
       <Collapsible className="rounded-lg border bg-card px-4 py-2">
         <CollapsibleTrigger asChild>
-          <Button variant="ghost" size="sm" className="group w-full justify-between px-0 font-normal text-muted-foreground hover:bg-transparent">
+          <Button variant="ghost" size="sm" className="-ml-2">
             สถานะเครื่อง · {productScopeSummary()}
-            <ChevronDownIcon data-icon="inline-end" className="transition-transform group-data-[state=open]:rotate-180" />
+            <ChevronDownIcon data-icon="inline-end" />
           </Button>
         </CollapsibleTrigger>
-        <CollapsibleContent className="pt-2 pb-1">
+        <CollapsibleContent className="pt-3 pb-2">
           <WorkerStatus />
         </CollapsibleContent>
       </Collapsible>
-      <WorkCenter
-        items={items}
-        postSummary={postSummary}
-        disabledContentRequests={disabledContentReqs.map((r) => ({
-          requestNo: r.request_no,
-          title: operatorJobTitle({
-            position: String((r.job_snapshot as Record<string, unknown> | null)?.position ?? ''),
-            title: r.erp_title,
-            requestNo: r.request_no,
-          }),
-        }))}
-        connectors={connectors.map((connector) => ({
-          id: connector.id,
-          label: `${connector.platform === 'jobthai' ? 'JobThai' : connector.platform === 'jobbkk' ? 'JobBKK' : connector.platform} · ${connector.label}`,
-          available: connector.available,
-          blockReason: connector.block_reason,
-        }))}
-        facebookAccounts={fb.map((account) => ({
-          id: account.id,
-          label: account.label,
-          groupCount: account.group_count,
-          preferredWorker: account.preferred_worker,
-          workerOnline: account.worker_online,
-          preflightReady: account.preflight_ready,
-          preflightVerified: account.preflight_verified,
-        }))}
-      />
     </div>
   );
 }

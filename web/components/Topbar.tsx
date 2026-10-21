@@ -6,7 +6,7 @@ import { usePathname } from 'next/navigation';
 import { signOut, useSession } from 'next-auth/react';
 import { useEffect, useState } from 'react';
 import type { LucideIcon } from 'lucide-react';
-import { BriefcaseIcon, LogOutIcon, MegaphoneIcon, MenuIcon, SettingsIcon, UsersIcon } from 'lucide-react';
+import { LayoutDashboardIcon, LogOutIcon, MegaphoneIcon, MenuIcon, SearchIcon, SettingsIcon, UsersIcon } from 'lucide-react';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
 import { Separator } from '@/components/ui/separator';
@@ -14,22 +14,16 @@ import { Sheet, SheetContent, SheetFooter, SheetHeader, SheetTitle, SheetTrigger
 
 type NavItem = { href: string; label: string; also?: string[] };
 
-// เมนูบนมือถือ (เปิดจากปุ่มเมนูด้านซ้าย) รวมตั้งค่าไว้ในลิสต์เดียว
-const NAV: NavItem[] = [
-  { href: '/orchestrator', label: 'ค้นหาผู้สมัคร' },
-  { href: '/workflow', label: 'ดูการไหลของงาน' },
-  { href: '/scraping', label: 'รายการงานค้นหา', also: ['/candidates'] },
-  { href: '/autopost', label: 'โพสต์ Facebook' },
-  { href: '/settings', label: 'ตั้งค่า', also: ['/connectors'] },
-];
-
-// เมนูหลักบน Desktop แยกห้องค้นหา / โพสต์
+// เมนูบนมือถือ (เปิดจากปุ่มเมนูด้านซ้าย) ใช้ลิสต์เดียวกับ Desktop
+// แยกงาน Scrap กับงานโพสต์ ส่วนศูนย์งานเป็นหน้าสรุปของทั้งสองฝั่ง
 const DESKTOP_NAV: (NavItem & { icon: LucideIcon })[] = [
-  { href: '/orchestrator', label: 'ค้นหา', icon: BriefcaseIcon },
-  { href: '/candidates', label: 'คลังผู้สมัคร', icon: UsersIcon, also: ['/scraping'] },
-  { href: '/autopost', label: 'โพสต์ FB', icon: MegaphoneIcon, also: ['/autopost/results'] },
+  { href: '/orchestrator', label: 'ศูนย์งาน', icon: LayoutDashboardIcon, also: ['/workflow', '/dashboard'] },
+  { href: '/scraping', label: 'งาน Scrap', icon: SearchIcon },
+  { href: '/autopost/jobs', label: 'งานโพสต์', icon: MegaphoneIcon, also: ['/autopost'] },
+  { href: '/candidates', label: 'คลังผู้สมัคร', icon: UsersIcon },
   { href: '/settings', label: 'ตั้งค่า', icon: SettingsIcon, also: ['/connectors'] },
 ];
+const NAV: NavItem[] = DESKTOP_NAV;
 
 /** active tab: exact หรือ prefix (ครอบหน้าย่อย) */
 function isActive(pathname: string, item: NavItem): boolean {
