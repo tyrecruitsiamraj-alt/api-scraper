@@ -6,6 +6,7 @@ import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 
 // แท็บย่อยใต้ "โพสต์ & ผลลัพธ์" — แยกงานที่กำลังทำ (ภาพรวม/คิว) ออกจากผลที่เก็บเกี่ยวได้ (leads)
 const ITEMS = [
+  { href: '/autopost/jobs', label: 'งานโพสต์', detail: 'สั่งโพสต์และดูผลแต่ละรอบ' },
   { href: '/autopost', label: 'ภาพรวมการโพสต์', detail: 'งานที่รอ สถานะระบบ และจำนวนที่ยังโพสต์ได้' },
   { href: '/autopost/results', label: 'ผลลัพธ์และผู้สนใจ', detail: 'เบอร์ผู้สนใจที่เก็บได้ และโพสต์ที่ได้ผล' },
   { href: '/autopost/report', label: 'รายงานสัปดาห์', detail: 'สรุปผลรายสัปดาห์สำหรับส่งหัวหน้า' },
