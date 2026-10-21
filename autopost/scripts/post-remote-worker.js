@@ -105,7 +105,25 @@ const JOB_MAX_MS = Math.min(
   Math.max(5 * 60 * 1000, Number(process.env.WORKER_POST_JOB_MAX_MS) || 25 * 60 * 1000)
 );
 
-function runPlaywrightForJob(job) {
+/**
+ * เวลาจำกัดของงานนี้: คิดตามจำนวนกลุ่ม (ดู server/post-job-timeout.js)
+ * อ่าน DB ไม่ได้ / งาน preflight = ใช้ค่าเดิม JOB_MAX_MS
+ */
+async function resolveJobTimeoutMs(job) {
+  if (String(job.mode || 'post') !== 'post' || !process.env.DATABASE_URL) return JOB_MAX_MS;
+  try {
+    const { postJobTimeoutMs, countJobGroups } = require('../server/post-job-timeout');
+    const groups = await countJobGroups(job, require('../server/db'));
+    return postJobTimeoutMs(groups);
+  } catch (e) {
+    console.warn(`[post-worker] คิดเวลาจำกัดตามจำนวนกลุ่มไม่ได้ (${e.message || e}) — ใช้ ${Math.round(JOB_MAX_MS / 60000)} นาที`);
+    return JOB_MAX_MS;
+  }
+}
+
+async function runPlaywrightForJob(job) {
+  const timeoutMs = await resolveJobTimeoutMs(job);
+  console.log(`[post-worker] job ${job.id} เวลาจำกัด ${Math.round(timeoutMs / 60000)} นาที`);
   return new Promise((resolve, reject) => {
     const assignmentIds = Array.isArray(job.assignment_ids) ? job.assignment_ids.map(String).filter(Boolean) : [];
     const env = { ...process.env, FORCE_COLOR: '1', RUN_ID: String(job.run_id || ''), RUN_LOG_API_URL: API_BASE };
@@ -152,10 +170,10 @@ function runPlaywrightForJob(job) {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
-      console.error(`[post-worker] job ${job.id} timeout ${JOB_MAX_MS}ms — killing Chrome/playwright`);
+      console.error(`[post-worker] job ${job.id} timeout ${timeoutMs}ms — killing Chrome/playwright`);
       killProcessTree(child);
-      reject(new Error(`WORKER_POST_JOB_MAX_MS exceeded (${JOB_MAX_MS}ms) — killed to free slot`));
-    }, JOB_MAX_MS);
+      reject(new Error(`WORKER_POST_JOB_MAX_MS exceeded (${timeoutMs}ms) — killed to free slot`));
+    }, timeoutMs);
 
     child.on('close', (code) => {
       if (settled) return;
@@ -245,7 +263,7 @@ if (CONCURRENCY >= 20) {
     '[post-worker] เตือน: Chrome หลายตัวกิน RAM มาก — ถ้าเครื่องค้างให้ลด WORKER_CONCURRENCY หรือแบ่งรันหลายเครื่อง worker'
   );
 }
-console.log(`[post-worker] job max duration ${Math.round(JOB_MAX_MS / 60000)} min (WORKER_POST_JOB_MAX_MS)`);
+console.log(`[post-worker] job max duration ${Math.round(JOB_MAX_MS / 60000)} min ขั้นต่ำ + ~6 นาทีต่อกลุ่ม (WORKER_POST_JOB_MAX_MS / WORKER_POST_JOB_MS_PER_GROUP)`);
 
 /** ล้างงาน running ค้างใน DB (worker crash / ไม่เรียก complete) */
 const SWEEP_MS = Math.max(60_000, Number(process.env.WORKER_SWEEP_INTERVAL_MS) || 120_000);
