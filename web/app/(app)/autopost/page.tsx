@@ -1,5 +1,4 @@
 import Link from 'next/link';
-import { ChevronRightIcon } from 'lucide-react';
 import {
   autopostOverview,
   autopostActivity,
@@ -14,14 +13,6 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from '@/components/ui/empty';
-import {
-  Item,
-  ItemActions,
-  ItemContent,
-  ItemDescription,
-  ItemMedia,
-  ItemTitle,
-} from '@/components/ui/item';
 import { Progress } from '@/components/ui/progress';
 import { Spinner } from '@/components/ui/spinner';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
@@ -92,30 +83,6 @@ export default async function AutopostOverviewPage() {
       </div>
 
       <AutopostNav />
-
-      <Item variant="outline" asChild>
-        <Link href="/autopost/example">
-          <ItemMedia variant="image" className="size-16">
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              src="/content-samples/driver-recruitment-background-v1.png"
-              alt="ตัวอย่างโปสเตอร์พนักงานขับรถ"
-              className="object-left"
-            />
-          </ItemMedia>
-          <ItemContent>
-            <ItemTitle>
-              ตัวอย่าง Content พนักงานขับรถ
-              <Badge variant="secondary">ตัวอย่าง</Badge>
-            </ItemTitle>
-            <ItemDescription>ข้อความบนภาพ Caption และช่องลองแก้ข้อมูล เห็นผลทันที ไม่โพสต์จริง</ItemDescription>
-          </ItemContent>
-          <ItemActions>
-            <span className="text-sm text-muted-foreground">เปิดตัวอย่าง</span>
-            <ChevronRightIcon className="size-4 text-muted-foreground" />
-          </ItemActions>
-        </Link>
-      </Item>
 
       {!a ? (
         <Alert variant="destructive">
