@@ -109,24 +109,28 @@ async function pushPostRecord(
   status: string,
   postLogOpts?: SaveToSheetOptions
 ): Promise<void> {
-  await request
-    .post(sheetUrl, {
-      timeout: SHEET_POST_TIMEOUT_MS,
-      data: {
-        action: 'NEW_POST',
-        posterName,
-        owner: postItem.owner,
-        jobTitle: postItem.title,
-        company: postItem.company,
-        groupName: normalizeGroupName(groupName),
-        memberCount,
-        postLink: finalLink,
-        status,
-      },
-    })
-    .catch((err) => {
-      console.error('[saveToSheet] POST ไป Sheet ไม่สำเร็จ:', (err as Error).message);
-    });
+  console.log(`[saveToSheet] เจอลิงก์โพสต์ (${status}): ${finalLink}`);
+  // ไม่มี sheet_url (บัญชีส่วนใหญ่) → ไม่ต้องยิง Sheet; ลิงก์ไปที่ post_logs อย่างเดียว
+  if (sheetUrl) {
+    await request
+      .post(sheetUrl, {
+        timeout: SHEET_POST_TIMEOUT_MS,
+        data: {
+          action: 'NEW_POST',
+          posterName,
+          owner: postItem.owner,
+          jobTitle: postItem.title,
+          company: postItem.company,
+          groupName: normalizeGroupName(groupName),
+          memberCount,
+          postLink: finalLink,
+          status,
+        },
+      })
+      .catch((err) => {
+        console.error('[saveToSheet] POST ไป Sheet ไม่สำเร็จ:', (err as Error).message);
+      });
+  }
   if (postLogOpts) {
     await postLog({
       poster_name: posterName,

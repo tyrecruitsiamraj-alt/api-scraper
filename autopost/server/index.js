@@ -48,6 +48,8 @@ app.use((req, res, next) => {
   if (!AUTOPOST_ACCESS_TOKEN) return next(); // ไม่ตั้ง token = ไม่เปิดประตู (โหมดเดิม/ dev)
   const p = req.path || '';
   if (ACCESS_GATE_EXEMPT.test(p)) return next();
+  // Worker (Playwright) ส่งลิงก์โพสต์กลับมาที่นี่เมื่อเขียน DB ตรงไม่ได้ — ใช้ POST_WORKER_TOKEN แทน access token
+  if (req.method === 'POST' && p === '/api/post-logs' && isValidPostWorkerToken(req)) return next();
 
   // ?access_token= ถูกต้อง → ตั้ง cookie แล้ว redirect ทิ้ง query (กัน token ค้างใน URL/แชร์ลิงก์)
   const qToken = String(req.query.access_token || '').trim();
