@@ -6,6 +6,7 @@ import { getServerSession } from 'next-auth';
 import { authOptions } from './auth';
 import { encryptSecret } from './crypto';
 import { kickWorker } from './worker-kick';
+import { postCaptionIssues } from '../../src/core/post-caption-check.js';
 import { q } from './db';
 import { CONTENT_DISABLED_OPERATOR_MESSAGE, isContentGenerationEnabled } from './product-scope';
 import { normalizePosterExtras, normalizePosterLayout } from '../../src/core/poster-template.js';
@@ -65,6 +66,7 @@ import {
   enqueueAssignmentPost,
   postJarvisOrder,
   repostJarvisOrder,
+  updateJarvisPostCaption,
   recordCandidateActivity,
   reassessCandidateJob,
 } from './repo';
@@ -127,6 +129,39 @@ export async function repostJarvisOrderAction(formData: FormData) {
   }
   revalidatePath('/autopost');
   revalidatePath('/autopost/jobs');
+  redirect(`/autopost/jobs?notice=${encodeURIComponent(notice)}`);
+}
+
+/** แก้แคปชั่นคำสั่งโพสต์จาก Jarvis แล้วเขียนกลับ Jarvis — ระบบตรวจข้อความใหม่ตอนเปิดหน้า */
+export async function editJarvisCaptionAction(formData: FormData) {
+  const session = await getServerSession(authOptions);
+  if (!session) throw new Error('unauthorized');
+  const requestNo = String(formData.get('requestNo') ?? '').trim();
+  const caption = String(formData.get('caption') ?? '').replace(/\r\n/g, '\n').trim();
+  let notice = `บันทึกข้อความของ ${requestNo} แล้ว และแก้ในใบสั่งของ Jarvis ด้วย`;
+  if (!requestNo) notice = 'ไม่พบคำสั่งโพสต์ที่เลือก';
+  else if (!caption) notice = 'ข้อความว่างอยู่ บันทึกไม่ได้';
+  else {
+    const issues = postCaptionIssues(caption);
+    const saved = await updateJarvisPostCaption(requestNo, caption, session.user?.email ?? session.user?.name ?? null);
+    if (!saved) notice = `แก้ข้อความไม่ได้: ${requestNo} ถูกโพสต์หรือตีกลับไปแล้ว`;
+    else if (issues.length) notice = `บันทึกแล้ว แต่ยังโพสต์ไม่ได้: ${issues.join(' · ')}`;
+  }
+  revalidatePath('/autopost/jobs');
+  redirect(`/autopost/jobs?notice=${encodeURIComponent(notice)}`);
+}
+
+/** ตีกลับคำสั่งโพสต์ให้ Jarvis แก้ พร้อมเหตุผล */
+export async function returnJarvisPostOrderAction(formData: FormData) {
+  await requireSession();
+  const requestNo = String(formData.get('requestNo') ?? '').trim();
+  const reason = String(formData.get('reason') ?? '').trim();
+  let notice = `ตีกลับ ${requestNo} ให้ Jarvis แก้แล้ว`;
+  if (!requestNo) notice = 'ไม่พบคำสั่งโพสต์ที่เลือก';
+  else if (!reason) notice = 'ใส่เหตุผลก่อนตีกลับ';
+  else await rejectSoRecruitRequest(requestNo, reason, 'content');
+  revalidatePath('/autopost/jobs');
+  revalidatePath('/orchestrator');
   redirect(`/autopost/jobs?notice=${encodeURIComponent(notice)}`);
 }
 

@@ -2056,6 +2056,29 @@ export async function rejectSoRecruitRequest(
   }
 }
 
+/**
+ * แก้แคปชั่นของคำสั่งโพสต์จาก Jarvis ที่ยังไม่ได้โพสต์ แล้วเขียนกลับใบสั่งใน Jarvis
+ * เก็บข้อความเดิมไว้ที่ job_snapshot.caption_original (ครั้งแรกเท่านั้น) และบันทึกว่าใครแก้เมื่อไร
+ */
+export async function updateJarvisPostCaption(requestNo: string, caption: string, editedBy: string | null): Promise<boolean> {
+  const rows = await q<{ request_no: string }>(
+    `UPDATE "jarvis_rm".job_posting_requests r
+        SET job_snapshot = COALESCE(r.job_snapshot, '{}'::jsonb)
+              || jsonb_build_object(
+                   'caption', $2::text,
+                   'caption_original', COALESCE(r.job_snapshot->'caption_original', r.job_snapshot->'caption'),
+                   'caption_edited_by', $3::text,
+                   'caption_edited_at', now()
+                 ),
+            updated_at = now()
+      WHERE r.request_no = $1 AND r.status = 'pending'
+        AND COALESCE(NULLIF(to_jsonb(r)->>'request_type', ''), 'content') = 'content'
+      RETURNING r.request_no`,
+    [requestNo, caption, editedBy],
+  );
+  return rows.length > 0;
+}
+
 export type CampaignRow = {
   id: string;
   request_no: string | null;

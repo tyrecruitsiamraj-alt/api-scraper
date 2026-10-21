@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import { ChevronDownIcon } from 'lucide-react';
-import { postJarvisOrderAction, repostJarvisOrderAction } from '@/lib/actions';
+import { postJarvisOrderAction, repostJarvisOrderAction, returnJarvisPostOrderAction } from '@/lib/actions';
 import { postModeLabel, REPOST_MIN_GAP_DAYS } from '@/lib/repo';
 import type { JarvisPostOrder } from '@/lib/repo';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
@@ -11,6 +11,8 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { Field, FieldDescription, FieldLabel, FieldLegend, FieldSet } from '@/components/ui/field';
 import { thaiTime } from './post-ui';
+import { CaptionEditor } from './CaptionEditor';
+import { Textarea } from '@/components/ui/textarea';
 
 /** ติ๊กยืนยัน + ปุ่ม — server action เช็ก confirm=yes อีกชั้นและแจ้งกลับถ้าไม่ได้ติ๊ก */
 export function ConfirmAndSubmit({ id, label, disabled }: { id: string; label: string; disabled: boolean }) {
@@ -104,15 +106,39 @@ export function PendingOrderCard({ order }: { order: JarvisPostOrder }) {
           </Alert>
         )}
         <p className="text-sm text-muted-foreground">กลุ่ม: {order.group_names.join(', ') || '-'}</p>
-        <Collapsible>
+        <Collapsible defaultOpen={order.issues.some((i) => !i.startsWith('ชนิด'))}>
           <CollapsibleTrigger asChild>
             <Button variant="ghost" size="sm" className="-ml-2">
-              ข้อความประกาศ
+              ข้อความประกาศ / แก้ข้อความ
               <ChevronDownIcon data-icon="inline-end" />
             </Button>
           </CollapsibleTrigger>
-          <CollapsibleContent>
-            <pre className="mt-2 max-h-80 overflow-auto rounded-lg bg-muted p-4 font-sans text-sm whitespace-pre-wrap">{order.caption}</pre>
+          <CollapsibleContent className="pt-2">
+            <CaptionEditor requestNo={order.request_no} caption={order.caption} />
+          </CollapsibleContent>
+        </Collapsible>
+        <Collapsible>
+          <CollapsibleTrigger asChild>
+            <Button variant="ghost" size="sm" className="-ml-2">
+              ตีกลับให้ Jarvis แก้
+              <ChevronDownIcon data-icon="inline-end" />
+            </Button>
+          </CollapsibleTrigger>
+          <CollapsibleContent className="pt-2">
+            <form action={returnJarvisPostOrderAction} className="flex flex-col gap-3">
+              <input type="hidden" name="requestNo" value={order.request_no} />
+              <Field>
+                <FieldLabel htmlFor={`return-${order.request_no}`}>เหตุผลที่ตีกลับ (ผู้สั่งใน Jarvis จะเห็นข้อความนี้)</FieldLabel>
+                <Textarea
+                  id={`return-${order.request_no}`}
+                  name="reason"
+                  rows={3}
+                  required
+                  defaultValue={order.issues.length ? `แก้ข้อความประกาศ: ${order.issues.join(', ')}` : ''}
+                />
+              </Field>
+              <Button variant="destructive" size="sm" className="self-start">ตีกลับใบนี้</Button>
+            </form>
           </CollapsibleContent>
         </Collapsible>
       </CardContent>
