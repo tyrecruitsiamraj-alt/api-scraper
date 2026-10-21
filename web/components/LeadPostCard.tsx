@@ -1,7 +1,16 @@
 'use client';
 
 import { useState } from 'react';
+import { CheckIcon, CopyIcon, ExternalLinkIcon, PencilLineIcon } from 'lucide-react';
 import type { LeadPostRow } from '@/lib/repo';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { ButtonGroup } from '@/components/ui/button-group';
+import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
+import { Field, FieldDescription, FieldLabel } from '@/components/ui/field';
+import { Textarea } from '@/components/ui/textarea';
+import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 
 /** แยกสตริง customer_phone (คั่น ', ') เป็นเบอร์ที่ไม่ซ้ำ */
 function splitPhones(raw: string | null): string[] {
@@ -72,109 +81,114 @@ export function LeadPostCard({ post }: { post: LeadPostRow }) {
     setMessage(draftMessage(next, post.job_title)); // เปลี่ยนโทน = ร่างใหม่ตามโทนนั้น
   }
 
+  const messageId = `lead-msg-${post.id}`;
+
   return (
-    <div className="card card-hover p-4">
-      <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-2">
-        <div className="min-w-0">
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="pill bg-accent/10 text-accent">{post.lead_count} เบอร์</span>
-            <h3 className="truncate text-sm font-semibold text-ink">{post.job_title || 'ไม่ระบุตำแหน่ง'}</h3>
-          </div>
-          <p className="mt-1 text-xs text-subtle">
-            {post.group_name || 'ไม่ระบุกลุ่ม'}
-            {post.account ? ` · ${post.account}` : ''} · {timeAgo(post.created_at)}
-          </p>
-        </div>
-        <div className="flex shrink-0 items-center gap-2">
-          <span className="text-[11px] text-subtle">
-            💬 {post.comment_count} · 👍 {post.reactions} · ↗ {post.shares}
+    <Card size="sm">
+      <CardHeader>
+        <CardTitle className="flex min-w-0 items-center gap-2">
+          <span className="truncate">{post.job_title || 'ไม่ระบุตำแหน่ง'}</span>
+          <Badge variant="secondary" className="tabular-nums">{post.lead_count} เบอร์</Badge>
+        </CardTitle>
+        <CardDescription className="leading-relaxed">
+          {post.group_name || 'ไม่ระบุกลุ่ม'}
+          {post.account ? ` · ${post.account}` : ''} · {timeAgo(post.created_at)}
+          <span className="block text-xs tabular-nums">
+            คอมเมนต์ {post.comment_count} · ถูกใจ {post.reactions} · แชร์ {post.shares}
           </span>
-          {post.post_link && (
-            <a
-              href={post.post_link}
-              target="_blank"
-              rel="noreferrer"
-              className="btn-sm rounded-full border border-line px-3 py-1 text-[12px] font-medium text-ink transition hover:border-accent/40 hover:text-accent"
-            >
-              ดูโพสต์
-            </a>
-          )}
-        </div>
-      </div>
+        </CardDescription>
+        {post.post_link && (
+          <CardAction>
+            <Button asChild variant="outline" size="sm">
+              <a href={post.post_link} target="_blank" rel="noreferrer">
+                ดูโพสต์
+                <ExternalLinkIcon data-icon="inline-end" />
+              </a>
+            </Button>
+          </CardAction>
+        )}
+      </CardHeader>
 
       {phones.length > 0 && (
-        <div className="mt-3 flex flex-wrap items-center gap-1.5">
-          {phones.map((phone, i) => {
-            const key = `${post.id}-${i}`;
-            return (
-              <div key={key} className="inline-flex items-center overflow-hidden rounded-full border border-line bg-white text-[12px]">
-                <a href={`tel:${phone.replace(/\s/g, '')}`} className="px-2.5 py-1 font-medium tabular-nums text-ink hover:text-accent">
-                  {phone}
-                </a>
-                <button
-                  type="button"
-                  onClick={() => copy(phone, key)}
-                  className="border-l border-line px-2 py-1 text-subtle transition hover:bg-black/[0.03] hover:text-ink"
-                  title="คัดลอกเบอร์"
-                >
-                  {copied === key ? '✓' : '⧉'}
-                </button>
-              </div>
-            );
-          })}
-          {phones.length > 1 && (
-            <button
-              type="button"
-              onClick={() => copy(phones.join('\n'), `${post.id}-all`)}
-              className="rounded-full px-2.5 py-1 text-[11px] font-medium text-accent transition hover:bg-accent/5"
-            >
-              {copied === `${post.id}-all` ? 'คัดลอกแล้ว ✓' : 'คัดลอกทุกเบอร์'}
-            </button>
-          )}
-          <button
-            type="button"
-            onClick={() => setShowComposer((s) => !s)}
-            className="rounded-full px-2.5 py-1 text-[11px] font-medium text-subtle transition hover:bg-black/[0.04] hover:text-ink"
-          >
-            {showComposer ? 'ซ่อนข้อความ' : '✍ ร่างข้อความทักกลับ'}
-          </button>
-        </div>
-      )}
+        <CardContent>
+          <Collapsible open={showComposer} onOpenChange={setShowComposer} className="flex flex-col gap-3">
+            <div className="flex flex-wrap items-center gap-2">
+              {phones.map((phone, i) => {
+                const key = `${post.id}-${i}`;
+                return (
+                  <ButtonGroup key={key}>
+                    <Button asChild variant="outline" size="sm" className="tabular-nums">
+                      <a href={`tel:${phone.replace(/\s/g, '')}`}>{phone}</a>
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="icon-sm"
+                      onClick={() => copy(phone, key)}
+                      title="คัดลอกเบอร์"
+                      aria-label={`คัดลอกเบอร์ ${phone}`}
+                    >
+                      {copied === key ? <CheckIcon /> : <CopyIcon />}
+                    </Button>
+                  </ButtonGroup>
+                );
+              })}
+              {phones.length > 1 && (
+                <Button type="button" variant="ghost" size="sm" onClick={() => copy(phones.join('\n'), `${post.id}-all`)}>
+                  {copied === `${post.id}-all` ? <CheckIcon data-icon="inline-start" /> : <CopyIcon data-icon="inline-start" />}
+                  {copied === `${post.id}-all` ? 'คัดลอกแล้ว' : 'คัดลอกทุกเบอร์'}
+                </Button>
+              )}
+              <CollapsibleTrigger asChild>
+                <Button type="button" variant="ghost" size="sm">
+                  <PencilLineIcon data-icon="inline-start" />
+                  {showComposer ? 'ซ่อนข้อความ' : 'ร่างข้อความทักกลับ'}
+                </Button>
+              </CollapsibleTrigger>
+            </div>
 
-      {showComposer && (
-        <div className="mt-3 rounded-2xl border border-line bg-black/[0.015] p-3">
-          <div className="flex flex-wrap items-center gap-1.5">
-            {TONES.map((t) => (
-              <button
-                key={t.key}
-                type="button"
-                onClick={() => pickTone(t.key)}
-                className={`rounded-full px-3 py-1 text-[12px] font-medium transition ${
-                  tone === t.key ? 'bg-accent text-white' : 'bg-white text-subtle hover:text-ink'
-                }`}
-              >
-                {t.label}
-              </button>
-            ))}
-          </div>
-          <textarea
-            value={message}
-            onChange={(e) => setMessage(e.target.value)}
-            rows={5}
-            className="mt-2 w-full resize-y rounded-xl border border-line bg-white px-3 py-2 text-[13px] leading-relaxed text-ink focus:border-accent/50 focus:outline-none"
-          />
-          <div className="mt-2 flex items-center justify-between gap-2">
-            <span className="text-[11px] text-subtle">แก้ข้อความได้ก่อนคัดลอกไปส่งทาง SMS / LINE</span>
-            <button
-              type="button"
-              onClick={() => copy(message, `${post.id}-msg`)}
-              className="btn-primary btn-sm rounded-full px-4 py-1.5 text-[12px]"
-            >
-              {copied === `${post.id}-msg` ? 'คัดลอกแล้ว ✓' : 'คัดลอกข้อความ'}
-            </button>
-          </div>
-        </div>
+            <CollapsibleContent>
+              <div className="flex flex-col gap-3 rounded-lg border bg-muted/50 p-3">
+                <ToggleGroup
+                  type="single"
+                  variant="outline"
+                  size="sm"
+                  value={tone}
+                  onValueChange={(v) => {
+                    if (v) pickTone(v as Tone);
+                  }}
+                  aria-label="โทนข้อความ"
+                >
+                  {TONES.map((t) => (
+                    <ToggleGroupItem key={t.key} value={t.key}>
+                      {t.label}
+                    </ToggleGroupItem>
+                  ))}
+                </ToggleGroup>
+                <Field>
+                  <FieldLabel htmlFor={messageId} className="sr-only">
+                    ข้อความทักกลับ
+                  </FieldLabel>
+                  <Textarea
+                    id={messageId}
+                    value={message}
+                    onChange={(e) => setMessage(e.target.value)}
+                    rows={5}
+                    className="resize-y leading-relaxed"
+                  />
+                  <FieldDescription className="text-xs">แก้ข้อความได้ก่อนคัดลอกไปส่งทาง SMS หรือ LINE</FieldDescription>
+                </Field>
+                <div className="flex justify-end">
+                  <Button type="button" size="sm" onClick={() => copy(message, `${post.id}-msg`)}>
+                    {copied === `${post.id}-msg` ? <CheckIcon data-icon="inline-start" /> : <CopyIcon data-icon="inline-start" />}
+                    {copied === `${post.id}-msg` ? 'คัดลอกแล้ว' : 'คัดลอกข้อความ'}
+                  </Button>
+                </div>
+              </div>
+            </CollapsibleContent>
+          </Collapsible>
+        </CardContent>
       )}
-    </div>
+    </Card>
   );
 }

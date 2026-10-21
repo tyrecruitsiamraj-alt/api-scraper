@@ -4,6 +4,8 @@ import { signIn, useSession } from 'next-auth/react';
 import { useRouter } from 'next/navigation';
 import { useEffect } from 'react';
 import { Logo } from '@/components/Logo';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 
 export default function LoginPage() {
   const { status } = useSession();
@@ -14,25 +16,29 @@ export default function LoginPage() {
   }, [status, router]);
 
   return (
-    <main className="min-h-screen grid place-items-center px-6">
-      <div className="w-full max-w-sm text-center">
-        <div className="mb-10 flex justify-center">
+    <main className="grid min-h-screen place-items-center px-6">
+      <div className="flex w-full max-w-sm flex-col gap-8">
+        <div className="flex justify-center">
           <Logo className="text-2xl" />
         </div>
-        <div className="card p-8">
-          <h1 className="text-xl font-semibold mb-1">ยินดีต้อนรับ</h1>
-          <p className="text-sm text-subtle mb-7">เข้าสู่ระบบด้วยบัญชีองค์กรของคุณ</p>
-          <button
-            onClick={() => signIn('azure-ad', { callbackUrl: '/orchestrator' })}
-            disabled={status === 'loading'}
-            className="btn-primary w-full"
-          >
-            เข้าสู่ระบบด้วย Microsoft
-          </button>
-          <p className="mt-6 text-xs text-subtle">
-            เฉพาะผู้ใช้ที่ได้รับสิทธิ์ในองค์กรเท่านั้น
-          </p>
-        </div>
+        <Card>
+          <CardHeader className="text-center">
+            <CardTitle>เข้าสู่ระบบ</CardTitle>
+            <CardDescription>ใช้บัญชี Microsoft ขององค์กร</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <Button
+              onClick={() => signIn('azure-ad', { callbackUrl: '/orchestrator' })}
+              disabled={status === 'loading'}
+              className="w-full"
+            >
+              เข้าสู่ระบบด้วย Microsoft
+            </Button>
+          </CardContent>
+          <CardFooter className="justify-center text-xs text-muted-foreground">
+            ใช้ได้เฉพาะผู้ใช้ที่องค์กรให้สิทธิ์
+          </CardFooter>
+        </Card>
       </div>
     </main>
   );

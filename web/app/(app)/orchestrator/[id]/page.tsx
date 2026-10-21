@@ -1,6 +1,18 @@
+import { Breadcrumb, BreadcrumbItem, BreadcrumbLink, BreadcrumbList, BreadcrumbPage, BreadcrumbSeparator } from '@/components/ui/breadcrumb';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import nextDynamic from 'next/dynamic';
+import {
+  ArrowLeftIcon,
+  CheckIcon,
+  ChevronDownIcon,
+  CircleAlertIcon,
+  CircleCheckIcon,
+  CircleXIcon,
+  ExternalLinkIcon,
+  RefreshCwIcon,
+  XIcon,
+} from 'lucide-react';
 import { contentGenIngredients, getCampaign, getCampaignAutopostProgress, getCampaignDraftQueueState, getCampaignPostQueueState, getPosterLayoutStandardMeta, listCampaignContents, listCampaignPosts, listFacebookAccounts, soRecruitCheck } from '@/lib/repo';
 import type { CampaignDraftQueueState, CampaignPostRow } from '@/lib/repo';
 import { approveContentAction, rejectContentAction, editCaptionAction, editPosterAction, measureCampaignAction, reopenContentForEditingAction, retryCampaignDraftAction, runFacebookPreflightAction } from '@/lib/actions';
@@ -8,10 +20,33 @@ import { CaptionViewer } from '@/components/CaptionViewer';
 import { AutopostSummaryForm } from '@/components/AutopostSummaryForm';
 import { CampaignContentWorkspace } from '@/components/CampaignContentWorkspace';
 import { AutoRefresh } from '@/components/AutoRefresh';
+import { Alert, AlertAction, AlertDescription, AlertTitle } from '@/components/ui/alert';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
+import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from '@/components/ui/empty';
+import { Field, FieldDescription, FieldGroup, FieldLabel } from '@/components/ui/field';
+import { Input } from '@/components/ui/input';
+import { Item, ItemContent, ItemDescription, ItemTitle } from '@/components/ui/item';
+import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select';
+import { Progress } from '@/components/ui/progress';
+import { Separator } from '@/components/ui/separator';
+import { Spinner } from '@/components/ui/spinner';
+import { Textarea } from '@/components/ui/textarea';
+import { cn } from '@/lib/utils';
 
 const ContentReviewWorkspace = nextDynamic(
   () => import('@/components/ContentReviewWorkspace').then((mod) => mod.ContentReviewWorkspace),
-  { ssr: false, loading: () => <div className="rounded-xl border border-[#d6dce4] bg-white p-6 text-sm text-[#667]">กำลังเปิดตัวแก้รูป…</div> },
+  {
+    ssr: false,
+    loading: () => (
+      <div className="flex items-center gap-2 rounded-xl border p-6 text-sm text-muted-foreground">
+        <Spinner />
+        กำลังเปิดตัวแก้รูป
+      </div>
+    ),
+  },
 );
 
 export const dynamic = 'force-dynamic';
@@ -19,17 +54,19 @@ export const maxDuration = 60;
 
 const humanText = (value: unknown) => String(value ?? '').replace(/โรงงาร/g, 'โรงงาน');
 
-const CONTENT_STATUS: Record<string, { label: string; cls: string }> = {
-  draft: { label: 'ร่าง (รออนุมัติ)', cls: 'bg-amber-50 text-amber-700' },
-  approved: { label: 'อนุมัติแล้ว', cls: 'bg-teal-50 text-teal-700' },
-  rejected: { label: 'ตีกลับ', cls: 'bg-red-50 text-red-700' },
-  posted: { label: 'โพสต์แล้ว', cls: 'bg-green-50 text-green-700' },
+type BadgeVariant = 'default' | 'secondary' | 'destructive' | 'outline';
+
+const CONTENT_STATUS: Record<string, { label: string; variant: BadgeVariant }> = {
+  draft: { label: 'ร่าง (รออนุมัติ)', variant: 'outline' },
+  approved: { label: 'อนุมัติแล้ว', variant: 'secondary' },
+  rejected: { label: 'ตีกลับ', variant: 'destructive' },
+  posted: { label: 'โพสต์แล้ว', variant: 'secondary' },
 };
 
-const VERDICT: Record<string, { label: string; cls: string }> = {
-  high: { label: '🔥 คนสนใจเยอะ', cls: 'bg-green-50 text-green-700' },
-  low: { label: '📉 คนสนใจน้อย → คิดใหม่', cls: 'bg-amber-50 text-amber-700' },
-  pending: { label: 'รอวัดผล', cls: 'bg-black/5 text-ink' },
+const VERDICT: Record<string, { label: string; variant: BadgeVariant }> = {
+  high: { label: 'คนสนใจเยอะ', variant: 'secondary' },
+  low: { label: 'คนสนใจน้อย ต้องทำใหม่', variant: 'destructive' },
+  pending: { label: 'รอวัดผล', variant: 'outline' },
 };
 
 const STAGE_LABEL: Record<string, string> = {
@@ -42,7 +79,7 @@ const STAGE_LABEL: Record<string, string> = {
   posting: 'กำลัง Auto-post',
   measuring: 'วัดผล',
   done: 'เสร็จ',
-  low_engagement: 'คนสนใจน้อย (คิดใหม่)',
+  low_engagement: 'คนสนใจน้อย (ทำใหม่)',
 };
 
 // แถบสเตจบนหน้า detail — ไฮไลต์ว่างานนี้อยู่ช่วงไหน
@@ -70,23 +107,29 @@ function StageStrip({ status }: { status: string }) {
   const cur = STATUS_TO_STEP[status] ?? 0;
   const lowEng = status === 'low_engagement';
   return (
-    <div className="flex min-w-[640px] items-center justify-between gap-1">
+    <ol className="flex min-w-[640px] items-center justify-between gap-2">
       {STRIP.map((s, i) => {
         const done = i < cur;
         const active = i === cur;
         return (
-          <div key={s.label} className={`flex min-w-0 flex-1 items-center ${i === STRIP.length - 1 ? '' : 'gap-2'}`}>
-            <div className="flex shrink-0 items-center gap-2">
-              <span className={`grid h-8 w-8 place-items-center rounded-full border text-sm font-semibold ${active ? (lowEng ? 'border-red-500 bg-red-500 text-white' : 'border-blue-600 bg-blue-600 text-white') : done ? 'border-blue-600 bg-blue-600 text-white' : 'border-slate-300 bg-white text-slate-400'}`}>
-                {done ? '✓' : i + 1}
-              </span>
-              <span className={`whitespace-nowrap text-sm ${active ? 'font-semibold text-blue-700' : done ? 'font-medium text-ink' : 'text-subtle'}`}>{s.label}</span>
-            </div>
-            {i < STRIP.length - 1 && <span className={`h-px min-w-5 flex-1 ${done ? 'bg-blue-500' : 'bg-slate-200'}`} />}
-          </div>
+          <li key={s.label} className={cn('flex min-w-0 items-center gap-2', i < STRIP.length - 1 && 'flex-1')}>
+            <span
+              className={cn(
+                'grid size-7 shrink-0 place-items-center rounded-full border text-xs font-medium tabular-nums',
+                active && !lowEng && 'border-primary bg-primary text-primary-foreground',
+                active && lowEng && 'border-destructive text-destructive',
+                done && 'border-transparent bg-muted text-foreground',
+                !active && !done && 'text-muted-foreground',
+              )}
+            >
+              {done ? <CheckIcon className="size-3.5" aria-label="เสร็จแล้ว" /> : i + 1}
+            </span>
+            <span className={cn('whitespace-nowrap text-sm', active ? 'font-medium text-foreground' : done ? 'text-foreground' : 'text-muted-foreground')}>{s.label}</span>
+            {i < STRIP.length - 1 && <Separator className="min-w-5 flex-1" />}
+          </li>
         );
       })}
-    </div>
+    </ol>
   );
 }
 
@@ -108,56 +151,63 @@ function WorkActionCenter({ campaignId, status, statusNote, queue }: {
   const failed = status === 'draft_error' || queueState === 'error';
   if (!working && !needsHelp && !failed) return null;
 
-  const tone = needsHelp || failed ? 'border-amber-200 bg-amber-50' : 'border-blue-200 bg-blue-50';
   const doing = queueState === 'queued'
     ? 'งานอยู่ในคิว รอเครื่องสร้างสื่อรับงาน'
     : status === 'researching'
-      ? statusNote || 'กำลังสำรวจคำค้นและโพสต์ที่เกี่ยวข้องก่อนสร้างสื่อ'
+      ? statusNote || 'กำลังดูคำค้นและโพสต์ที่เกี่ยวข้องก่อนสร้างสื่อ'
       : queueState === 'running' || status === 'drafting'
         ? 'กำลังเขียน Caption สร้างภาพ และตรวจข้อมูลสำคัญ'
         : needsHelp
           ? 'ระบบหยุดก่อนสร้างสื่อ เพื่อไม่ให้ข้อมูลหรือรูปผิดจากใบขอ'
           : 'ระบบสร้างสื่อไม่สำเร็จ';
   const blocker = needsHelp || failed
-    ? statusNote || queue?.last_error || 'ต้องตรวจข้อมูลก่อนเริ่มต่อ'
-    : 'ไม่มี — ระบบกำลังทำงาน';
+    ? statusNote || queue?.last_error || 'ต้องตรวจข้อมูลก่อนทำต่อ'
+    : 'ไม่มี ระบบกำลังทำงาน';
   const next = needsHelp
-    ? 'ลองสำรวจใหม่ได้หลังระบบมีแหล่งสำรอง หรือกลับไปตรวจข้อมูลใบขอ'
+    ? 'ลองสำรวจใหม่หลังระบบมีแหล่งสำรอง หรือกลับไปตรวจข้อมูลใบขอ'
     : failed
       ? 'ลองสร้างสื่อใหม่ ระบบจะเก็บร่างเดิมไว้และไม่โพสต์ Facebook'
-      : 'ไม่ต้องกดซ้ำ หน้านี้จะอัปเดตเองเมื่อขั้นตอนถัดไปเสร็จ';
+      : 'ไม่ต้องกดซ้ำ หน้านี้จะอัปเดตเองเมื่อขั้นต่อไปเสร็จ';
+  const queueLabel = queueState === 'queued' ? 'รอคิว' : queueState === 'running' ? 'กำลังทำ' : queueState === 'needs_input' ? 'ต้องให้ช่วย' : queueState || '—';
 
   return (
-    <section className={`rounded-2xl border p-4 ${tone}`} aria-live="polite">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <p className="eyebrow">สถานะงานแบบเข้าใจง่าย</p>
-          <h2 className="mt-1 text-base font-semibold">{needsHelp ? 'ต้องให้ช่วยหนึ่งเรื่องก่อน' : failed ? 'ระบบหยุดและต้องลองใหม่' : 'ระบบกำลังทำงาน'}</h2>
-        </div>
-        {queue && <span className="rounded-full border border-current/15 bg-white/70 px-2.5 py-1 text-xs">{queueState === 'queued' ? 'รอคิว' : queueState === 'running' ? 'กำลังทำ' : queueState === 'needs_input' ? 'ต้องให้ช่วย' : queueState || '—'}</span>}
-      </div>
-      <div className="mt-3 grid gap-3 text-sm md:grid-cols-2">
-        <div><b>ระบบกำลังทำอะไร</b><p className="mt-1 text-ink/75">{doing}</p></div>
-        <div><b>ได้อะไรแล้ว</b><p className="mt-1 text-ink/75">{queue?.started_at ? `Worker เริ่มงานเมื่อ ${formatTime(queue.started_at)}` : 'รับใบขอและตรวจข้อมูลเบื้องต้นแล้ว'}</p></div>
-        <div><b>ติดอะไร</b><p className="mt-1 text-ink/75">{blocker}</p></div>
-        <div><b>คุณต้องทำอะไรต่อ</b><p className="mt-1 text-ink/75">{next}</p></div>
-      </div>
-      {(needsHelp || failed) && (
-        <div className="mt-4 flex flex-wrap gap-2">
-          <form action={retryCampaignDraftAction}><input type="hidden" name="campaignId" value={campaignId} /><button className="btn-primary btn-sm">{needsHelp ? 'ลองสำรวจและสร้างสื่อใหม่' : 'ลองสร้างสื่อใหม่'}</button></form>
-          <a href="#facts" className="btn-ghost btn-sm">ตรวจข้อมูลใบขอ</a>
-        </div>
+    <Alert role="status" aria-live="polite" variant={failed ? 'destructive' : 'default'}>
+      {needsHelp || failed ? <CircleAlertIcon /> : <Spinner />}
+      <AlertTitle>{needsHelp ? 'ต้องให้คนช่วยก่อนทำต่อ' : failed ? 'ระบบหยุด ต้องลองใหม่' : 'ระบบกำลังทำงาน'}</AlertTitle>
+      {queue && (
+        <AlertAction>
+          <Badge variant="outline">{queueLabel}</Badge>
+        </AlertAction>
       )}
-    </section>
+      <AlertDescription className="flex flex-col gap-4">
+        <dl className="mt-2 grid gap-3 md:grid-cols-2">
+          <div className="flex flex-col gap-0.5"><dt className="font-medium text-foreground">ระบบกำลังทำอะไร</dt><dd>{doing}</dd></div>
+          <div className="flex flex-col gap-0.5"><dt className="font-medium text-foreground">ได้อะไรแล้ว</dt><dd>{queue?.started_at ? `Worker เริ่มงานเมื่อ ${formatTime(queue.started_at)}` : 'รับใบขอและตรวจข้อมูลเบื้องต้นแล้ว'}</dd></div>
+          <div className="flex flex-col gap-0.5"><dt className="font-medium text-foreground">ติดอะไร</dt><dd>{blocker}</dd></div>
+          <div className="flex flex-col gap-0.5"><dt className="font-medium text-foreground">ต้องทำอะไรต่อ</dt><dd>{next}</dd></div>
+        </dl>
+        {(needsHelp || failed) && (
+          <div className="flex flex-wrap gap-2">
+            <form action={retryCampaignDraftAction}>
+              <input type="hidden" name="campaignId" value={campaignId} />
+              <Button size="sm">{needsHelp ? 'สำรวจและสร้างสื่อใหม่' : 'ลองสร้างสื่อใหม่'}</Button>
+            </form>
+            <Button asChild variant="outline" size="sm">
+              <a href="#facts">ตรวจข้อมูลใบขอ</a>
+            </Button>
+          </div>
+        )}
+      </AlertDescription>
+    </Alert>
   );
 }
 
-function Field({ label, value }: { label: string; value?: unknown }) {
+function Fact({ label, value }: { label: string; value?: unknown }) {
   const v = value === null || value === undefined || value === '' ? '—' : String(value);
   return (
-    <div>
-      <dt className="text-xs text-subtle">{label}</dt>
-      <dd className="mt-0.5 text-sm">{v}</dd>
+    <div className="flex flex-col gap-0.5">
+      <dt className="text-xs text-muted-foreground">{label}</dt>
+      <dd className="text-sm leading-relaxed">{v}</dd>
     </div>
   );
 }
@@ -166,7 +216,7 @@ function Metric({ label, value }: { label: string; value: number }) {
   return (
     <div className="text-center">
       <div className="text-lg font-semibold tabular-nums">{value}</div>
-      <div className="text-[11px] text-subtle">{label}</div>
+      <div className="text-xs text-muted-foreground">{label}</div>
     </div>
   );
 }
@@ -195,10 +245,20 @@ export default async function CampaignDetail({ params, searchParams }: { params:
   } catch (error) {
     const message = error instanceof Error ? error.message : 'ไม่ทราบสาเหตุ';
     return (
-      <div className="p-8">
-        <Link href="/orchestrator" className="text-sm text-[#0d5fb8]">← ศูนย์งาน</Link>
-        <h1 className="mt-4 text-xl font-semibold">เปิดใบงานไม่สำเร็จ</h1>
-        <p className="mt-2 text-sm text-red-800">{message}</p>
+      <div className="flex flex-col gap-4 p-8">
+        <div>
+          <Button asChild variant="ghost" size="sm" className="-ml-2.5">
+            <Link href="/orchestrator">
+              <ArrowLeftIcon data-icon="inline-start" />
+              ศูนย์งาน
+            </Link>
+          </Button>
+        </div>
+        <h1 className="text-xl font-semibold">เปิดใบงานไม่สำเร็จ</h1>
+        <Alert variant="destructive">
+          <CircleXIcon />
+          <AlertDescription>{message}</AlertDescription>
+        </Alert>
       </div>
     );
   }
@@ -240,14 +300,14 @@ async function renderCampaignDetail({ params, searchParams }: { params: { id: st
   const ingredients = await contentGenIngredients(c.title);
 
   // ป้ายบอกว่า "ต้องทำอะไรต่อ" — คนเปิดหน้ามาแล้วรู้ทันทีว่างานค้างที่ใคร
-  const NEXT_ACTION: Record<string, { text: string; cls: string }> = {
-    drafting: { text: '🤖 AI กำลังคิดร่าง — รอสักครู่ ร่างใหม่จะโผล่ด้านล่างเอง', cls: 'border-blue-200 bg-blue-50 text-blue-800' },
-    pending_approval: { text: '👉 รอคุณ: ตรวจร่างด้านล่าง เลือกเวอร์ชันที่ชอบแล้วกดอนุมัติ (หรือตีกลับให้ AI แก้)', cls: 'border-amber-200 bg-amber-50 text-amber-800' },
-    posting: { text: '📤 กำลังโพสต์/รอคิวโพสต์ — เสร็จแล้วระบบจะเก็บคอมเมนต์และวัดผลเอง', cls: 'border-blue-200 bg-blue-50 text-blue-800' },
-    measuring: { text: '⏳ รอเก็บผลตอบรับจากโพสต์ — เมื่อข้อมูลพร้อมให้กด “ตรวจผลตอนนี้”', cls: 'border-amber-200 bg-amber-50 text-amber-800' },
-    low_engagement: { text: '📉 คนสนใจน้อย — ระบบบันทึกแนวนี้เป็น "ห้ามทำซ้ำ" และสั่ง AI คิดเวอร์ชันใหม่แล้ว', cls: 'border-red-200 bg-red-50 text-red-700' },
-    done: { text: '✅ เสร็จสิ้น — แนวที่ได้ผลถูกเก็บเป็นต้นแบบ ระบบจะใช้เป็นแนวทางในงานถัดไป', cls: 'border-emerald-200 bg-emerald-50 text-emerald-800' },
-    draft_error: { text: '⚠️ สร้างประกาศไม่สำเร็จ — กลับไปหน้าศูนย์งานแล้วกด “ลองสร้างประกาศใหม่”', cls: 'border-red-200 bg-red-50 text-red-700' },
+  const NEXT_ACTION: Record<string, { text: string; variant: 'default' | 'destructive' }> = {
+    drafting: { text: 'AI กำลังทำร่าง ร่างใหม่จะขึ้นด้านล่างเมื่อเสร็จ', variant: 'default' },
+    pending_approval: { text: 'รอคุณตรวจร่างด้านล่าง เลือกเวอร์ชันที่จะใช้แล้วกดอนุมัติ หรือตีกลับให้ AI แก้', variant: 'default' },
+    posting: { text: 'กำลังโพสต์หรือรอคิวโพสต์ เมื่อเสร็จระบบจะเก็บคอมเมนต์และวัดผลเอง', variant: 'default' },
+    measuring: { text: 'รอเก็บผลตอบรับจากโพสต์ เมื่อข้อมูลพร้อมให้กด “วัดผลตอนนี้”', variant: 'default' },
+    low_engagement: { text: 'คนสนใจน้อย ระบบบันทึกแนวนี้เป็น "ห้ามทำซ้ำ" และให้ AI ทำเวอร์ชันใหม่แล้ว', variant: 'destructive' },
+    done: { text: 'เสร็จแล้ว ระบบเก็บแนวที่ได้ผลไว้เป็นแนวทางสำหรับงานถัดไป', variant: 'default' },
+    draft_error: { text: 'สร้างประกาศไม่สำเร็จ กลับไปหน้าศูนย์งานแล้วกด “ลองสร้างประกาศใหม่”', variant: 'destructive' },
   };
   const nextAction = NEXT_ACTION[c.status];
 
@@ -275,25 +335,48 @@ async function renderCampaignDetail({ params, searchParams }: { params: { id: st
       logoVariant: 'people-navy' as const,
     };
     const qualityStatus = focusedContent.quality_status;
-    const qualityDot = qualityStatus === 'fail' ? 'bg-red-600' : qualityStatus === 'pass' ? 'bg-emerald-600' : 'bg-amber-500';
+    const qualityVariant: BadgeVariant = qualityStatus === 'fail' ? 'destructive' : qualityStatus === 'pass' ? 'secondary' : 'outline';
     const qualityLabel = qualityStatus === 'fail' ? 'ยังอนุมัติไม่ได้' : qualityStatus === 'pass' ? 'สื่อพร้อมแก้ไข' : 'ควรตรวจเพิ่ม';
-    const qualityScoreClass = qualityStatus === 'fail' ? 'text-red-700' : qualityStatus === 'pass' ? 'text-emerald-700' : 'text-amber-700';
     return (
-      <div className="pb-1">
-        <header>
-          <Link href="/orchestrator" className="text-[13px] text-[#6f7782] hover:text-[#0d5fb8]">ศูนย์งาน&nbsp;&nbsp;/&nbsp;&nbsp;เวิร์กออเดอร์&nbsp;&nbsp;/&nbsp;&nbsp;{c.request_no || 'ใบงาน'}</Link>
-          <div className="mt-3 flex items-end justify-between gap-6">
-            <h1 className="text-[30px] font-semibold leading-none tracking-[-0.025em] text-[#191919]">{c.request_no || 'ใบงาน'} <span className="mx-3 font-normal text-[#c5c9ce]">|</span> {c.title || 'งานรับสมัคร'}</h1>
-            <div className="flex items-center gap-4 pb-0.5">
-              <span className="inline-flex items-center gap-2 text-[15px]"><span className={`h-3.5 w-3.5 rounded-full ${qualityDot}`} />{qualityLabel}</span>
-              <span className="h-7 w-px bg-[#d6d9de]" />
-              <span className="text-[14px] text-[#444]">Quality <b className={`ml-2 text-[29px] font-medium leading-none ${qualityScoreClass}`}>{focusedContent.quality_score ?? '—'}</b></span>
+      <div className="flex flex-col gap-4 pb-1">
+        <header className="flex flex-col gap-3">
+          <Breadcrumb>
+            <BreadcrumbList>
+              <BreadcrumbItem>
+                <BreadcrumbLink asChild><Link href="/orchestrator">ศูนย์งาน</Link></BreadcrumbLink>
+              </BreadcrumbItem>
+              <BreadcrumbSeparator />
+              <BreadcrumbItem>
+                <BreadcrumbPage>{c.request_no || 'ใบงาน'}</BreadcrumbPage>
+              </BreadcrumbItem>
+            </BreadcrumbList>
+          </Breadcrumb>
+          <div className="flex flex-wrap items-center justify-between gap-4">
+            <h1 className="flex flex-wrap items-center gap-x-3 text-2xl font-semibold">
+              <span>{c.request_no || 'ใบงาน'}</span>
+              <Separator orientation="vertical" className="h-6" />
+              <span>{c.title || 'งานรับสมัคร'}</span>
+            </h1>
+            <div className="flex items-center gap-3">
+              <Badge variant={qualityVariant}>{qualityLabel}</Badge>
+              <span className="text-sm text-muted-foreground">
+                Quality <span className={cn('ml-1 text-2xl font-semibold tabular-nums text-foreground', qualityStatus === 'fail' && 'text-destructive')}>{focusedContent.quality_score ?? '—'}</span>
+              </span>
             </div>
           </div>
         </header>
-        <div className="mt-6 overflow-x-auto rounded-xl border border-[#d6dce4] bg-white px-12 py-4"><StageStrip status={c.status} /></div>
-        <div className="mt-3 space-y-3">
-          {contentError && <div role="alert" className="rounded-md border border-red-200 bg-red-50 px-4 py-2 text-sm text-red-800">{contentError}</div>}
+        <Card>
+          <CardContent className="overflow-x-auto">
+            <StageStrip status={c.status} />
+          </CardContent>
+        </Card>
+        <div className="flex flex-col gap-3">
+          {contentError && (
+            <Alert variant="destructive">
+              <CircleXIcon />
+              <AlertDescription>{contentError}</AlertDescription>
+            </Alert>
+          )}
           <ContentReviewWorkspace
             campaignId={c.id}
             content={{
@@ -317,143 +400,205 @@ async function renderCampaignDetail({ params, searchParams }: { params: { id: st
     );
   }
 
+  const statusVariant: BadgeVariant = c.status === 'pending_approval' ? 'secondary' : c.status === 'draft_error' ? 'destructive' : 'outline';
+  const subline = [c.province ? humanText(c.province) : null, c.remaining_qty != null ? `ยังขาด ${c.remaining_qty} อัตรา` : null].filter(Boolean).join(' · ');
+
   return (
-    <div className="space-y-5">
+    <div className="flex flex-col gap-5">
       {liveDraft && <AutoRefresh seconds={6} />}
-      <div className="card overflow-hidden p-0">
-        <div className="border-b border-hairline px-6 pt-5">
-          <Link href="/orchestrator" className="text-sm text-subtle hover:text-accent">ศูนย์งาน <span className="mx-1">/</span> เวิร์กออเดอร์ <span className="mx-1">/</span> {c.request_no || 'ใบงาน'}</Link>
-        </div>
-        <div className="px-6 py-5">
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div>
-            <h1 className="text-3xl font-semibold tracking-tight">{c.request_no || 'ใบงาน'} <span className="mx-2 font-normal text-hairline">|</span> {c.title || 'งานรับสมัคร'}</h1>
-            <p className="mt-1 text-sm text-subtle">
-              {c.province && ` · ${humanText(c.province)}`}
-              {c.remaining_qty != null && ` · ยังขาด ${c.remaining_qty} อัตรา`}
-            </p>
+      <Card>
+        <CardHeader>
+          <Breadcrumb>
+            <BreadcrumbList>
+              <BreadcrumbItem>
+                <BreadcrumbLink asChild><Link href="/orchestrator">ศูนย์งาน</Link></BreadcrumbLink>
+              </BreadcrumbItem>
+              <BreadcrumbSeparator />
+              <BreadcrumbItem>
+                <BreadcrumbPage>{c.request_no || 'ใบงาน'}</BreadcrumbPage>
+              </BreadcrumbItem>
+            </BreadcrumbList>
+          </Breadcrumb>
+        </CardHeader>
+        <CardContent className="flex flex-col gap-4">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div className="flex flex-col gap-1">
+              <h1 className="flex flex-wrap items-center gap-x-3 text-2xl font-semibold">
+                <span>{c.request_no || 'ใบงาน'}</span>
+                <Separator orientation="vertical" className="h-6" />
+                <span>{c.title || 'งานรับสมัคร'}</span>
+              </h1>
+              {subline && <p className="text-sm text-muted-foreground">{subline}</p>}
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <Badge variant={statusVariant}>{c.status === 'pending_approval' ? 'สื่อพร้อมแก้ไข' : STAGE_LABEL[c.status] ?? c.status}</Badge>
+              {recommendedContentId && (
+                <span className="text-sm text-muted-foreground">
+                  Quality <span className="ml-1 text-xl font-semibold tabular-nums text-foreground">{readyContents[0]?.quality_score ?? '—'}</span>
+                </span>
+              )}
+              {canMeasure && (
+                <form action={measureCampaignAction}>
+                  <input type="hidden" name="campaignId" value={c.id} />
+                  <Button variant="outline" size="sm">วัดผลตอนนี้</Button>
+                </form>
+              )}
+              {!regenerateBusy && (
+                <form action={retryCampaignDraftAction}>
+                  <input type="hidden" name="campaignId" value={c.id} />
+                  <Button variant="outline" size="sm" title="สร้างเวอร์ชันใหม่ ของเดิมยังเก็บไว้ให้เทียบ">
+                    <RefreshCwIcon data-icon="inline-start" />
+                    ให้ AI ทำร่างใหม่
+                  </Button>
+                </form>
+              )}
+              {regenerateBusy && ['posting', 'measuring'].includes(c.status) && (
+                <span className="text-xs text-muted-foreground" title="กันไม่ให้ประกาศคนละฉบับชนกับงานที่กำลังเผยแพร่">
+                  ทำร่างใหม่ได้หลังโพสต์และวัดผลเสร็จ
+                </span>
+              )}
+            </div>
           </div>
-          <div className="flex items-center gap-2">
-            <span className={`h-3 w-3 rounded-full ${c.status === 'pending_approval' ? 'bg-emerald-500' : c.status === 'needs_input' || c.status === 'draft_error' ? 'bg-amber-500' : 'bg-blue-500'}`} />
-            <span className="text-sm font-medium">{c.status === 'pending_approval' ? 'สื่อพร้อมแก้ไข' : STAGE_LABEL[c.status] ?? c.status}</span>
-            {recommendedContentId && <><span className="mx-1 h-6 w-px bg-hairline" /><span className="text-sm text-subtle">Quality</span><b className="text-2xl text-emerald-600">{readyContents[0]?.quality_score ?? '—'}</b></>}
-            {canMeasure && (
-              <form action={measureCampaignAction}>
-                <input type="hidden" name="campaignId" value={c.id} />
-                <button className="btn-ghost btn-sm">📊 วัดผลตอนนี้</button>
-              </form>
-            )}
-            {!regenerateBusy && (
-              <form action={retryCampaignDraftAction}>
-                <input type="hidden" name="campaignId" value={c.id} />
-                <button className="btn-ghost btn-sm" title="สร้างเวอร์ชันใหม่ — ของเดิมยังอยู่ให้เทียบ">↻ ให้ AI คิดใหม่</button>
-              </form>
-            )}
-            {regenerateBusy && ['posting', 'measuring'].includes(c.status) && (
-              <span className="text-xs text-subtle" title="ป้องกันประกาศคนละฉบับชนกับงานที่กำลังเผยแพร่">
-                รอโพสต์และวัดผลเสร็จก่อนจึงคิดใหม่ได้
-              </span>
-            )}
-          </div>
-        </div>
-        <div className="mt-4">
           <div className="overflow-x-auto pb-1"><StageStrip status={c.status} /></div>
-        </div>
-        <div className="mt-4"><WorkActionCenter campaignId={c.id} status={c.status} statusNote={c.status_note} queue={draftQueue} /></div>
-        {nextAction && !liveDraft && c.status !== 'needs_input' && (
-          <div className={`mt-4 rounded-xl border px-4 py-2.5 text-[13px] font-medium ${nextAction.cls}`}>{nextAction.text}</div>
-        )}
-        {contentError && (
-          <div role="alert" className="mt-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-900">
-            <b>บันทึกรูปยังไม่สำเร็จ:</b> {contentError}
-            <p className="mt-1 text-xs text-red-800">ข้อมูลเดิมยังอยู่ครบ ลองบันทึกอีกครั้งได้โดยไม่ต้องสร้าง Content หรือโพสต์ใหม่</p>
-          </div>
-        )}
-        {posterSaved && (
-          <div role="status" className="mt-4 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-900">
-            {standardSaved
-              ? <><b>บันทึกแล้ว งานโปสเตอร์ชุดนี้ต่อไปจะจัดวางแบบนี้</b> ระบบประกอบ PNG ของร่างนี้แล้ว และจะจำการจัดวางสำหรับงานใหม่ที่ใช้เทมเพลตเดียวกัน โดยไม่ย้ายรูปคนจากงานนี้</>
-              : <><b>บันทึกรูปใหม่แล้ว</b> ระบบประกอบ PNG จากภาพต้นฉบับและตรวจข้อมูลสำคัญเรียบร้อยแล้ว · เฉพาะร่างนี้</>}
-          </div>
-        )}
-        {standardReset && (
-          <div role="status" className="mt-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-950">
-            <b>กลับไปใช้แบบต้นฉบับ SO แล้ว</b> งานโปสเตอร์ชุดนี้ต่อไปจะจัดวางตามเทมเพลต SO PEOPLE เดิม
-          </div>
-        )}
-        </div>
-      </div>
+          <WorkActionCenter campaignId={c.id} status={c.status} statusNote={c.status_note} queue={draftQueue} />
+          {nextAction && !liveDraft && c.status !== 'needs_input' && (
+            <Alert role="status" variant={nextAction.variant}>
+              <AlertTitle>{nextAction.text}</AlertTitle>
+            </Alert>
+          )}
+          {contentError && (
+            <Alert variant="destructive">
+              <CircleXIcon />
+              <AlertTitle>บันทึกรูปยังไม่สำเร็จ</AlertTitle>
+              <AlertDescription>
+                <p>{contentError}</p>
+                <p>ข้อมูลเดิมยังอยู่ครบ ลองบันทึกอีกครั้งได้ ไม่ต้องสร้าง Content หรือโพสต์ใหม่</p>
+              </AlertDescription>
+            </Alert>
+          )}
+          {posterSaved && (
+            <Alert role="status">
+              <CircleCheckIcon />
+              {standardSaved ? (
+                <>
+                  <AlertTitle>บันทึกแล้ว งานโปสเตอร์ชุดนี้ต่อไปจะจัดวางแบบนี้</AlertTitle>
+                  <AlertDescription>ระบบประกอบ PNG ของร่างนี้แล้ว และจะใช้การจัดวางนี้กับงานใหม่ที่ใช้เทมเพลตเดียวกัน โดยไม่ย้ายรูปคนจากงานนี้</AlertDescription>
+                </>
+              ) : (
+                <>
+                  <AlertTitle>บันทึกรูปใหม่แล้ว</AlertTitle>
+                  <AlertDescription>ระบบประกอบ PNG จากภาพต้นฉบับและตรวจข้อมูลสำคัญแล้ว มีผลเฉพาะร่างนี้</AlertDescription>
+                </>
+              )}
+            </Alert>
+          )}
+          {standardReset && (
+            <Alert role="status">
+              <AlertTitle>กลับไปใช้แบบต้นฉบับ SO แล้ว</AlertTitle>
+              <AlertDescription>งานโปสเตอร์ชุดนี้ต่อไปจะจัดวางตามเทมเพลต SO PEOPLE เดิม</AlertDescription>
+            </Alert>
+          )}
+        </CardContent>
+      </Card>
 
       {/* Pool pre-check: มีคนใน So Recruit สำหรับใบขอนี้หรือยัง (อ่านอย่างเดียว คนตัดสินใจเอง) */}
-      <div id="facts" className="card p-4">
-        <div className="flex flex-wrap items-center gap-2 text-sm">
-          <span className="font-medium">So Recruit:</span>
-          {pool === null ? (
-            <span className="text-subtle">เชื่อมข้อมูล So Recruit ไม่ได้ (สิทธิ์/สคีมา)</span>
-          ) : !pool.found ? (
-            <span className="text-subtle">
-              ยังไม่พบใบขอนี้ใน So Recruit (jobs.request_no ยังไม่ผูก) — ถือว่ายังไม่มีคน → ควรคิด content
-            </span>
-          ) : pool.totalAssigned > 0 ? (
-            <span className="rounded-md bg-green-50 px-2 py-0.5 text-green-700">
-              ✅ มีคนแล้ว {pool.totalAssigned} — อาจไม่ต้องคิด content (ตรวจก่อนอนุมัติ)
-            </span>
-          ) : (
-            <span className="rounded-md bg-amber-50 px-2 py-0.5 text-amber-700">
-              พบงานใน So Recruit แต่ยังไม่มีคนถูก assign → ควรคิด content
-            </span>
-          )}
-        </div>
-        {pool?.found && pool.jobs.length > 0 && (
-          <div className="mt-2 text-xs text-subtle">
-            {pool.jobs.map((j) => (
-              <span key={j.id} className="mr-3">
-                · {j.unit_name || j.location || 'งาน'} [{j.status || '—'}] · assign {j.assigned}
+      <Card id="facts" size="sm">
+        <CardContent className="flex flex-col gap-2">
+          <div className="flex flex-wrap items-center gap-2 text-sm">
+            <span className="font-medium">So Recruit</span>
+            {pool === null ? (
+              <span className="text-muted-foreground">เชื่อมข้อมูล So Recruit ไม่ได้ (สิทธิ์/สคีมา)</span>
+            ) : !pool.found ? (
+              <span className="text-muted-foreground">
+                ยังไม่พบใบขอนี้ใน So Recruit (jobs.request_no ยังไม่ผูก) ถือว่ายังไม่มีคน ควรทำ content
               </span>
-            ))}
+            ) : pool.totalAssigned > 0 ? (
+              <>
+                <Badge variant="secondary">มีคนแล้ว {pool.totalAssigned}</Badge>
+                <span className="text-muted-foreground">อาจไม่ต้องทำ content ตรวจก่อนอนุมัติ</span>
+              </>
+            ) : (
+              <>
+                <Badge variant="outline">ยังไม่มีคนถูก assign</Badge>
+                <span className="text-muted-foreground">พบงานใน So Recruit แล้ว ควรทำ content</span>
+              </>
+            )}
           </div>
-        )}
-      </div>
+          {pool?.found && pool.jobs.length > 0 && (
+            <ul className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
+              {pool.jobs.map((j) => (
+                <li key={j.id}>
+                  {j.unit_name || j.location || 'งาน'} [{j.status || '—'}] · assign {j.assigned}
+                </li>
+              ))}
+            </ul>
+          )}
+        </CardContent>
+      </Card>
 
-      <div className="card p-6">
-        <h2 className="mb-4 text-sm font-semibold uppercase tracking-wide text-subtle">
-          ข้อเท็จจริงจากใบขอ
-          {snap.user_edited && <span className="ml-2 rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-medium normal-case text-amber-700">✎ มีการแก้ไขตอนรับงาน</span>}
-          {snap.simulation && <span className="ml-2 rounded-full bg-blue-50 px-2 py-0.5 text-[10px] font-medium normal-case text-blue-700">DEMO — ห้ามเผยแพร่</span>}
-        </h2>
-        <dl className="grid grid-cols-2 gap-4 sm:grid-cols-3">
-          <Field label="ตำแหน่ง" value={snap.position || snap.request_name || c.title} />
-          <Field label="พื้นที่/สถานที่" value={humanText(snap.location || snap.work_addr || c.province)} />
-          <Field label="รายได้" value={snap.income} />
-          <Field label="จำนวนที่รับ" value={snap.qty || c.qty} />
-          <Field label="เวลางาน" value={snap.work_schedule} />
-          <Field label="เพศ" value={snap.gender} />
-          <Field label="อายุ" value={snap.age_min || snap.age_max ? `${snap.age_min ?? ''}-${snap.age_max ?? ''} ปี` : ''} />
-          <Field label="หน่วยงาน" value={snap.unit_name || snap.site_name} />
-          <Field label="ผู้ขอ" value={snap.requested_by_name || snap.requester_name || c.created_by} />
-          <div className="col-span-2 sm:col-span-3"><Field label="หน้าที่/เหตุผลที่ขอโพส" value={snap.job_description || snap.detail || snap.reason} /></div>
-          {snap.note && <div className="col-span-2 sm:col-span-3"><Field label="หมายเหตุ" value={snap.note} /></div>}
-        </dl>
-      </div>
+      <Card>
+        <CardHeader>
+          <CardTitle>ข้อเท็จจริงจากใบขอ</CardTitle>
+          {(snap.user_edited || snap.simulation) && (
+            <CardAction className="flex flex-wrap gap-2">
+              {snap.user_edited && <Badge variant="outline">มีการแก้ไขตอนรับงาน</Badge>}
+              {snap.simulation && <Badge variant="destructive">DEMO ห้ามเผยแพร่</Badge>}
+            </CardAction>
+          )}
+        </CardHeader>
+        <CardContent>
+          <dl className="grid grid-cols-2 gap-4 sm:grid-cols-3">
+            <Fact label="ตำแหน่ง" value={snap.position || snap.request_name || c.title} />
+            <Fact label="พื้นที่/สถานที่" value={humanText(snap.location || snap.work_addr || c.province)} />
+            <Fact label="รายได้" value={snap.income} />
+            <Fact label="จำนวนที่รับ" value={snap.qty || c.qty} />
+            <Fact label="เวลางาน" value={snap.work_schedule} />
+            <Fact label="เพศ" value={snap.gender} />
+            <Fact label="อายุ" value={snap.age_min || snap.age_max ? `${snap.age_min ?? ''}-${snap.age_max ?? ''} ปี` : ''} />
+            <Fact label="หน่วยงาน" value={snap.unit_name || snap.site_name} />
+            <Fact label="ผู้ขอ" value={snap.requested_by_name || snap.requester_name || c.created_by} />
+            <div className="col-span-2 sm:col-span-3"><Fact label="หน้าที่/เหตุผลที่ขอโพส" value={snap.job_description || snap.detail || snap.reason} /></div>
+            {snap.note && <div className="col-span-2 sm:col-span-3"><Fact label="หมายเหตุ" value={snap.note} /></div>}
+          </dl>
+        </CardContent>
+      </Card>
 
       {c.status === 'approved' && approvedContent && (
-        <section className="overflow-hidden rounded-2xl border-2 border-violet-300 bg-violet-50/60">
-          <div className="bg-violet-700 px-5 py-4 text-white">
-            <p className="text-xs font-medium uppercase tracking-wide text-violet-100">ขั้นสุดท้ายก่อนโพสต์จริง</p>
-            <h2 className="mt-1 text-lg font-semibold">สรุปงานและเริ่ม Auto-post</h2>
-            <p className="mt-1 text-sm text-violet-100">Content อนุมัติแล้ว แต่ยังไม่มีโพสต์ใดถูกส่งออกจนกดปุ่มด้านล่าง</p>
-          </div>
-          <div className="p-5">
-            <div className="grid gap-3 text-sm sm:grid-cols-3">
-              <div className="rounded-xl border border-violet-100 bg-white px-4 py-3"><span className="block text-xs text-subtle">ตำแหน่ง</span><b>{c.title || c.request_no}</b></div>
-              <div className="rounded-xl border border-violet-100 bg-white px-4 py-3"><span className="block text-xs text-subtle">สื่อที่อนุมัติ</span><b>รูป + แคปชัน เวอร์ชัน {approvedContent.version}</b></div>
-              <div className="rounded-xl border border-violet-100 bg-white px-4 py-3"><span className="block text-xs text-subtle">สถานะ</span><b>รอเลือกบัญชีและกลุ่ม</b></div>
+        <Card>
+          <CardHeader>
+            <CardDescription>ขั้นสุดท้ายก่อนโพสต์จริง</CardDescription>
+            <CardTitle>สรุปงานและเริ่ม Auto-post</CardTitle>
+            <CardDescription>Content อนุมัติแล้ว ระบบยังไม่ส่งโพสต์ใดออกไปจนกว่าจะกดปุ่มด้านล่าง</CardDescription>
+          </CardHeader>
+          <CardContent className="flex flex-col gap-4">
+            <div className="grid gap-3 sm:grid-cols-3">
+              <Item variant="outline">
+                <ItemContent>
+                  <ItemDescription>ตำแหน่ง</ItemDescription>
+                  <ItemTitle>{c.title || c.request_no}</ItemTitle>
+                </ItemContent>
+              </Item>
+              <Item variant="outline">
+                <ItemContent>
+                  <ItemDescription>สื่อที่อนุมัติ</ItemDescription>
+                  <ItemTitle>รูป + แคปชัน เวอร์ชัน {approvedContent.version}</ItemTitle>
+                </ItemContent>
+              </Item>
+              <Item variant="outline">
+                <ItemContent>
+                  <ItemDescription>สถานะ</ItemDescription>
+                  <ItemTitle>รอเลือกบัญชีและกลุ่ม</ItemTitle>
+                </ItemContent>
+              </Item>
             </div>
-            <form action={reopenContentForEditingAction} className="mt-4">
+            <form action={reopenContentForEditingAction} className="flex flex-wrap items-center gap-2">
               <input type="hidden" name="campaignId" value={c.id} />
               <input type="hidden" name="contentId" value={approvedContent.id} />
-              <button className="btn-secondary">← กลับไปแก้รูปและ Caption</button>
-              <span className="ml-2 text-xs text-subtle">ใช้ได้ก่อนเริ่ม Auto-post และไม่ส่งโพสต์จริง</span>
+              <Button variant="secondary">
+                <ArrowLeftIcon data-icon="inline-start" />
+                กลับไปแก้รูปและ Caption
+              </Button>
+              <span className="text-xs text-muted-foreground">ใช้ได้ก่อนเริ่ม Auto-post และไม่ส่งโพสต์จริง</span>
             </form>
             {publishAccounts.length > 0 ? (
               <AutopostSummaryForm
@@ -462,91 +607,117 @@ async function renderCampaignDetail({ params, searchParams }: { params: { id: st
                 accounts={publishAccounts.map((account) => ({ id: account.id, label: account.label, groupCount: account.group_count }))}
               />
             ) : (
-              <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
-                ยังไม่มีบัญชีที่พร้อม Auto-post — ต้องผูกเครื่อง เลือกกลุ่ม และผ่านการทดสอบแบบไม่โพสต์จริงก่อน
-                <Link href="/settings/connectors" className="ml-2 font-medium text-accent underline">ไปตั้งค่า Connector</Link>
-              </div>
+              <Alert>
+                <CircleAlertIcon />
+                <AlertTitle>ยังไม่มีบัญชีที่พร้อม Auto-post</AlertTitle>
+                <AlertDescription>
+                  ต้องผูกเครื่อง เลือกกลุ่ม และผ่านการทดสอบแบบไม่โพสต์จริงก่อน <Link href="/settings/connectors">ไปตั้งค่า Connector</Link>
+                </AlertDescription>
+              </Alert>
             )}
-          </div>
-        </section>
+          </CardContent>
+        </Card>
       )}
 
       {autopostProgress && ['posting', 'measuring', 'done'].includes(c.status) && (
-        <section className="card p-5">
-          <div className="flex flex-wrap items-end justify-between gap-3">
-            <div>
-              <p className="eyebrow">Auto-post</p>
-              <h2 className="mt-1 text-lg font-semibold">ความคืบหน้าการโพสต์ตามกลุ่มที่เลือก</h2>
-            </div>
-            <span className="pill bg-blue-50 text-blue-700">โพสต์สำเร็จ {autopostProgress.posted_groups} / {autopostProgress.selected_groups} กลุ่ม</span>
-          </div>
-          <div className="mt-4 h-2 overflow-hidden rounded-full bg-black/[0.06]">
-            <div className="h-full rounded-full bg-accent transition-all" style={{ width: `${autopostProgress.selected_groups ? Math.min(100, Math.round((autopostProgress.posted_groups / autopostProgress.selected_groups) * 100)) : 0}%` }} />
-          </div>
-          <p className="mt-2 text-xs text-subtle">ระบบเริ่มบันทึกผลแล้ว {autopostProgress.attempted_groups} กลุ่ม · จำนวนเป้าหมายล็อกจากชุดกลุ่มที่คุณเลือกตอนกด Auto-post</p>
-        </section>
+        <Card>
+          <CardHeader>
+            <CardDescription>Auto-post</CardDescription>
+            <CardTitle>ความคืบหน้าการโพสต์ตามกลุ่มที่เลือก</CardTitle>
+            <CardAction>
+              <Badge variant="secondary">โพสต์สำเร็จ {autopostProgress.posted_groups} / {autopostProgress.selected_groups} กลุ่ม</Badge>
+            </CardAction>
+          </CardHeader>
+          <CardContent className="flex flex-col gap-2">
+            <Progress
+              aria-label="ความคืบหน้าการโพสต์"
+              value={autopostProgress.selected_groups ? Math.min(100, Math.round((autopostProgress.posted_groups / autopostProgress.selected_groups) * 100)) : 0}
+            />
+            <p className="text-xs text-muted-foreground">บันทึกผลแล้ว {autopostProgress.attempted_groups} กลุ่ม · จำนวนเป้าหมายนับจากกลุ่มที่เลือกตอนกด Auto-post</p>
+          </CardContent>
+        </Card>
       )}
 
       {/* โปร่งใส: บอกคนตรวจว่า AI เอาอะไรมาประกอบตอนคิดร่าง — จะได้รู้ว่าต้องเช็คอะไร */}
-      <details className="card px-6 py-4">
-        <summary className="cursor-pointer select-none text-sm font-semibold">
-          🧠 AI ใช้ข้อมูลอะไรสร้างประกาศ
-          <span className="ml-2 text-xs font-normal text-subtle">กดดูข้อมูลที่นำมาประกอบการสร้าง</span>
-        </summary>
-        <div className="mt-4 space-y-3 text-sm">
-          <div>
-            <div className="text-xs font-medium text-subtle">1 · ข้อมูลใบขอ (ด้านบน)</div>
-            <p className="mt-0.5 text-ink/80">ตำแหน่ง พื้นที่ รายได้ จำนวน เวลางาน — กติกาเหล็ก: <b>ไม่มีในใบขอ = ห้าม AI แต่งเอง</b> (เงินเดือน/สวัสดิการใช้คำกลางแทน)</p>
-          </div>
-          <div>
-            <div className="text-xs font-medium text-subtle">2 · ตัวเลือกสองแบบให้เปรียบเทียบ</div>
-            <p className="mt-0.5 text-ink/80">A — ตรงไปตรงมา: พาดหัวชัด ข้อมูลครบ กระชับ · B — เน้นจุดขาย: นำด้วยรายได้/สวัสดิการ โทนชวนคุย</p>
-          </div>
-          <div>
-            <div className="text-xs font-medium text-subtle">3 · แนวที่เคยได้ผลดี ({ingredients.winning.length} ตัวอย่าง)</div>
-            {ingredients.winning.length === 0 ? (
-              <p className="mt-0.5 text-subtle">ยังไม่มี — จะสะสมเองเมื่อโพสต์ไหนวัดผลแล้ว "คนสนใจเยอะ"</p>
-            ) : (
-              ingredients.winning.map((w, i) => (
-                <p key={i} className="mt-1 rounded-lg border border-hairline bg-emerald-50/40 px-3 py-1.5 text-xs text-ink/70">
-                  {w.length > 160 ? `${w.slice(0, 160)}…` : w}
-                </p>
-              ))
-            )}
-          </div>
-          <div>
-            <div className="text-xs font-medium text-subtle">4 · แนวที่ห้ามทำซ้ำ ({ingredients.losing.length} ตัวอย่าง)</div>
-            {ingredients.losing.length === 0 ? (
-              <p className="mt-0.5 text-subtle">ยังไม่มี — จะสะสมเองเมื่อโพสต์ไหนวัดผลแล้ว "คนสนใจน้อย"</p>
-            ) : (
-              ingredients.losing.map((w, i) => (
-                <p key={i} className="mt-1 rounded-lg border border-hairline bg-red-50/40 px-3 py-1.5 text-xs text-ink/70">
-                  {w.length > 160 ? `${w.slice(0, 160)}…` : w}
-                </p>
-              ))
-            )}
-          </div>
-          <p className="text-xs text-subtle">ตัวอย่างข้อ 3-4 เลือกจากตำแหน่งใกล้เคียงก่อน แล้วเรียงตามผลตอบรับ — อัปเดตเมื่อมีผลจากโพสต์ใหม่</p>
-        </div>
-      </details>
-
-      <div>
-        <h2 className="mb-3 text-base font-semibold">ร่างคอนเทนต์</h2>
-        {contents.length === 0 ? (
-          <div className="card border-dashed p-6">
-            <h3 className="font-semibold text-ink">ยังไม่มีรูปและ Caption เพราะงานยังไม่ถึงขั้นสร้างร่าง</h3>
-            <p className="mt-2 text-sm text-subtle">ดูสถานะด้านบนเพื่อทราบว่า Worker กำลังสำรวจตลาด, กำลังสร้างสื่อ, รอคิว หรือมีข้อมูลใดต้องแก้ ระบบจะไม่แสดงร่างเปล่าหรือบอกว่างานเสร็จก่อนมีผลลัพธ์จริง.</p>
-          </div>
-        ) : (
-          <div className="space-y-4">
-            {recommendedContentId && (
-              <div className="rounded-lg border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-800">
-                <span className="font-semibold">ร่างแนะนำ</span> ผ่านข้อเท็จจริงสำคัญและมีรูปพร้อมใช้แล้ว
-                {hiddenHistoryCount > 0 && <span className="ml-1 text-green-700/75">· เก็บร่างเก่าหรือไม่ผ่านไว้อีก {hiddenHistoryCount} ร่างโดยไม่รบกวนการตัดสินใจ</span>}
+      <Card>
+        <Collapsible>
+          <CardHeader>
+            <CardTitle>AI ใช้ข้อมูลอะไรสร้างประกาศ</CardTitle>
+            <CardDescription>ข้อมูลที่นำมาประกอบตอนสร้างร่าง</CardDescription>
+            <CardAction>
+              <CollapsibleTrigger asChild>
+                <Button variant="ghost" size="sm" className="group">
+                  ดูรายละเอียด
+                  <ChevronDownIcon data-icon="inline-end" className="transition-transform group-data-[state=open]:rotate-180" />
+                </Button>
+              </CollapsibleTrigger>
+            </CardAction>
+          </CardHeader>
+          <CollapsibleContent>
+            <CardContent className="flex flex-col gap-4 pt-4 text-sm">
+              <div className="flex flex-col gap-1">
+                <div className="text-xs font-medium text-muted-foreground">1. ข้อมูลใบขอ (ด้านบน)</div>
+                <p className="leading-relaxed">ตำแหน่ง พื้นที่ รายได้ จำนวน เวลางาน ข้อมูลที่ใบขอไม่มี AI ห้ามแต่งเอง (เงินเดือนและสวัสดิการใช้คำกลางแทน)</p>
               </div>
+              <div className="flex flex-col gap-1">
+                <div className="text-xs font-medium text-muted-foreground">2. ร่างสองแบบให้เทียบ</div>
+                <p className="leading-relaxed">A ตรงไปตรงมา: พาดหัวชัด ข้อมูลครบ กระชับ · B เน้นจุดขาย: เปิดด้วยรายได้หรือสวัสดิการ โทนชวนคุย</p>
+              </div>
+              <div className="flex flex-col gap-1.5">
+                <div className="text-xs font-medium text-muted-foreground">3. แนวที่เคยได้ผลดี ({ingredients.winning.length} ตัวอย่าง)</div>
+                {ingredients.winning.length === 0 ? (
+                  <p className="text-muted-foreground">ยังไม่มี จะสะสมเองเมื่อโพสต์ที่วัดผลแล้วได้ &quot;คนสนใจเยอะ&quot;</p>
+                ) : (
+                  ingredients.winning.map((w, i) => (
+                    <blockquote key={i} className="border-l-2 pl-3 text-xs leading-relaxed text-muted-foreground">
+                      {w.length > 160 ? `${w.slice(0, 160)}…` : w}
+                    </blockquote>
+                  ))
+                )}
+              </div>
+              <div className="flex flex-col gap-1.5">
+                <div className="text-xs font-medium text-muted-foreground">4. แนวที่ห้ามทำซ้ำ ({ingredients.losing.length} ตัวอย่าง)</div>
+                {ingredients.losing.length === 0 ? (
+                  <p className="text-muted-foreground">ยังไม่มี จะสะสมเองเมื่อโพสต์ที่วัดผลแล้วได้ &quot;คนสนใจน้อย&quot;</p>
+                ) : (
+                  ingredients.losing.map((w, i) => (
+                    <blockquote key={i} className="border-l-2 border-destructive/40 pl-3 text-xs leading-relaxed text-muted-foreground">
+                      {w.length > 160 ? `${w.slice(0, 160)}…` : w}
+                    </blockquote>
+                  ))
+                )}
+              </div>
+              <p className="text-xs text-muted-foreground">ตัวอย่างข้อ 3-4 เลือกจากตำแหน่งใกล้เคียงก่อน แล้วเรียงตามผลตอบรับ อัปเดตเมื่อมีผลจากโพสต์ใหม่</p>
+            </CardContent>
+          </CollapsibleContent>
+        </Collapsible>
+      </Card>
+
+      <section className="flex flex-col gap-3">
+        <h2 className="text-base font-semibold">ร่างคอนเทนต์</h2>
+        {contents.length === 0 ? (
+          <Empty className="border border-dashed">
+            <EmptyHeader>
+              <EmptyTitle>ยังไม่มีรูปและ Caption</EmptyTitle>
+              <EmptyDescription>
+                งานยังไม่ถึงขั้นสร้างร่าง ดูสถานะด้านบนว่า Worker กำลังสำรวจตลาด สร้างสื่อ รอคิว หรือมีข้อมูลที่ต้องแก้ ระบบจะไม่แสดงร่างเปล่า และไม่บอกว่างานเสร็จจนกว่าจะมีผลจริง
+              </EmptyDescription>
+            </EmptyHeader>
+          </Empty>
+        ) : (
+          <div className="flex flex-col gap-4">
+            {recommendedContentId && (
+              <Alert role="status">
+                <CircleCheckIcon />
+                <AlertTitle>ร่างแนะนำ</AlertTitle>
+                <AlertDescription>
+                  ผ่านการตรวจข้อเท็จจริงสำคัญและมีรูปพร้อมใช้
+                  {hiddenHistoryCount > 0 && ` · ซ่อนร่างเก่าหรือร่างที่ไม่ผ่านไว้ ${hiddenHistoryCount} ร่าง`}
+                </AlertDescription>
+              </Alert>
             )}
             {reviewContents.map((ct) => {
-              const meta = CONTENT_STATUS[ct.status] ?? { label: ct.status, cls: 'bg-black/5 text-ink' };
+              const meta = CONTENT_STATUS[ct.status] ?? { label: ct.status, variant: 'outline' as const };
               const eng = engByContent.get(ct.id);
               const isPreview = ct.gen_notes?.generation_mode === 'preview';
               const posterFields = ct.poster_fields ?? {
@@ -566,20 +737,27 @@ async function renderCampaignDetail({ params, searchParams }: { params: { id: st
                 contactLine: String(snap.contact_phone || snap.phone || snap.tel || snap.mobile || snap.contact_tel || ''),
                 imageSide: isPreview ? 'left' as const : 'right' as const,
               };
+              const verdict = eng ? VERDICT[eng.verdict] ?? VERDICT.pending : null;
               return (
-                <div key={ct.id} className="card p-5">
-                  <div className="mb-3 flex items-center justify-between">
-                    <div className="text-sm font-medium">
+                <Card key={ct.id}>
+                  <CardHeader>
+                    <CardTitle>
                       เวอร์ชัน {ct.version}
-                      {ct.id === recommendedContentId && <span className="ml-1 text-green-700">(แนะนำ)</span>}
-                      <span className="ml-2 text-xs text-subtle">· {ct.platform}</span>
-                    </div>
-                    <span className={`pill ${meta.cls}`}>{meta.label}</span>
-                  </div>
+                      {ct.id === recommendedContentId && <span className="ml-1 font-normal text-muted-foreground">(แนะนำ)</span>}
+                    </CardTitle>
+                    <CardDescription>{ct.platform}</CardDescription>
+                    <CardAction>
+                      <Badge variant={meta.variant}>{meta.label}</Badge>
+                    </CardAction>
+                  </CardHeader>
+                  <CardContent className="flex flex-col gap-4">
                   {isPreview && (
-                    <div className="mb-3 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-xs text-blue-900">
-                      Preview ชั่วคราวจาก Codex — ใช้ตรวจรูปและแคปชันได้ แต่ระบบปิดการโพสต์ไว้จนกว่า Worker จะสร้างร่าง Production ใหม่
-                    </div>
+                    <Alert>
+                      <CircleAlertIcon />
+                      <AlertDescription>
+                        Preview ชั่วคราวจาก Codex ใช้ตรวจรูปและแคปชันได้ แต่ระบบปิดการโพสต์ไว้จนกว่า Worker จะสร้างร่าง Production ใหม่
+                      </AlertDescription>
+                    </Alert>
                   )}
                   {ct.status === 'draft' ? (
                     <CampaignContentWorkspace
@@ -604,7 +782,6 @@ async function renderCampaignDetail({ params, searchParams }: { params: { id: st
                       standardReset={standardReset}
                     />
                   ) : (
-                    <>
                   <div className="grid items-start gap-5 sm:grid-cols-[180px_1fr]">
                     {ct.has_image ? (
                       // คลิกเปิดรูปเต็ม (แท็บใหม่ — ซูม/เซฟได้)
@@ -616,221 +793,237 @@ async function renderCampaignDetail({ params, searchParams }: { params: { id: st
                         title="คลิกดูรูปเต็ม"
                       >
                         {/* eslint-disable-next-line @next/next/no-img-element */}
-                         <img
-                           src={`/api/campaign-content/${ct.id}/poster`}
-                           alt="รูปคอนเทนต์ที่ AI สร้าง"
-                           className="aspect-square w-full rounded-lg border border-hairline object-cover transition group-hover:opacity-90"
-                         />
-                         <span className="pointer-events-none absolute inset-0 rounded-lg bg-gradient-to-r from-white/20 via-white/5 to-transparent" />
-                        <span className="absolute bottom-1.5 right-1.5 rounded-full bg-black/55 px-2 py-0.5 text-[10px] text-white opacity-0 transition group-hover:opacity-100">
-                          🔍 ดูเต็ม
-                        </span>
+                        <img
+                          src={`/api/campaign-content/${ct.id}/poster`}
+                          alt="รูปคอนเทนต์ที่ AI สร้าง"
+                          className="aspect-square w-full rounded-lg border object-cover transition-opacity group-hover:opacity-90"
+                        />
+                        <Badge variant="secondary" className="absolute right-1.5 bottom-1.5 opacity-0 transition-opacity group-hover:opacity-100">
+                          ดูรูปเต็ม
+                        </Badge>
                       </a>
                     ) : (
-                      <div className="grid aspect-square place-items-center rounded-lg bg-accent/10 text-center text-xs text-accent">
+                      <div className="grid aspect-square place-items-center rounded-lg bg-muted text-center text-xs text-muted-foreground">
                         ยังไม่มีรูป
                       </div>
                     )}
-                      <div className="min-w-0">
-                        {ct.status === 'draft' ? (
-                          <form action={editCaptionAction} className="rounded-xl border border-hairline bg-black/[0.015] p-4">
-                            <input type="hidden" name="contentId" value={ct.id} />
-                            <input type="hidden" name="campaignId" value={c.id} />
-                            <div className="flex items-start justify-between gap-3">
-                              <div>
-                                <p className="eyebrow">แก้บนหน้า Web</p>
-                                <h3 className="mt-1 text-base font-semibold">แคปชัน</h3>
+                    <div className="flex min-w-0 flex-col gap-3">
+                      {ct.status === 'draft' ? (
+                        <form action={editCaptionAction} className="rounded-xl border p-4">
+                          <input type="hidden" name="contentId" value={ct.id} />
+                          <input type="hidden" name="campaignId" value={c.id} />
+                          <FieldGroup>
+                            <Field>
+                              <div className="flex items-start justify-between gap-3">
+                                <FieldLabel htmlFor={`caption-${ct.id}`}>แคปชัน</FieldLabel>
+                                <Button type="reset" variant="ghost" size="sm" className="shrink-0">คืนค่าเดิม</Button>
                               </div>
-                              <button type="reset" className="btn-ghost btn-sm shrink-0">คืนค่าเดิม</button>
+                              <FieldDescription>แก้ข้อความใต้โพสต์ได้ทันที บันทึกแล้วระบบจะตรวจข้อมูลสำคัญของร่างนี้ใหม่</FieldDescription>
+                              <Textarea
+                                id={`caption-${ct.id}`}
+                                name="caption"
+                                defaultValue={ct.caption ?? ''}
+                                rows={9}
+                                className="min-h-48 resize-y"
+                              />
+                            </Field>
+                            <div className="flex flex-wrap items-center gap-2">
+                              <Button variant="secondary" size="sm">บันทึกแคปชัน</Button>
+                              <span className="text-xs text-muted-foreground">ยังไม่โพสต์จริงจนกว่าจะกดอนุมัติ</span>
                             </div>
-                            <p className="mt-2 text-xs leading-5 text-subtle">ปรับข้อความที่คนเห็นใต้โพสต์ได้ทันที บันทึกแล้วระบบจะตรวจข้อมูลสำคัญของร่างนี้ใหม่</p>
-                            <textarea
-                              name="caption"
-                              defaultValue={ct.caption ?? ''}
-                              rows={9}
-                              className="field mt-4 min-h-48 w-full resize-y"
-                            />
-                            <div className="mt-3 flex flex-wrap items-center gap-2">
-                              <button className="btn-secondary btn-sm">บันทึกแคปชัน</button>
-                              <span className="text-[11px] text-subtle">ยังไม่โพสต์จริงจนกดอนุมัติ</span>
-                            </div>
-                          </form>
-                        ) : (
-                          <>
-                            <div className="mb-1 text-xs text-subtle">แคปชัน</div>
-                            <CaptionViewer caption={ct.caption} />
-                          </>
-                        )}
-                      {ct.video_brief && (
-                        <>
-                          <div className="mb-1 mt-3 text-xs text-subtle">แนววิดีโอ (brief)</div>
-                          <div className="text-sm text-ink/70">{ct.video_brief}</div>
-                        </>
-                      )}
-                      {ct.reject_reason && <div className="mt-2 text-xs text-red-600">เหตุผลตีกลับ: {ct.reject_reason}</div>}
-
-                      <div className={`mt-3 rounded-lg border px-3 py-2 ${
-                        ct.quality_status === 'fail'
-                          ? 'border-red-200 bg-red-50'
-                          : ct.quality_status === 'pass'
-                            ? 'border-green-200 bg-green-50'
-                            : 'border-amber-200 bg-amber-50'
-                      }`}>
-                        <div className="flex flex-wrap items-center justify-between gap-2 text-sm">
-                          <span className="font-medium">
-                            {ct.quality_status === 'fail' ? '⛔ ยังอนุมัติไม่ได้' : ct.quality_status === 'pass' ? '✓ ข้อมูลสำคัญผ่านการตรวจ' : '⚠ ควรตรวจเพิ่ม'}
-                          </span>
-                          {ct.quality_score != null && <span>{ct.quality_score}/100</span>}
+                          </FieldGroup>
+                        </form>
+                      ) : (
+                        <div className="flex flex-col gap-1">
+                          <div className="text-xs text-muted-foreground">แคปชัน</div>
+                          <CaptionViewer caption={ct.caption} />
                         </div>
-                        {ct.quality_checks?.summary && <p className="mt-1 text-xs text-ink/75">{ct.quality_checks.summary}</p>}
-                        {ct.quality_checks?.checks?.length ? (
-                          <details className="mt-2 text-xs">
-                            <summary className="cursor-pointer select-none text-subtle">ดูผลตรวจทีละข้อ</summary>
-                            <ul className="mt-1.5 space-y-1">
-                              {ct.quality_checks.checks.map((item) => (
-                                <li key={item.code} className={item.status === 'fail' ? 'text-red-700' : item.status === 'warning' ? 'text-amber-700' : 'text-green-700'}>
-                                  {item.status === 'fail' ? '✕' : item.status === 'warning' ? '!' : '✓'} {item.label}: {item.message}
-                                </li>
-                              ))}
-                            </ul>
-                          </details>
+                      )}
+                      {ct.video_brief && (
+                        <div className="flex flex-col gap-1">
+                          <div className="text-xs text-muted-foreground">แนววิดีโอ (brief)</div>
+                          <div className="text-sm leading-relaxed text-muted-foreground">{ct.video_brief}</div>
+                        </div>
+                      )}
+                      {ct.reject_reason && <div className="text-xs text-destructive">เหตุผลที่ตีกลับ: {ct.reject_reason}</div>}
+
+                      <Alert variant={ct.quality_status === 'fail' ? 'destructive' : 'default'}>
+                        {ct.quality_status === 'fail' ? <CircleXIcon /> : ct.quality_status === 'pass' ? <CircleCheckIcon /> : <CircleAlertIcon />}
+                        <AlertTitle className="flex flex-wrap items-center justify-between gap-2">
+                          <span>{ct.quality_status === 'fail' ? 'ยังอนุมัติไม่ได้' : ct.quality_status === 'pass' ? 'ข้อมูลสำคัญผ่านการตรวจ' : 'ควรตรวจเพิ่ม'}</span>
+                          {ct.quality_score != null && <span className="font-normal tabular-nums">{ct.quality_score}/100</span>}
+                        </AlertTitle>
+                        {(ct.quality_checks?.summary || ct.quality_checks?.checks?.length) ? (
+                          <AlertDescription className="flex flex-col gap-1">
+                            {ct.quality_checks?.summary && <p className="text-xs">{ct.quality_checks.summary}</p>}
+                            {ct.quality_checks?.checks?.length ? (
+                              <Collapsible>
+                                <CollapsibleTrigger asChild>
+                                  <Button variant="link" size="xs" className="group h-auto px-0 text-muted-foreground">
+                                    ดูผลตรวจทีละข้อ
+                                    <ChevronDownIcon data-icon="inline-end" className="transition-transform group-data-[state=open]:rotate-180" />
+                                  </Button>
+                                </CollapsibleTrigger>
+                                <CollapsibleContent>
+                                  <ul className="mt-1.5 flex flex-col gap-1 text-xs">
+                                    {ct.quality_checks.checks.map((item) => (
+                                      <li key={item.code} className={cn('flex items-start gap-1.5', item.status === 'fail' ? 'text-destructive' : 'text-muted-foreground')}>
+                                        {item.status === 'fail'
+                                          ? <XIcon className="mt-0.5 size-3.5 shrink-0" aria-label="ไม่ผ่าน" />
+                                          : item.status === 'warning'
+                                            ? <CircleAlertIcon className="mt-0.5 size-3.5 shrink-0" aria-label="ควรตรวจ" />
+                                            : <CheckIcon className="mt-0.5 size-3.5 shrink-0" aria-label="ผ่าน" />}
+                                        <span>{item.label}: {item.message}</span>
+                                      </li>
+                                    ))}
+                                  </ul>
+                                </CollapsibleContent>
+                              </Collapsible>
+                            ) : null}
+                          </AlertDescription>
                         ) : null}
-                      </div>
+                      </Alert>
 
                       {/* provenance จริงของร่างนี้ — AI คิดจากอะไร (research + A/B + ตัวอย่างที่ใช้) */}
                       {ct.gen_notes && (ct.gen_notes.angles?.length || ct.gen_notes.hooks?.length || ct.gen_notes.imageStyle || ct.gen_notes.style) && (
-                        <details className="mt-3 rounded-lg border border-hairline bg-black/[0.015] px-3 py-2">
-                          <summary className="cursor-pointer select-none text-xs font-medium text-subtle">🧠 ประกาศนี้สร้างจากข้อมูลอะไร</summary>
-                          <div className="mt-2 space-y-1.5 text-xs text-ink/75">
-                            {ct.gen_notes.style && <div><span className="text-subtle">แนวเขียน:</span> {ct.gen_notes.style}</div>}
-                            {ct.gen_notes.angles && ct.gen_notes.angles.length > 0 && (
-                              <div><span className="text-subtle">แนวคิดที่เลือกใช้:</span> {ct.gen_notes.angles.join(' · ')}</div>
-                            )}
-                            {ct.gen_notes.hooks && ct.gen_notes.hooks.length > 0 && (
-                              <div><span className="text-subtle">ฮุกที่แนะ:</span> {ct.gen_notes.hooks.join(' | ')}</div>
-                            )}
-                            {ct.gen_notes.imageStyle && <div><span className="text-subtle">สไตล์รูป:</span> {ct.gen_notes.imageStyle}</div>}
-                            {ct.gen_notes.trends?.length ? <div><span className="text-subtle">คำแนะนำจาก Google Trends:</span> {ct.gen_notes.trends.join(' · ')}</div> : null}
-                            {ct.gen_notes.research_keywords?.length ? <div><span className="text-subtle">คำค้นที่ Google แนะนำ:</span> {ct.gen_notes.research_keywords.join(' · ')}</div> : null}
-                            <div className="text-subtle/70">
-                              อ้างอิงแนวที่ได้ผล {ct.gen_notes.used_winning ?? 0} · เรียนรู้จากงานที่เคยอนุมัติ {ct.gen_notes.used_feedback ?? 0} · เลี่ยงแนวที่ไม่ผ่าน {ct.gen_notes.used_losing ?? 0}
-                              {ct.gen_notes.research_model ? ` · วิเคราะห์ด้วย ${ct.gen_notes.research_model}` : ''}
+                        <Collapsible className="rounded-lg border px-3 py-2">
+                          <CollapsibleTrigger asChild>
+                            <Button variant="ghost" size="xs" className="group w-full justify-between px-0 text-muted-foreground hover:bg-transparent">
+                              ประกาศนี้สร้างจากข้อมูลอะไร
+                              <ChevronDownIcon data-icon="inline-end" className="transition-transform group-data-[state=open]:rotate-180" />
+                            </Button>
+                          </CollapsibleTrigger>
+                          <CollapsibleContent>
+                            <div className="mt-2 flex flex-col gap-1.5 text-xs leading-relaxed">
+                              {ct.gen_notes.style && <div><span className="text-muted-foreground">แนวเขียน:</span> {ct.gen_notes.style}</div>}
+                              {ct.gen_notes.angles && ct.gen_notes.angles.length > 0 && (
+                                <div><span className="text-muted-foreground">แนวคิดที่เลือกใช้:</span> {ct.gen_notes.angles.join(' · ')}</div>
+                              )}
+                              {ct.gen_notes.hooks && ct.gen_notes.hooks.length > 0 && (
+                                <div><span className="text-muted-foreground">ฮุกที่แนะนำ:</span> {ct.gen_notes.hooks.join(' | ')}</div>
+                              )}
+                              {ct.gen_notes.imageStyle && <div><span className="text-muted-foreground">สไตล์รูป:</span> {ct.gen_notes.imageStyle}</div>}
+                              {ct.gen_notes.trends?.length ? <div><span className="text-muted-foreground">คำแนะนำจาก Google Trends:</span> {ct.gen_notes.trends.join(' · ')}</div> : null}
+                              {ct.gen_notes.research_keywords?.length ? <div><span className="text-muted-foreground">คำค้นที่ Google แนะนำ:</span> {ct.gen_notes.research_keywords.join(' · ')}</div> : null}
+                              <div className="text-muted-foreground">
+                                อ้างอิงแนวที่ได้ผล {ct.gen_notes.used_winning ?? 0} · เรียนรู้จากงานที่เคยอนุมัติ {ct.gen_notes.used_feedback ?? 0} · เลี่ยงแนวที่ไม่ผ่าน {ct.gen_notes.used_losing ?? 0}
+                                {ct.gen_notes.research_model ? ` · วิเคราะห์ด้วย ${ct.gen_notes.research_model}` : ''}
+                              </div>
                             </div>
-                          </div>
-                        </details>
+                          </CollapsibleContent>
+                        </Collapsible>
                       )}
 
                       {ct.status === 'draft' && (
-                        <section className="mt-4 overflow-hidden rounded-xl border-2 border-blue-300 bg-blue-50/70">
-                          <form action={editPosterAction}>
-                            <input type="hidden" name="contentId" value={ct.id} />
-                            <input type="hidden" name="campaignId" value={c.id} />
-                            <div className="flex items-start justify-between gap-4 bg-blue-600 px-4 py-3 text-white">
-                              <div>
-                                <p className="text-[11px] font-medium uppercase tracking-wide text-blue-100">แก้ข้อความบนหน้า Web</p>
-                                <h3 className="mt-1 text-base font-semibold">ข้อความบนภาพ</h3>
-                              </div>
-                              <button type="reset" className="btn-ghost btn-sm shrink-0 border-white/30 bg-white/10 text-white hover:bg-white/20">คืนค่าเดิม</button>
+                        <form action={editPosterAction} className="flex flex-col gap-4 rounded-xl border p-4">
+                          <input type="hidden" name="contentId" value={ct.id} />
+                          <input type="hidden" name="campaignId" value={c.id} />
+                          <div className="flex items-start justify-between gap-4">
+                            <div className="flex flex-col gap-1">
+                              <h3 className="text-base font-medium">ข้อความบนภาพ</h3>
+                              <p className="text-xs leading-relaxed text-muted-foreground">แก้รายละเอียดแล้วกดบันทึก ระบบจะประกอบ PNG ใหม่จากภาพต้นฉบับเดิมทางซ้าย และยังไม่ส่งโพสต์จริง</p>
                             </div>
-                            <p className="px-4 pt-3 text-xs leading-5 text-blue-950/75">แก้รายละเอียดแล้วกดบันทึก ระบบจะประกอบ PNG ใหม่จากภาพต้นฉบับเดิมทางซ้าย โดยยังไม่ส่งโพสต์จริง</p>
-                            <div className="grid gap-3 p-4 sm:grid-cols-2">
-                            <label className="text-xs text-subtle">
-                              <span className="mb-1 block">ตำแหน่ง</span>
-                              <input className="field" name="posterTitle" required defaultValue={posterFields.title} />
-                            </label>
-                            <label className="text-xs text-subtle">
-                              <span className="mb-1 block">ป้ายด้านบน</span>
-                              <input className="field" name="posterBadge" defaultValue={posterFields.badge} />
-                            </label>
-                            <label className="text-xs text-subtle sm:col-span-2">
-                              <span className="mb-1 block">สถานที่ทำงาน</span>
-                              <textarea className="field min-h-20 resize-y" name="posterLocation" defaultValue={posterFields.location} />
-                            </label>
-                            <label className="text-xs text-subtle sm:col-span-2">
-                              <span className="mb-1 block">วันและเวลาทำงาน</span>
-                              <textarea className="field min-h-20 resize-y" name="posterWorktime" defaultValue={posterFields.worktime} />
-                            </label>
-                            <label className="text-xs text-subtle">
-                              <span className="mb-1 block">รายได้หลัก</span>
-                              <input className="field" name="posterSalaryTotal" defaultValue={posterFields.salaryTotal} />
-                            </label>
-                            <label className="text-xs text-subtle">
-                              <span className="mb-1 block">รายละเอียดรายได้เพิ่มเติม</span>
-                              <input className="field" name="posterSalaryBreakdown" defaultValue={posterFields.salaryBreakdown} />
-                            </label>
-                            <label className="text-xs text-subtle">
-                              <span className="mb-1 block">จำนวนที่รับ</span>
-                              <input className="field" name="posterQuantity" defaultValue={posterFields.quantity} />
-                            </label>
-                            <label className="text-xs text-subtle">
-                              <span className="mb-1 block">เพศ / อายุ / คุณสมบัติ — 1 ข้อต่อบรรทัด</span>
-                              <textarea className="field min-h-24" name="posterQualifications" defaultValue={posterFields.qualifications.join('\n')} />
-                            </label>
-                            <label className="text-xs text-subtle">
-                              <span className="mb-1 block">สวัสดิการ — 1 ข้อต่อบรรทัด</span>
-                              <textarea className="field min-h-24" name="posterBenefits" defaultValue={posterFields.benefits.join('\n')} />
-                            </label>
-                            <label className="text-xs text-subtle">
-                              <span className="mb-1 block">เบอร์โทรที่ยืนยันแล้ว</span>
-                              <input className="field" name="posterContactLine" inputMode="tel" placeholder="กรอกเมื่อพร้อม เช่น 081-234-5678" defaultValue={posterFields.contactLine} />
-                              <span className="mt-1 block text-[11px]">เมื่อกรอก ระบบจะบันทึกเป็นข้อมูลของงานและเติมใน Caption ให้อัตโนมัติ</span>
-                            </label>
-                            <label className="text-xs text-subtle">
-                              <span className="mb-1 block">คนอยู่ฝั่งไหนของภาพ</span>
-                              <select className="field" name="posterImageSide" defaultValue={posterFields.imageSide}>
-                                <option value="right">ขวา — ข้อความอยู่ซ้าย</option>
-                                <option value="left">ซ้าย — ข้อความอยู่ขวา</option>
-                              </select>
-                            </label>
-                            <input type="hidden" name="posterLayout" value={JSON.stringify(posterFields.layout ?? {})} />
-                            <div className="sm:col-span-2 flex flex-wrap items-center gap-2">
-                              <button className="btn-secondary btn-sm" disabled={!ct.has_source_image}>บันทึกและประกอบรูปใหม่</button>
-                              {ct.has_source_image ? (
-                                <span className="text-xs text-emerald-800">✓ มีภาพต้นฉบับแยกเก็บแล้ว แก้ข้อความ/ตำแหน่งคนแล้วประกอบ PNG ใหม่ได้ทันที</span>
-                              ) : (
-                                <>
-                                  <span className="text-xs text-amber-800">ร่างนี้ยังไม่มีภาพต้นฉบับ จึงแก้บนรูปเดิมไม่ได้</span>
-                                  <button formAction={retryCampaignDraftAction} className="btn-secondary btn-sm">ให้ AI สร้างรูปและแคปชันใหม่</button>
-                                </>
-                              )}
-                            </div>
-                            </div>
-                          </form>
-                        </section>
+                            <Button type="reset" variant="ghost" size="sm" className="shrink-0">คืนค่าเดิม</Button>
+                          </div>
+                          <FieldGroup className="grid gap-4 sm:grid-cols-2">
+                            <Field>
+                              <FieldLabel htmlFor={`posterTitle-${ct.id}`}>ตำแหน่ง</FieldLabel>
+                              <Input id={`posterTitle-${ct.id}`} name="posterTitle" required defaultValue={posterFields.title} />
+                            </Field>
+                            <Field>
+                              <FieldLabel htmlFor={`posterBadge-${ct.id}`}>ป้ายด้านบน</FieldLabel>
+                              <Input id={`posterBadge-${ct.id}`} name="posterBadge" defaultValue={posterFields.badge} />
+                            </Field>
+                            <Field className="sm:col-span-2">
+                              <FieldLabel htmlFor={`posterLocation-${ct.id}`}>สถานที่ทำงาน</FieldLabel>
+                              <Textarea id={`posterLocation-${ct.id}`} className="min-h-20 resize-y" name="posterLocation" defaultValue={posterFields.location} />
+                            </Field>
+                            <Field className="sm:col-span-2">
+                              <FieldLabel htmlFor={`posterWorktime-${ct.id}`}>วันและเวลาทำงาน</FieldLabel>
+                              <Textarea id={`posterWorktime-${ct.id}`} className="min-h-20 resize-y" name="posterWorktime" defaultValue={posterFields.worktime} />
+                            </Field>
+                            <Field>
+                              <FieldLabel htmlFor={`posterSalaryTotal-${ct.id}`}>รายได้หลัก</FieldLabel>
+                              <Input id={`posterSalaryTotal-${ct.id}`} name="posterSalaryTotal" defaultValue={posterFields.salaryTotal} />
+                            </Field>
+                            <Field>
+                              <FieldLabel htmlFor={`posterSalaryBreakdown-${ct.id}`}>รายละเอียดรายได้เพิ่มเติม</FieldLabel>
+                              <Input id={`posterSalaryBreakdown-${ct.id}`} name="posterSalaryBreakdown" defaultValue={posterFields.salaryBreakdown} />
+                            </Field>
+                            <Field>
+                              <FieldLabel htmlFor={`posterQuantity-${ct.id}`}>จำนวนที่รับ</FieldLabel>
+                              <Input id={`posterQuantity-${ct.id}`} name="posterQuantity" defaultValue={posterFields.quantity} />
+                            </Field>
+                            <Field>
+                              <FieldLabel htmlFor={`posterQualifications-${ct.id}`}>เพศ / อายุ / คุณสมบัติ</FieldLabel>
+                              <Textarea id={`posterQualifications-${ct.id}`} className="min-h-24" name="posterQualifications" defaultValue={posterFields.qualifications.join('\n')} />
+                              <FieldDescription>บรรทัดละ 1 ข้อ</FieldDescription>
+                            </Field>
+                            <Field>
+                              <FieldLabel htmlFor={`posterBenefits-${ct.id}`}>สวัสดิการ</FieldLabel>
+                              <Textarea id={`posterBenefits-${ct.id}`} className="min-h-24" name="posterBenefits" defaultValue={posterFields.benefits.join('\n')} />
+                              <FieldDescription>บรรทัดละ 1 ข้อ</FieldDescription>
+                            </Field>
+                            <Field>
+                              <FieldLabel htmlFor={`posterContactLine-${ct.id}`}>เบอร์โทรที่ยืนยันแล้ว</FieldLabel>
+                              <Input id={`posterContactLine-${ct.id}`} name="posterContactLine" inputMode="tel" placeholder="กรอกเมื่อพร้อม เช่น 081-234-5678" defaultValue={posterFields.contactLine} />
+                              <FieldDescription>เมื่อกรอก ระบบจะบันทึกเป็นข้อมูลของงานและเติมใน Caption ให้</FieldDescription>
+                            </Field>
+                            <Field>
+                              <FieldLabel htmlFor={`posterImageSide-${ct.id}`}>คนอยู่ฝั่งไหนของภาพ</FieldLabel>
+                              <NativeSelect id={`posterImageSide-${ct.id}`} name="posterImageSide" defaultValue={posterFields.imageSide} className="w-full">
+                                <NativeSelectOption value="right">ขวา (ข้อความอยู่ซ้าย)</NativeSelectOption>
+                                <NativeSelectOption value="left">ซ้าย (ข้อความอยู่ขวา)</NativeSelectOption>
+                              </NativeSelect>
+                            </Field>
+                          </FieldGroup>
+                          <input type="hidden" name="posterLayout" value={JSON.stringify(posterFields.layout ?? {})} />
+                          <div className="flex flex-wrap items-center gap-2">
+                            <Button variant="secondary" size="sm" disabled={!ct.has_source_image}>บันทึกและประกอบรูปใหม่</Button>
+                            {ct.has_source_image ? (
+                              <span className="text-xs text-muted-foreground">มีภาพต้นฉบับแยกไว้แล้ว แก้ข้อความหรือตำแหน่งคนแล้วประกอบ PNG ใหม่ได้</span>
+                            ) : (
+                              <>
+                                <span className="text-xs text-muted-foreground">ร่างนี้ยังไม่มีภาพต้นฉบับ จึงแก้บนรูปเดิมไม่ได้</span>
+                                <Button formAction={retryCampaignDraftAction} variant="secondary" size="sm">ให้ AI สร้างรูปและแคปชันใหม่</Button>
+                              </>
+                            )}
+                          </div>
+                        </form>
                       )}
                     </div>
                   </div>
-                    </>
                   )}
 
                   {/* engagement ของเวอร์ชันนี้ (ถ้าเคยโพสต์+วัดผลแล้ว) */}
-                  {eng && (
-                    <div className="mt-4 flex flex-wrap items-center gap-5 rounded-lg border border-hairline bg-black/[0.015] px-4 py-2.5">
-                      <span className="text-xs font-medium text-subtle">ผลตอบรับ</span>
+                  {eng && verdict && (
+                    <div className="flex flex-wrap items-center gap-5 rounded-lg bg-muted/50 px-4 py-2.5">
+                      <span className="text-xs font-medium text-muted-foreground">ผลตอบรับ</span>
                       <Metric label="ไลก์" value={eng.likes} />
                       <Metric label="คอมเมนต์" value={eng.comments} />
                       <Metric label="คนทัก" value={eng.leads} />
-                      <span className={`pill ${(VERDICT[eng.verdict] ?? VERDICT.pending).cls}`}>
-                        {(VERDICT[eng.verdict] ?? VERDICT.pending).label}
-                      </span>
+                      <Badge variant={verdict.variant}>{verdict.label}</Badge>
                       {eng.postLink && (
-                        <a href={eng.postLink} target="_blank" rel="noreferrer" className="text-xs text-accent hover:underline">
-                          เปิดโพสต์จริง ↗
-                        </a>
+                        <Button asChild variant="link" size="xs" className="px-0">
+                          <a href={eng.postLink} target="_blank" rel="noreferrer">
+                            เปิดโพสต์จริง
+                            <ExternalLinkIcon data-icon="inline-end" />
+                          </a>
+                        </Button>
                       )}
                     </div>
                   )}
-
-                </div>
+                  </CardContent>
+                </Card>
               );
             })}
           </div>
         )}
-      </div>
+      </section>
 
       {posts.length > 0 && (
-        <p className="text-xs text-subtle">
-          คะแนนผล = คอมเมนต์ + (คนทัก × 2) · “ไลก์” จะมีเมื่อเปิดการอ่าน reactions ในตัวเก็บคอมเมนต์ (งานย่อยที่เหลือ) · คนสนใจน้อย = AI คิดคอนเทนต์ใหม่อัตโนมัติ
+        <p className="text-xs leading-relaxed text-muted-foreground">
+          คะแนนผล = คอมเมนต์ + (คนทัก × 2) · ยอดไลก์จะขึ้นเมื่อตัวเก็บคอมเมนต์อ่าน reactions ได้ (ยังเป็นงานค้าง) · ถ้าคนสนใจน้อย AI จะทำคอนเทนต์ใหม่ให้เอง
         </p>
       )}
     </div>

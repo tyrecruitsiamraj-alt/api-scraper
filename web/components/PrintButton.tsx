@@ -1,13 +1,13 @@
 'use client';
 
+import { PrinterIcon } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+
 export function PrintButton({ label = 'พิมพ์ / บันทึก PDF' }: { label?: string }) {
   return (
-    <button
-      type="button"
-      onClick={() => window.print()}
-      className="btn-sm rounded-full border border-line px-4 py-1.5 text-[12px] font-medium text-ink transition hover:border-accent/40 hover:text-accent print:hidden"
-    >
+    <Button type="button" variant="outline" size="sm" onClick={() => window.print()} className="print:hidden">
+      <PrinterIcon data-icon="inline-start" />
       {label}
-    </button>
+    </Button>
   );
 }

@@ -951,10 +951,17 @@ export async function autopostRuns(limit = 50): Promise<AutopostRunListRow[]> {
       `SELECT r.id, r.run_id, u.name AS account, r.user_id, r.worker_id, r.status,
               r.requested_by, r.message, r.error, r.created_at, r.started_at, r.finished_at,
               u.preferred_worker AS pinned_worker,
-              COALESCE((
-                SELECT count(*)::int FROM ${AP}.post_logs pl
-                 WHERE pl.run_id = r.run_id AND pl.post_link IS NOT NULL AND TRIM(pl.post_link) <> ''
-              ), 0) AS posted
+              -- post_logs ต้องมีลิงก์ ซึ่งบางรอบเก็บไม่ได้ — นับ run_logs success ของรอบนั้นด้วย เอาค่าที่มากกว่า
+              GREATEST(
+                COALESCE((
+                  SELECT count(*)::int FROM ${AP}.post_logs pl
+                   WHERE pl.run_id = r.run_id AND pl.post_link IS NOT NULL AND TRIM(pl.post_link) <> ''
+                ), 0),
+                COALESCE((
+                  SELECT count(*)::int FROM ${AP}.run_logs rl
+                   WHERE rl.run_id = r.run_id AND rl.level = 'success'
+                ), 0)
+              ) AS posted
          FROM ${AP}.post_run_queue r
          LEFT JOIN ${AP}.users u ON u.id = r.user_id
         ORDER BY r.created_at DESC LIMIT $1`,
@@ -3274,9 +3281,27 @@ export type JarvisPostOrder = {
   posts: JarvisPostRecord[];
   /** กลุ่มที่เลือกได้ตอนสั่งโพสต์ซ้ำ */
   repost_groups: JarvisRepostGroup[];
+  /** ผลรายกลุ่มของใบนี้ (ทุกรอบรวมกัน, ผลล่าสุดของแต่ละกลุ่ม) */
+  group_results: JarvisGroupResult[];
 };
 
-export type JarvisPostRecord = { at: string; group_name: string; worker: string | null };
+export type JarvisPostRecord = { at: string; group_name: string; worker: string | null; ok: boolean; message: string | null };
+export type JarvisGroupResult = {
+  fb_group_id: string;
+  name: string;
+  /** posted = worker กดโพสต์สำเร็จ, failed = โพสต์ไม่สำเร็จ, waiting = ยังไม่ถึงคิว/ยังไม่สั่ง */
+  status: 'posted' | 'failed' | 'waiting';
+  at: string | null;
+  worker: string | null;
+  error: string | null;
+  post_link: string | null;
+  /** สถานะในกลุ่มตามที่ worker เห็น: อนุมัติเเล้ว / รออนุมัติ */
+  approval: string | null;
+  comments: number | null;
+  reactions: number | null;
+  shares: number | null;
+  collected_at: string | null;
+};
 export type JarvisRepostGroup = {
   id: string;
   name: string;
@@ -3371,26 +3396,72 @@ export async function listJarvisPostOrders(): Promise<JarvisPostOrder[]> {
         ORDER BY created_at DESC LIMIT 1`,
       [jobId],
     ).catch(() => []);
-    const postRows = await q<{ at: string; group_id: string | null; worker_id: string | null }>(
-      `SELECT l.created_at AS at, l.group_id, pq.worker_id
+    // worker เขียน run_logs ต่อกลุ่ม: success = กดโพสต์สำเร็จ, warn = โพสต์ไม่สำเร็จ
+    const attemptRows = await q<{ at: string; group_id: string | null; worker_id: string | null; level: string; message: string | null }>(
+      `SELECT l.created_at AS at, l.group_id, pq.worker_id, l.level, l.message
          FROM ${AP}.run_logs l
          LEFT JOIN ${AP}.post_run_queue pq ON pq.run_id = l.run_id
-        WHERE l.job_id = $1 AND l.level = 'success'
+        WHERE l.job_id = $1 AND l.group_id IS NOT NULL AND l.level IN ('success', 'warn', 'error')
         ORDER BY l.created_at DESC`,
       [jobId],
     ).catch(() => []);
-    const posts: JarvisPostRecord[] = postRows.map((p) => ({
+    const fbName = (fb: string | null) => groupNamesByFb.get(String(fb ?? '')) ?? String(fb ?? '-');
+    // worker_id = ชื่อเครื่อง-pid
+    const machine = (w: string | null) => (w ? w.replace(/-\d+$/, '') : null);
+    const posts: JarvisPostRecord[] = attemptRows.map((p) => ({
       at: p.at,
-      group_name: groupNamesByFb.get(String(p.group_id ?? '')) ?? String(p.group_id ?? '-'),
-      // worker_id = ชื่อเครื่อง-pid
-      worker: p.worker_id ? p.worker_id.replace(/-\d+$/, '') : null,
+      group_name: fbName(p.group_id),
+      worker: machine(p.worker_id),
+      ok: p.level === 'success',
+      message: p.level === 'success' ? null : p.message,
     }));
     const lastPostByFb = new Map<string, number>();
-    for (const p of postRows) {
+    for (const p of attemptRows) {
+      if (p.level !== 'success') continue;
       const key = String(p.group_id ?? '');
       const t = new Date(p.at).getTime();
       if (t > (lastPostByFb.get(key) ?? 0)) lastPostByFb.set(key, t);
     }
+    const logRows = await q<{
+      group_id: string; post_link: string | null; post_status: string | null; comment_count: number | null;
+      reactions: number | null; shares: number | null; last_collected_at: string | null;
+    }>(
+      `SELECT DISTINCT ON (group_id) group_id, post_link, post_status, comment_count, reactions, shares, last_collected_at
+         FROM ${AP}.post_logs WHERE job_id = $1 AND group_id IS NOT NULL
+        ORDER BY group_id, created_at DESC`,
+      [jobId],
+    ).catch(() => []);
+    const logByFb = new Map(logRows.map((l) => [String(l.group_id), l]));
+    // กลุ่มที่สั่งไว้: จากทุก assignment ของใบนี้ (รวมโพสต์ซ้ำ) หรือจาก Jarvis ถ้ายังไม่สั่ง
+    const assignedRows = await q<{ gid: string }>(
+      `SELECT DISTINCT jsonb_array_elements_text(COALESCE(group_ids::jsonb, '[]'::jsonb)) AS gid
+         FROM ${AP}.assignments WHERE id = $1 OR id LIKE $1 || '-r%'`,
+      [jobId],
+    ).catch(() => []);
+    const fbByRowId = new Map(groupRows.map((g) => [g.id, String(g.fb_group_id)]));
+    const plannedFb = new Set<string>();
+    for (const id of assignedRows.length ? assignedRows.map((r) => r.gid) : groupIds) {
+      plannedFb.add(fbByRowId.get(id) ?? id);
+    }
+    for (const p of attemptRows) if (p.group_id) plannedFb.add(String(p.group_id));
+    const groupResults: JarvisGroupResult[] = [...plannedFb].map((fb) => {
+      const latest = attemptRows.find((p) => String(p.group_id) === fb) ?? null;
+      const log = logByFb.get(fb) ?? null;
+      return {
+        fb_group_id: fb,
+        name: fbName(fb),
+        status: !latest ? 'waiting' : latest.level === 'success' ? 'posted' : 'failed',
+        at: latest?.at ?? null,
+        worker: machine(latest?.worker_id ?? null),
+        error: latest && latest.level !== 'success' ? latest.message : null,
+        post_link: log?.post_link || null,
+        approval: log?.post_status || null,
+        comments: log ? Number(log.comment_count ?? 0) : null,
+        reactions: log ? Number(log.reactions ?? 0) : null,
+        shares: log ? Number(log.shares ?? 0) : null,
+        collected_at: log?.last_collected_at ?? null,
+      };
+    });
     const repostGroups: JarvisRepostGroup[] = groupRows.map((g) => {
       const last = lastPostByFb.get(String(g.fb_group_id));
       const until = last ? last + REPOST_MIN_GAP_DAYS * 86_400_000 : 0;
@@ -3439,6 +3510,7 @@ export async function listJarvisPostOrders(): Promise<JarvisPostOrder[]> {
       post_link: posted[0]?.post_link ?? null,
       posts,
       repost_groups: repostGroups,
+      group_results: groupResults,
     });
   }
   return out;

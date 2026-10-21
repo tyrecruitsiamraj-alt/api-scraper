@@ -1,8 +1,10 @@
 import { getServerSession } from 'next-auth';
 import { redirect, notFound } from 'next/navigation';
 import Link from 'next/link';
+import { ArrowLeftIcon, DownloadIcon } from 'lucide-react';
 import { authOptions } from '@/lib/auth';
 import { getCandidate } from '@/lib/repo';
+import { Button } from '@/components/ui/button';
 
 export const dynamic = 'force-dynamic';
 
@@ -33,7 +35,7 @@ function Field({ label, value }: { label: string; value?: unknown }) {
   const v = txt(value);
   if (!v) return null;
   return (
-    <div className="field">
+    <div className="pf">
       <div className="fl">{label}</div>
       <div className="fv">{v}</div>
     </div>
@@ -67,19 +69,19 @@ export default async function PrintResume({ params }: { params: { id: string } }
     <>
       {/* eslint-disable-next-line react/no-danger */}
       <style dangerouslySetInnerHTML={{ __html: CSS }} />
-      <div className="no-print fixed right-5 top-5 z-10 flex gap-2">
-        <a
-          href={`/api/candidates/${params.id}/pdf`}
-          className="inline-flex items-center gap-1.5 rounded-lg bg-ink px-4 py-2 text-sm font-medium text-white shadow-lg hover:opacity-90"
-        >
-          ⬇ ดาวน์โหลด PDF
-        </a>
-        <Link
-          href={`/candidates/${params.id}`}
-          className="inline-flex items-center rounded-lg border border-line bg-white px-3 py-2 text-sm text-ink shadow"
-        >
-          กลับ
-        </Link>
+      <div className="no-print fixed top-5 right-5 z-10 flex gap-2">
+        <Button variant="outline" asChild>
+          <Link href={`/candidates/${params.id}`}>
+            <ArrowLeftIcon data-icon="inline-start" />
+            กลับ
+          </Link>
+        </Button>
+        <Button asChild>
+          <a href={`/api/candidates/${params.id}/pdf`}>
+            <DownloadIcon data-icon="inline-start" />
+            ดาวน์โหลด PDF
+          </a>
+        </Button>
       </div>
       <div className="sheet">
         <header className="head">
@@ -104,7 +106,7 @@ export default async function PrintResume({ params }: { params: { id: string } }
 
         <section className="sec">
           <h2>ข้อมูลส่วนตัว</h2>
-          <div className="grid">
+          <div className="pgrid">
             <Field label="คำนำหน้า" value={c.prefix} />
             <Field label="เพศ" value={c.gender} />
             <Field label="อายุ" value={c.age} />
@@ -129,7 +131,7 @@ export default async function PrintResume({ params }: { params: { id: string } }
 
         <section className="sec">
           <h2>งานที่ต้องการ</h2>
-          <div className="grid">
+          <div className="pgrid">
             <Field label="ตำแหน่ง" value={c.desired_positions} />
             <Field label="เงินเดือนที่ต้องการ" value={c.expected_salary} />
             <Field label="พื้นที่ทำงาน" value={c.desired_work_area} />
@@ -185,39 +187,37 @@ export default async function PrintResume({ params }: { params: { id: string } }
 const CSS = `
 @page { size: A4; margin: 14mm; }
 * { box-sizing: border-box; }
-html, body { background: #f3f4f6; margin: 0; }
+html, body { background: #f4f4f5; margin: 0; }
 .sheet {
-  max-width: 800px; margin: 24px auto; background: #fff; color: #1a1a1a;
-  padding: 40px 44px; border-radius: 8px; box-shadow: 0 1px 8px rgba(0,0,0,.08);
-  font-size: 13px; line-height: 1.5;
+  max-width: 800px; margin: 24px auto; background: #fff; color: #18181b;
+  padding: 40px 44px; border-radius: 8px; border: 1px solid #e4e4e7;
+  font-size: 13px; line-height: 1.65;
 }
-.head { display: flex; gap: 18px; align-items: flex-start; border-bottom: 2px solid #1a1a1a; padding-bottom: 16px; margin-bottom: 18px; }
-.avatar { width: 84px; height: 84px; border-radius: 10px; object-fit: cover; border: 1px solid #e5e7eb; flex-shrink: 0; }
+.head { display: flex; gap: 18px; align-items: flex-start; border-bottom: 1px solid #d4d4d8; padding-bottom: 16px; margin-bottom: 18px; }
+.avatar { width: 84px; height: 84px; border-radius: 8px; object-fit: cover; border: 1px solid #e4e4e7; flex-shrink: 0; }
 .head-main { flex: 1; min-width: 0; }
-.name { font-size: 26px; font-weight: 700; margin: 0; letter-spacing: -.3px; }
-.role { color: #1d4ed8; font-size: 15px; margin-top: 3px; }
-.contacts { color: #4b5563; font-size: 12.5px; margin-top: 7px; }
-.sources { color: #6b7280; font-size: 11px; margin-top: 4px; }
-.sec { margin-bottom: 16px; break-inside: avoid; }
-.sec h2 { font-size: 12px; font-weight: 700; color: #1d4ed8; text-transform: uppercase; letter-spacing: .6px; margin: 0 0 9px; padding-bottom: 4px; border-bottom: 1px solid #e5e7eb; }
-.grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 9px 18px; }
-.field, .addr { min-width: 0; }
-.addr { margin-top: 9px; }
-.fl { font-size: 10px; color: #6b7280; margin-bottom: 1px; }
+.name { font-size: 24px; font-weight: 600; margin: 0; line-height: 1.4; }
+.role { color: #3f3f46; font-size: 15px; margin-top: 2px; }
+.contacts { color: #52525b; font-size: 12.5px; margin-top: 6px; }
+.sources { color: #71717a; font-size: 11px; margin-top: 2px; }
+.sec { margin-bottom: 18px; break-inside: avoid; }
+.sec h2 { font-size: 13px; font-weight: 600; color: #18181b; margin: 0 0 10px; padding-bottom: 4px; border-bottom: 1px solid #e4e4e7; }
+.pgrid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px 18px; }
+.pf, .addr { min-width: 0; }
+.addr { margin-top: 10px; }
+.fl { font-size: 11px; color: #71717a; }
 .fv { font-size: 13px; }
-.entry { padding-left: 11px; border-left: 2px solid #e5e7eb; margin-bottom: 10px; break-inside: avoid; }
-.et { font-weight: 700; font-size: 13px; }
-.em { color: #6b7280; font-size: 11.5px; margin-top: 1px; }
-.para { color: #374151; font-size: 12.5px; margin: 4px 0 0; white-space: pre-line; }
-.skl { margin-bottom: 8px; }
-.chips { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 4px; }
-.chip { background: #eef2ff; color: #1d4ed8; font-size: 11.5px; padding: 2px 8px; border-radius: 5px; }
-.foot { margin-top: 20px; padding-top: 8px; border-top: 1px solid #e5e7eb; color: #9ca3af; font-size: 10px; text-align: center; }
+.entry { padding-left: 12px; border-left: 2px solid #e4e4e7; margin-bottom: 12px; break-inside: avoid; }
+.et { font-weight: 600; font-size: 13px; }
+.em { color: #71717a; font-size: 12px; }
+.para { color: #3f3f46; font-size: 12.5px; margin: 4px 0 0; white-space: pre-line; }
+.skl { margin-bottom: 10px; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
+.chip { border: 1px solid #e4e4e7; color: #3f3f46; font-size: 12px; padding: 1px 8px; border-radius: 999px; }
+.foot { margin-top: 20px; padding-top: 8px; border-top: 1px solid #e4e4e7; color: #a1a1aa; font-size: 10px; text-align: center; }
 @media print {
   html, body { background: #fff; }
-  .sheet { margin: 0; max-width: none; box-shadow: none; border-radius: 0; padding: 0; }
+  .sheet { margin: 0; max-width: none; border: 0; border-radius: 0; padding: 0; }
   .no-print { display: none !important; }
-  .chip { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-  .sec h2, .role { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
 }
 `;

@@ -1,15 +1,36 @@
 import Link from 'next/link';
+import { ChevronRightIcon } from 'lucide-react';
 import { autopostRuns } from '@/lib/repo';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent } from '@/components/ui/card';
+import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from '@/components/ui/empty';
+import { Spinner } from '@/components/ui/spinner';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 
 export const dynamic = 'force-dynamic';
 
-const STATUS: Record<string, { label: string; cls: string }> = {
-  queued: { label: 'รอคิว', cls: 'bg-black/5 text-ink' },
-  running: { label: 'กำลังโพสต์', cls: 'bg-blue-50 text-blue-700' },
-  completed: { label: 'เสร็จ', cls: 'bg-green-50 text-green-700' },
-  failed: { label: 'ล้มเหลว', cls: 'bg-red-50 text-red-700' },
-  cancelled: { label: 'ยกเลิก', cls: 'bg-amber-50 text-amber-700' },
-};
+function RunStatus({ status }: { status: string }) {
+  switch (status) {
+    case 'running':
+      return (
+        <Badge variant="secondary">
+          <Spinner data-icon="inline-start" />
+          กำลังโพสต์
+        </Badge>
+      );
+    case 'queued':
+      return <Badge variant="outline">รอคิว</Badge>;
+    case 'completed':
+      return <Badge variant="secondary">เสร็จ</Badge>;
+    case 'failed':
+      return <Badge variant="destructive">ล้มเหลว</Badge>;
+    case 'cancelled':
+      return <Badge variant="ghost">ยกเลิก</Badge>;
+    default:
+      return <Badge variant="outline">{status}</Badge>;
+  }
+}
 
 function fmt(v: string | null): string {
   if (!v) return '—';
@@ -23,74 +44,85 @@ function fmt(v: string | null): string {
 /** requested_by → ข้อความอ่านง่าย (auto-daily = รอบอัตโนมัติ 8:00, อื่น ๆ = คนสั่ง) */
 function whoRequested(v: string | null): string {
   if (!v) return '—';
-  if (v === 'auto-daily') return '🕗 รอบอัตโนมัติ 8:00';
-  if (v === 'orchestrator') return '🤖 ระบบสร้างประกาศ';
-  return `👤 ${v}`;
+  if (v === 'auto-daily') return 'รอบอัตโนมัติ 8:00';
+  if (v === 'orchestrator') return 'ระบบสร้างประกาศ';
+  return v;
 }
 
 export default async function AutopostRunsPage() {
   const runs = await autopostRuns(80);
 
   return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">รอบโพสต์ (Runs)</h1>
-        <p className="mt-1 text-sm text-subtle">
-          บัญชีไหนโพสต์อยู่ที่ worker (เครื่อง) ไหน · สั่งโดยใคร · กดเข้าไปดูว่าโพสต์ลงกลุ่มไหนจริง
+    <div className="flex flex-col gap-6">
+      <div className="flex flex-col gap-1">
+        <h1 className="text-2xl font-semibold">รอบโพสต์ (Runs)</h1>
+        <p className="text-sm leading-relaxed text-muted-foreground">
+          บัญชีไหนโพสต์อยู่บน Worker เครื่องไหน ใครเป็นคนสั่ง กดเข้าไปดูว่าโพสต์ลงกลุ่มไหนบ้าง
         </p>
       </div>
 
       {runs.length === 0 ? (
-        <div className="card px-5 py-16 text-center text-subtle">
-          ยังไม่มีรอบโพสต์ — หรือยังเชื่อมต่อฐานข้อมูล Auto-Post ไม่ได้
-        </div>
+        <Empty className="border">
+          <EmptyHeader>
+            <EmptyTitle>ยังไม่มีรอบโพสต์</EmptyTitle>
+            <EmptyDescription>หรือยังเชื่อมต่อฐานข้อมูล Auto-Post ไม่ได้</EmptyDescription>
+          </EmptyHeader>
+        </Empty>
       ) : (
-        <div className="card overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-hairline text-left text-xs text-subtle">
-                <th className="px-4 py-2.5 font-medium">บัญชี Facebook</th>
-                <th className="px-4 py-2.5 font-medium">เครื่องที่ทำงาน</th>
-                <th className="px-4 py-2.5 font-medium">สั่งโดย</th>
-                <th className="px-4 py-2.5 font-medium">สถานะ</th>
-                <th className="px-4 py-2.5 font-medium text-right">โพสต์สำเร็จ</th>
-                <th className="px-4 py-2.5 font-medium">เวลา</th>
-                <th className="px-4 py-2.5 font-medium text-right"></th>
-              </tr>
-            </thead>
-            <tbody>
-              {runs.map((r) => {
-                const st = STATUS[r.status] ?? { label: r.status, cls: 'bg-black/5 text-ink' };
-                return (
-                  <tr key={r.id} className="border-b border-hairline/60 last:border-0 hover:bg-black/[0.015]">
-                    <td className="px-4 py-2.5 font-medium">{r.account || r.user_id || '—'}</td>
-                    <td className="px-4 py-2.5">
+        <Card>
+          <CardContent>
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>บัญชี Facebook</TableHead>
+                  <TableHead>เครื่องที่ทำงาน</TableHead>
+                  <TableHead>สั่งโดย</TableHead>
+                  <TableHead>สถานะ</TableHead>
+                  <TableHead className="text-right">โพสต์สำเร็จ</TableHead>
+                  <TableHead>เวลา</TableHead>
+                  <TableHead className="text-right">
+                    <span className="sr-only">ดูรายละเอียด</span>
+                  </TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {runs.map((r) => (
+                  <TableRow key={r.id}>
+                    <TableCell className="font-medium">{r.account || r.user_id || '—'}</TableCell>
+                    <TableCell>
                       {r.worker_id ? (
-                        <span className="font-mono text-xs text-subtle">{r.worker_id}</span>
+                        <span className="font-mono text-xs text-muted-foreground">{r.worker_id}</span>
                       ) : r.status === 'queued' && r.pinned_worker ? (
-                        <span className="text-xs text-amber-700">⏳ รอเครื่อง <span className="font-mono">{r.pinned_worker}</span></span>
+                        <span className="text-xs">
+                          รอเครื่อง <span className="font-mono">{r.pinned_worker}</span>
+                        </span>
                       ) : (
-                        <span className="font-mono text-xs text-subtle">— (ยังไม่ถูกหยิบ)</span>
+                        <span className="text-xs text-muted-foreground">ยังไม่มีเครื่องรับงาน</span>
                       )}
-                    </td>
-                    <td className="px-4 py-2.5 text-subtle">{whoRequested(r.requested_by)}</td>
-                    <td className="px-4 py-2.5"><span className={`pill ${st.cls}`}>{st.label}</span></td>
-                    <td className="px-4 py-2.5 text-right tabular-nums">{r.posted}</td>
-                    <td className="px-4 py-2.5 text-subtle">{fmt(r.started_at || r.created_at)}</td>
-                    <td className="px-4 py-2.5 text-right">
-                      <Link href={`/autopost/runs/${r.id}`} className="text-accent hover:underline">
-                        ดูโพสต์ →
-                      </Link>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
+                    </TableCell>
+                    <TableCell className="text-muted-foreground">{whoRequested(r.requested_by)}</TableCell>
+                    <TableCell>
+                      <RunStatus status={r.status} />
+                    </TableCell>
+                    <TableCell className="text-right tabular-nums">{r.posted}</TableCell>
+                    <TableCell className="text-muted-foreground">{fmt(r.started_at || r.created_at)}</TableCell>
+                    <TableCell className="text-right">
+                      <Button asChild variant="ghost" size="sm">
+                        <Link href={`/autopost/runs/${r.id}`}>
+                          ดูโพสต์
+                          <ChevronRightIcon data-icon="inline-end" />
+                        </Link>
+                      </Button>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </CardContent>
+        </Card>
       )}
-      <p className="text-xs text-subtle">
-        เครื่องที่ทำงานจะรับงานเผยแพร่ตามลำดับจากส่วนกลาง · “สั่งโดย” บอกว่างานมาจากผู้ใช้ ระบบสร้างประกาศ หรือรอบอัตโนมัติ 8:00
+      <p className="text-xs leading-relaxed text-muted-foreground">
+        Worker รับงานโพสต์ตามลำดับจากส่วนกลาง ช่อง “สั่งโดย” บอกว่างานมาจากผู้ใช้ ระบบสร้างประกาศ หรือรอบอัตโนมัติ 8:00
       </p>
     </div>
   );

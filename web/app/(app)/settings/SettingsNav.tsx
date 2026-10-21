@@ -2,6 +2,7 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 
 const ITEMS = [
   { href: '/settings/connectors', label: 'บัญชีที่ใช้งาน', detail: 'JobBKK, JobThai และ Facebook' },
@@ -11,26 +12,17 @@ const ITEMS = [
 
 export function SettingsNav() {
   const pathname = usePathname();
+  const active = ITEMS.find((item) => pathname === item.href || pathname.startsWith(`${item.href}/`))?.href ?? '';
 
   return (
-    <nav className="grid gap-3 sm:grid-cols-3" aria-label="เมนูตั้งค่า">
-      {ITEMS.map((item) => {
-        const active = pathname === item.href || pathname.startsWith(`${item.href}/`);
-        return (
-          <Link
-            key={item.href}
-            href={item.href}
-            className={`rounded-2xl border px-4 py-3 transition ${
-              active
-                ? 'border-accent bg-accent text-white shadow-sm'
-                : 'border-line bg-white text-ink hover:border-accent/40 hover:bg-accent/[0.03]'
-            }`}
-          >
-            <span className="block text-sm font-semibold">{item.label}</span>
-            <span className={`mt-0.5 block text-xs ${active ? 'text-white/75' : 'text-subtle'}`}>{item.detail}</span>
-          </Link>
-        );
-      })}
-    </nav>
+    <Tabs value={active}>
+      <TabsList aria-label="เมนูตั้งค่า">
+        {ITEMS.map((item) => (
+          <TabsTrigger key={item.href} value={item.href} asChild>
+            <Link href={item.href} title={item.detail}>{item.label}</Link>
+          </TabsTrigger>
+        ))}
+      </TabsList>
+    </Tabs>
   );
 }

@@ -6,12 +6,16 @@ import {
   listJarvisPostOrders,
   postModeLabel,
 } from '@/lib/repo';
+import { ChevronDownIcon } from 'lucide-react';
 import { AutoRefresh } from '@/components/AutoRefresh';
 import { WorkerStatus } from '@/components/WorkerStatus';
 import { WorkCenter, type PostOrderSummary, type WorkCenterItem, type WorkCenterStage, type Step } from '@/components/WorkCenter';
 import { humanizeOperatorError, operatorJobTitle } from '@/lib/operator-copy';
 import { prefillScrapePlan } from '@/lib/scrape-intake.js';
 import { isContentGenerationEnabled, productScopeSummary } from '@/lib/product-scope';
+import { Alert, AlertDescription } from '@/components/ui/alert';
+import { Button } from '@/components/ui/button';
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 
 export const dynamic = 'force-dynamic';
 
@@ -139,21 +143,24 @@ export default async function OrchestratorPage({ searchParams }: { searchParams?
   ].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
 
   return (
-    <div className="space-y-4">
+    <div className="flex flex-col gap-4">
       <AutoRefresh seconds={20} />
       {typeof searchParams?.notice === 'string' && (
-        <div role="status" className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
-          {searchParams.notice}
-        </div>
+        <Alert role="status">
+          <AlertDescription>{searchParams.notice}</AlertDescription>
+        </Alert>
       )}
-      <details className="rounded-xl border border-line bg-white px-4 py-2.5">
-        <summary className="cursor-pointer text-sm text-subtle">
-          สถานะเครื่อง · {productScopeSummary()}
-        </summary>
-        <div className="mt-3">
+      <Collapsible className="rounded-lg border bg-card px-4 py-2">
+        <CollapsibleTrigger asChild>
+          <Button variant="ghost" size="sm" className="group w-full justify-between px-0 font-normal text-muted-foreground hover:bg-transparent">
+            สถานะเครื่อง · {productScopeSummary()}
+            <ChevronDownIcon data-icon="inline-end" className="transition-transform group-data-[state=open]:rotate-180" />
+          </Button>
+        </CollapsibleTrigger>
+        <CollapsibleContent className="pt-2 pb-1">
           <WorkerStatus />
-        </div>
-      </details>
+        </CollapsibleContent>
+      </Collapsible>
       <WorkCenter
         items={items}
         postSummary={postSummary}

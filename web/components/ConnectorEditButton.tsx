@@ -2,6 +2,19 @@
 
 import { useState } from 'react';
 import { editConnectorAction } from '@/lib/actions';
+import { Button } from '@/components/ui/button';
+import {
+  Dialog,
+  DialogClose,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from '@/components/ui/dialog';
+import { Field, FieldDescription, FieldGroup, FieldLabel } from '@/components/ui/field';
+import { Input } from '@/components/ui/input';
 
 /**
  * ปุ่ม "แก้ไข" + modal ฟอร์มแก้ข้อมูล connector (Scraper หรือ Facebook).
@@ -20,40 +33,44 @@ export function ConnectorEditButton({
 }) {
   const [open, setOpen] = useState(false);
   const isFb = platform === 'facebook';
+  const fieldId = `edit-connector-${id}`;
 
   return (
-    <>
-      <button type="button" onClick={() => setOpen(true)} className="btn-ghost btn-sm">แก้ไข</button>
-      {open && (
-        <div
-          className="fixed inset-0 z-50 grid place-items-center bg-black/40 p-4"
-          onClick={() => setOpen(false)}
-        >
-          <div className="card w-full max-w-sm p-5" onClick={(e) => e.stopPropagation()}>
-            <h3 className="mb-3 text-sm font-semibold">แก้ไขบัญชี {isFb ? 'Facebook' : 'ค้นหาผู้สมัคร'}</h3>
-            <form action={editConnectorAction} className="space-y-3" onSubmit={() => setOpen(false)}>
-              <input type="hidden" name="id" value={id} />
-              <input type="hidden" name="platform" value={platform} />
-              <div>
-                <label className="label">ชื่อที่แสดง</label>
-                <input name="label" defaultValue={label} required className="field" />
-              </div>
-              <div>
-                <label className="label">{isFb ? 'อีเมล/เบอร์ (ล็อกอิน FB)' : 'ชื่อผู้ใช้'}</label>
-                <input name="username" defaultValue={username} className="field" />
-              </div>
-              <div>
-                <label className="label">รหัสผ่าน <span className="text-subtle">(เว้นว่าง = คงรหัสเดิม)</span></label>
-                <input name="password" type="password" placeholder="••••••••" className="field" />
-              </div>
-              <div className="flex justify-end gap-2 pt-1">
-                <button type="button" onClick={() => setOpen(false)} className="btn-secondary btn-sm">ยกเลิก</button>
-                <button className="btn-primary btn-sm">บันทึก</button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-    </>
+    <Dialog open={open} onOpenChange={setOpen}>
+      <DialogTrigger asChild>
+        <Button type="button" variant="ghost" size="sm">แก้ไข</Button>
+      </DialogTrigger>
+      <DialogContent className="sm:max-w-sm">
+        <form action={editConnectorAction} onSubmit={() => setOpen(false)} className="flex flex-col gap-6">
+          <DialogHeader>
+            <DialogTitle>แก้ไขบัญชี{isFb ? ' Facebook' : 'ค้นหาผู้สมัคร'}</DialogTitle>
+            <DialogDescription>{label}</DialogDescription>
+          </DialogHeader>
+          <input type="hidden" name="id" value={id} />
+          <input type="hidden" name="platform" value={platform} />
+          <FieldGroup>
+            <Field>
+              <FieldLabel htmlFor={`${fieldId}-label`}>ชื่อที่แสดง</FieldLabel>
+              <Input id={`${fieldId}-label`} name="label" defaultValue={label} required />
+            </Field>
+            <Field>
+              <FieldLabel htmlFor={`${fieldId}-username`}>{isFb ? 'อีเมลหรือเบอร์ที่ใช้ล็อกอิน Facebook' : 'ชื่อผู้ใช้'}</FieldLabel>
+              <Input id={`${fieldId}-username`} name="username" defaultValue={username} />
+            </Field>
+            <Field>
+              <FieldLabel htmlFor={`${fieldId}-password`}>รหัสผ่าน</FieldLabel>
+              <Input id={`${fieldId}-password`} name="password" type="password" />
+              <FieldDescription>เว้นว่างไว้ถ้าจะใช้รหัสเดิม</FieldDescription>
+            </Field>
+          </FieldGroup>
+          <DialogFooter>
+            <DialogClose asChild>
+              <Button type="button" variant="outline">ยกเลิก</Button>
+            </DialogClose>
+            <Button type="submit">บันทึก</Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
   );
 }

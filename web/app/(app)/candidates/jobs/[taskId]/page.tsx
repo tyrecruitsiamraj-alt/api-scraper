@@ -4,14 +4,24 @@ import { ScrapingNav } from '@/components/ScrapingNav';
 import { getCandidateJobGroup, listCandidateJobMatches } from '@/lib/repo';
 import { reassessCandidateJobAction } from '@/lib/actions';
 import { humanizeJobFamily, operatorJobTitle } from '@/lib/operator-copy';
+import { ArrowLeftIcon, CheckCircle2Icon, InfoIcon, UsersIcon } from 'lucide-react';
+import { cn } from '@/lib/utils';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Empty, EmptyHeader, EmptyMedia, EmptyTitle } from '@/components/ui/empty';
+import { Item, ItemContent, ItemTitle } from '@/components/ui/item';
+import { Separator } from '@/components/ui/separator';
 
 export const dynamic = 'force-dynamic';
 
 const PLATFORM: Record<string, string> = { jobbkk: 'JobBKK', jobthai: 'JobThai' };
 const STATUS = {
-  qualified: { label: 'ผ่านเกณฑ์', cls: 'bg-emerald-50 text-emerald-700 border-emerald-200' },
-  needs_review: { label: 'ต้องตรวจเพิ่ม', cls: 'bg-amber-50 text-amber-700 border-amber-200' },
-  rejected: { label: 'ไม่ผ่าน Hard Gate', cls: 'bg-red-50 text-red-700 border-red-200' },
+  qualified: { label: 'ผ่านเกณฑ์', variant: 'secondary' },
+  needs_review: { label: 'ต้องตรวจเพิ่ม', variant: 'outline' },
+  rejected: { label: 'ไม่ผ่าน Hard Gate', variant: 'destructive' },
 } as const;
 
 const REASON: Record<string, string> = {
@@ -57,98 +67,168 @@ export default async function CandidateJobDetailPage({ params, searchParams }: {
   return (
     <div>
       <ScrapingNav />
-      <Link href="/candidates/jobs" className="text-sm text-subtle hover:text-accent">← กลับไปผู้สมัครตามใบงาน</Link>
-      <header className="mt-3 flex flex-wrap items-start justify-between gap-4">
+      <div className="flex flex-col gap-6">
         <div>
-          <p className="text-sm font-medium text-accent">{job.source_request_no || 'งานค้นหาที่สร้างเอง'}</p>
-          <h1 className="mt-1 text-[28px] font-semibold tracking-tight">{title}</h1>
-          <p className="mt-1 text-sm text-subtle">{family || `${PLATFORM[job.platform] || job.platform} · ${job.connector_label}`} · ผลล่าสุด {fmt(job.latest_matched_at)}</p>
+          <Button variant="ghost" size="sm" asChild>
+            <Link href="/candidates/jobs">
+              <ArrowLeftIcon data-icon="inline-start" />
+              กลับไปผู้สมัครตามใบงาน
+            </Link>
+          </Button>
         </div>
-        <div className="flex flex-wrap gap-2">
-          <form action={reassessCandidateJobAction}>
-            <input type="hidden" name="taskId" value={job.id} />
-            <button className="btn-primary">วิเคราะห์และเรียงใหม่</button>
-          </form>
-          <Link href={`/scraping/${job.id}`} className="btn-ghost">ดูสถานะงานค้นหา</Link>
-        </div>
-      </header>
 
-      {searchParams?.rescored === '1' && <div role="status" className="mt-4 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">✓ ประเมินผู้สมัครจาก Resume และเกณฑ์ใบงานล่าสุดแล้ว โดยไม่ Scrap หรือใช้โควตาเพิ่ม</div>}
+        <header className="flex flex-wrap items-start justify-between gap-4">
+          <div className="flex flex-col gap-1">
+            <p className="text-sm text-muted-foreground">{job.source_request_no || 'งานค้นหาที่สร้างเอง'}</p>
+            <h1 className="text-2xl font-semibold">{title}</h1>
+            <p className="text-sm text-muted-foreground">{family || `${PLATFORM[job.platform] || job.platform} · ${job.connector_label}`} · ผลล่าสุด {fmt(job.latest_matched_at)}</p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <form action={reassessCandidateJobAction}>
+              <input type="hidden" name="taskId" value={job.id} />
+              <Button type="submit">วิเคราะห์และเรียงใหม่</Button>
+            </form>
+            <Button variant="outline" asChild>
+              <Link href={`/scraping/${job.id}`}>ดูสถานะงานค้นหา</Link>
+            </Button>
+          </div>
+        </header>
 
-      <section className="mt-5 grid gap-3 sm:grid-cols-4">
-        <Metric value={job.qualified_count} label="ผ่าน Hard Gate" tone="text-emerald-700" />
-        <Metric value={job.needs_review_count} label="ต้องตรวจหลักฐาน" tone="text-amber-700" />
-        <Metric value={job.rejected_count} label="ไม่ผ่าน" tone="text-red-700" />
-        <Metric value={job.target_count ?? 0} label="จำนวนที่ต้องการ" tone="text-ink" />
-      </section>
+        {searchParams?.rescored === '1' && (
+          <Alert role="status">
+            <CheckCircle2Icon />
+            <AlertDescription>ประเมินผู้สมัครใหม่จาก Resume และเกณฑ์ใบงานล่าสุดแล้ว ไม่ได้ Scrap เพิ่มและไม่ใช้โควตา</AlertDescription>
+          </Alert>
+        )}
 
-      <div className="mt-5 rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-900">
-        <b>AI ช่วยอย่างไร:</b> ระบบอ่านเกณฑ์จากใบงาน แล้วตรวจ Resume ทีละคนด้วยหลักฐานที่เปิดดูได้ คนที่ผ่านเงื่อนไขบังคับจะแสดงก่อน จากนั้นเรียงตามความเหมาะสมและความครบของข้อมูล หากคะแนนเท่ากัน จะให้ Resume ที่อัปเดตล่าสุดขึ้นก่อน ข้อมูลที่ Resume ไม่ระบุจะแสดงว่า “ต้องตรวจเพิ่ม” และไม่นับว่าผ่าน
-      </div>
+        <section className="grid gap-3 sm:grid-cols-4">
+          <Metric value={job.qualified_count} label="ผ่าน Hard Gate" />
+          <Metric value={job.needs_review_count} label="ต้องตรวจหลักฐาน" />
+          <Metric value={job.rejected_count} label="ไม่ผ่าน" />
+          <Metric value={job.target_count ?? 0} label="จำนวนที่ต้องการ" />
+        </section>
 
-      <div className="mt-5 space-y-3">
-        {rows.length === 0 && <div className="card py-14 text-center text-subtle">งานนี้ยังไม่มีผู้สมัครที่ Scrap มา</div>}
-        {rows.map((candidate) => {
-          const state = STATUS[candidate.qualification_status];
-          const score = candidate.assessment_ready ? candidate.qualification_score : null;
-          const evidence = candidate.qualification_evidence || {};
-          const passed = textList(evidence.passed);
-          const missing = textList(evidence.missing);
-          const softPassed = textList(evidence.soft_passed);
-          const softMissing = textList(evidence.soft_missing);
-          const breakdown = evidence.score_breakdown && typeof evidence.score_breakdown === 'object'
-            ? evidence.score_breakdown as Record<string, number>
-            : null;
-          const confidence = Number(evidence.confidence_score ?? 0) || 0;
-          const reasons = (candidate.qualification_reasons || []).map(humanReason);
-          const rank = candidate.qualification_status === 'qualified' ? ++qualifiedRank : null;
-          return (
-            <article key={candidate.id} className="rounded-2xl border border-line bg-white p-5 shadow-sm">
-              <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_180px]">
-                <div className="min-w-0">
-                  <div className="flex flex-wrap items-start gap-4">
-                    {candidate.profile_asset_id ? (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img src={`/api/assets/${candidate.profile_asset_id}`} alt="" className="h-16 w-16 shrink-0 rounded-xl border border-line object-cover" />
-                    ) : <div className="grid h-16 w-16 shrink-0 place-items-center rounded-xl bg-[#082f5f] text-xl font-semibold text-white">{(candidate.full_name || '?').charAt(0)}</div>}
-                    <div className="min-w-0 flex-1">
-                      <div className="flex flex-wrap items-center gap-2">
-                        {rank && <span className="rounded-full bg-[#082f5f] px-2.5 py-1 text-xs font-semibold text-white">อันดับ {rank}</span>}
-                        <span className={`rounded-full border px-2.5 py-1 text-xs font-medium ${state.cls}`}>{state.label}</span>
-                        {candidate.viewed_at && <span className="pill bg-black/5 text-subtle">เปิดอ่านแล้ว</span>}
-                        {candidate.called_at && <span className="pill bg-blue-50 text-blue-700">โทรแล้ว</span>}
+        <Alert>
+          <InfoIcon />
+          <AlertTitle>ระบบเรียงผู้สมัครอย่างไร</AlertTitle>
+          <AlertDescription className="leading-relaxed">
+            ระบบอ่านเกณฑ์จากใบงาน แล้วตรวจ Resume ทีละคนพร้อมหลักฐานที่เปิดดูได้ คนที่ผ่านเงื่อนไขบังคับขึ้นก่อน ตามด้วยความเหมาะสมและความครบของข้อมูล ถ้าคะแนนเท่ากัน Resume ที่อัปเดตล่าสุดขึ้นก่อน ข้อที่ Resume ไม่ได้ระบุจะขึ้นว่า “ต้องตรวจเพิ่ม” และไม่นับว่าผ่าน
+          </AlertDescription>
+        </Alert>
+
+        <div className="flex flex-col gap-3">
+          {rows.length === 0 && (
+            <Empty className="border">
+              <EmptyHeader>
+                <EmptyMedia variant="icon"><UsersIcon /></EmptyMedia>
+                <EmptyTitle>งานนี้ยังไม่มีผู้สมัครที่ Scrap มา</EmptyTitle>
+              </EmptyHeader>
+            </Empty>
+          )}
+          {rows.map((candidate) => {
+            const state = STATUS[candidate.qualification_status];
+            const score = candidate.assessment_ready ? candidate.qualification_score : null;
+            const evidence = candidate.qualification_evidence || {};
+            const passed = textList(evidence.passed);
+            const missing = textList(evidence.missing);
+            const softPassed = textList(evidence.soft_passed);
+            const softMissing = textList(evidence.soft_missing);
+            const breakdown = evidence.score_breakdown && typeof evidence.score_breakdown === 'object'
+              ? evidence.score_breakdown as Record<string, number>
+              : null;
+            const confidence = Number(evidence.confidence_score ?? 0) || 0;
+            const reasons = (candidate.qualification_reasons || []).map(humanReason);
+            const rank = candidate.qualification_status === 'qualified' ? ++qualifiedRank : null;
+            return (
+              <Card key={candidate.id}>
+                <CardContent className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_180px]">
+                  <div className="flex min-w-0 flex-col gap-4">
+                    <div className="flex flex-wrap items-start gap-4">
+                      <Avatar className="size-16">
+                        {candidate.profile_asset_id && <AvatarImage src={`/api/assets/${candidate.profile_asset_id}`} alt="" />}
+                        <AvatarFallback className="text-xl">{(candidate.full_name || '?').charAt(0)}</AvatarFallback>
+                      </Avatar>
+                      <div className="flex min-w-0 flex-1 flex-col gap-1">
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          {rank && <Badge>อันดับ {rank}</Badge>}
+                          <Badge variant={state.variant}>{state.label}</Badge>
+                          {candidate.viewed_at && <Badge variant="outline">เปิดอ่านแล้ว</Badge>}
+                          {candidate.called_at && <Badge variant="outline">โทรแล้ว</Badge>}
+                        </div>
+                        <Link href={`/candidates/${candidate.id}`} className="mt-1 truncate text-lg font-semibold text-foreground hover:text-primary">{candidate.full_name || '(ไม่มีชื่อ)'}</Link>
+                        <p className="text-sm text-muted-foreground">{candidate.desired_positions || candidate.matched_position || 'ไม่ระบุตำแหน่ง'} · {candidate.province || 'ไม่ระบุพื้นที่'} · {candidate.age ? `${candidate.age} ปี` : 'ไม่ระบุอายุ'}</p>
+                        <p className="text-xs text-muted-foreground">พบจาก {(candidate.platforms || []).map((item) => PLATFORM[item] || item).join(', ') || 'ไม่ระบุ'} · {fmt(candidate.last_matched_at)}</p>
                       </div>
-                      <Link href={`/candidates/${candidate.id}`} className="mt-2 block truncate text-lg font-semibold text-ink hover:text-accent">{candidate.full_name || '(ไม่มีชื่อ)'}</Link>
-                      <p className="mt-1 text-sm text-subtle">{candidate.desired_positions || candidate.matched_position || 'ไม่ระบุตำแหน่ง'} · {candidate.province || 'ไม่ระบุพื้นที่'} · {candidate.age ? `${candidate.age} ปี` : 'ไม่ระบุอายุ'}</p>
-                      <p className="mt-1 text-xs text-subtle">พบจาก {(candidate.platforms || []).map((item) => PLATFORM[item] || item).join(', ') || 'ไม่ระบุ'} · {fmt(candidate.last_matched_at)}</p>
+                    </div>
+
+                    <div className="grid gap-3 md:grid-cols-2">
+                      <EvidenceBox title="หลักฐานที่ผ่าน" items={[...passed.map((x) => EVIDENCE[x] || x), ...softPassed.map((x) => `จุดเด่น: ${x}`)]} empty="ยังไม่มีหลักฐานที่ระบบยืนยัน" />
+                      <EvidenceBox title={candidate.qualification_status === 'rejected' ? 'เหตุผลที่ไม่ผ่าน' : 'สิ่งที่ต้องตรวจเพิ่ม'} items={[...reasons, ...missing.map(humanReason), ...softMissing.map((x) => `ยังไม่พบหลักฐาน: ${x}`)]} empty="ไม่มีจุดค้างจากข้อมูลที่ตรวจได้" destructive={candidate.qualification_status === 'rejected'} />
                     </div>
                   </div>
 
-                  <div className="mt-4 grid gap-3 md:grid-cols-2">
-                    <EvidenceBox title="หลักฐานที่ผ่าน" items={[...passed.map((x) => EVIDENCE[x] || x), ...softPassed.map((x) => `จุดเด่น: ${x}`)]} empty="ยังไม่มีหลักฐานที่ระบบยืนยัน" tone="green" />
-                    <EvidenceBox title={candidate.qualification_status === 'rejected' ? 'เหตุผลที่ไม่ผ่าน' : 'สิ่งที่ต้องตรวจเพิ่ม'} items={[...reasons, ...missing.map(humanReason), ...softMissing.map((x) => `ยังไม่พบหลักฐาน: ${x}`)]} empty="ไม่มีจุดค้างจากข้อมูลที่ตรวจได้" tone={candidate.qualification_status === 'rejected' ? 'red' : 'amber'} />
+                  <div className="flex flex-col items-center justify-center gap-1 rounded-lg bg-muted/50 px-4 py-5 text-center">
+                    {score == null ? (
+                      <>
+                        <b className="text-lg text-muted-foreground">รอประเมิน</b>
+                        <span className="text-xs text-muted-foreground">หลักฐานยังไม่พอให้แสดง %</span>
+                      </>
+                    ) : (
+                      <>
+                        <b className={cn('text-4xl font-semibold', score < 60 ? 'text-destructive' : 'text-foreground')}>{score}%</b>
+                        <span className="text-xs text-muted-foreground">ตรงเกณฑ์งานนี้</span>
+                        <span className="text-xs text-muted-foreground">ความครบหลักฐาน {confidence}%</span>
+                      </>
+                    )}
+                    {breakdown && (
+                      <>
+                        <Separator className="my-2" />
+                        <dl className="flex w-full flex-col gap-1 text-left text-xs text-muted-foreground">
+                          <div className="flex justify-between"><dt>ตำแหน่ง/ประสบการณ์</dt><dd className="font-medium text-foreground">{breakdown.role ?? 0}</dd></div>
+                          <div className="flex justify-between"><dt>Hard Gate</dt><dd className="font-medium text-foreground">{breakdown.hard_filters ?? 0}</dd></div>
+                          <div className="flex justify-between"><dt>จุดเด่นเฉพาะงาน</dt><dd className="font-medium text-foreground">{breakdown.soft_evidence ?? 0}</dd></div>
+                          <div className="flex justify-between"><dt>ความครบหลักฐาน</dt><dd className="font-medium text-foreground">{breakdown.evidence_confidence ?? 0}</dd></div>
+                        </dl>
+                      </>
+                    )}
+                    <Button variant="outline" size="sm" className="mt-3 w-full" asChild>
+                      <Link href={`/candidates/${candidate.id}`}>เปิด Resume และหลักฐาน</Link>
+                    </Button>
                   </div>
-                </div>
-
-                <div className="flex flex-col items-center justify-center rounded-xl border border-line bg-[#f7f9fc] px-4 py-5 text-center">
-                  {score == null ? <><b className="text-lg text-amber-700">รอประเมิน</b><span className="mt-1 text-xs text-subtle">ยังไม่มีหลักฐานพอให้แสดง %</span></> : <><b className={`text-4xl ${score >= 80 ? 'text-emerald-700' : score >= 60 ? 'text-amber-700' : 'text-red-700'}`}>{score}%</b><span className="mt-1 text-xs text-subtle">ความตรงตามเกณฑ์งานนี้</span><span className="mt-1 text-[11px] text-subtle">ความครบหลักฐาน {confidence}%</span></>}
-                  {breakdown && <div className="mt-3 w-full space-y-1 border-t border-line pt-3 text-left text-[11px] text-subtle"><div className="flex justify-between"><span>ตำแหน่ง/ประสบการณ์</span><b>{breakdown.role ?? 0}</b></div><div className="flex justify-between"><span>Hard Gate</span><b>{breakdown.hard_filters ?? 0}</b></div><div className="flex justify-between"><span>จุดเด่นเฉพาะงาน</span><b>{breakdown.soft_evidence ?? 0}</b></div><div className="flex justify-between"><span>ความครบหลักฐาน</span><b>{breakdown.evidence_confidence ?? 0}</b></div></div>}
-                  <Link href={`/candidates/${candidate.id}`} className="btn-ghost mt-4 w-full text-xs">เปิด Resume และหลักฐาน</Link>
-                </div>
-              </div>
-            </article>
-          );
-        })}
+                </CardContent>
+              </Card>
+            );
+          })}
+        </div>
       </div>
     </div>
   );
 }
 
-function Metric({ value, label, tone }: { value: number; label: string; tone: string }) {
-  return <div className="rounded-xl border border-line bg-white px-4 py-4"><b className={`text-2xl ${tone}`}>{value.toLocaleString('th-TH')}</b><p className="mt-1 text-xs text-subtle">{label}</p></div>;
+function Metric({ value, label }: { value: number; label: string }) {
+  return (
+    <Card size="sm">
+      <CardHeader>
+        <CardDescription>{label}</CardDescription>
+        <CardTitle className="text-2xl">{value.toLocaleString('th-TH')}</CardTitle>
+      </CardHeader>
+    </Card>
+  );
 }
 
-function EvidenceBox({ title, items, empty, tone }: { title: string; items: string[]; empty: string; tone: 'green' | 'amber' | 'red' }) {
-  const cls = tone === 'green' ? 'border-emerald-100 bg-emerald-50/60' : tone === 'red' ? 'border-red-100 bg-red-50/60' : 'border-amber-100 bg-amber-50/60';
-  return <div className={`rounded-xl border px-4 py-3 ${cls}`}><h3 className="text-xs font-semibold text-ink">{title}</h3>{items.length ? <ul className="mt-2 space-y-1 text-xs text-ink/75">{[...new Set(items)].map((item) => <li key={item}>• {item}</li>)}</ul> : <p className="mt-2 text-xs text-subtle">{empty}</p>}</div>;
+function EvidenceBox({ title, items, empty, destructive = false }: { title: string; items: string[]; empty: string; destructive?: boolean }) {
+  return (
+    <Item variant="muted" className="items-start">
+      <ItemContent className="gap-2">
+        <ItemTitle className={cn(destructive && 'text-destructive')}>{title}</ItemTitle>
+        {items.length ? (
+          <ul className="flex list-disc flex-col gap-1 pl-4 text-sm leading-relaxed text-muted-foreground">
+            {[...new Set(items)].map((item) => <li key={item}>{item}</li>)}
+          </ul>
+        ) : (
+          <p className="text-sm text-muted-foreground">{empty}</p>
+        )}
+      </ItemContent>
+    </Item>
+  );
 }

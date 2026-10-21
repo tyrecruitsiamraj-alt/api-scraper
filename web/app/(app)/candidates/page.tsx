@@ -1,7 +1,19 @@
 import Link from 'next/link';
+import { ChevronLeftIcon, ChevronRightIcon, UsersIcon } from 'lucide-react';
 import { countCandidates, listCandidates, listCandidateProvinces } from '@/lib/repo';
 import { ScrapingNav } from '@/components/ScrapingNav';
 import { markCandidateCalledAction, markCandidateViewedAction } from '@/lib/actions';
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { Card } from '@/components/ui/card';
+import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from '@/components/ui/empty';
+import { Field, FieldLabel } from '@/components/ui/field';
+import { Input } from '@/components/ui/input';
+import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select';
+import { Pagination, PaginationContent, PaginationItem } from '@/components/ui/pagination';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 
 export const dynamic = 'force-dynamic';
 
@@ -21,10 +33,6 @@ const ACTIVITY_OPTS: { value: string; label: string }[] = [
 ];
 
 const PLATFORM_LABEL: Record<string, string> = { jobbkk: 'JobBKK', jobthai: 'JobThai' };
-const PLATFORM_COLOR: Record<string, string> = {
-  jobbkk: 'bg-blue-50 text-blue-700',
-  jobthai: 'bg-orange-50 text-orange-700',
-};
 
 /** Full timestamp for the title attribute (hover). */
 function fmtFull(s: string | null) {
@@ -90,15 +98,10 @@ export default async function CandidatesPage({
 
   const tab = (key: string, label: string) => {
     const p = baseParams({ platform: key });
-    const active = (platform ?? '') === key;
     return (
-      <Link
-        key={key || 'all'}
-        href={`/candidates${p.toString() ? '?' + p.toString() : ''}`}
-        className={`pill ${active ? 'bg-ink text-white' : 'bg-black/5 text-ink hover:bg-black/10'}`}
-      >
-        {label}
-      </Link>
+      <TabsTrigger key={key || 'all'} value={key || 'all'} asChild>
+        <Link href={`/candidates${p.toString() ? '?' + p.toString() : ''}`}>{label}</Link>
+      </TabsTrigger>
     );
   };
 
@@ -107,145 +110,186 @@ export default async function CandidatesPage({
   return (
     <div>
       <ScrapingNav />
+      <div className="flex flex-col gap-6">
 
-      <div className="mb-5 flex items-end justify-between gap-4">
-        <div>
-          <h1 className="text-[28px] font-medium tracking-tight">คลังผู้สมัคร</h1>
-          <p className="text-sm text-subtle mt-1">{total.toLocaleString()} โปรไฟล์{activeFilters > 0 ? ' (กรองแล้ว)' : 'พร้อมใช้งาน'}</p>
-          <p className="mt-1 text-xs text-subtle">คลังเก็บทุกคนที่พบเพื่อไม่เสียโควตาเปิดซ้ำ แต่งานจะนับเฉพาะผู้สมัครที่ผ่านช่วงอายุและ Hard Filter เท่านั้น</p>
-        </div>
-      </div>
+        <header className="flex flex-col gap-1.5">
+          <h1 className="text-2xl font-semibold">คลังผู้สมัคร</h1>
+          <p className="text-sm text-muted-foreground">
+            {total.toLocaleString()} โปรไฟล์{activeFilters > 0 ? ' ตามตัวกรอง' : ''}
+          </p>
+          <p className="max-w-3xl text-sm leading-relaxed text-muted-foreground">
+            เก็บทุกคนที่พบไว้ที่นี่ จะได้ไม่เสียโควตาเปิดซ้ำ ส่วนงานค้นหาจะนับเฉพาะคนที่ผ่านช่วงอายุและ Hard Filter
+          </p>
+        </header>
 
-      {/* ฟิลเตอร์: ค้นหา · ตำแหน่ง · จังหวัด · วันที่อัปเดต */}
-      <form className="mb-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-6" action="/candidates" method="get">
-        {platform && <input type="hidden" name="platform" value={platform} />}
-        <input name="q" defaultValue={search} placeholder="ค้นหาชื่อ / เบอร์" className="field" />
-        <input name="position" defaultValue={position} placeholder="ตำแหน่งที่ต้องการ" className="field" />
-        <select name="province" defaultValue={province ?? ''} className="field">
-          <option value="">ทุกจังหวัด</option>
-          {provinces.map((pv) => <option key={pv} value={pv}>{pv}</option>)}
-        </select>
-        <select name="updated" defaultValue={searchParams.updated ?? ''} className="field">
-          {UPDATED_OPTS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
-        </select>
-        <select name="activity" defaultValue={searchParams.activity ?? ''} className="field">
-          {ACTIVITY_OPTS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
-        </select>
-        <div className="flex gap-2">
-          <button className="btn-primary flex-1" type="submit">กรอง</button>
-          {(search || activeFilters > 0) && (
-            <Link href="/candidates" className="btn-secondary">ล้าง</Link>
-          )}
-        </div>
-      </form>
-
-      <div className="mb-5 flex gap-2">
-        {tab('', 'ทั้งหมด')}
-        {tab('jobbkk', 'JobBKK')}
-        {tab('jobthai', 'JobThai')}
-      </div>
-
-      <div className="card overflow-hidden">
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="border-b border-hairline text-left text-subtle">
-              <th className="px-5 py-3 font-medium">รูป / ชื่อ</th>
-              <th className="px-5 py-3 font-medium">ตำแหน่งที่ต้องการ</th>
-              <th className="px-5 py-3 font-medium">จังหวัด</th>
-              <th className="px-5 py-3 font-medium">อายุ</th>
-              <th className="px-5 py-3 font-medium">ติดต่อ</th>
-              <th className="px-5 py-3 font-medium">แหล่งที่มา</th>
-              <th className="px-5 py-3 font-medium">พบจากเว็บล่าสุด</th>
-              <th className="px-5 py-3 font-medium">ติดตาม</th>
-              <th className="px-5 py-3 font-medium text-right">การทำงาน</th>
-              <th className="px-5 py-3 font-medium text-right">ไฟล์</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.length === 0 && (
-              <tr>
-                <td colSpan={10} className="px-5 py-16 text-center text-subtle">ยังไม่มีข้อมูลผู้สมัคร</td>
-              </tr>
+        <form className="grid items-end gap-2 sm:grid-cols-2 lg:grid-cols-6" action="/candidates" method="get">
+          {platform && <input type="hidden" name="platform" value={platform} />}
+          <Field>
+            <FieldLabel htmlFor="cand-q" className="sr-only">ค้นหาชื่อหรือเบอร์</FieldLabel>
+            <Input id="cand-q" name="q" defaultValue={search} placeholder="ค้นหาชื่อ / เบอร์" />
+          </Field>
+          <Field>
+            <FieldLabel htmlFor="cand-position" className="sr-only">ตำแหน่งที่ต้องการ</FieldLabel>
+            <Input id="cand-position" name="position" defaultValue={position} placeholder="ตำแหน่งที่ต้องการ" />
+          </Field>
+          <Field>
+            <FieldLabel htmlFor="cand-province" className="sr-only">จังหวัด</FieldLabel>
+            <NativeSelect id="cand-province" name="province" defaultValue={province ?? ''} className="w-full">
+              <NativeSelectOption value="">ทุกจังหวัด</NativeSelectOption>
+              {provinces.map((pv) => <NativeSelectOption key={pv} value={pv}>{pv}</NativeSelectOption>)}
+            </NativeSelect>
+          </Field>
+          <Field>
+            <FieldLabel htmlFor="cand-updated" className="sr-only">ช่วงที่อัปเดต</FieldLabel>
+            <NativeSelect id="cand-updated" name="updated" defaultValue={searchParams.updated ?? ''} className="w-full">
+              {UPDATED_OPTS.map((o) => <NativeSelectOption key={o.value} value={o.value}>{o.label}</NativeSelectOption>)}
+            </NativeSelect>
+          </Field>
+          <Field>
+            <FieldLabel htmlFor="cand-activity" className="sr-only">สถานะการติดตาม</FieldLabel>
+            <NativeSelect id="cand-activity" name="activity" defaultValue={searchParams.activity ?? ''} className="w-full">
+              {ACTIVITY_OPTS.map((o) => <NativeSelectOption key={o.value} value={o.value}>{o.label}</NativeSelectOption>)}
+            </NativeSelect>
+          </Field>
+          <div className="flex gap-2">
+            <Button className="flex-1" type="submit">กรอง</Button>
+            {(search || activeFilters > 0) && (
+              <Button variant="outline" asChild>
+                <Link href="/candidates">ล้าง</Link>
+              </Button>
             )}
-            {rows.map((c) => (
-              <tr key={c.id} className="border-b border-hairline/60 last:border-0 hover:bg-black/[0.02]">
-                <td className="px-5 py-3.5">
-                  <div className="flex items-center gap-3">
-                    {c.profile_asset_id ? (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img src={`/api/assets/${c.profile_asset_id}`} alt="" className="h-10 w-10 shrink-0 rounded-xl border border-hairline object-cover" />
-                    ) : (
-                      <div className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-ink text-sm text-white">
-                        {(c.full_name || '?').trim().charAt(0)}
-                      </div>
-                    )}
-                    <Link href={`/candidates/${c.id}`} className="font-medium text-ink hover:text-accent">
-                      {c.full_name || '(ไม่มีชื่อ)'}
-                    </Link>
-                  </div>
-                </td>
-                <td className="px-5 py-3.5 text-subtle max-w-[240px] truncate">{c.desired_positions || '—'}</td>
-                <td className="px-5 py-3.5 text-subtle">{c.province || '—'}</td>
-                <td className="px-5 py-3.5 text-subtle whitespace-nowrap">{c.age ? `${c.age} ปี` : 'ไม่ระบุ'}</td>
-                <td className="px-5 py-3.5 text-subtle">{c.phone || c.email || '—'}</td>
-                <td className="px-5 py-3.5">
-                  <div className="flex flex-wrap gap-1">
-                    {(c.platforms ?? []).map((p) => (
-                      <span key={p} className={`pill ${PLATFORM_COLOR[p] ?? 'bg-black/5'}`}>{PLATFORM_LABEL[p] ?? p}</span>
-                    ))}
-                  </div>
-                </td>
-                <td className="px-5 py-3.5 text-subtle whitespace-nowrap" title={fmtFull(c.latest_source_seen_at)}>
-                  <div>{relTime(c.latest_source_seen_at)}</div>
-                  {c.latest_search_rank && <div className="text-[11px]">อันดับ {c.latest_search_rank} ในผลค้น</div>}
-                </td>
-                <td className="px-5 py-3.5 text-xs whitespace-nowrap">
-                  <div className="space-y-1.5">
-                    <span className={`pill ${c.viewed_at ? 'bg-green-50 text-green-700' : 'bg-black/5 text-subtle'}`}>
-                      {c.viewed_at ? 'เปิดอ่านแล้ว' : 'ยังไม่เปิดอ่าน'}
-                    </span>
-                    {c.viewed_at && <div className="text-[11px] text-subtle" title={fmtFull(c.viewed_at)}>{activityTime(c.viewed_at, c.viewed_by)}</div>}
-                    <span className={`pill ${c.called_at ? 'bg-blue-50 text-blue-700' : 'bg-black/5 text-subtle'}`}>
-                      {c.called_at ? 'โทรแล้ว' : 'ยังไม่โทร'}
-                    </span>
-                    {c.called_at && <div className="text-[11px] text-subtle" title={fmtFull(c.called_at)}>{activityTime(c.called_at, c.called_by)}</div>}
-                  </div>
-                </td>
-                <td className="px-5 py-3.5 text-right">
-                  <div className="flex flex-col items-end gap-1.5">
-                    {!c.viewed_at && (
-                      <form action={markCandidateViewedAction}>
-                        <input type="hidden" name="candidateId" value={c.id} />
-                        <button className="btn-ghost text-xs" type="submit">ทำเครื่องหมายว่าเปิดอ่านแล้ว</button>
-                      </form>
-                    )}
-                    {!c.called_at && (
-                      <form action={markCandidateCalledAction}>
-                        <input type="hidden" name="candidateId" value={c.id} />
-                        <button className="btn-ghost text-xs" type="submit">ทำเครื่องหมายว่าโทรแล้ว</button>
-                      </form>
-                    )}
-                    {(c.viewed_at && c.called_at) && <span className="text-xs text-subtle">ติดตามครบแล้ว</span>}
-                  </div>
-                </td>
-                <td className="px-5 py-3.5 text-right text-subtle">{c.asset_count || 0}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+          </div>
+        </form>
 
-      {pages > 1 && (
-        <div className="mt-5 flex items-center justify-center gap-3 text-sm">
-          {pageNo > 1 && (
-            <Link className="btn-ghost" href={`/candidates?${baseParams({ page: String(pageNo - 1) })}`}>ก่อนหน้า</Link>
-          )}
-          <span className="text-subtle">หน้า {pageNo} / {pages}</span>
-          {pageNo < pages && (
-            <Link className="btn-ghost" href={`/candidates?${baseParams({ page: String(pageNo + 1) })}`}>ถัดไป</Link>
-          )}
-        </div>
-      )}
+        <Tabs value={platform ?? 'all'}>
+          <TabsList>
+            {tab('', 'ทั้งหมด')}
+            {tab('jobbkk', 'JobBKK')}
+            {tab('jobthai', 'JobThai')}
+          </TabsList>
+        </Tabs>
+
+        {rows.length === 0 ? (
+          <Empty className="border">
+            <EmptyHeader>
+              <EmptyMedia variant="icon"><UsersIcon /></EmptyMedia>
+              <EmptyTitle>ยังไม่มีข้อมูลผู้สมัคร</EmptyTitle>
+              {(search || activeFilters > 0) && <EmptyDescription>ลองล้างตัวกรองแล้วค้นใหม่</EmptyDescription>}
+            </EmptyHeader>
+          </Empty>
+        ) : (
+          <Card className="py-0">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead className="px-4 text-muted-foreground">ชื่อ</TableHead>
+                  <TableHead className="px-4 text-muted-foreground">ตำแหน่งที่ต้องการ</TableHead>
+                  <TableHead className="px-4 text-muted-foreground">จังหวัด</TableHead>
+                  <TableHead className="px-4 text-muted-foreground">อายุ</TableHead>
+                  <TableHead className="px-4 text-muted-foreground">ติดต่อ</TableHead>
+                  <TableHead className="hidden xl:table-cell px-4 text-muted-foreground">แหล่งที่มา</TableHead>
+                  <TableHead className="hidden 2xl:table-cell px-4 text-muted-foreground">พบจากเว็บล่าสุด</TableHead>
+                  <TableHead className="px-4 text-muted-foreground">ติดตาม</TableHead>
+                  <TableHead className="px-4 text-right text-muted-foreground">บันทึก</TableHead>
+                  <TableHead className="hidden 2xl:table-cell px-4 text-right text-muted-foreground">ไฟล์</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {rows.map((c) => (
+                  <TableRow key={c.id}>
+                    <TableCell className="px-4 py-3">
+                      <div className="flex items-center gap-3">
+                        <Avatar size="lg">
+                          {c.profile_asset_id && <AvatarImage src={`/api/assets/${c.profile_asset_id}`} alt="" />}
+                          <AvatarFallback>{(c.full_name || '?').trim().charAt(0)}</AvatarFallback>
+                        </Avatar>
+                        <Link href={`/candidates/${c.id}`} className="font-medium text-foreground hover:text-primary">
+                          {c.full_name || '(ไม่มีชื่อ)'}
+                        </Link>
+                      </div>
+                    </TableCell>
+                    <TableCell className="max-w-48 truncate px-4 py-3 text-muted-foreground">{c.desired_positions || '—'}</TableCell>
+                    <TableCell className="px-4 py-3 text-muted-foreground">{c.province || '—'}</TableCell>
+                    <TableCell className="px-4 py-3 text-muted-foreground">{c.age ? `${c.age} ปี` : 'ไม่ระบุ'}</TableCell>
+                    <TableCell className="px-4 py-3 text-muted-foreground">{c.phone || c.email || '—'}</TableCell>
+                    <TableCell className="hidden xl:table-cell px-4 py-3">
+                      <div className="flex flex-wrap gap-1">
+                        {(c.platforms ?? []).map((p) => (
+                          <Badge key={p} variant="outline">{PLATFORM_LABEL[p] ?? p}</Badge>
+                        ))}
+                      </div>
+                    </TableCell>
+                    <TableCell className="hidden 2xl:table-cell px-4 py-3 text-muted-foreground" title={fmtFull(c.latest_source_seen_at)}>
+                      <div>{relTime(c.latest_source_seen_at)}</div>
+                      {c.latest_search_rank && <div className="text-xs">อันดับ {c.latest_search_rank} ในผลค้น</div>}
+                    </TableCell>
+                    <TableCell className="px-4 py-3">
+                      <div className="flex flex-col items-start gap-1">
+                        <Badge variant={c.viewed_at ? 'secondary' : 'outline'}>
+                          {c.viewed_at ? 'เปิดอ่านแล้ว' : 'ยังไม่เปิดอ่าน'}
+                        </Badge>
+                        {c.viewed_at && <span className="text-xs text-muted-foreground" title={fmtFull(c.viewed_at)}>{activityTime(c.viewed_at, c.viewed_by)}</span>}
+                        <Badge variant={c.called_at ? 'secondary' : 'outline'}>
+                          {c.called_at ? 'โทรแล้ว' : 'ยังไม่โทร'}
+                        </Badge>
+                        {c.called_at && <span className="text-xs text-muted-foreground" title={fmtFull(c.called_at)}>{activityTime(c.called_at, c.called_by)}</span>}
+                      </div>
+                    </TableCell>
+                    <TableCell className="px-4 py-3 text-right">
+                      <div className="flex flex-col items-end gap-1">
+                        {!c.viewed_at && (
+                          <form action={markCandidateViewedAction}>
+                            <input type="hidden" name="candidateId" value={c.id} />
+                            <Button variant="ghost" size="sm" type="submit">บันทึกว่าอ่านแล้ว</Button>
+                          </form>
+                        )}
+                        {!c.called_at && (
+                          <form action={markCandidateCalledAction}>
+                            <input type="hidden" name="candidateId" value={c.id} />
+                            <Button variant="ghost" size="sm" type="submit">บันทึกว่าโทรแล้ว</Button>
+                          </form>
+                        )}
+                        {(c.viewed_at && c.called_at) && <span className="text-xs text-muted-foreground">ครบแล้ว</span>}
+                      </div>
+                    </TableCell>
+                    <TableCell className="hidden 2xl:table-cell px-4 py-3 text-right text-muted-foreground">{c.asset_count || 0}</TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </Card>
+        )}
+
+        {pages > 1 && (
+          <Pagination>
+            <PaginationContent className="gap-3">
+              {pageNo > 1 && (
+                <PaginationItem>
+                  <Button variant="ghost" asChild>
+                    <Link href={`/candidates?${baseParams({ page: String(pageNo - 1) })}`}>
+                      <ChevronLeftIcon data-icon="inline-start" />
+                      ก่อนหน้า
+                    </Link>
+                  </Button>
+                </PaginationItem>
+              )}
+              <PaginationItem>
+                <span className="text-sm text-muted-foreground">หน้า {pageNo} / {pages}</span>
+              </PaginationItem>
+              {pageNo < pages && (
+                <PaginationItem>
+                  <Button variant="ghost" asChild>
+                    <Link href={`/candidates?${baseParams({ page: String(pageNo + 1) })}`}>
+                      ถัดไป
+                      <ChevronRightIcon data-icon="inline-end" />
+                    </Link>
+                  </Button>
+                </PaginationItem>
+              )}
+            </PaginationContent>
+          </Pagination>
+        )}
+      </div>
     </div>
   );
 }

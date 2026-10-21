@@ -1,21 +1,45 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { AlertTriangleIcon } from 'lucide-react';
 import type { AutopostActivity as Activity } from '@/lib/repo';
+import { cn } from '@/lib/utils';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
+import { Badge } from '@/components/ui/badge';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Empty, EmptyDescription, EmptyHeader } from '@/components/ui/empty';
+import { ScrollArea } from '@/components/ui/scroll-area';
+import { Spinner } from '@/components/ui/spinner';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 
-const RUN_STATUS: Record<string, { label: string; cls: string }> = {
-  queued: { label: 'รอคิว', cls: 'bg-amber-50 text-amber-700' },
-  running: { label: 'กำลังโพสต์', cls: 'bg-blue-50 text-blue-700' },
-  completed: { label: 'เสร็จ', cls: 'bg-green-50 text-green-700' },
-  failed: { label: 'ล้มเหลว', cls: 'bg-red-50 text-red-700' },
-  cancelled: { label: 'ยกเลิก', cls: 'bg-black/5 text-subtle' },
-};
-const LOG_CLS: Record<string, string> = {
-  success: 'text-green-700',
-  info: 'text-subtle',
-  warn: 'text-amber-600',
-  error: 'text-red-600',
-};
+function RunStatus({ status }: { status: string }) {
+  switch (status) {
+    case 'running':
+      return (
+        <Badge variant="secondary">
+          <Spinner data-icon="inline-start" />
+          กำลังโพสต์
+        </Badge>
+      );
+    case 'queued':
+      return <Badge variant="outline">รอคิว</Badge>;
+    case 'completed':
+      return <Badge variant="secondary">เสร็จ</Badge>;
+    case 'failed':
+      return <Badge variant="destructive">ล้มเหลว</Badge>;
+    case 'cancelled':
+      return <Badge variant="ghost">ยกเลิก</Badge>;
+    default:
+      return <Badge variant="outline">{status}</Badge>;
+  }
+}
+
+function LogLevel({ level }: { level: string }) {
+  if (level === 'success') return <Badge variant="secondary">สำเร็จ</Badge>;
+  if (level === 'warn') return <Badge variant="outline">เตือน</Badge>;
+  if (level === 'error') return <Badge variant="destructive">ผิดพลาด</Badge>;
+  return null;
+}
 
 function timeAgo(s: string | null): string {
   if (!s) return '—';
@@ -63,63 +87,117 @@ export function AutopostActivity({ initial }: { initial: Activity | null }) {
   const jobsStuck = a.queued > 0 && a.running === 0 && workerMs > 3 * 60 * 1000;
 
   return (
-    <section className="space-y-3">
+    <section className="flex flex-col gap-3">
       <div className="flex flex-wrap items-center gap-2">
-        <h2 className="text-[15px] font-semibold">สถานะการโพสต์ (อัปเดตอัตโนมัติ)</h2>
+        <h2 className="text-base font-semibold">สถานะการโพสต์</h2>
+        <span className="text-xs text-muted-foreground">อัปเดตทุก 4 วินาที</span>
         {a.running > 0 ? (
-          <span className="pill bg-blue-50 text-blue-700"><span className="dot bg-blue-500" />กำลังโพสต์ {a.running}</span>
+          <Badge variant="secondary">
+            <Spinner data-icon="inline-start" />
+            กำลังโพสต์ {a.running}
+          </Badge>
         ) : jobsStuck ? (
-          <span className="pill bg-red-50 text-red-700"><span className="dot bg-red-500" />งานค้าง — ระบบอัตโนมัติยังไม่ทำงาน</span>
+          <Badge variant="destructive">งานค้าง Worker ยังไม่ทำงาน</Badge>
         ) : workerActive ? (
-          <span className="pill bg-green-50 text-green-700"><span className="dot bg-green-500" />ระบบทำงานล่าสุด {timeAgo(a.worker_last_seen)}</span>
+          <Badge variant="secondary">Worker ทำงานล่าสุด {timeAgo(a.worker_last_seen)}</Badge>
         ) : (
-          <span className="pill bg-black/5 text-subtle"><span className="dot bg-gray-400" />ไม่มีงานในคิว</span>
+          <Badge variant="outline">ไม่มีงานในคิว</Badge>
         )}
-        {a.queued > 0 && <span className="pill bg-amber-50 text-amber-700">รอคิว {a.queued}</span>}
+        {a.queued > 0 && <Badge variant="outline">รอคิว {a.queued}</Badge>}
       </div>
 
       {jobsStuck && (
-        <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-2.5 text-[13px] text-red-700">
-          มีงาน {a.queued} รายการรออยู่ แต่เครื่องเผยแพร่ Facebook ยังไม่ทำงาน — กรุณาเปิดระบบอัตโนมัติบนเครื่องหลัก
-          {a.worker_last_seen && <> (แตะคิวล่าสุด {timeAgo(a.worker_last_seen)})</>}
-        </div>
+        <Alert variant="destructive">
+          <AlertTriangleIcon />
+          <AlertTitle>มีงาน {a.queued} รายการรออยู่ แต่ยังไม่มีเครื่องมารับงาน</AlertTitle>
+          <AlertDescription>
+            เปิดระบบอัตโนมัติบนเครื่องหลัก
+            {a.worker_last_seen && <> (Worker แตะคิวล่าสุด {timeAgo(a.worker_last_seen)})</>}
+          </AlertDescription>
+        </Alert>
       )}
 
       <div className="grid gap-4 lg:grid-cols-2">
         {/* recent runs */}
-        <div className="card overflow-hidden">
-          <h3 className="px-4 pt-4 text-[13px] font-semibold">งานโพสต์ล่าสุด</h3>
-          <div className="mt-2 divide-y divide-hairline/50">
-            {a.runs.length === 0 && <p className="px-4 py-6 text-center text-sm text-subtle">ยังไม่มีงาน</p>}
-            {a.runs.map((r) => {
-              const st = RUN_STATUS[r.status] ?? { label: r.status, cls: 'bg-black/5' };
-              return (
-                <div key={r.id} className="flex items-center gap-2 px-4 py-2.5">
-                  <span className={`pill ${st.cls} shrink-0`}>{st.label}</span>
-                  <div className="min-w-0 flex-1">
-                    <div className="truncate text-[13px] text-ink">{r.account ?? 'ทุกบัญชี'}</div>
-                    {r.error && <div className="truncate text-[11px] text-red-600" title={r.error}>{r.error}</div>}
-                  </div>
-                  <span className="shrink-0 text-[11px] tabular-nums text-subtle">{timeAgo(r.created_at)}</span>
-                </div>
-              );
-            })}
-          </div>
-        </div>
+        <Card size="sm">
+          <CardHeader>
+            <CardTitle>งานโพสต์ล่าสุด</CardTitle>
+          </CardHeader>
+          <CardContent>
+            {a.runs.length === 0 ? (
+              <Empty>
+                <EmptyHeader>
+                  <EmptyDescription>ยังไม่มีงาน</EmptyDescription>
+                </EmptyHeader>
+              </Empty>
+            ) : (
+              <Table className="table-fixed">
+                <TableHeader>
+                  <TableRow>
+                    <TableHead className="w-28">สถานะ</TableHead>
+                    <TableHead>บัญชี</TableHead>
+                    <TableHead className="w-24 text-right">เวลา</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {a.runs.map((r) => (
+                    <TableRow key={r.id}>
+                      <TableCell>
+                        <RunStatus status={r.status} />
+                      </TableCell>
+                      <TableCell>
+                        <div className="truncate">{r.account ?? 'ทุกบัญชี'}</div>
+                        {r.error && (
+                          <div className="truncate text-xs text-destructive" title={r.error}>
+                            {r.error}
+                          </div>
+                        )}
+                      </TableCell>
+                      <TableCell className="text-right text-xs tabular-nums text-muted-foreground">
+                        {timeAgo(r.created_at)}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            )}
+          </CardContent>
+        </Card>
 
         {/* recent logs */}
-        <div className="card overflow-hidden">
-          <h3 className="px-4 pt-4 text-[13px] font-semibold">บันทึกล่าสุด (สำเร็จ / ข้าม / ล้ม)</h3>
-          <div className="mt-2 max-h-80 space-y-1.5 overflow-y-auto px-4 pb-4">
-            {a.logs.length === 0 && <p className="py-6 text-center text-sm text-subtle">ยังไม่มีบันทึก</p>}
-            {a.logs.map((l, i) => (
-              <div key={i} className="flex gap-2 text-[12px]">
-                <span className="shrink-0 tabular-nums text-subtle">{fmt(l.created_at)}</span>
-                <span className={`min-w-0 flex-1 ${LOG_CLS[l.level] ?? 'text-ink'}`}>{l.message}</span>
-              </div>
-            ))}
-          </div>
-        </div>
+        <Card size="sm">
+          <CardHeader>
+            <CardTitle>บันทึกล่าสุด</CardTitle>
+          </CardHeader>
+          <CardContent>
+            {a.logs.length === 0 ? (
+              <Empty>
+                <EmptyHeader>
+                  <EmptyDescription>ยังไม่มีบันทึก</EmptyDescription>
+                </EmptyHeader>
+              </Empty>
+            ) : (
+              <ScrollArea className="h-80">
+                <ul className="flex flex-col gap-2 pr-3">
+                  {a.logs.map((l, i) => (
+                    <li key={i} className="flex items-start gap-2 text-xs leading-relaxed">
+                      <span className="shrink-0 tabular-nums text-muted-foreground">{fmt(l.created_at)}</span>
+                      <LogLevel level={l.level} />
+                      <span
+                        className={cn(
+                          'min-w-0 flex-1',
+                          l.level === 'error' ? 'text-destructive' : l.level === 'info' ? 'text-muted-foreground' : 'text-foreground',
+                        )}
+                      >
+                        {l.message}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              </ScrollArea>
+            )}
+          </CardContent>
+        </Card>
       </div>
     </section>
   );

@@ -1,7 +1,15 @@
 import Link from 'next/link';
+import { ArrowDownIcon, ArrowUpIcon, ChevronLeftIcon, ChevronRightIcon, ExternalLinkIcon } from 'lucide-react';
 import { AutopostNav } from '@/components/AutopostNav';
 import { PrintButton } from '@/components/PrintButton';
 import { weeklyReport, type ReportMetric } from '@/lib/repo';
+import { cn } from '@/lib/utils';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from '@/components/ui/empty';
+import { Progress } from '@/components/ui/progress';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 
 export const dynamic = 'force-dynamic';
 
@@ -12,31 +20,35 @@ function fmtDate(iso: string): string {
   return d.toLocaleDateString('th-TH', { day: 'numeric', month: 'short', year: '2-digit' });
 }
 
-/** ป้าย WoW: ▲/▼ % เทียบสัปดาห์ก่อน */
+/** เทียบสัปดาห์ก่อน (WoW) เป็น % */
 function Delta({ m }: { m: ReportMetric }) {
-  if (m.prev === 0 && m.value === 0) return <span className="text-xs text-subtle">—</span>;
-  if (m.prev === 0) return <span className="text-xs font-medium text-emerald-600">ใหม่</span>;
+  if (m.prev === 0 && m.value === 0) return <span className="text-xs text-muted-foreground">—</span>;
+  if (m.prev === 0) return <span className="text-xs text-muted-foreground">สัปดาห์ก่อนเป็น 0</span>;
   const pct = Math.round(((m.value - m.prev) / m.prev) * 100);
-  if (pct === 0) return <span className="text-xs text-subtle">เท่าเดิม</span>;
+  if (pct === 0) return <span className="text-xs text-muted-foreground">เท่าสัปดาห์ก่อน</span>;
   const up = pct > 0;
   return (
-    <span className={`text-xs font-medium ${up ? 'text-emerald-600' : 'text-rose-600'}`}>
-      {up ? '▲' : '▼'} {Math.abs(pct)}% <span className="text-subtle">เทียบสัปดาห์ก่อน</span>
+    <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
+      <span className={cn('inline-flex items-center gap-0.5 font-medium', up ? 'text-foreground' : 'text-destructive')}>
+        {up ? <ArrowUpIcon className="size-3" aria-label="เพิ่มขึ้น" /> : <ArrowDownIcon className="size-3" aria-label="ลดลง" />}
+        {Math.abs(pct)}%
+      </span>
+      เทียบสัปดาห์ก่อน
     </span>
   );
 }
 
-function MetricCard({ label, m, accent }: { label: string; m: ReportMetric; accent?: boolean }) {
+function MetricCard({ label, m }: { label: string; m: ReportMetric }) {
   return (
-    <div className="card p-5">
-      <div className="text-xs text-subtle">{label}</div>
-      <div className={`mt-1 text-3xl font-semibold tabular-nums tracking-tight ${accent ? 'text-accent' : ''}`}>
-        {m.value.toLocaleString()}
-      </div>
-      <div className="mt-1">
+    <Card size="sm">
+      <CardHeader>
+        <CardDescription>{label}</CardDescription>
+        <CardTitle className="text-2xl font-semibold tabular-nums">{m.value.toLocaleString()}</CardTitle>
+      </CardHeader>
+      <CardContent>
         <Delta m={m} />
-      </div>
-    </div>
+      </CardContent>
+    </Card>
   );
 }
 
@@ -44,7 +56,7 @@ export default async function WeeklyReportPage({ searchParams }: { searchParams?
   const offset = Math.max(0, Math.min(52, parseInt(searchParams?.w ?? '0', 10) || 0));
   const report = await weeklyReport(offset);
 
-  // เติมครบ 7 วันของหน้าต่าง (วันที่ไม่มีโพสต์ = 0) เพื่อกราฟแท่งไม่ขาดช่วง
+  // เติมครบ 7 วันของหน้าต่าง (วันที่ไม่มีโพสต์ = 0) เพื่อให้ตารางรายวันไม่ขาดช่วง
   const days: { day: string; posts: number; leads: number; dow: number; label: string }[] = [];
   if (report) {
     const byDay = new Map(report.byDay.map((d) => [d.day, d]));
@@ -66,31 +78,31 @@ export default async function WeeklyReportPage({ searchParams }: { searchParams?
   const maxPosLeads = report && report.byPosition.length ? Math.max(...report.byPosition.map((p) => p.leads)) : 0;
 
   return (
-    <div className="space-y-6">
+    <div className="flex flex-col gap-6">
       <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">รายงานสัปดาห์</h1>
+        <div className="flex flex-col gap-1">
+          <h1 className="text-2xl font-semibold">รายงานสัปดาห์</h1>
           {report && (
-            <p className="mt-1 text-sm text-subtle">
+            <p className="text-sm text-muted-foreground">
               {fmtDate(report.from)} – {fmtDate(new Date(new Date(report.to).getTime() - 86_400_000).toISOString())}
-              {offset === 0 ? ' · 7 วันล่าสุด' : ` · ย้อนหลัง ${offset} สัปดาห์`}
+              {offset === 0 ? ' (7 วันล่าสุด)' : ` (ย้อนหลัง ${offset} สัปดาห์)`}
             </p>
           )}
         </div>
-        <div className="flex items-center gap-1.5 print:hidden">
-          <Link
-            href={`/autopost/report?w=${offset + 1}`}
-            className="btn-sm rounded-full border border-line px-3 py-1.5 text-[12px] font-medium text-ink transition hover:border-accent/40 hover:text-accent"
-          >
-            ← สัปดาห์ก่อน
-          </Link>
-          {offset > 0 && (
-            <Link
-              href={offset - 1 === 0 ? '/autopost/report' : `/autopost/report?w=${offset - 1}`}
-              className="btn-sm rounded-full border border-line px-3 py-1.5 text-[12px] font-medium text-ink transition hover:border-accent/40 hover:text-accent"
-            >
-              สัปดาห์ถัดไป →
+        <div className="flex items-center gap-2 print:hidden">
+          <Button asChild variant="outline" size="sm">
+            <Link href={`/autopost/report?w=${offset + 1}`}>
+              <ChevronLeftIcon data-icon="inline-start" />
+              สัปดาห์ก่อน
             </Link>
+          </Button>
+          {offset > 0 && (
+            <Button asChild variant="outline" size="sm">
+              <Link href={offset - 1 === 0 ? '/autopost/report' : `/autopost/report?w=${offset - 1}`}>
+                สัปดาห์ถัดไป
+                <ChevronRightIcon data-icon="inline-end" />
+              </Link>
+            </Button>
           )}
           <PrintButton />
         </div>
@@ -101,84 +113,147 @@ export default async function WeeklyReportPage({ searchParams }: { searchParams?
       </div>
 
       {!report ? (
-        <div className="card px-5 py-10 text-center text-sm text-subtle">
-          ยังไม่มีข้อมูลรายงาน — ตรวจสอบการเชื่อมต่อฐานข้อมูล Auto-Post
-        </div>
+        <Empty className="border">
+          <EmptyHeader>
+            <EmptyTitle>ยังไม่มีข้อมูลรายงาน</EmptyTitle>
+            <EmptyDescription>ตรวจการเชื่อมต่อฐานข้อมูล Auto-Post</EmptyDescription>
+          </EmptyHeader>
+        </Empty>
       ) : (
         <>
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
             <MetricCard label="โพสต์" m={report.posts} />
-            <MetricCard label="ผู้สนใจ (เบอร์โทร)" m={report.leads} accent />
+            <MetricCard label="ผู้สนใจ (เบอร์โทร)" m={report.leads} />
             <MetricCard label="ผู้สมัครที่ดึงได้" m={report.candidates} />
             <MetricCard label="แคมเปญที่โพสต์" m={report.campaigns} />
           </div>
 
           {/* โพสต์ & lead รายวัน */}
-          <div>
-            <h2 className="mb-3 text-base font-semibold">ผลรายวัน (โพสต์และผู้สนใจ)</h2>
-            <div className="card p-4">
-              <div className="flex items-end justify-between gap-2" style={{ height: 140 }}>
-                {days.map((d) => (
-                  <div key={d.day} className="flex flex-1 flex-col items-center justify-end gap-1" title={`${d.label}: ${d.posts} โพสต์ · ${d.leads} เบอร์`}>
-                    <span className="text-[11px] font-medium tabular-nums text-ink">{d.leads || ''}</span>
-                    <div
-                      className="w-full max-w-[36px] rounded-t bg-accent"
-                      style={{ height: `${Math.round((d.leads / maxDayLeads) * 96)}px`, minHeight: d.leads ? 3 : 0 }}
-                    />
-                    <span className="mt-1 text-[10px] text-subtle">{DOW_TH[d.dow]}</span>
-                    <span className="text-[10px] tabular-nums text-subtle">{d.posts}<span className="opacity-60">p</span></span>
-                  </div>
-                ))}
-              </div>
-              <p className="mt-3 text-[11px] text-subtle">แท่ง = จำนวนผู้สนใจต่อวัน · ตัวเลขด้านล่าง = จำนวนโพสต์</p>
-            </div>
-          </div>
+          <Card>
+            <CardHeader>
+              <CardTitle>ผลรายวัน</CardTitle>
+              <CardDescription>จำนวนโพสต์และผู้สนใจในแต่ละวัน</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>วัน</TableHead>
+                    <TableHead className="w-1/2">
+                      <span className="sr-only">สัดส่วนผู้สนใจ</span>
+                    </TableHead>
+                    <TableHead className="text-right">ผู้สนใจ</TableHead>
+                    <TableHead className="text-right">โพสต์</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {days.map((d) => (
+                    <TableRow key={d.day}>
+                      <TableCell>
+                        {DOW_TH[d.dow]} <span className="text-muted-foreground">{d.label}</span>
+                      </TableCell>
+                      <TableCell>
+                        <Progress value={(d.leads / maxDayLeads) * 100} aria-label={`${d.label} ${d.leads} เบอร์`} />
+                      </TableCell>
+                      <TableCell className="text-right font-medium tabular-nums">{d.leads}</TableCell>
+                      <TableCell className="text-right tabular-nums text-muted-foreground">{d.posts}</TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </CardContent>
+          </Card>
 
           {/* lead ตามตำแหน่ง */}
           {report.byPosition.length > 0 && (
-            <div>
-              <h2 className="mb-3 text-base font-semibold">ผู้สนใจแยกตามตำแหน่ง</h2>
-              <div className="card divide-y divide-hairline">
-                {report.byPosition.map((p) => (
-                  <div key={p.position} className="flex items-center gap-3 px-4 py-2.5">
-                    <span className="w-40 shrink-0 truncate text-sm text-ink sm:w-56" title={p.position}>{p.position}</span>
-                    <div className="h-2 flex-1 overflow-hidden rounded-full bg-black/[0.05]">
-                      <div className="h-full rounded-full bg-accent" style={{ width: `${maxPosLeads ? Math.max(4, (p.leads / maxPosLeads) * 100) : 0}%` }} />
-                    </div>
-                    <span className="w-24 shrink-0 text-right text-xs text-subtle">
-                      <span className="font-semibold tabular-nums text-ink">{p.leads}</span> เบอร์ · {p.posts} โพสต์
-                    </span>
-                  </div>
-                ))}
-              </div>
-            </div>
+            <Card>
+              <CardHeader>
+                <CardTitle>ผู้สนใจแยกตามตำแหน่ง</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>ตำแหน่ง</TableHead>
+                      <TableHead className="w-1/3">
+                        <span className="sr-only">สัดส่วน</span>
+                      </TableHead>
+                      <TableHead className="text-right">เบอร์</TableHead>
+                      <TableHead className="text-right">โพสต์</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {report.byPosition.map((p) => (
+                      <TableRow key={p.position}>
+                        <TableCell className="max-w-56 truncate" title={p.position}>
+                          {p.position}
+                        </TableCell>
+                        <TableCell>
+                          <Progress
+                            value={maxPosLeads ? (p.leads / maxPosLeads) * 100 : 0}
+                            aria-label={`${p.position} ${p.leads} เบอร์`}
+                          />
+                        </TableCell>
+                        <TableCell className="text-right font-medium tabular-nums">{p.leads}</TableCell>
+                        <TableCell className="text-right tabular-nums text-muted-foreground">{p.posts}</TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </CardContent>
+            </Card>
           )}
 
           {/* โพสต์เด่นของสัปดาห์ */}
           {report.topPosts.length > 0 && (
-            <div>
-              <h2 className="mb-3 text-base font-semibold">โพสต์เด่นของสัปดาห์</h2>
-              <div className="card divide-y divide-hairline">
-                {report.topPosts.map((t) => (
-                  <div key={t.id} className="flex items-center gap-3 px-4 py-2.5">
-                    <span className="pill shrink-0 bg-accent/10 text-accent">{t.lead_count}</span>
-                    <div className="min-w-0 flex-1">
-                      <div className="truncate text-sm text-ink">{t.job_title || 'ไม่ระบุตำแหน่ง'}</div>
-                      <div className="truncate text-[11px] text-subtle">{t.group_name || 'ไม่ระบุกลุ่ม'}</div>
-                    </div>
-                    <span className="shrink-0 text-[11px] text-subtle">💬 {t.comment_count} · 👍 {t.reactions}</span>
-                    {t.post_link && (
-                      <a href={t.post_link} target="_blank" rel="noreferrer" className="shrink-0 text-[12px] font-medium text-accent hover:underline print:hidden">
-                        ดูโพสต์
-                      </a>
-                    )}
-                  </div>
-                ))}
-              </div>
-            </div>
+            <Card>
+              <CardHeader>
+                <CardTitle>โพสต์ที่ได้เบอร์มากสุดของสัปดาห์</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>ตำแหน่งและกลุ่ม</TableHead>
+                      <TableHead className="text-right">เบอร์</TableHead>
+                      <TableHead className="text-right">คอมเมนต์</TableHead>
+                      <TableHead className="text-right">ถูกใจ</TableHead>
+                      <TableHead className="text-right print:hidden">
+                        <span className="sr-only">ลิงก์</span>
+                      </TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {report.topPosts.map((t) => (
+                      <TableRow key={t.id}>
+                        <TableCell className="max-w-72">
+                          <div className="truncate">{t.job_title || 'ไม่ระบุตำแหน่ง'}</div>
+                          <div className="truncate text-xs text-muted-foreground">{t.group_name || 'ไม่ระบุกลุ่ม'}</div>
+                        </TableCell>
+                        <TableCell className="text-right">
+                          <Badge variant="secondary" className="tabular-nums">{t.lead_count}</Badge>
+                        </TableCell>
+                        <TableCell className="text-right tabular-nums">{t.comment_count}</TableCell>
+                        <TableCell className="text-right tabular-nums">{t.reactions}</TableCell>
+                        <TableCell className="text-right print:hidden">
+                          {t.post_link && (
+                            <Button asChild variant="ghost" size="sm">
+                              <a href={t.post_link} target="_blank" rel="noreferrer">
+                                ดูโพสต์
+                                <ExternalLinkIcon data-icon="inline-end" />
+                              </a>
+                            </Button>
+                          )}
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </CardContent>
+            </Card>
           )}
 
-          <p className="text-[11px] text-subtle">สร้างโดย SO Recruitment · {fmtDate(new Date().toISOString())}</p>
+          <p className="text-xs text-muted-foreground">สร้างโดย SO Recruitment วันที่ {fmtDate(new Date().toISOString())}</p>
         </>
       )}
     </div>

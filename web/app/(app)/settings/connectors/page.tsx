@@ -1,16 +1,25 @@
+import { Fragment } from 'react';
 import { deleteConnectorAction, deleteFacebookAccountAction, setAccountWorkerAction, toggleConnectorAction } from '@/lib/actions';
 import { facebookQuotaSummary, knownWorkerNames, listAllConnectors, listProviderLimits } from '@/lib/repo';
 import { ProviderLimitsPanel } from '@/components/ProviderLimitsPanel';
 import { FacebookQuotaPanel } from '@/components/FacebookQuotaPanel';
 import { ConnectorEditButton } from '@/components/ConnectorEditButton';
 import { NewUnifiedConnectorForm } from '../NewUnifiedConnectorForm';
+import { UserRoundIcon } from 'lucide-react';
+import { Avatar, AvatarFallback } from '@/components/ui/avatar';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { Card } from '@/components/ui/card';
+import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from '@/components/ui/empty';
+import { Input } from '@/components/ui/input';
+import { Item, ItemActions, ItemContent, ItemDescription, ItemGroup, ItemMedia, ItemSeparator, ItemTitle } from '@/components/ui/item';
 
 export const dynamic = 'force-dynamic';
 
-const PLATFORM: Record<string, { label: string; avatar: string; letter: string }> = {
-  jobbkk: { label: 'JobBKK', avatar: 'bg-blue-500', letter: 'B' },
-  jobthai: { label: 'JobThai', avatar: 'bg-orange-500', letter: 'T' },
-  facebook: { label: 'Facebook', avatar: 'bg-indigo-600', letter: 'f' },
+const PLATFORM: Record<string, { label: string; letter: string }> = {
+  jobbkk: { label: 'JobBKK', letter: 'B' },
+  jobthai: { label: 'JobThai', letter: 'T' },
+  facebook: { label: 'Facebook', letter: 'f' },
 };
 
 function fmtDate(s: string | null) {
@@ -29,116 +38,131 @@ export default async function SettingsConnectorsPage() {
   const facebookCount = connectors.filter((c) => c.platform === 'facebook').length;
 
   return (
-    <div className="space-y-8">
+    <div className="flex flex-col gap-8">
       <div className="flex flex-wrap items-end justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">บัญชีที่ใช้งาน</h1>
-          <p className="mt-1 text-sm text-subtle">เพิ่มและดูแลบัญชีสำหรับค้นหาผู้สมัครและเผยแพร่ Facebook จากที่เดียว</p>
+        <div className="flex flex-col gap-1">
+          <h2 className="text-lg font-semibold">บัญชีที่ใช้งาน</h2>
+          <p className="text-sm text-muted-foreground">เพิ่มและดูแลบัญชีที่ใช้ค้นหาผู้สมัครและโพสต์ลง Facebook</p>
         </div>
-        <div className="flex gap-2 text-xs text-subtle">
-          <span className="pill bg-blue-50 text-blue-700">ค้นหาผู้สมัคร {scraperCount}</span>
-          <span className="pill bg-indigo-50 text-indigo-700">Facebook {facebookCount}</span>
+        <div className="flex gap-2">
+          <Badge variant="secondary">ค้นหาผู้สมัคร {scraperCount}</Badge>
+          <Badge variant="secondary">Facebook {facebookCount}</Badge>
         </div>
       </div>
 
-      <section className="space-y-3">
-        <div className="flex items-baseline justify-between">
-          <div>
-            <h2 className="text-[15px] font-semibold">บัญชีทั้งหมด</h2>
-            <p className="mt-0.5 text-xs text-subtle">แต่ละบัญชีจะทำงานทีละงาน เพื่อป้องกันการเข้าสู่ระบบซ้อนกัน</p>
+      <section className="flex flex-col gap-3">
+        <div className="flex items-baseline justify-between gap-4">
+          <div className="flex flex-col gap-0.5">
+            <h3 className="text-base font-semibold">บัญชีทั้งหมด</h3>
+            <p className="text-sm text-muted-foreground">แต่ละบัญชีทำงานทีละงาน จะได้ไม่ล็อกอินซ้อนกัน</p>
           </div>
-          <span className="text-xs text-subtle">{connectors.length} บัญชี</span>
+          <span className="text-sm text-muted-foreground">{connectors.length} บัญชี</span>
         </div>
 
         {connectors.length > 0 ? (
-          <div className="card divide-y divide-hairline/50 overflow-hidden">
-            {connectors.map((c) => {
-              const p = PLATFORM[c.platform] ?? { label: c.platform, avatar: 'bg-gray-500', letter: '?' };
-              const cooling = !!c.cooldown_until && new Date(c.cooldown_until) > new Date();
-              const paused = !!c.paused_until && new Date(c.paused_until) > new Date();
-              const id = c.key.slice(c.key.indexOf(':') + 1);
-              return (
-                <div key={c.key} className="row">
-                  <div className={`grid h-10 w-10 shrink-0 place-items-center rounded-xl text-sm font-semibold text-white ${p.avatar}`}>{p.letter}</div>
-                  <div className="min-w-0 flex-1">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span className="truncate font-medium text-ink">{c.label}</span>
-                      <span className="pill bg-black/5 text-subtle">{p.label}</span>
-                    </div>
-                    <div className="mt-0.5 truncate text-[13px] text-subtle">
-                      {c.username || 'ไม่ระบุผู้ใช้'}
-                      {c.platform !== 'facebook' && ` · ล็อกอินล่าสุด ${fmtDate(c.last_login_at)}`}
-                      {paused && c.pause_reason ? ` · ${c.pause_reason}` : ''}
-                      {c.platform === 'facebook' && ` · เครื่องประจำ: ${c.preferred_worker || 'ยังไม่ได้เลือก'}`}
-                    </div>
-                  </div>
+          <Card className="py-0">
+            <ItemGroup className="gap-0">
+              {connectors.map((c, index) => {
+                const p = PLATFORM[c.platform] ?? { label: c.platform, letter: '?' };
+                const cooling = !!c.cooldown_until && new Date(c.cooldown_until) > new Date();
+                const paused = !!c.paused_until && new Date(c.paused_until) > new Date();
+                const id = c.key.slice(c.key.indexOf(':') + 1);
+                return (
+                  <Fragment key={c.key}>
+                    {index > 0 && <ItemSeparator className="my-0" />}
+                    <Item role="listitem" className="rounded-none px-4 py-3">
+                      <ItemMedia>
+                        <Avatar size="lg">
+                          <AvatarFallback className="font-semibold">{p.letter}</AvatarFallback>
+                        </Avatar>
+                      </ItemMedia>
+                      <ItemContent className="min-w-0">
+                        <ItemTitle>
+                          <span className="truncate">{c.label}</span>
+                          <Badge variant="outline">{p.label}</Badge>
+                        </ItemTitle>
+                        <ItemDescription className="line-clamp-1">
+                          {c.username || 'ไม่ระบุผู้ใช้'}
+                          {c.platform !== 'facebook' && ` · ล็อกอินล่าสุด ${fmtDate(c.last_login_at)}`}
+                          {paused && c.pause_reason ? ` · ${c.pause_reason}` : ''}
+                          {c.platform === 'facebook' && ` · เครื่องประจำ: ${c.preferred_worker || 'ยังไม่ได้เลือก'}`}
+                        </ItemDescription>
+                      </ItemContent>
 
-                  <div className="hidden min-w-24 text-right sm:block">
-                    {c.platform === 'facebook' ? (
-                      <>
-                        <div className="text-sm tabular-nums text-ink">{c.used_today ?? 0}<span className="text-subtle"> / {c.daily_cap ?? 15}</span></div>
-                        <div className="text-[12px] text-subtle">โพสต์วันนี้</div>
-                      </>
-                    ) : (
-                      <>
-                        <div className="text-sm tabular-nums text-ink">{c.scrape_limit}<span className="text-subtle"> / รอบ</span></div>
-                        <div className="text-[12px] text-subtle">{c.daily_cap} / วัน</div>
-                      </>
-                    )}
-                  </div>
+                      <div className="hidden min-w-24 flex-col items-end text-right sm:flex">
+                        {c.platform === 'facebook' ? (
+                          <>
+                            <span className="text-sm tabular-nums">{c.used_today ?? 0}<span className="text-muted-foreground"> / {c.daily_cap ?? 15}</span></span>
+                            <span className="text-xs text-muted-foreground">โพสต์วันนี้</span>
+                          </>
+                        ) : (
+                          <>
+                            <span className="text-sm tabular-nums">{c.scrape_limit}<span className="text-muted-foreground"> / รอบ</span></span>
+                            <span className="text-xs text-muted-foreground">{c.daily_cap} / วัน</span>
+                          </>
+                        )}
+                      </div>
 
-                  <div className="w-24 shrink-0 text-center">
-                    {cooling || paused ? (
-                      <span className="pill bg-amber-50 text-amber-700"><span className="dot bg-amber-500" />พัก</span>
-                    ) : c.enabled ? (
-                      <span className="pill bg-green-50 text-green-700"><span className="dot bg-green-500" />พร้อม</span>
-                    ) : (
-                      <span className="pill bg-black/5 text-subtle"><span className="dot bg-gray-400" />ปิด</span>
-                    )}
-                  </div>
+                      <div className="flex w-16 shrink-0 justify-center">
+                        {cooling || paused ? (
+                          <Badge variant="outline">พัก</Badge>
+                        ) : c.enabled ? (
+                          <Badge variant="secondary">พร้อม</Badge>
+                        ) : (
+                          <Badge variant="ghost" className="text-muted-foreground">ปิด</Badge>
+                        )}
+                      </div>
 
-                  <div className="flex shrink-0 flex-wrap items-center justify-end gap-1">
-                    {c.platform === 'facebook' ? (
-                      <>
-                        <form action={setAccountWorkerAction} className="flex items-center gap-1">
-                          <input type="hidden" name="accountId" value={id} />
-                          <input
-                            name="worker"
-                            defaultValue={c.preferred_worker ?? ''}
-                            placeholder="ชื่อเครื่อง"
-                            list="known-facebook-workers"
-                            className="field w-28 py-1.5 font-mono text-xs"
-                            aria-label={`เครื่องสำหรับ ${c.label}`}
-                          />
-                          <button className="btn-secondary btn-sm">บันทึกเครื่อง</button>
-                        </form>
-                        <ConnectorEditButton id={id} platform="facebook" label={c.label} username={c.username ?? ''} />
-                        <form action={deleteFacebookAccountAction}>
-                          <input type="hidden" name="id" value={id} />
-                          <button className="btn-danger btn-sm" aria-label={`ลบ ${c.label}`}>ลบ</button>
-                        </form>
-                      </>
-                    ) : (
-                      <>
-                        <form action={toggleConnectorAction}>
-                          <input type="hidden" name="id" value={id} />
-                          <input type="hidden" name="enabled" value={(!c.enabled).toString()} />
-                          <button className="btn-ghost btn-sm">{c.enabled ? 'ปิด' : 'เปิด'}</button>
-                        </form>
-                        <ConnectorEditButton id={id} platform={c.platform} label={c.label} username={c.username ?? ''} />
-                        <form action={deleteConnectorAction}>
-                          <input type="hidden" name="id" value={id} />
-                          <button className="btn-danger btn-sm" aria-label={`ลบ ${c.label}`}>ลบ</button>
-                        </form>
-                      </>
-                    )}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
+                      <ItemActions className="flex-wrap justify-end gap-1">
+                        {c.platform === 'facebook' ? (
+                          <>
+                            <form action={setAccountWorkerAction} className="flex items-center gap-1">
+                              <input type="hidden" name="accountId" value={id} />
+                              <Input
+                                name="worker"
+                                defaultValue={c.preferred_worker ?? ''}
+                                placeholder="ชื่อเครื่อง"
+                                list="known-facebook-workers"
+                                className="h-7 w-28 font-mono"
+                                aria-label={`เครื่องสำหรับ ${c.label}`}
+                              />
+                              <Button variant="secondary" size="sm" type="submit">บันทึกเครื่อง</Button>
+                            </form>
+                            <ConnectorEditButton id={id} platform="facebook" label={c.label} username={c.username ?? ''} />
+                            <form action={deleteFacebookAccountAction}>
+                              <input type="hidden" name="id" value={id} />
+                              <Button variant="destructive" size="sm" type="submit" aria-label={`ลบ ${c.label}`}>ลบ</Button>
+                            </form>
+                          </>
+                        ) : (
+                          <>
+                            <form action={toggleConnectorAction}>
+                              <input type="hidden" name="id" value={id} />
+                              <input type="hidden" name="enabled" value={(!c.enabled).toString()} />
+                              <Button variant="ghost" size="sm" type="submit">{c.enabled ? 'ปิด' : 'เปิด'}</Button>
+                            </form>
+                            <ConnectorEditButton id={id} platform={c.platform} label={c.label} username={c.username ?? ''} />
+                            <form action={deleteConnectorAction}>
+                              <input type="hidden" name="id" value={id} />
+                              <Button variant="destructive" size="sm" type="submit" aria-label={`ลบ ${c.label}`}>ลบ</Button>
+                            </form>
+                          </>
+                        )}
+                      </ItemActions>
+                    </Item>
+                  </Fragment>
+                );
+              })}
+            </ItemGroup>
+          </Card>
         ) : (
-          <div className="card p-8 text-center text-sm text-subtle">ยังไม่มีบัญชี — เพิ่มบัญชีแรกด้านล่าง</div>
+          <Empty className="border">
+            <EmptyHeader>
+              <EmptyMedia variant="icon"><UserRoundIcon /></EmptyMedia>
+              <EmptyTitle>ยังไม่มีบัญชี</EmptyTitle>
+              <EmptyDescription>เพิ่มบัญชีแรกได้ที่ปุ่มด้านล่าง</EmptyDescription>
+            </EmptyHeader>
+          </Empty>
         )}
 
         <datalist id="known-facebook-workers">
@@ -147,10 +171,10 @@ export default async function SettingsConnectorsPage() {
         <NewUnifiedConnectorForm workers={workers} />
       </section>
 
-      <section className="space-y-4">
-        <div>
-          <h2 className="text-[15px] font-semibold">โควต้าการใช้งาน</h2>
-          <p className="mt-0.5 text-xs text-subtle">กำหนดจำนวนค้นหาผู้สมัครรวมตามเว็บไซต์ และจำนวนโพสต์แยกตามบัญชี Facebook</p>
+      <section className="flex flex-col gap-4">
+        <div className="flex flex-col gap-0.5">
+          <h3 className="text-base font-semibold">โควต้าการใช้งาน</h3>
+          <p className="text-sm text-muted-foreground">กำหนดจำนวนค้นหาผู้สมัครรวมต่อเว็บไซต์ และจำนวนโพสต์ของแต่ละบัญชี Facebook</p>
         </div>
         <ProviderLimitsPanel initialLimits={limits} />
         <FacebookQuotaPanel initialFb={fbQuota} />

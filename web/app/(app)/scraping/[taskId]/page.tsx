@@ -4,6 +4,9 @@ import { ScrapingNav } from '@/components/ScrapingNav';
 import { TaskList } from '../TaskList';
 import { getTask } from '@/lib/repo';
 import { operatorJobTitle } from '@/lib/operator-copy';
+import { ArrowLeftIcon, CheckIcon } from 'lucide-react';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
+import { Button } from '@/components/ui/button';
 
 export const dynamic = 'force-dynamic';
 
@@ -24,23 +27,48 @@ export default async function ScrapeTaskDetailPage({
   const notice = typeof searchParams?.notice === 'string' ? searchParams.notice : null;
 
   return (
-    <div className="space-y-5">
+    <div>
       <ScrapingNav />
-      <Link href="/orchestrator" className="text-sm text-subtle hover:text-accent">← กลับศูนย์งาน</Link>
-      <header className="flex flex-wrap items-end justify-between gap-4">
-        <div>
-          <p className="eyebrow">ใบงานค้นหาผู้สมัคร</p>
-          <h1 className="mt-1 text-[28px] font-semibold tracking-tight">{title}</h1>
-          <p className="mt-1 text-sm text-subtle">{task.source_request_no || 'งานค้นหาที่สร้างเอง'} · {task.platform === 'jobthai' ? 'JobThai' : task.platform === 'jobbkk' ? 'JobBKK' : task.platform} · {task.connector_label}</p>
-        </div>
-        <Link href={`/candidates/jobs/${task.id}`} className="btn-secondary">ดูผู้สมัครของงานนี้</Link>
-      </header>
+      <div className="flex flex-col gap-5">
+        <Button variant="ghost" size="sm" asChild className="-ml-2.5 self-start">
+          <Link href="/orchestrator">
+            <ArrowLeftIcon data-icon="inline-start" />
+            กลับศูนย์งาน
+          </Link>
+        </Button>
+        <header className="flex flex-wrap items-end justify-between gap-4">
+          <div className="flex flex-col gap-1.5">
+            <p className="text-sm text-muted-foreground">ใบงานค้นหาผู้สมัคร</p>
+            <h1 className="text-2xl leading-snug font-semibold">{title}</h1>
+            <p className="text-sm text-muted-foreground">{task.source_request_no || 'งานค้นหาที่สร้างเอง'} · {task.platform === 'jobthai' ? 'JobThai' : task.platform === 'jobbkk' ? 'JobBKK' : task.platform} · {task.connector_label}</p>
+          </div>
+          <Button variant="secondary" asChild>
+            <Link href={`/candidates/jobs/${task.id}`}>ดูผู้สมัครของงานนี้</Link>
+          </Button>
+        </header>
 
-      {notice && <div role="status" className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">{notice}</div>}
-      {searchParams?.started === '1' && <div role="status" className="rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-900">✓ รับคำสั่งแล้ว ระบบกำลังส่งงานให้เครื่องค้นหา หน้านี้จะอัปเดตความคืบหน้าเอง</div>}
-      {searchParams?.created === '1' && <div role="status" className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-900">✓ บันทึกงานแล้ว เมื่อต้องการเริ่ม ให้กด “รันตอนนี้” เพียงครั้งเดียว</div>}
+        {notice && (
+          <Alert role="status">
+            <AlertDescription>{notice}</AlertDescription>
+          </Alert>
+        )}
+        {searchParams?.started === '1' && (
+          <Alert role="status">
+            <CheckIcon />
+            <AlertTitle>รับคำสั่งแล้ว</AlertTitle>
+            <AlertDescription>ระบบกำลังส่งงานให้เครื่องค้นหา หน้านี้จะอัปเดตความคืบหน้าเอง</AlertDescription>
+          </Alert>
+        )}
+        {searchParams?.created === '1' && (
+          <Alert role="status">
+            <CheckIcon />
+            <AlertTitle>บันทึกงานแล้ว</AlertTitle>
+            <AlertDescription>พร้อมเมื่อไหร่ กด “รันตอนนี้” ครั้งเดียวพอ</AlertDescription>
+          </Alert>
+        )}
 
-      <TaskList initialTasks={[task]} />
+        <TaskList initialTasks={[task]} />
+      </div>
     </div>
   );
 }

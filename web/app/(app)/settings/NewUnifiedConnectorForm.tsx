@@ -1,12 +1,30 @@
 'use client';
 
 import { useState } from 'react';
+import { AlertCircleIcon, InfoIcon, PlusIcon, XIcon } from 'lucide-react';
 import { createConnectorAction } from '@/lib/actions';
+import { Alert, AlertDescription } from '@/components/ui/alert';
+import { Button } from '@/components/ui/button';
+import { Card, CardAction, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
+import {
+  Field,
+  FieldContent,
+  FieldDescription,
+  FieldGroup,
+  FieldLabel,
+  FieldLegend,
+  FieldSeparator,
+  FieldSet,
+  FieldTitle,
+} from '@/components/ui/field';
+import { Input } from '@/components/ui/input';
+import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
+import { Spinner } from '@/components/ui/spinner';
 
 const PLATFORMS = [
-  { value: 'jobbkk', label: 'JobBKK', detail: 'ดึง Resume', color: 'border-blue-200 bg-blue-50/60' },
-  { value: 'jobthai', label: 'JobThai', detail: 'ดึง Resume', color: 'border-orange-200 bg-orange-50/60' },
-  { value: 'facebook', label: 'Facebook', detail: 'ใช้เผยแพร่ประกาศ', color: 'border-indigo-200 bg-indigo-50/60' },
+  { value: 'jobbkk', label: 'JobBKK', detail: 'ดึง Resume' },
+  { value: 'jobthai', label: 'JobThai', detail: 'ดึง Resume' },
+  { value: 'facebook', label: 'Facebook', detail: 'ใช้โพสต์ประกาศ' },
 ];
 
 export function NewUnifiedConnectorForm({ workers = [] }: { workers?: string[] }) {
@@ -18,13 +36,10 @@ export function NewUnifiedConnectorForm({ workers = [] }: { workers?: string[] }
 
   if (!open) {
     return (
-      <button
-        onClick={() => { setError(''); setOpen(true); }}
-        className="group flex w-full items-center justify-center gap-2.5 rounded-[18px] border border-dashed border-hairline py-4 text-sm font-medium text-subtle transition-colors hover:border-accent/40 hover:bg-accent/[0.03] hover:text-accent"
-      >
-        <span className="grid h-6 w-6 place-items-center rounded-full bg-black/5 text-base leading-none text-ink transition-colors group-hover:bg-accent group-hover:text-white">+</span>
+      <Button variant="outline" className="w-full" onClick={() => { setError(''); setOpen(true); }}>
+        <PlusIcon data-icon="inline-start" />
         เพิ่มบัญชีใหม่
-      </button>
+      </Button>
     );
   }
 
@@ -43,105 +58,129 @@ export function NewUnifiedConnectorForm({ workers = [] }: { workers?: string[] }
           setSubmitting(false);
         }
       }}
-      className="card p-6"
     >
-      <div className="mb-5 flex items-center justify-between gap-3">
-        <div>
-          <h2 className="text-[15px] font-semibold">เพิ่มบัญชีที่ระบบจะใช้งาน</h2>
-          <p className="mt-0.5 text-xs text-subtle">เลือกบัญชีสำหรับค้นหาผู้สมัครหรือเผยแพร่ประกาศบน Facebook</p>
-        </div>
-        <button type="button" onClick={() => setOpen(false)} className="grid h-8 w-8 place-items-center rounded-full text-subtle hover:bg-black/5 hover:text-ink" aria-label="ปิด">✕</button>
-      </div>
+      <Card>
+        <CardHeader>
+          <CardTitle>เพิ่มบัญชีใหม่</CardTitle>
+          <CardDescription>บัญชีสำหรับค้นหาผู้สมัคร หรือโพสต์ประกาศบน Facebook</CardDescription>
+          <CardAction>
+            <Button type="button" variant="ghost" size="icon-sm" onClick={() => setOpen(false)} aria-label="ปิด">
+              <XIcon />
+            </Button>
+          </CardAction>
+        </CardHeader>
 
-      <div className="grid gap-2 sm:grid-cols-3">
-        {PLATFORMS.map((p) => (
-          <button
-            type="button"
-            key={p.value}
-            onClick={() => { setPlatform(p.value); setError(''); }}
-            className={`rounded-2xl border p-3 text-left transition ${
-              platform === p.value ? `${p.color} ring-2 ring-accent/20` : 'border-line bg-white hover:bg-canvas'
-            }`}
-          >
-            <span className="block text-sm font-semibold text-ink">{p.label}</span>
-            <span className="mt-0.5 block text-xs text-subtle">{p.detail}</span>
-          </button>
-        ))}
-      </div>
-      <input type="hidden" name="platform" value={platform} />
+        <CardContent>
+          <FieldGroup>
+            <FieldSet>
+              <FieldLegend variant="label">ประเภทบัญชี</FieldLegend>
+              <RadioGroup
+                value={platform}
+                onValueChange={(value) => { setPlatform(value); setError(''); }}
+                className="grid gap-2 sm:grid-cols-3"
+              >
+                {PLATFORMS.map((p) => (
+                  <FieldLabel key={p.value} htmlFor={`new-connector-${p.value}`}>
+                    <Field orientation="horizontal">
+                      <FieldContent>
+                        <FieldTitle>{p.label}</FieldTitle>
+                        <FieldDescription>{p.detail}</FieldDescription>
+                      </FieldContent>
+                      <RadioGroupItem value={p.value} id={`new-connector-${p.value}`} />
+                    </Field>
+                  </FieldLabel>
+                ))}
+              </RadioGroup>
+            </FieldSet>
+            <input type="hidden" name="platform" value={platform} />
 
-      <div className="mt-5 grid gap-4 md:grid-cols-2">
-        <div className="md:col-span-2">
-          <label className="label">ชื่อเรียก</label>
-          <input name="label" required placeholder={facebook ? 'Facebook - ทีมสรรหา 1' : 'JobBKK - ทีม HR 1'} className="field" />
-        </div>
-        <div>
-          <label className="label">{facebook ? 'อีเมลหรือเบอร์ที่ใช้เข้าสู่ระบบ' : 'ชื่อผู้ใช้'}</label>
-          <input name="username" required autoComplete="off" placeholder={facebook ? 'email@example.com หรือ 08x...' : 'ชื่อผู้ใช้ของบัญชี'} className="field" />
-        </div>
-        <div>
-          <label className="label">รหัสผ่าน</label>
-          <input name="password" type="password" required autoComplete="new-password" placeholder="••••••••" className="field" />
-        </div>
+            <FieldGroup className="grid gap-4 md:grid-cols-2">
+              <Field className="md:col-span-2">
+                <FieldLabel htmlFor="new-connector-label">ชื่อเรียก</FieldLabel>
+                <Input id="new-connector-label" name="label" required placeholder={facebook ? 'Facebook - ทีมสรรหา 1' : 'JobBKK - ทีม HR 1'} />
+              </Field>
+              <Field>
+                <FieldLabel htmlFor="new-connector-username">{facebook ? 'อีเมลหรือเบอร์ที่ใช้เข้าสู่ระบบ' : 'ชื่อผู้ใช้'}</FieldLabel>
+                <Input id="new-connector-username" name="username" required autoComplete="off" placeholder={facebook ? 'email@example.com หรือ 08x...' : 'ชื่อผู้ใช้ของบัญชี'} />
+              </Field>
+              <Field>
+                <FieldLabel htmlFor="new-connector-password">รหัสผ่าน</FieldLabel>
+                <Input id="new-connector-password" name="password" type="password" required autoComplete="new-password" />
+              </Field>
 
-        {facebook && (
-          <>
-            <div>
-              <label className="label">ชื่อที่ใช้โพสต์</label>
-              <input name="posterName" placeholder="เว้นว่างเพื่อใช้ชื่อเรียก" className="field" />
-            </div>
-            <div>
-              <label className="label">เบอร์ของบัญชีเอง</label>
-              <input name="contactPhone" placeholder="ใช้แยกเบอร์ของเราออกจากรายชื่อผู้สนใจ" className="field" />
-            </div>
-            <div className="md:col-span-2">
-              <label className="label">กำหนดเครื่องประจำของบัญชี</label>
-              <input
-                name="preferredWorker"
-                list="facebook-worker-names"
-                placeholder="ชื่อเครื่อง เช่น SONB-RM009"
-                className="field font-mono"
-              />
-              <datalist id="facebook-worker-names">
-                {workers.map((worker) => <option key={worker} value={worker} />)}
-              </datalist>
-              <p className="mt-1.5 text-xs text-subtle">
-                ใช้เครื่องเดิมกับบัญชีนี้ทุกครั้ง เพื่อลดโอกาสที่ Facebook จะขอยืนยันตัวตน · เว้นว่างได้หากยังไม่ทราบชื่อเครื่อง
-              </p>
-            </div>
-          </>
-        )}
-      </div>
+              {facebook && (
+                <>
+                  <Field>
+                    <FieldLabel htmlFor="new-connector-poster">ชื่อที่ใช้โพสต์</FieldLabel>
+                    <Input id="new-connector-poster" name="posterName" placeholder="เว้นว่างไว้จะใช้ชื่อเรียก" />
+                  </Field>
+                  <Field>
+                    <FieldLabel htmlFor="new-connector-phone">เบอร์ของบัญชีเอง</FieldLabel>
+                    <Input id="new-connector-phone" name="contactPhone" placeholder="ใช้แยกเบอร์เราออกจากรายชื่อผู้สนใจ" />
+                  </Field>
+                  <Field className="md:col-span-2">
+                    <FieldLabel htmlFor="new-connector-worker">เครื่องประจำของบัญชี</FieldLabel>
+                    <Input
+                      id="new-connector-worker"
+                      name="preferredWorker"
+                      list="facebook-worker-names"
+                      placeholder="ชื่อเครื่อง เช่น SONB-RM009"
+                      className="font-mono"
+                    />
+                    <datalist id="facebook-worker-names">
+                      {workers.map((worker) => <option key={worker} value={worker} />)}
+                    </datalist>
+                    <FieldDescription>
+                      ใช้เครื่องเดิมกับบัญชีนี้ทุกครั้ง Facebook จะขอยืนยันตัวตนน้อยลง ถ้ายังไม่รู้ชื่อเครื่องเว้นว่างไว้ก่อนได้
+                    </FieldDescription>
+                  </Field>
+                </>
+              )}
+            </FieldGroup>
 
-      <div className="mt-5 rounded-2xl bg-black/[0.02] p-4">
-        <div className={`grid gap-4 ${facebook ? '' : 'sm:grid-cols-2'}`}>
-          {!facebook && (
-            <div>
-              <label className="label">จำนวนผู้สมัครต่อครั้ง</label>
-              <input name="scrapeLimit" type="number" min={1} max={100} defaultValue={15} className="field" />
-              <p className="mt-1.5 text-xs text-subtle">จำนวนสูงสุดที่ระบบจะค้นหาในการทำงานหนึ่งครั้ง</p>
-            </div>
-          )}
-          <div>
-            <label className="label">โควต้าต่อวัน</label>
-            <input key={platform} name="dailyCap" type="number" min={1} max={facebook ? 50 : 2000} defaultValue={facebook ? 15 : 200} className="field" />
-            <p className="mt-1.5 text-xs text-subtle">{facebook ? 'จำนวนโพสต์สูงสุดต่อบัญชี/วัน (แนะนำ 15)' : 'จำนวนโปรไฟล์สะสมสูงสุดต่อบัญชี/วัน'}</p>
-          </div>
-        </div>
-      </div>
+            <FieldSeparator />
 
-      {facebook && (
-        <p className="mt-4 rounded-xl bg-amber-50 px-3 py-2 text-xs text-amber-800">
-          ระบบจะเปิด Facebook และเข้าสู่บัญชีนี้เมื่อเริ่มทำงานครั้งแรก หาก Facebook ขอรหัส OTP ให้ยืนยันบนเครื่องประจำที่เลือกไว้
-        </p>
-      )}
-      {error && <p className="mt-4 rounded-xl bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
+            <FieldGroup className={facebook ? 'grid gap-4' : 'grid gap-4 sm:grid-cols-2'}>
+              {!facebook && (
+                <Field>
+                  <FieldLabel htmlFor="new-connector-limit">จำนวนผู้สมัครต่อครั้ง</FieldLabel>
+                  <Input id="new-connector-limit" name="scrapeLimit" type="number" min={1} max={100} defaultValue={15} />
+                  <FieldDescription>จำนวนสูงสุดที่ค้นได้ในหนึ่งรอบ</FieldDescription>
+                </Field>
+              )}
+              <Field>
+                <FieldLabel htmlFor="new-connector-cap">โควต้าต่อวัน</FieldLabel>
+                <Input key={platform} id="new-connector-cap" name="dailyCap" type="number" min={1} max={facebook ? 50 : 2000} defaultValue={facebook ? 15 : 200} />
+                <FieldDescription>{facebook ? 'จำนวนโพสต์สูงสุดต่อบัญชีต่อวัน แนะนำ 15' : 'จำนวนโปรไฟล์สะสมสูงสุดต่อบัญชีต่อวัน'}</FieldDescription>
+              </Field>
+            </FieldGroup>
 
-      <div className="mt-6 flex flex-wrap items-center gap-2.5">
-        <button type="submit" disabled={submitting} className="btn-primary">{submitting ? 'กำลังบันทึก…' : 'เพิ่มบัญชี'}</button>
-        <button type="button" onClick={() => setOpen(false)} className="btn-secondary">ยกเลิก</button>
-        {!facebook && <span className="ml-auto text-xs text-subtle">รหัสผ่านถูกเข้ารหัสก่อนบันทึก</span>}
-      </div>
+            {facebook && (
+              <Alert>
+                <InfoIcon />
+                <AlertDescription>
+                  ระบบจะเปิด Facebook แล้วเข้าสู่บัญชีนี้ตอนเริ่มงานครั้งแรก ถ้า Facebook ขอรหัส OTP ให้ยืนยันบนเครื่องประจำที่เลือกไว้
+                </AlertDescription>
+              </Alert>
+            )}
+            {error && (
+              <Alert variant="destructive">
+                <AlertCircleIcon />
+                <AlertDescription>{error}</AlertDescription>
+              </Alert>
+            )}
+          </FieldGroup>
+        </CardContent>
+
+        <CardFooter className="flex-wrap gap-2">
+          <Button type="submit" disabled={submitting}>
+            {submitting && <Spinner data-icon="inline-start" />}
+            {submitting ? 'กำลังบันทึก' : 'เพิ่มบัญชี'}
+          </Button>
+          <Button type="button" variant="outline" onClick={() => setOpen(false)}>ยกเลิก</Button>
+          {!facebook && <span className="ml-auto text-xs text-muted-foreground">รหัสผ่านจะถูกเข้ารหัสก่อนบันทึก</span>}
+        </CardFooter>
+      </Card>
     </form>
   );
 }

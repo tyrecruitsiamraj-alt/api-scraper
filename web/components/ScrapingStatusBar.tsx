@@ -1,5 +1,11 @@
 'use client';
 
+import { CheckIcon, CircleAlertIcon } from 'lucide-react';
+import { cn } from '@/lib/utils';
+import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Progress } from '@/components/ui/progress';
+import { Spinner } from '@/components/ui/spinner';
+
 const PHASES = ['scraping', 'ocr', 'enrich'] as const;
 type Phase = (typeof PHASES)[number];
 
@@ -48,12 +54,12 @@ export function ScrapingStatusBar({ taskName, status, phase, qualified, assessed
 
   const currentLabel =
     status === 'queued'
-      ? 'รอเริ่มทำงาน…'
+      ? 'รอเริ่มทำงาน'
       : phase === 'login'
         ? 'กำลัง login เข้าแพลตฟอร์ม'
         : phaseIdx >= 0
           ? PHASE_LABEL[PHASES[phaseIdx]]
-          : 'กำลังเตรียมงาน…';
+          : 'กำลังเตรียมงาน';
   // progress_got ระหว่าง phase scraping คือจำนวนโปรไฟล์ที่เปิดตรวจ ไม่ใช่จำนวน
   // Resume ที่ผ่านเกณฑ์ ห้ามนำไปแสดงเป็นผลลัพธ์ 4/15 เพราะทำให้คนเข้าใจว่าได้คนแล้ว.
   const phaseProgress = phase === 'scraping' ? assessed : got;
@@ -62,77 +68,59 @@ export function ScrapingStatusBar({ taskName, status, phase, qualified, assessed
     : `${phaseProgress}/${target}`;
 
   return (
-    <div className="card overflow-hidden border-accent/20 shadow-md">
-      <div className="border-b border-line/50 bg-accent/[0.04] px-4 py-3 sm:px-5">
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <div className="flex min-w-0 items-center gap-2.5">
-            <span className="relative flex h-2.5 w-2.5 shrink-0">
-              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-accent/40" />
-              <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-accent" />
-            </span>
-            <div className="min-w-0">
-              <p className="text-[13px] font-semibold text-ink">
-                {status === 'queued' ? 'อยู่ในคิว' : 'กำลังทำงาน'} — {taskName}
-              </p>
-              <p className="text-xs text-subtle">
-                ขั้นตอนที่ {stepNum} จาก {PHASES.length} · {currentLabel}
-                {status === 'running' && target > 0 && (
-                  <span className="ml-1 tabular-nums font-medium text-ink">
-                    ({phaseProgressLabel})
-                  </span>
-                )}
-                {looksStuck && (
-                  <span className="ml-2 text-amber-700">
-                    — ไม่มีผลลัพธ์ใหม่ {Math.floor(staleSec / 60)} นาที ระบบนี้ยังไม่ถือว่างานเดินหน้า
-                  </span>
-                )}
-              </p>
-            </div>
-          </div>
-          <span className="shrink-0 text-sm font-semibold tabular-nums text-accent">{overallPct}%</span>
-        </div>
-      </div>
+    <Card size="sm">
+      <CardHeader>
+        <CardTitle className="flex min-w-0 items-center gap-2">
+          <Spinner className="shrink-0 text-muted-foreground" />
+          <span className="truncate">
+            {status === 'queued' ? 'อยู่ในคิว' : 'กำลังทำงาน'}: {taskName}
+          </span>
+        </CardTitle>
+        <CardDescription className="leading-relaxed">
+          ขั้นตอนที่ {stepNum} จาก {PHASES.length} · {currentLabel}
+          {status === 'running' && target > 0 && (
+            <span className="ml-1 tabular-nums text-foreground">({phaseProgressLabel})</span>
+          )}
+        </CardDescription>
+        <CardAction>
+          <span className="text-sm font-medium tabular-nums">{overallPct}%</span>
+        </CardAction>
+      </CardHeader>
+      <CardContent className="flex flex-col gap-3">
+        <Progress value={overallPct} aria-label="ความคืบหน้าทั้งงาน" />
+        <ol className="flex flex-wrap gap-x-5 gap-y-1 text-sm">
+          {PHASES.map((p, idx) => {
+            let state: 'done' | 'active' | 'pending';
+            if (status === 'queued') state = idx === 0 ? 'active' : 'pending';
+            else if (phaseIdx < 0) state = 'pending';
+            else state = phaseIdx > idx ? 'done' : phaseIdx === idx ? 'active' : 'pending';
 
-      {/* step strip */}
-      <div className="grid grid-cols-3 gap-0 border-b border-line/40 bg-white px-2 py-2 sm:px-4">
-        {PHASES.map((p, idx) => {
-          let state: 'done' | 'active' | 'pending';
-          if (status === 'queued') state = idx === 0 ? 'active' : 'pending';
-          else if (phaseIdx < 0) state = 'pending';
-          else state = phaseIdx > idx ? 'done' : phaseIdx === idx ? 'active' : 'pending';
-
-          return (
-            <div key={p} className="flex flex-col items-center gap-1 px-1 text-center">
-              <div
-                className={`flex h-7 w-7 items-center justify-center rounded-full text-[11px] font-semibold transition-colors ${
-                  state === 'done'
-                    ? 'bg-green-100 text-green-700'
-                    : state === 'active'
-                      ? 'bg-accent text-white shadow-sm'
-                      : 'bg-black/5 text-subtle'
-                }`}
+            return (
+              <li
+                key={p}
+                className={cn(
+                  'flex items-center gap-1.5',
+                  state === 'active' ? 'font-medium text-foreground' : 'text-muted-foreground',
+                  state === 'pending' && 'opacity-60',
+                )}
               >
-                {state === 'done' ? '✓' : idx + 1}
-              </div>
-              <span
-                className={`text-[11px] leading-tight ${
-                  state === 'active' ? 'font-semibold text-ink' : state === 'done' ? 'text-subtle' : 'text-subtle/50'
-                }`}
-              >
+                {state === 'done' ? (
+                  <CheckIcon className="size-3.5" aria-hidden="true" />
+                ) : (
+                  <span className="tabular-nums">{idx + 1}.</span>
+                )}
                 {PHASE_SHORT[p]}
-              </span>
-            </div>
-          );
-        })}
-      </div>
-
-      {/* overall progress bar */}
-      <div className="h-2 bg-black/[0.04]">
-        <div
-          className="h-full bg-gradient-to-r from-accent to-accent-hover transition-all duration-700 ease-out"
-          style={{ width: `${overallPct}%` }}
-        />
-      </div>
-    </div>
+              </li>
+            );
+          })}
+        </ol>
+        {looksStuck && (
+          <p className="flex items-start gap-2 text-sm leading-relaxed text-destructive">
+            <CircleAlertIcon className="mt-1 size-3.5 shrink-0" aria-hidden="true" />
+            ไม่มีผลลัพธ์ใหม่มา {Math.floor(staleSec / 60)} นาทีแล้ว ระบบยังไม่นับว่างานเดินหน้า
+          </p>
+        )}
+      </CardContent>
+    </Card>
   );
 }

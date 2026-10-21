@@ -16,6 +16,7 @@ export function AutoRefresh({ seconds = 8 }: { seconds?: number }) {
       const tag = el.tagName;
       if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || el.isContentEditable) return true;
       if (el.closest('details[open]')) return true;
+      if (el.closest('[data-slot="collapsible"][data-state="open"]')) return true;
       if (el.closest('[data-pause-refresh="1"]')) return true;
       return false;
     };

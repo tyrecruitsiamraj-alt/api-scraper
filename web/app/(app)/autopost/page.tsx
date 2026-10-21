@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { ChevronRightIcon } from 'lucide-react';
 import {
   autopostOverview,
   autopostActivity,
@@ -6,28 +7,69 @@ import {
   listPendingApprovalContents,
   postQueueList,
 } from '@/lib/repo';
-
-const DOW_TH = ['อาทิตย์', 'จันทร์', 'อังคาร', 'พุธ', 'พฤหัส', 'ศุกร์', 'เสาร์'];
 import { AutopostActivity } from '@/components/AutopostActivity';
 import { AutopostNav } from '@/components/AutopostNav';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from '@/components/ui/empty';
+import {
+  Item,
+  ItemActions,
+  ItemContent,
+  ItemDescription,
+  ItemMedia,
+  ItemTitle,
+} from '@/components/ui/item';
+import { Progress } from '@/components/ui/progress';
+import { Spinner } from '@/components/ui/spinner';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+
+const DOW_TH = ['อาทิตย์', 'จันทร์', 'อังคาร', 'พุธ', 'พฤหัส', 'ศุกร์', 'เสาร์'];
 
 export const dynamic = 'force-dynamic';
 
 // โหมด Auto-Post: หน้าภาพรวมของตัวเอง (ข้อมูล Auto-Post ล้วน แยกจากภาพรวม Scraping)
-function Stat({ label, value, sub }: { label: string; value: string | number; sub?: string }) {
+function Stat({
+  label,
+  value,
+  sub,
+  progress,
+}: {
+  label: string;
+  value: string | number;
+  sub?: string;
+  progress?: number;
+}) {
   return (
-    <div className="card p-5">
-      <div className="text-xs text-subtle">{label}</div>
-      <div className="mt-1 text-3xl font-semibold tabular-nums tracking-tight">{value}</div>
-      {sub && <div className="mt-1 text-xs text-subtle">{sub}</div>}
-    </div>
+    <Card size="sm">
+      <CardHeader>
+        <CardDescription>{label}</CardDescription>
+        <CardTitle className="text-2xl font-semibold tabular-nums">{value}</CardTitle>
+      </CardHeader>
+      {(sub || progress !== undefined) && (
+        <CardContent className="flex flex-col gap-2">
+          {progress !== undefined && <Progress value={progress} aria-label={label} />}
+          {sub && <p className="text-xs text-muted-foreground">{sub}</p>}
+        </CardContent>
+      )}
+    </Card>
   );
 }
 
-const QUEUE_STATUS: Record<string, { label: string; cls: string }> = {
-  queued: { label: 'รอคิว', cls: 'bg-black/5 text-ink' },
-  running: { label: 'กำลังโพสต์', cls: 'bg-blue-50 text-blue-700' },
-};
+function QueueStatus({ status }: { status: string }) {
+  if (status === 'running') {
+    return (
+      <Badge variant="secondary">
+        <Spinner data-icon="inline-start" />
+        กำลังโพสต์
+      </Badge>
+    );
+  }
+  if (status === 'queued') return <Badge variant="outline">รอคิว</Badge>;
+  return <Badge variant="outline">{status}</Badge>;
+}
 
 export default async function AutopostOverviewPage() {
   const [a, activity, pending, queue, bestTimes] = await Promise.all([
@@ -38,37 +80,48 @@ export default async function AutopostOverviewPage() {
     listBestPostTimes(3),
   ]);
 
+  const capacityPct = a && a.capacity > 0 ? Math.min(100, Math.round((a.posts_today / a.capacity) * 100)) : 0;
+
   return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">ภาพรวมการโพสต์</h1>
-        <p className="mt-1 text-sm text-subtle">ดูงานที่กำลังรอโพสต์ ความพร้อมของระบบ และจำนวนที่แต่ละบัญชียังโพสต์ได้วันนี้</p>
+    <div className="flex flex-col gap-6">
+      <div className="flex flex-col gap-1">
+        <h1 className="text-2xl font-semibold">ภาพรวมการโพสต์</h1>
+        <p className="text-sm leading-relaxed text-muted-foreground">
+          งานที่รอโพสต์ ความพร้อมของระบบ และจำนวนที่แต่ละบัญชียังโพสต์ได้วันนี้
+        </p>
       </div>
 
       <AutopostNav />
 
-      <Link
-        href="/autopost/example"
-        className="card card-hover group grid overflow-hidden border-blue-100 bg-gradient-to-r from-[#eef7ff] to-white sm:grid-cols-[180px_1fr_auto] sm:items-center"
-      >
-        <div className="relative aspect-[16/9] h-full min-h-28 overflow-hidden sm:aspect-auto">
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
-            src="/content-samples/driver-recruitment-background-v1.png"
-            alt="ตัวอย่างโปสเตอร์พนักงานขับรถ"
-            className="absolute inset-0 h-full w-full object-cover object-left"
-          />
-        </div>
-        <div className="px-5 py-4">
-          <span className="pill bg-blue-100 text-blue-700">ตัวอย่างใหม่</span>
-          <h2 className="mt-2 text-base font-semibold">ดู Content พนักงานขับรถบนหน้า Web</h2>
-          <p className="mt-1 text-sm text-subtle">มีข้อความบนภาพ Caption และช่องให้ลองแก้ข้อมูลแบบเห็นผลทันที · ไม่โพสต์จริง</p>
-        </div>
-        <span className="px-5 pb-5 text-sm font-semibold text-accent transition group-hover:translate-x-1 sm:pb-0">เปิดตัวอย่าง →</span>
-      </Link>
+      <Item variant="outline" asChild>
+        <Link href="/autopost/example">
+          <ItemMedia variant="image" className="size-16">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src="/content-samples/driver-recruitment-background-v1.png"
+              alt="ตัวอย่างโปสเตอร์พนักงานขับรถ"
+              className="object-left"
+            />
+          </ItemMedia>
+          <ItemContent>
+            <ItemTitle>
+              ตัวอย่าง Content พนักงานขับรถ
+              <Badge variant="secondary">ตัวอย่าง</Badge>
+            </ItemTitle>
+            <ItemDescription>ข้อความบนภาพ Caption และช่องลองแก้ข้อมูล เห็นผลทันที ไม่โพสต์จริง</ItemDescription>
+          </ItemContent>
+          <ItemActions>
+            <span className="text-sm text-muted-foreground">เปิดตัวอย่าง</span>
+            <ChevronRightIcon className="size-4 text-muted-foreground" />
+          </ItemActions>
+        </Link>
+      </Item>
 
       {!a ? (
-        <p className="text-sm text-subtle">ยังอ่านข้อมูลการโพสต์ไม่ได้ กรุณาตรวจว่าบริการเผยแพร่ Facebook เปิดอยู่</p>
+        <Alert variant="destructive">
+          <AlertTitle>ยังอ่านข้อมูลการโพสต์ไม่ได้</AlertTitle>
+          <AlertDescription>ตรวจว่าบริการเผยแพร่ Facebook เปิดอยู่</AlertDescription>
+        </Alert>
       ) : (
         <>
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
@@ -76,83 +129,108 @@ export default async function AutopostOverviewPage() {
               label="โพสต์วันนี้"
               value={`${a.posts_today.toLocaleString()} / ${a.capacity.toLocaleString()}`}
               sub={`${a.accounts} บัญชี`}
+              progress={capacityPct}
             />
             <Stat
               label="บัญชีเต็มโควต้า"
               value={a.over_cap.toLocaleString()}
-              sub={a.paused > 0 ? `ระบบพักบัญชีชั่วคราว ${a.paused}` : 'ทุกบัญชีพร้อมใช้งาน'}
+              sub={a.paused > 0 ? `พักชั่วคราว ${a.paused} บัญชี` : 'ทุกบัญชีพร้อมใช้งาน'}
             />
             <Stat label="ผู้สนใจวันนี้" value={a.leads_today.toLocaleString()} sub="เบอร์ที่พบในคอมเมนต์" />
             <Stat label="ผู้สนใจ 14 วัน" value={a.leads_14d.toLocaleString()} />
           </div>
-          <div className="card flex flex-wrap items-center gap-x-4 gap-y-1.5 px-4 py-2.5 text-xs">
-            <span className="eyebrow">ช่วงเวลาโพสต์แนะนำ</span>
-            {bestTimes.length > 0 ? (
-              bestTimes.map((t) => (
-                <span key={`${t.dow}-${t.hour}`} className="pill bg-emerald-50 text-emerald-700">
-                  {DOW_TH[t.dow]} {String(t.hour).padStart(2, '0')}:00 · คะแนน {t.score.toFixed(1)}
-                </span>
-              ))
-            ) : (
-              <span className="text-subtle">ยังไม่มีข้อมูลพอ — แนวทั่วไป: เช้า 07-09 · เที่ยง 12-13 · เย็น 18-20 (ระบบจะเรียนรู้เองเมื่อโพสต์สะสมมากขึ้น)</span>
-            )}
-          </div>
-          <p className="text-xs text-subtle">
+
+          <Card size="sm">
+            <CardHeader>
+              <CardTitle>ช่วงเวลาโพสต์แนะนำ</CardTitle>
+            </CardHeader>
+            <CardContent>
+              {bestTimes.length > 0 ? (
+                <div className="flex flex-wrap gap-2">
+                  {bestTimes.map((t) => (
+                    <Badge key={`${t.dow}-${t.hour}`} variant="secondary">
+                      {DOW_TH[t.dow]} {String(t.hour).padStart(2, '0')}:00 คะแนน {t.score.toFixed(1)}
+                    </Badge>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-sm leading-relaxed text-muted-foreground">
+                  ข้อมูลยังไม่พอ ใช้ช่วงทั่วไปไปก่อน: เช้า 07-09 น. เที่ยง 12-13 น. เย็น 18-20 น. ระบบจะปรับเองเมื่อมีโพสต์สะสมมากขึ้น
+                </p>
+              )}
+            </CardContent>
+          </Card>
+          <p className="text-xs text-muted-foreground">
             จัดการบัญชี Facebook กลุ่มที่จะโพสต์ และเนื้อหางานได้จากเมนู “ตั้งค่า”
           </p>
         </>
       )}
 
       {/* Content AI ปิดแล้ว — โพสต์ใช้ caption/รูปที่คนเตรียมในหน้างานโพสต์ */}
-      <div>
-        <h2 className="mb-3 text-base font-semibold">เริ่มโพสต์</h2>
-        <div className="card px-5 py-8 text-center text-sm text-subtle">
-          <p>
+      <Card>
+        <CardHeader>
+          <CardTitle>เริ่มโพสต์</CardTitle>
+          <CardDescription className="leading-relaxed">
             {pending.length > 0
-              ? `มีร่างเก่าค้าง ${pending.length} ใบ — ระบบไม่สร้างประกาศใหม่อัตโนมัติแล้ว ให้เตรียม caption/รูปในงานโพสต์`
-              : 'เตรียม caption + รูป แล้วสั่งโพสต์จากหน้างานโพสต์'}
-          </p>
-          <div className="mt-3 flex flex-wrap justify-center gap-2">
-            <Link href="/autopost/jobs" className="btn-primary btn-sm inline-flex">ไปงานโพสต์</Link>
-            <Link href="/orchestrator" className="btn-ghost btn-sm inline-flex">ห้องค้นหาผู้สมัคร</Link>
-          </div>
-        </div>
-      </div>
+              ? `มีร่างเก่าค้าง ${pending.length} ใบ ระบบไม่สร้างประกาศใหม่อัตโนมัติแล้ว ให้เตรียม caption และรูปในหน้างานโพสต์`
+              : 'เตรียม caption และรูป แล้วสั่งโพสต์จากหน้างานโพสต์'}
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="flex flex-wrap gap-2">
+          <Button asChild size="sm">
+            <Link href="/autopost/jobs">ไปงานโพสต์</Link>
+          </Button>
+          <Button asChild size="sm" variant="outline">
+            <Link href="/orchestrator">ห้องค้นหาผู้สมัคร</Link>
+          </Button>
+        </CardContent>
+      </Card>
 
       {/* คิวโพสต์ — worker รันตามลำดับเวลาเข้าคิว บัญชีละ 1 งานพร้อมกัน */}
-      <div>
-        <h2 className="mb-1 text-base font-semibold">🚦 คิวโพสต์ (เรียงก่อน-หลัง)</h2>
-        <p className="mb-3 text-xs text-subtle">รันตามลำดับเวลาเข้าคิว · แต่ละบัญชีโพสต์ทีละ 1 งานพร้อมกัน (กันโดนบล็อก)</p>
-        {queue.length === 0 ? (
-          <div className="card px-5 py-10 text-center text-sm text-subtle">คิวว่าง — ไม่มีงานรอโพสต์</div>
-        ) : (
-          <div className="card overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-hairline text-left text-xs text-subtle">
-                  <th className="px-4 py-2.5 font-medium">ลำดับ</th>
-                  <th className="px-4 py-2.5 font-medium">บัญชี</th>
-                  <th className="px-4 py-2.5 font-medium">งาน</th>
-                  <th className="px-4 py-2.5 font-medium">สถานะ</th>
-                </tr>
-              </thead>
-              <tbody>
-                {queue.map((row, i) => {
-                  const meta = QUEUE_STATUS[row.status] ?? { label: row.status, cls: 'bg-black/5 text-ink' };
-                  return (
-                    <tr key={row.id} className="border-b border-hairline/60 last:border-0">
-                      <td className="px-4 py-2.5 tabular-nums font-medium">#{i + 1}</td>
-                      <td className="px-4 py-2.5">{row.account || '—'}</td>
-                      <td className="px-4 py-2.5 text-subtle">{row.job_title || '—'}</td>
-                      <td className="px-4 py-2.5"><span className={`pill ${meta.cls}`}>{meta.label}</span></td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
+      <Card>
+        <CardHeader>
+          <CardTitle>คิวโพสต์</CardTitle>
+          <CardDescription className="leading-relaxed">
+            รันตามลำดับที่เข้าคิว แต่ละบัญชีโพสต์ได้ทีละ 1 งาน เพื่อลดโอกาสโดนบล็อก
+          </CardDescription>
+          <CardAction>
+            <Badge variant="outline">{queue.length} งาน</Badge>
+          </CardAction>
+        </CardHeader>
+        <CardContent>
+          {queue.length === 0 ? (
+            <Empty>
+              <EmptyHeader>
+                <EmptyTitle>คิวว่าง</EmptyTitle>
+                <EmptyDescription>ไม่มีงานรอโพสต์</EmptyDescription>
+              </EmptyHeader>
+            </Empty>
+          ) : (
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>ลำดับ</TableHead>
+                  <TableHead>บัญชี</TableHead>
+                  <TableHead>งาน</TableHead>
+                  <TableHead>สถานะ</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {queue.map((row, i) => (
+                  <TableRow key={row.id}>
+                    <TableCell className="font-medium tabular-nums">{i + 1}</TableCell>
+                    <TableCell>{row.account || '—'}</TableCell>
+                    <TableCell className="text-muted-foreground">{row.job_title || '—'}</TableCell>
+                    <TableCell>
+                      <QueueStatus status={row.status} />
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          )}
+        </CardContent>
+      </Card>
 
       <AutopostActivity initial={activity} />
     </div>

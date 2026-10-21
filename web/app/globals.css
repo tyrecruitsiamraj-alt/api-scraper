@@ -1,111 +1,146 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import 'tailwindcss';
+@import 'tw-animate-css';
+@import 'shadcn/tailwind.css';
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  --font-sans: var(--font-thai), system-ui, sans-serif;
+  --font-heading: var(--font-thai), system-ui, sans-serif;
+  --color-sidebar-ring: var(--sidebar-ring);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar: var(--sidebar);
+  --color-chart-5: var(--chart-5);
+  --color-chart-4: var(--chart-4);
+  --color-chart-3: var(--chart-3);
+  --color-chart-2: var(--chart-2);
+  --color-chart-1: var(--chart-1);
+  --color-ring: var(--ring);
+  --color-input: var(--input);
+  --color-border: var(--border);
+  --color-destructive: var(--destructive);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-accent: var(--accent);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-muted: var(--muted);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-secondary: var(--secondary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary: var(--primary);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-popover: var(--popover);
+  --color-card-foreground: var(--card-foreground);
+  --color-card: var(--card);
+  --color-foreground: var(--foreground);
+  --color-background: var(--background);
+  --radius-sm: calc(var(--radius) * 0.6);
+  --radius-md: calc(var(--radius) * 0.8);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) * 1.4);
+  --radius-2xl: calc(var(--radius) * 1.8);
+  --radius-3xl: calc(var(--radius) * 2.2);
+  --radius-4xl: calc(var(--radius) * 2.6);
+}
 
 :root {
-  --font-kanit: 'Kanit', system-ui, sans-serif;
+  --background: oklch(0.98 0 0);
+  --foreground: oklch(0.2 0 0);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.2 0 0);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.2 0 0);
+  /* แดง SIAMRAJ #e41c24 */
+  --primary: #e41c24;
+  --primary-foreground: oklch(0.99 0 0);
+  --secondary: oklch(0.96 0 0);
+  --secondary-foreground: oklch(0.2 0 0);
+  --muted: oklch(0.96 0 0);
+  --muted-foreground: oklch(0.5 0 0);
+  --accent: oklch(0.96 0 0);
+  --accent-foreground: oklch(0.2 0 0);
+  --destructive: oklch(0.577 0.245 27.325);
+  --border: oklch(0.91 0 0);
+  --input: oklch(0.89 0 0);
+  --ring: oklch(0.7 0 0);
+  --chart-1: #e41c24;
+  --chart-2: oklch(0.55 0 0);
+  --chart-3: oklch(0.44 0 0);
+  --chart-4: oklch(0.37 0 0);
+  --chart-5: oklch(0.27 0 0);
+  --radius: 0.625rem;
+  --sidebar: oklch(0.985 0 0);
+  --sidebar-foreground: oklch(0.2 0 0);
+  --sidebar-primary: #e41c24;
+  --sidebar-primary-foreground: oklch(0.99 0 0);
+  --sidebar-accent: oklch(0.96 0 0);
+  --sidebar-accent-foreground: oklch(0.2 0 0);
+  --sidebar-border: oklch(0.91 0 0);
+  --sidebar-ring: oklch(0.7 0 0);
 }
 
-html, body {
-  background: theme('colors.canvas');
-  color: theme('colors.ink');
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
-  text-rendering: optimizeLegibility;
-  letter-spacing: -0.011em;
-  font-size: 14px;
-  line-height: 1.5;
+.dark {
+  --background: oklch(0.145 0 0);
+  --foreground: oklch(0.985 0 0);
+  --card: oklch(0.205 0 0);
+  --card-foreground: oklch(0.985 0 0);
+  --popover: oklch(0.205 0 0);
+  --popover-foreground: oklch(0.985 0 0);
+  --primary: #e5343b;
+  --primary-foreground: oklch(0.99 0 0);
+  --secondary: oklch(0.269 0 0);
+  --secondary-foreground: oklch(0.985 0 0);
+  --muted: oklch(0.269 0 0);
+  --muted-foreground: oklch(0.708 0 0);
+  --accent: oklch(0.269 0 0);
+  --accent-foreground: oklch(0.985 0 0);
+  --destructive: oklch(0.704 0.191 22.216);
+  --border: oklch(1 0 0 / 10%);
+  --input: oklch(1 0 0 / 15%);
+  --ring: oklch(0.556 0 0);
+  --chart-1: #e5343b;
+  --chart-2: oklch(0.556 0 0);
+  --chart-3: oklch(0.439 0 0);
+  --chart-4: oklch(0.371 0 0);
+  --chart-5: oklch(0.269 0 0);
+  --sidebar: oklch(0.205 0 0);
+  --sidebar-foreground: oklch(0.985 0 0);
+  --sidebar-primary: #e5343b;
+  --sidebar-primary-foreground: oklch(0.985 0 0);
+  --sidebar-accent: oklch(0.269 0 0);
+  --sidebar-accent-foreground: oklch(0.985 0 0);
+  --sidebar-border: oklch(1 0 0 / 10%);
+  --sidebar-ring: oklch(0.556 0 0);
 }
 
-::selection { background: rgba(228, 28, 36, 0.14); }
-
-@layer components {
-  /* Surfaces — Apple-soft: โค้งนุ่ม + เงามีมิติ + ยกขึ้นตอน hover ---------- */
-  .card {
-    @apply bg-white rounded-2xl border border-line/70 shadow-card
-           transition-[box-shadow,transform] duration-300 ease-out;
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
   }
-  /* การ์ดที่คลิกได้ — ใส่คลาสนี้เพิ่มเพื่อให้ยกลอยตอน hover */
-  .card-hover {
-    @apply hover:-translate-y-0.5 hover:shadow-cardHover;
+  html {
+    @apply font-sans;
+    /* ภาษาไทยมีสระบน-ล่างและวรรณยุกต์ ต้องการบรรทัดสูงกว่าละติน และไม่บีบตัวอักษร */
+    font-size: 15px;
+    line-height: 1.7;
+    letter-spacing: 0;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
   }
-  .glass {
-    background: rgba(255, 255, 255, 0.72);
-    backdrop-filter: saturate(180%) blur(20px);
-    -webkit-backdrop-filter: saturate(180%) blur(20px);
+  body {
+    @apply bg-background text-foreground;
   }
-  .glass-dark {
-    background: rgba(22, 22, 24, 0.72);
-    backdrop-filter: saturate(180%) blur(20px);
-    -webkit-backdrop-filter: saturate(180%) blur(20px);
+  h1,
+  h2,
+  h3,
+  h4 {
+    line-height: 1.4;
+    letter-spacing: 0;
   }
-
-  /* Buttons — Apple pill: โค้งเต็ม, sentence-case, transition นุ่ม -------- */
-  .btn {
-    @apply inline-flex items-center justify-center gap-2 rounded-full px-5 py-2.5
-           text-sm font-medium tracking-[-0.01em]
-           transition-all duration-200 ease-out active:scale-[0.97]
-           disabled:pointer-events-none disabled:opacity-40;
-  }
-  .btn-primary {
-    @apply btn bg-accent text-white shadow-sm hover:bg-accent-hover
-           hover:shadow-[0_6px_18px_rgba(228,28,36,0.28)];
-  }
-  .btn-secondary {
-    @apply btn bg-black/[0.05] text-ink hover:bg-black/[0.08];
-  }
-  .btn-ghost {
-    @apply btn text-ink hover:bg-black/5;
-  }
-  .btn-sm {
-    @apply px-3.5 py-1.5 text-[13px];
-  }
-  .btn-danger {
-    @apply btn text-red-600 hover:bg-red-50;
-  }
-
-  /* Pills + status dot --------------------------------------------------- */
-  .pill {
-    @apply inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium;
-  }
-  .dot {
-    @apply inline-block h-2 w-2 shrink-0 rounded-full;
-  }
-
-  /* Form controls — โค้งนุ่ม 12px + focus ring ---------------------------- */
-  .field {
-    @apply w-full rounded-xl border border-hairline/70 bg-black/[0.015] px-3.5 py-2.5
-           text-sm text-ink outline-none transition duration-200
-           placeholder:text-subtle/60
-           focus:border-accent focus:bg-white focus:ring-4 focus:ring-accent/10;
-  }
-  .label {
-    @apply mb-1.5 block text-[13px] font-medium text-ink/70;
-  }
-
-  /* Segmented control (iOS-style) --------------------------------------- */
-  .seg {
-    @apply inline-flex gap-1 rounded-full bg-black/[0.05] p-1;
-  }
-  .seg-btn {
-    @apply rounded-full px-4 py-1.5 text-[13px] font-medium text-subtle transition hover:text-ink;
-  }
-  .seg-btn-active {
-    @apply bg-white text-ink shadow-sm hover:text-ink;
-  }
-
-  /* List row (dense, divider-based) -------------------------------------- */
-  .row {
-    @apply flex items-center gap-4 px-5 py-4 transition-colors hover:bg-black/[0.015];
-  }
-
-  /* Small caption/eyebrow label (subtle, sentence-case) ------------------ */
-  .eyebrow {
-    @apply text-[11px] font-semibold uppercase tracking-[0.08em] text-muted;
+  ::selection {
+    background: color-mix(in oklch, var(--primary) 15%, transparent);
   }
 }
-
-* { scrollbar-width: thin; scrollbar-color: #c7c7cc transparent; }
-::-webkit-scrollbar { width: 9px; height: 9px; }
-::-webkit-scrollbar-thumb { background: #c7c7cc; border-radius: 999px; border: 2px solid transparent; background-clip: content-box; }
-::-webkit-scrollbar-thumb:hover { background: #aeaeb2; background-clip: content-box; }

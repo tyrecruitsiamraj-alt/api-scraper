@@ -1,7 +1,15 @@
 import Link from 'next/link';
+import { ArrowLeftIcon } from 'lucide-react';
 import { listConnectorOptions, listSoRecruitPostingRequests } from '@/lib/repo';
 import { rejectRequestAction, startCampaignAction, startSoRecruitScrapeAction } from '@/lib/actions';
 import { CONTENT_DISABLED_OPERATOR_MESSAGE, isContentGenerationEnabled, productScopeSummary } from '@/lib/product-scope';
+import { Alert, AlertDescription } from '@/components/ui/alert';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { Card } from '@/components/ui/card';
+import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from '@/components/ui/empty';
+import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 
 export const dynamic = 'force-dynamic';
 
@@ -19,98 +27,104 @@ export default async function ImportsPage() {
   const contentEnabled = isContentGenerationEnabled();
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-center gap-3">
-        <Link href="/orchestrator" className="text-sm text-subtle hover:text-accent">← กลับ Dashboard</Link>
-      </div>
+    <div className="flex flex-col gap-6">
       <div>
-        <h1 className="text-2xl font-semibold tracking-tight">คำขอจาก So Recruit</h1>
-        <p className="mt-1 text-sm text-subtle">
-          ขอบเขตระบบ: {productScopeSummary()}. คำขอค้นหาผู้สมัครเลือกบัญชีแล้วเริ่มได้ · คำขอสร้างประกาศ{contentEnabled ? 'ให้ AI ช่วยร่าง' : 'ไม่รับแล้ว ให้ตีกลับ'}
+        <Button asChild variant="ghost" size="sm" className="-ml-2.5">
+          <Link href="/orchestrator">
+            <ArrowLeftIcon data-icon="inline-start" />
+            ศูนย์งาน
+          </Link>
+        </Button>
+      </div>
+      <div className="flex flex-col gap-1">
+        <h1 className="text-2xl font-semibold">คำขอจาก So Recruit</h1>
+        <p className="text-sm leading-relaxed text-muted-foreground">
+          ขอบเขตระบบ: {productScopeSummary()}. คำขอค้นหาผู้สมัคร เลือกบัญชีแล้วกดเริ่มได้ · คำขอสร้างประกาศ{contentEnabled ? 'ให้ AI ช่วยร่าง' : 'ไม่รับแล้ว ให้ตีกลับ'}
         </p>
       </div>
 
       {!contentEnabled && (
-        <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-950">
-          {CONTENT_DISABLED_OPERATOR_MESSAGE}
-        </div>
+        <Alert role="status">
+          <AlertDescription>{CONTENT_DISABLED_OPERATOR_MESSAGE}</AlertDescription>
+        </Alert>
       )}
 
       {reqs.length === 0 ? (
-        <div className="card px-5 py-16 text-center text-subtle">
-          ยังไม่มีคำขอโพสหางานใหม่จาก So Recruit
-          <br />
-          (ทีม matching จะกดส่งคำขอมาเมื่อหาคนใน pool ไม่พอ)
-        </div>
+        <Empty className="border">
+          <EmptyHeader>
+            <EmptyTitle>ยังไม่มีคำขอใหม่จาก So Recruit</EmptyTitle>
+            <EmptyDescription>ทีม matching จะส่งคำขอมาเมื่อหาคนใน pool ไม่พอ</EmptyDescription>
+          </EmptyHeader>
+        </Empty>
       ) : (
-        <div className="card overflow-hidden">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-hairline text-left text-xs text-subtle">
-                <th className="px-4 py-2.5 font-medium">เลขใบขอ</th>
-                <th className="px-4 py-2.5 font-medium">ประเภท</th>
-                <th className="px-4 py-2.5 font-medium">ตำแหน่ง/เหตุผล</th>
-                <th className="px-4 py-2.5 font-medium">ไซต์/จังหวัด</th>
-                <th className="px-4 py-2.5 font-medium">ผู้ขอ</th>
-                <th className="px-4 py-2.5 font-medium">วันที่ขอ</th>
-                <th className="px-4 py-2.5 font-medium text-right">จัดการ</th>
-              </tr>
-            </thead>
-            <tbody>
+        <Card className="py-0">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead className="pl-4">เลขใบขอ</TableHead>
+                <TableHead>ประเภท</TableHead>
+                <TableHead>ตำแหน่ง/เหตุผล</TableHead>
+                <TableHead>ไซต์/จังหวัด</TableHead>
+                <TableHead>ผู้ขอ</TableHead>
+                <TableHead>วันที่ขอ</TableHead>
+                <TableHead className="pr-4 text-right">จัดการ</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
               {reqs.map((r) => (
-                <tr key={r.request_no} className="border-b border-hairline/60 last:border-0 hover:bg-black/[0.015]">
-                  <td className="px-4 py-2.5 font-medium">{r.request_no}</td>
-                  <td className="px-4 py-2.5">
-                    <span className={`pill ${r.request_type === 'scraping' ? 'bg-emerald-50 text-emerald-700' : 'bg-orange-50 text-orange-700'}`}>
+                <TableRow key={r.request_no}>
+                  <TableCell className="pl-4 font-medium">{r.request_no}</TableCell>
+                  <TableCell>
+                    <Badge variant={r.request_type === 'scraping' ? 'secondary' : 'outline'}>
                       {r.request_type === 'scraping' ? 'ค้นหาผู้สมัคร' : 'สร้างประกาศ'}
-                    </span>
-                  </td>
-                  <td className="px-4 py-2.5">
+                    </Badge>
+                  </TableCell>
+                  <TableCell>
                     {r.erp_title ? (
                       <span>{r.erp_title}</span>
                     ) : (
-                      <span className="text-subtle">{r.reason || '—'}</span>
+                      <span className="text-muted-foreground">{r.reason || '—'}</span>
                     )}
-                  </td>
-                  <td className="px-4 py-2.5 text-subtle">{r.erp_province || '—'}</td>
-                  <td className="px-4 py-2.5 text-subtle">{r.requested_by_name || '—'}</td>
-                  <td className="px-4 py-2.5 text-subtle">{fmtDate(r.created_at)}</td>
-                  <td className="px-4 py-2.5 text-right">
+                  </TableCell>
+                  <TableCell className="text-muted-foreground">{r.erp_province || '—'}</TableCell>
+                  <TableCell className="text-muted-foreground">{r.requested_by_name || '—'}</TableCell>
+                  <TableCell className="text-muted-foreground">{fmtDate(r.created_at)}</TableCell>
+                  <TableCell className="pr-4 text-right">
                     {r.request_type === 'scraping' ? (
                       <form action={startSoRecruitScrapeAction} className="ml-auto flex max-w-72 items-center justify-end gap-2">
                         <input type="hidden" name="requestNo" value={r.request_no} />
-                        <select name="connectorId" required defaultValue="" className="field h-8 min-w-36 py-1 text-xs">
-                          <option value="" disabled>เลือกบัญชีที่ใช้ค้นหา…</option>
+                        <NativeSelect name="connectorId" required defaultValue="" size="sm" className="min-w-36" aria-label="บัญชีที่ใช้ค้นหา">
+                          <NativeSelectOption value="" disabled>เลือกบัญชีที่ใช้ค้นหา</NativeSelectOption>
                           {connectors.map((connector) => (
-                            <option key={connector.id} value={connector.id} disabled={!connector.available}>
+                            <NativeSelectOption key={connector.id} value={connector.id} disabled={!connector.available}>
                               {connector.platform} · {connector.label}
-                              {connector.available ? '' : ` — ยังใช้ไม่ได้: ${connector.block_reason}`}
-                            </option>
+                              {connector.available ? '' : ` (ยังใช้ไม่ได้: ${connector.block_reason})`}
+                            </NativeSelectOption>
                           ))}
-                        </select>
-                        <button className="btn-primary btn-sm shrink-0" disabled={!connectors.some((connector) => connector.available)}>
+                        </NativeSelect>
+                        <Button size="sm" className="shrink-0" disabled={!connectors.some((connector) => connector.available)}>
                           เริ่มค้นหาผู้สมัคร
-                        </button>
+                        </Button>
                       </form>
                     ) : contentEnabled ? (
                       <form action={startCampaignAction} className="inline">
                         <input type="hidden" name="requestNo" value={r.request_no} />
-                        <button className="btn-primary btn-sm">เริ่มสร้างประกาศ</button>
+                        <Button size="sm">เริ่มสร้างประกาศ</Button>
                       </form>
                     ) : (
                       <form action={rejectRequestAction} className="inline-flex items-center gap-2">
                         <input type="hidden" name="requestNo" value={r.request_no} />
                         <input type="hidden" name="requestType" value={r.request_type} />
                         <input type="hidden" name="reason" value={CONTENT_DISABLED_OPERATOR_MESSAGE} />
-                        <button className="btn-secondary btn-sm">ตีกลับ (ไม่รับสร้างประกาศ)</button>
+                        <Button variant="secondary" size="sm">ตีกลับ (ไม่รับสร้างประกาศ)</Button>
                       </form>
                     )}
-                  </td>
-                </tr>
+                  </TableCell>
+                </TableRow>
               ))}
-            </tbody>
-          </table>
-        </div>
+            </TableBody>
+          </Table>
+        </Card>
       )}
     </div>
   );

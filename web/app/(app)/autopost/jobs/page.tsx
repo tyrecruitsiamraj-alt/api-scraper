@@ -1,16 +1,22 @@
 import Link from 'next/link';
 import { listJarvisPostOrders, listPostAssignments, postModeLabel, REPOST_MIN_GAP_DAYS } from '@/lib/repo';
-import type { JarvisPostOrder } from '@/lib/repo';
+import type { JarvisGroupResult, JarvisPostOrder } from '@/lib/repo';
 import { postAssignmentNowAction, postJarvisOrderAction, repostJarvisOrderAction, runFacebookPreflightAction } from '@/lib/actions';
 import { AutopostNav } from '@/components/AutopostNav';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { Card, CardAction, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
+import { Checkbox } from '@/components/ui/checkbox';
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
+import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from '@/components/ui/empty';
+import { Field, FieldDescription, FieldLabel, FieldLegend, FieldSet } from '@/components/ui/field';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { ChevronDownIcon, ExternalLinkIcon } from 'lucide-react';
 
 export const dynamic = 'force-dynamic';
 
-const JARVIS_STATUS: Record<string, { label: string; cls: string }> = {
-  pending: { label: 'รอโพสต์', cls: 'bg-amber-50 text-amber-800' },
-  in_progress: { label: 'กำลังโพสต์', cls: 'bg-blue-50 text-blue-700' },
-  posted: { label: 'โพสต์แล้ว', cls: 'bg-emerald-50 text-emerald-700' },
-};
+type BadgeVariant = 'default' | 'secondary' | 'destructive' | 'outline';
 
 // เซิร์ฟเวอร์ Vercel เป็น UTC — บังคับเวลาไทย
 function thaiTime(value: string | null): string {
@@ -20,98 +26,258 @@ function thaiTime(value: string | null): string {
   });
 }
 
+/** ข้อความ error ของ worker มีหมายเหตุภายในในวงเล็บท้ายประโยค — ตัดออกให้อ่านง่าย */
+function shortError(message: string | null): string {
+  return String(message ?? '').replace(/\s*\(.*$/, '').trim() || 'โพสต์ไม่สำเร็จ';
+}
+
+function orderStage(order: JarvisPostOrder, counts: ReturnType<typeof countGroups>): { label: string; variant: BadgeVariant } {
+  if (order.jarvis_status === 'pending') {
+    return order.issues.length ? { label: 'โพสต์ไม่ได้', variant: 'destructive' } : { label: 'รอสั่งโพสต์', variant: 'outline' };
+  }
+  if (order.queue_status === 'queued') return { label: 'รอเครื่องรับงาน', variant: 'outline' };
+  if (order.queue_status === 'running') return { label: 'กำลังโพสต์', variant: 'secondary' };
+  if (counts.posted === 0 && (counts.failed > 0 || order.queue_status === 'failed')) return { label: 'ไม่สำเร็จ', variant: 'destructive' };
+  if (counts.posted > 0 && counts.posted < counts.planned) return { label: `โพสต์แล้ว ${counts.posted}/${counts.planned} กลุ่ม`, variant: 'secondary' };
+  if (counts.posted > 0) return { label: 'โพสต์ครบแล้ว', variant: 'secondary' };
+  return { label: 'รอผล', variant: 'outline' };
+}
+
+function countGroups(groups: JarvisGroupResult[]) {
+  const sum = (pick: (g: JarvisGroupResult) => number | null) =>
+    groups.some((g) => pick(g) !== null) ? groups.reduce((n, g) => n + (pick(g) ?? 0), 0) : null;
+  return {
+    planned: groups.length,
+    posted: groups.filter((g) => g.status === 'posted').length,
+    failed: groups.filter((g) => g.status === 'failed').length,
+    waiting: groups.filter((g) => g.status === 'waiting').length,
+    comments: sum((g) => g.comments),
+    reactions: sum((g) => g.reactions),
+  };
+}
+
+function Stat({ label, value }: { label: string; value: string | number }) {
+  return (
+    <div className="flex flex-col gap-0.5">
+      <dt className="text-xs text-muted-foreground">{label}</dt>
+      <dd className="text-lg font-semibold tabular-nums">{value}</dd>
+    </div>
+  );
+}
+
+const RESULT_BADGE: Record<JarvisGroupResult['status'], { label: string; variant: BadgeVariant }> = {
+  posted: { label: 'โพสต์แล้ว', variant: 'secondary' },
+  failed: { label: 'ไม่สำเร็จ', variant: 'destructive' },
+  waiting: { label: 'ยังไม่โพสต์', variant: 'outline' },
+};
+
+function GroupTable({ groups }: { groups: JarvisGroupResult[] }) {
+  const num = (n: number | null) => (n === null ? '-' : n.toLocaleString('th-TH'));
+  return (
+    <Table>
+      <TableHeader>
+        <TableRow>
+          <TableHead>กลุ่ม</TableHead>
+          <TableHead>ผล</TableHead>
+          <TableHead>ในกลุ่ม</TableHead>
+          <TableHead className="text-right">คอมเมนต์</TableHead>
+          <TableHead className="text-right">ไลก์</TableHead>
+          <TableHead className="text-right">แชร์</TableHead>
+          <TableHead>เวลา</TableHead>
+          <TableHead>โพสต์</TableHead>
+        </TableRow>
+      </TableHeader>
+      <TableBody>
+        {groups.map((g) => (
+          <TableRow key={g.fb_group_id}>
+            <TableCell className="font-medium">{g.name}</TableCell>
+            <TableCell>
+              <div className="flex flex-col items-start gap-1">
+                <Badge variant={RESULT_BADGE[g.status].variant}>{RESULT_BADGE[g.status].label}</Badge>
+                {g.error && <span className="text-xs text-destructive">{shortError(g.error)}</span>}
+              </div>
+            </TableCell>
+            <TableCell>{g.approval ?? '-'}</TableCell>
+            <TableCell className="text-right tabular-nums">{num(g.comments)}</TableCell>
+            <TableCell className="text-right tabular-nums">{num(g.reactions)}</TableCell>
+            <TableCell className="text-right tabular-nums">{num(g.shares)}</TableCell>
+            <TableCell className="text-muted-foreground">
+              {g.at ? `${thaiTime(g.at)}${g.worker ? ` · ${g.worker}` : ''}` : '-'}
+            </TableCell>
+            <TableCell>
+              {g.post_link ? (
+                <Button asChild variant="link" size="sm" className="px-0">
+                  <a href={g.post_link} target="_blank" rel="noreferrer">
+                    เปิด
+                    <ExternalLinkIcon data-icon="inline-end" />
+                  </a>
+                </Button>
+              ) : (
+                '-'
+              )}
+            </TableCell>
+          </TableRow>
+        ))}
+      </TableBody>
+    </Table>
+  );
+}
+
 function RepostForm({ order }: { order: JarvisPostOrder }) {
   const busy = order.queue_status === 'queued' || order.queue_status === 'running';
   const pickable = order.repost_groups.filter((g) => g.account_label && !g.blocked_until);
   return (
-    <details className="rounded-lg border border-line px-3 py-2">
-      <summary className="cursor-pointer text-sm font-medium">โพสต์ซ้ำ</summary>
-      <form action={repostJarvisOrderAction} className="mt-3 space-y-3">
-        <input type="hidden" name="requestNo" value={order.request_no} />
-        <div className="space-y-1.5">
-          <div className="text-xs text-subtle">เลือกกลุ่ม</div>
-          {order.repost_groups.map((g) => (
-            <label key={g.id} className="flex flex-wrap items-center gap-2 text-sm">
-              <input type="checkbox" name="groupId" value={g.id} disabled={busy || !g.account_label || Boolean(g.blocked_until)} />
-              <span>{g.name}</span>
-              <span className="text-xs text-subtle">
-                {!g.account_label
-                  ? 'ยังไม่มีบัญชี Facebook ที่ผูกกลุ่มนี้'
-                  : g.blocked_until
-                    ? `โพสต์งานนี้ไปแล้ว โพสต์ซ้ำได้หลัง ${thaiTime(g.blocked_until)}`
-                    : `โพสต์ด้วย ${g.account_label}`}
-              </span>
-            </label>
-          ))}
-          <p className="text-xs text-subtle">
-            กลุ่มเดิมต้องเว้น {REPOST_MIN_GAP_DAYS} วัน · เพิ่มกลุ่มได้ที่{' '}
-            <Link href="/settings/posting" className="underline">ตั้งค่าการโพสต์</Link>
-          </p>
-        </div>
-        {busy && <p className="text-sm text-amber-700">มีรอบโพสต์ของใบนี้รอคิวอยู่ รอให้เสร็จก่อน</p>}
-        <div className="flex flex-wrap items-center gap-3">
-          <label className="flex items-center gap-2 text-sm">
-            <input type="checkbox" name="confirm" value="yes" required disabled={busy || !pickable.length} />
-            ยืนยันว่าจะโพสต์จริงลงกลุ่ม
-          </label>
-          <button className="btn-primary btn-sm" disabled={busy || !pickable.length}>โพสต์ซ้ำ</button>
-        </div>
-      </form>
-    </details>
+    <Collapsible className="w-full">
+      <CollapsibleTrigger asChild>
+        <Button variant="outline" size="sm">
+          โพสต์ซ้ำ
+          <ChevronDownIcon data-icon="inline-end" />
+        </Button>
+      </CollapsibleTrigger>
+      <CollapsibleContent>
+        <form action={repostJarvisOrderAction} className="mt-4 flex flex-col gap-4">
+          <input type="hidden" name="requestNo" value={order.request_no} />
+          <FieldSet>
+            <FieldLegend variant="label">เลือกกลุ่ม</FieldLegend>
+            <FieldDescription>
+              กลุ่มเดิมต้องเว้น {REPOST_MIN_GAP_DAYS} วัน เพิ่มกลุ่มได้ที่{' '}
+              <Link href="/settings/posting">ตั้งค่าการโพสต์</Link>
+            </FieldDescription>
+            {order.repost_groups.map((g) => {
+              const id = `repost-${order.request_no}-${g.id}`;
+              return (
+                <Field key={g.id} orientation="horizontal" data-disabled={busy || !g.account_label || Boolean(g.blocked_until) || undefined}>
+                  <Checkbox id={id} name="groupId" value={g.id} disabled={busy || !g.account_label || Boolean(g.blocked_until)} />
+                  <FieldLabel htmlFor={id} className="font-normal">
+                    {g.name}
+                    <span className="text-muted-foreground">
+                      {!g.account_label
+                        ? ' · ยังไม่มีบัญชี Facebook ที่ผูกกลุ่มนี้'
+                        : g.blocked_until
+                          ? ` · โพสต์ซ้ำได้หลัง ${thaiTime(g.blocked_until)}`
+                          : ` · โพสต์ด้วย ${g.account_label}`}
+                    </span>
+                  </FieldLabel>
+                </Field>
+              );
+            })}
+          </FieldSet>
+          {busy && <p className="text-sm text-muted-foreground">มีรอบโพสต์ของใบนี้รอคิวอยู่ รอให้เสร็จก่อน</p>}
+          <ConfirmAndSubmit id={`repost-confirm-${order.request_no}`} label="โพสต์ซ้ำ" disabled={busy || !pickable.length} />
+        </form>
+      </CollapsibleContent>
+    </Collapsible>
+  );
+}
+
+/** ติ๊กยืนยัน + ปุ่ม — server action เช็ก confirm=yes อีกชั้นและแจ้งกลับถ้าไม่ได้ติ๊ก */
+function ConfirmAndSubmit({ id, label, disabled }: { id: string; label: string; disabled: boolean }) {
+  return (
+    <div className="flex flex-wrap items-center gap-4">
+      <Field orientation="horizontal" className="w-auto" data-disabled={disabled || undefined}>
+        <Checkbox id={id} name="confirm" value="yes" disabled={disabled} />
+        <FieldLabel htmlFor={id} className="font-normal">ยืนยันว่าจะโพสต์จริงลงกลุ่ม</FieldLabel>
+      </Field>
+      <Button size="sm" disabled={disabled}>{label}</Button>
+    </div>
   );
 }
 
 function JarvisOrderCard({ order }: { order: JarvisPostOrder }) {
-  const status = JARVIS_STATUS[order.jarvis_status] ?? { label: order.jarvis_status, cls: 'bg-black/5 text-ink' };
-  const blocker = order.issues[0]
-    ?? (!order.worker_online ? 'เครื่องที่ผูกกับบัญชี Facebook ยังออฟไลน์' : null);
-  const failed = order.jarvis_status === 'in_progress' && order.queue_status === 'failed';
+  const counts = countGroups(order.group_results);
+  const stage = orderStage(order, counts);
+  const failedGroups = order.group_results.filter((g) => g.status === 'failed');
+  const blockers = order.jarvis_status === 'pending'
+    ? [...order.issues, ...(!order.issues.length && !order.worker_online ? ['เครื่องที่ผูกกับบัญชี Facebook ยังออฟไลน์'] : [])]
+    : failedGroups.map((g) => `${g.name}: ${shortError(g.error)}`);
+  const noLink = order.group_results.some((g) => g.status === 'posted' && !g.post_link);
+  const meta = [
+    order.request_no,
+    postModeLabel(order.post_mode),
+    order.account_label ? `บัญชี ${order.account_label}` : null,
+    order.requested_by_name ? `สั่งโดย ${order.requested_by_name}` : null,
+    `Jarvis สั่งเมื่อ ${thaiTime(order.created_at)}`,
+  ].filter(Boolean).join(' · ');
+
   return (
-    <div className="card space-y-3 p-5">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div className="min-w-0">
-          <div className="font-semibold">{order.position}</div>
-          <div className="mt-1 text-xs text-subtle">
-            {order.request_no} · {postModeLabel(order.post_mode)} · {order.group_names.join(', ') || 'ไม่มีกลุ่ม'}
-            {order.account_label ? ` · โพสต์ด้วย ${order.account_label}` : ''}
-            {order.requested_by_name ? ` · สั่งโดย ${order.requested_by_name}` : ''}
-            {` · Jarvis สั่งเมื่อ ${thaiTime(order.created_at)}`}
-          </div>
-        </div>
-        <span className={`pill ${status.cls}`}>{status.label}</span>
-      </div>
-      <pre className="max-h-64 overflow-auto whitespace-pre-wrap rounded-lg bg-black/[0.03] p-3 font-sans text-sm">{order.caption}</pre>
-      {order.post_link && (
-        <a href={order.post_link} target="_blank" rel="noreferrer" className="text-sm text-accent underline">เปิดโพสต์บน Facebook</a>
-      )}
-      {order.posts.length > 0 && (
-        <div className="space-y-1">
-          <div className="text-xs font-medium text-subtle">ประวัติการโพสต์</div>
-          <ul className="space-y-0.5 text-sm">
-            {order.posts.map((p) => (
-              <li key={`${p.at}-${p.group_name}`}>
-                {thaiTime(p.at)} · {p.group_name}{p.worker ? ` · เครื่อง ${p.worker}` : ''}
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
-      {failed && <p className="text-sm text-red-700">โพสต์ไม่สำเร็จ ดูสาเหตุในบันทึกการโพสต์ด้านล่างหน้า "ภาพรวมการโพสต์"</p>}
-      {order.jarvis_status === 'pending' && (
-        <>
-          {blocker && <p className="text-sm text-amber-700">โพสต์ไม่ได้ตอนนี้: {order.issues.length ? order.issues.join(' · ') : blocker}</p>}
-          <form action={postJarvisOrderAction} className="flex flex-wrap items-center gap-3">
+    <Card>
+      <CardHeader>
+        <CardTitle>{order.position}</CardTitle>
+        <CardDescription>{meta}</CardDescription>
+        <CardAction>
+          <Badge variant={stage.variant}>{stage.label}</Badge>
+        </CardAction>
+      </CardHeader>
+      <CardContent className="flex flex-col gap-5">
+        <dl className="grid grid-cols-2 gap-4 sm:grid-cols-6">
+          <Stat label="กลุ่มที่สั่ง" value={counts.planned} />
+          <Stat label="โพสต์แล้ว" value={counts.posted} />
+          <Stat label="ไม่สำเร็จ" value={counts.failed} />
+          <Stat label="ยังไม่โพสต์" value={counts.waiting} />
+          <Stat label="คอมเมนต์" value={counts.comments ?? '-'} />
+          <Stat label="ไลก์" value={counts.reactions ?? '-'} />
+        </dl>
+
+        {blockers.length > 0 && (
+          <Alert variant="destructive">
+            <AlertTitle>{order.jarvis_status === 'pending' ? 'ยังโพสต์ไม่ได้' : 'มีกลุ่มที่โพสต์ไม่สำเร็จ'}</AlertTitle>
+            <AlertDescription>{blockers.join(' · ')}</AlertDescription>
+          </Alert>
+        )}
+
+        {order.group_results.length > 0 && <GroupTable groups={order.group_results} />}
+        {noLink && (
+          <p className="text-sm text-muted-foreground">
+            ยอดคอมเมนต์และไลก์จะขึ้นเมื่อระบบเก็บลิงก์โพสต์ได้ โพสต์ที่ไม่มีลิงก์จึงยังไม่มีตัวเลข
+          </p>
+        )}
+
+        <Collapsible>
+          <CollapsibleTrigger asChild>
+            <Button variant="ghost" size="sm" className="-ml-2">
+              ข้อความประกาศ
+              <ChevronDownIcon data-icon="inline-end" />
+            </Button>
+          </CollapsibleTrigger>
+          <CollapsibleContent>
+            <pre className="mt-2 max-h-80 overflow-auto rounded-lg bg-muted p-4 font-sans text-sm whitespace-pre-wrap">{order.caption}</pre>
+          </CollapsibleContent>
+        </Collapsible>
+
+        {order.posts.length > 0 && (
+          <Collapsible>
+            <CollapsibleTrigger asChild>
+              <Button variant="ghost" size="sm" className="-ml-2">
+                ประวัติการโพสต์ ({order.posts.length} ครั้ง)
+                <ChevronDownIcon data-icon="inline-end" />
+              </Button>
+            </CollapsibleTrigger>
+            <CollapsibleContent>
+              <ul className="mt-2 flex flex-col gap-1 text-sm">
+                {order.posts.map((p) => (
+                  <li key={`${p.at}-${p.group_name}`}>
+                    {thaiTime(p.at)} · {p.group_name}
+                    {p.worker ? ` · เครื่อง ${p.worker}` : ''}
+                    {' · '}
+                    <span className={p.ok ? undefined : 'text-destructive'}>{p.ok ? 'สำเร็จ' : shortError(p.message)}</span>
+                  </li>
+                ))}
+              </ul>
+            </CollapsibleContent>
+          </Collapsible>
+        )}
+      </CardContent>
+      <CardFooter>
+        {order.jarvis_status === 'pending' ? (
+          <form action={postJarvisOrderAction}>
             <input type="hidden" name="requestNo" value={order.request_no} />
-            <label className="flex items-center gap-2 text-sm">
-              <input type="checkbox" name="confirm" value="yes" required disabled={Boolean(blocker)} />
-              ยืนยันว่าจะโพสต์จริงลงกลุ่ม
-            </label>
-            <button className="btn-primary btn-sm" disabled={Boolean(blocker)}>โพสต์</button>
+            <ConfirmAndSubmit id={`post-confirm-${order.request_no}`} label="โพสต์" disabled={blockers.length > 0} />
           </form>
-        </>
-      )}
-      {order.jarvis_status !== 'pending' && <RepostForm order={order} />}
-    </div>
+        ) : (
+          <RepostForm order={order} />
+        )}
+      </CardFooter>
+    </Card>
   );
 }
 
@@ -131,37 +297,48 @@ export default async function AutopostJobsPage({ searchParams }: { searchParams?
   const rows = allRows.filter((row) => !row.id.startsWith('jv-'));
 
   return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">งานโพสต์</h1>
-        <p className="mt-1 text-sm text-subtle">
-          สั่งโพสต์งานที่ผูกบัญชีและกลุ่มไว้แล้ว หรือทดสอบบัญชีแบบไม่โพสต์จริงก่อน
+    <div className="flex flex-col gap-6">
+      <div className="flex flex-col gap-1">
+        <h1 className="text-2xl font-semibold">งานโพสต์</h1>
+        <p className="text-sm text-muted-foreground">
+          สั่งโพสต์งานจาก Jarvis ดูผลรายกลุ่ม หรือทดสอบบัญชีแบบไม่โพสต์จริง
         </p>
       </div>
 
       <AutopostNav />
 
-      {notice && <div className="card border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">{notice}</div>}
+      {notice && (
+        <Alert>
+          <AlertDescription>{notice}</AlertDescription>
+        </Alert>
+      )}
 
-      <div className="space-y-3">
+      <section className="flex flex-col gap-3">
         <h2 className="text-base font-semibold">คำสั่งโพสต์จาก Jarvis</h2>
         {orders.length === 0 ? (
-          <div className="card px-5 py-6 text-center text-sm text-subtle">ยังไม่มีคำสั่งโพสต์จาก Jarvis</div>
+          <Empty className="border">
+            <EmptyHeader>
+              <EmptyTitle>ยังไม่มีคำสั่งโพสต์จาก Jarvis</EmptyTitle>
+            </EmptyHeader>
+          </Empty>
         ) : (
           orders.map((order) => <JarvisOrderCard key={order.request_no} order={order} />)
         )}
-      </div>
+      </section>
 
-      <h2 className="text-base font-semibold">งานโพสต์อื่นในระบบ</h2>
-
-      {rows.length === 0 ? (
-        <div className="card px-5 py-8 text-center text-sm text-subtle">
-          ยังไม่มีงานโพสต์ที่ผูกบัญชีไว้ เพิ่มบัญชีและกลุ่มได้ที่{' '}
-          <Link href="/settings/posting" className="underline">ตั้งค่าการโพสต์</Link>
-        </div>
-      ) : (
-        <div className="space-y-3">
-          {rows.map((row) => {
+      <section className="flex flex-col gap-3">
+        <h2 className="text-base font-semibold">งานโพสต์อื่นในระบบ</h2>
+        {rows.length === 0 ? (
+          <Empty className="border">
+            <EmptyHeader>
+              <EmptyTitle>ยังไม่มีงานโพสต์ที่ผูกบัญชีไว้</EmptyTitle>
+              <EmptyDescription>
+                เพิ่มบัญชีและกลุ่มได้ที่ <Link href="/settings/posting">ตั้งค่าการโพสต์</Link>
+              </EmptyDescription>
+            </EmptyHeader>
+          </Empty>
+        ) : (
+          rows.map((row) => {
             const busy = row.last_queue_status === 'queued' || row.last_queue_status === 'running';
             const blocker = !row.account_id
               ? 'ยังไม่ผูกบัญชี Facebook'
@@ -175,45 +352,49 @@ export default async function AutopostJobsPage({ searchParams }: { searchParams?
                       ? 'มีงานโพสต์รอคิวอยู่แล้ว'
                       : null;
             return (
-              <div key={row.id} className="card space-y-3 p-5">
-                <div className="flex flex-wrap items-start justify-between gap-3">
-                  <div className="min-w-0">
-                    <div className="font-semibold">{row.job_titles}</div>
-                    <div className="mt-1 text-xs text-subtle">
-                      {row.account_label ?? 'ไม่มีบัญชี'} · {row.group_count} กลุ่ม · {row.has_image ? 'caption + รูป' : 'caption อย่างเดียว'}
-                    </div>
-                  </div>
-                  <span className="pill bg-black/5 text-ink">
-                    {row.last_queue_status
-                      ? `${QUEUE_LABEL[row.last_queue_status] ?? row.last_queue_status} · ${new Date(row.last_queue_at ?? '').toLocaleString('th-TH')}`
-                      : 'ยังไม่เคยโพสต์'}
-                  </span>
-                </div>
-                {row.caption_preview && (
-                  <p className="line-clamp-3 whitespace-pre-line text-sm text-subtle">{row.caption_preview}</p>
+              <Card key={row.id}>
+                <CardHeader>
+                  <CardTitle>{row.job_titles}</CardTitle>
+                  <CardDescription>
+                    {row.account_label ?? 'ไม่มีบัญชี'} · {row.group_count} กลุ่ม · {row.has_image ? 'caption + รูป' : 'caption อย่างเดียว'}
+                  </CardDescription>
+                  <CardAction>
+                    <Badge variant="outline">
+                      {row.last_queue_status
+                        ? `${QUEUE_LABEL[row.last_queue_status] ?? row.last_queue_status} · ${thaiTime(row.last_queue_at)}`
+                        : 'ยังไม่เคยโพสต์'}
+                    </Badge>
+                  </CardAction>
+                </CardHeader>
+                {(row.caption_preview || blocker) && (
+                  <CardContent className="flex flex-col gap-3">
+                    {row.caption_preview && (
+                      <p className="line-clamp-3 text-sm whitespace-pre-line text-muted-foreground">{row.caption_preview}</p>
+                    )}
+                    {blocker && (
+                      <Alert>
+                        <AlertDescription>โพสต์ไม่ได้ตอนนี้: {blocker}</AlertDescription>
+                      </Alert>
+                    )}
+                  </CardContent>
                 )}
-                {blocker && <p className="text-sm text-amber-700">โพสต์ไม่ได้ตอนนี้: {blocker}</p>}
-                <div className="flex flex-wrap items-center gap-3">
-                  <form action={postAssignmentNowAction} className="flex flex-wrap items-center gap-3">
+                <CardFooter className="flex flex-wrap gap-4">
+                  <form action={postAssignmentNowAction}>
                     <input type="hidden" name="assignmentId" value={row.id} />
-                    <label className="flex items-center gap-2 text-sm">
-                      <input type="checkbox" name="confirm" value="yes" required disabled={Boolean(blocker)} />
-                      ยืนยันว่าจะโพสต์จริงลงกลุ่ม
-                    </label>
-                    <button className="btn-primary btn-sm" disabled={Boolean(blocker)}>โพสต์ตอนนี้</button>
+                    <ConfirmAndSubmit id={`assignment-confirm-${row.id}`} label="โพสต์ตอนนี้" disabled={Boolean(blocker)} />
                   </form>
                   {row.account_id && (
                     <form action={runFacebookPreflightAction}>
                       <input type="hidden" name="fbAccountId" value={row.account_id} />
-                      <button className="btn-ghost btn-sm" disabled={!row.worker_online}>ทดสอบแบบไม่โพสต์จริง</button>
+                      <Button variant="outline" size="sm" disabled={!row.worker_online}>ทดสอบแบบไม่โพสต์จริง</Button>
                     </form>
                   )}
-                </div>
-              </div>
+                </CardFooter>
+              </Card>
             );
-          })}
-        </div>
-      )}
+          })
+        )}
+      </section>
     </div>
   );
 }

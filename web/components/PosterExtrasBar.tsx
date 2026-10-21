@@ -2,6 +2,11 @@
 
 import { useRef, useState } from 'react';
 import type { PosterExtra } from '../../src/core/poster-template.js';
+import { ImageIcon, ImagePlusIcon, TypeIcon } from 'lucide-react';
+import { cn } from '@/lib/utils';
+import { Button } from '@/components/ui/button';
+import { Item, ItemActions, ItemContent, ItemDescription, ItemFooter, ItemGroup, ItemTitle } from '@/components/ui/item';
+import { Textarea } from '@/components/ui/textarea';
 import {
   POSTER_MAX_EXTRAS,
   createPosterImageExtra,
@@ -69,9 +74,7 @@ export function PosterExtrasBar({ extras, hasSourceImage, onChange, tone = 'work
   const fileRef = useRef<HTMLInputElement>(null);
   const [error, setError] = useState('');
   const full = extras.length >= POSTER_MAX_EXTRAS;
-  const button = tone === 'pixel'
-    ? 'inline-flex h-11 items-center justify-center rounded-md border border-[#0a3970] bg-white px-4 text-[14px] font-medium text-[#082b62] transition hover:bg-blue-50 disabled:opacity-50'
-    : 'btn-ghost btn-sm';
+  const buttonSize = tone === 'pixel' ? 'default' : 'sm';
 
   const add = (extra: PosterExtra | null, failMessage: string) => {
     if (full) {
@@ -87,7 +90,7 @@ export function PosterExtrasBar({ extras, hasSourceImage, onChange, tone = 'work
   };
 
   return (
-    <div className={tone === 'pixel' ? 'mt-4 space-y-3' : 'mt-3 space-y-3'}>
+    <div className={cn('flex flex-col gap-3', tone === 'pixel' ? 'mt-4' : 'mt-3')}>
       <div className="flex flex-wrap items-center gap-2">
         <input
           ref={fileRef}
@@ -114,12 +117,14 @@ export function PosterExtrasBar({ extras, hasSourceImage, onChange, tone = 'work
             }
           }}
         />
-        <button type="button" className={button} disabled={full} onClick={() => fileRef.current?.click()}>
+        <Button type="button" variant="outline" size={buttonSize} disabled={full} onClick={() => fileRef.current?.click()}>
+          <ImagePlusIcon data-icon="inline-start" />
           เพิ่มรูป
-        </button>
-        <button
+        </Button>
+        <Button
           type="button"
-          className={button}
+          variant="outline"
+          size={buttonSize}
           disabled={full || !hasSourceImage}
           onClick={() => add(createPosterImageExtra({
             origin: 'campaign_source',
@@ -129,11 +134,13 @@ export function PosterExtrasBar({ extras, hasSourceImage, onChange, tone = 'work
             h: 280,
           }), 'ยังไม่มีภาพต้นฉบับของงานนี้')}
         >
+          <ImageIcon data-icon="inline-start" />
           ใช้รูปต้นฉบับของงานนี้
-        </button>
-        <button
+        </Button>
+        <Button
           type="button"
-          className={button}
+          variant="outline"
+          size={buttonSize}
           disabled={full}
           onClick={() => add(createPosterTextExtra({
             text: 'ข้อความใหม่',
@@ -141,40 +148,45 @@ export function PosterExtrasBar({ extras, hasSourceImage, onChange, tone = 'work
             y: 620 + (extras.filter((item) => item.kind === 'text').length * 36),
           }), 'เพิ่มข้อความไม่สำเร็จ')}
         >
+          <TypeIcon data-icon="inline-start" />
           เพิ่มข้อความ
-        </button>
+        </Button>
       </div>
-      <p className="text-xs leading-5 text-subtle">นี่ไม่ใช่ Canva เต็ม แต่เพิ่มรูปและข้อความบนโปสเตอร์ชุดนี้ได้แล้ว · รูปที่เพิ่มมาจากเครื่องคุณหรือจากภาพต้นฉบับของงานนี้ ไม่ได้สุ่มรูปสต็อกมาแทน</p>
-      {error && <p className="text-xs text-red-700">{error}</p>}
+      <p className="text-xs leading-relaxed text-muted-foreground">เพิ่มรูปจากเครื่อง หรือใช้ภาพต้นฉบับของงานนี้ ระบบไม่ใส่รูปสต็อกให้เอง</p>
+      {error && <p role="alert" className="text-xs text-destructive">{error}</p>}
       {extras.length > 0 && (
-        <ul className="space-y-2">
+        <ItemGroup className="gap-2">
           {extras.map((extra) => (
-            <li key={extra.id} className="rounded-xl border border-hairline bg-white px-3 py-2">
-              <div className="flex items-start justify-between gap-3">
-                <div className="min-w-0">
-                  <p className="text-sm font-medium">{extra.kind === 'image' ? 'รูปที่เพิ่ม' : 'ข้อความที่เพิ่ม'}</p>
-                  <p className="text-[11px] text-subtle">{originLabel(extra)}</p>
-                </div>
-                <button
+            <Item key={extra.id} variant="outline" size="sm">
+              <ItemContent className="min-w-0">
+                <ItemTitle>{extra.kind === 'image' ? 'รูปที่เพิ่ม' : 'ข้อความที่เพิ่ม'}</ItemTitle>
+                <ItemDescription className="text-xs">{originLabel(extra)}</ItemDescription>
+              </ItemContent>
+              <ItemActions>
+                <Button
                   type="button"
-                  className="text-xs text-red-700 hover:underline"
+                  variant="ghost"
+                  size="xs"
                   onClick={() => onChange(extras.filter((item) => item.id !== extra.id))}
                 >
                   ลบ
-                </button>
-              </div>
+                </Button>
+              </ItemActions>
               {extra.kind === 'text' && (
-                <textarea
-                  className="field mt-2 min-h-16 w-full resize-y text-sm"
-                  value={extra.text ?? ''}
-                  onChange={(event) => onChange(extras.map((item) => (
-                    item.id === extra.id ? { ...item, text: event.target.value } : item
-                  )))}
-                />
+                <ItemFooter>
+                  <Textarea
+                    aria-label="ข้อความที่เพิ่มบนโปสเตอร์"
+                    className="min-h-16 resize-y"
+                    value={extra.text ?? ''}
+                    onChange={(event) => onChange(extras.map((item) => (
+                      item.id === extra.id ? { ...item, text: event.target.value } : item
+                    )))}
+                  />
+                </ItemFooter>
               )}
-            </li>
+            </Item>
           ))}
-        </ul>
+        </ItemGroup>
       )}
     </div>
   );

@@ -1,8 +1,27 @@
 'use client';
 
 import { useState } from 'react';
+import { ChevronDownIcon } from 'lucide-react';
 import { createTaskAction } from '@/lib/actions';
 import { EDUCATION_LEVELS, GENDERS, PROVINCES, SALARY_LABELS, SALARY_STEPS } from '@/lib/filter-options';
+import { Button } from '@/components/ui/button';
+import { Checkbox } from '@/components/ui/checkbox';
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
+import {
+  Field,
+  FieldContent,
+  FieldDescription,
+  FieldError,
+  FieldGroup,
+  FieldLabel,
+  FieldLegend,
+  FieldSet,
+} from '@/components/ui/field';
+import { Input } from '@/components/ui/input';
+import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select';
+import { Separator } from '@/components/ui/separator';
+import { Spinner } from '@/components/ui/spinner';
+import { Textarea } from '@/components/ui/textarea';
 
 type ConnectorOption = { id: string; platform: string; label: string; scrape_limit: number; available: boolean; block_reason: string | null };
 
@@ -12,6 +31,7 @@ export function NewTaskForm({ connectors }: { connectors: ConnectorOption[] }) {
   const [scheduled, setScheduled] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const readyConnectors = connectors.filter((connector) => connector.available);
+  const noConnector = readyConnectors.length === 0;
 
   return (
     <form
@@ -27,183 +47,195 @@ export function NewTaskForm({ connectors }: { connectors: ConnectorOption[] }) {
         }
       }}
       id="new-task-form"
-      className="card p-5"
+      className="flex flex-col gap-6"
     >
-      <h2 className="text-base font-semibold">ค้นหา Resume จากรายละเอียดงาน</h2>
-      <p className="mt-1 text-sm text-subtle">ระบบจะวิเคราะห์ประเภทงาน ค้นหาตำแหน่งที่ตรงกัน และเก็บเฉพาะ Resume ไม่ซ้ำจนถึงจำนวนที่ต้องการ</p>
       <input type="hidden" name="mode" value="count" />
 
-      <div className="mt-5 rounded-lg border border-line/60 bg-black/[0.015] px-4 py-3">
-        <label className="label">รายละเอียดเนื้องาน</label>
-        <textarea
-          name="jobDescription"
-          required
-          rows={5}
-          placeholder="วางรายละเอียดหน้าที่ คุณสมบัติ พื้นที่ทำงาน และเงื่อนไขที่ต้องการได้เลย"
-          className="field"
-        />
-        <p className="mt-1 text-xs text-subtle">
-          ไม่ต้องคิดคำค้นเอง ระบบจะเลือกคำค้นและตำแหน่งใกล้เคียงใน Job Family เดียวกันให้
-        </p>
-      </div>
-
-      <div className="mt-4 md:w-72">
-        <label className="label">จำนวน Resume ที่ต้องการ</label>
-        <input name="targetCount" type="number" min={1} max={1000} defaultValue={15} required className="field" />
-        <p className="mt-1 text-xs text-subtle">ระบบจะนับคนเดิมเพียงครั้งเดียว และจะไม่ขึ้นว่าสำเร็จจนกว่าจะครบเป้า</p>
-      </div>
-
-      <details className="mt-4 rounded-lg border border-line/60 px-4 py-3">
-        <summary className="cursor-pointer text-sm font-medium text-ink">ตัวเลือกเพิ่มเติม</summary>
-        <div className="mt-4 grid gap-4 md:grid-cols-2">
-          <div>
-            <label className="label">ชื่องาน (ไม่บังคับ)</label>
-            <input name="name" placeholder="ระบบจะตั้งชื่อจากรายละเอียดงานให้อัตโนมัติ" className="field" />
-          </div>
-          <div>
-            <label className="label">แหล่งค้นหา</label>
-            <select name="connectorId" required className="field" defaultValue={readyConnectors[0]?.id ?? ''}>
-              {readyConnectors.length === 0 && <option value="">ยังไม่มีบัญชีที่พร้อมใช้งาน</option>}
-              {connectors.map((c) => (
-                <option key={c.id} value={c.id} disabled={!c.available}>
-                  {PLATFORM_LABEL[c.platform] ?? c.platform} — {c.label}{c.available ? ` (รอบละ ${c.scrape_limit})` : ` — ยังใช้ไม่ได้: ${c.block_reason}`}
-                </option>
-              ))}
-            </select>
-            {connectors.some((connector) => !connector.available) && <p className="mt-1 text-xs text-amber-700">บัญชีที่ยังใช้ไม่ได้ถูกปิดการเลือกไว้ เพื่อไม่ให้สั่งงานแล้วล้มซ้ำ</p>}
-          </div>
-        </div>
-
-        <div className="mt-4 grid gap-4 md:grid-cols-2">
-        <div>
-          <label className="label">ตำแหน่ง (ไม่บังคับ)</label>
-          <input name="position" placeholder="เช่น Developer" className="field" />
-        </div>
-        <div>
-          <label className="label">คำค้น (ไม่บังคับ)</label>
-          <input name="keyword" placeholder="เช่น React" className="field" />
-        </div>
-      </div>
-
-      {/* auto-expand to adjacent positions when short of target */}
-      <div className="mt-4 rounded-lg border border-line/60 bg-black/[0.015] px-4 py-3">
-        <label className="flex items-center gap-2 text-sm font-medium text-ink">
-          <input type="checkbox" name="expandAdjacent" defaultChecked className="h-4 w-4 rounded border-hairline" />
-          🧭 หาไม่ครบ → ขยายไปตำแหน่งใกล้เคียงอัตโนมัติ
-        </label>
-        <p className="mt-1 text-xs text-subtle">
-          ถ้าได้ผู้สมัครน้อยกว่าจำนวนที่ต้องการ ระบบจะให้ AI จัดกลุ่มงาน (Job Family) แล้วค้นตำแหน่งใกล้เคียงในกลุ่มเดียวกันเพิ่มให้จนครบ (ใช้ AI บริษัทฟรี ไม่ต้องตั้งคีย์)
-        </p>
-      </div>
-
-      {/* filters (province ก่อน · gender · salary · education · age) — กางให้เห็นตลอด */}
-      <div className="mt-4 rounded-lg border border-line/60 bg-black/[0.015] px-4 py-3">
-        <div className="text-sm font-medium text-ink">ตัวกรอง (เลือกได้ตามต้องการ — ไม่บังคับ)</div>
-        <div className="mt-4 grid gap-4 md:grid-cols-3">
-          <div>
-            <label className="label">ประเภทงาน / สาขาอาชีพ</label>
-            <input name="industry" placeholder="เช่น การขาย, IT Support" className="field" />
-          </div>
-
-          <div>
-            <label className="label">จังหวัด</label>
-            <input name="province" list="province-options" placeholder="เช่น กรุงเทพมหานคร" className="field" />
-            <datalist id="province-options">
-              {PROVINCES.map((p) => (
-                <option key={p} value={p} />
-              ))}
-            </datalist>
-          </div>
-
-          <div>
-            <label className="label">เพศ</label>
-            <select name="gender" className="field" defaultValue="ไม่ระบุ">
-              {GENDERS.map((g) => (
-                <option key={g} value={g}>
-                  {g}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          <div>
-            <label className="label">วุฒิการศึกษา (ขั้นต่ำ)</label>
-            <select name="education" className="field" defaultValue="ไม่ระบุ">
-              {EDUCATION_LEVELS.map((e) => (
-                <option key={e} value={e}>
-                  {e}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          <div>
-            <label className="label">เงินเดือน (บาท/เดือน)</label>
-            <div className="flex items-center gap-2">
-              <select name="salaryMin" className="field" defaultValue="">
-                <option value="">ต่ำสุด</option>
-                {SALARY_STEPS.map((s) => (
-                  <option key={s} value={s}>
-                    {SALARY_LABELS[s]}
-                  </option>
-                ))}
-              </select>
-              <span className="text-subtle">–</span>
-              <select name="salaryMax" className="field" defaultValue="">
-                <option value="">สูงสุด</option>
-                {SALARY_STEPS.map((s) => (
-                  <option key={s} value={s}>
-                    {SALARY_LABELS[s]}
-                  </option>
-                ))}
-              </select>
-            </div>
-          </div>
-
-          <div>
-            <label className="label">อายุ (ปี)</label>
-            <div className="flex items-center gap-2">
-              <input name="ageMin" type="number" min={15} max={70} placeholder="ต่ำสุด" className="field" />
-              <span className="text-subtle">–</span>
-              <input name="ageMax" type="number" min={15} max={70} placeholder="สูงสุด" className="field" />
-            </div>
-          </div>
-        </div>
-        <p className="mt-3 text-xs text-subtle">
-          ตัวกรองเหล่านี้ใช้ได้กับทั้ง JobBKK และ JobThai · ระบบเริ่มจาก Resume ที่เพิ่งอัปเดตและอยู่ลำดับต้นของแพลตฟอร์มก่อน · อายุจะตรวจซ้ำจาก Resume จริงก่อนนับเข้ายอด
-        </p>
-      </div>
-
-      {/* schedule */}
-      <div className="mt-4">
-        <label className="flex items-center gap-2 text-sm">
-          <input
-            type="checkbox"
-            checked={scheduled}
-            onChange={(e) => setScheduled(e.target.checked)}
-            className="h-4 w-4 rounded border-hairline"
+      <FieldGroup>
+        <Field>
+          <FieldLabel htmlFor="nt-job-description">รายละเอียดเนื้องาน</FieldLabel>
+          <Textarea
+            id="nt-job-description"
+            name="jobDescription"
+            required
+            rows={5}
+            placeholder="วางหน้าที่ คุณสมบัติ พื้นที่ทำงาน และเงื่อนไขที่ต้องการ"
+            className="min-h-32 leading-relaxed"
           />
-          ตั้งเวลาทำงานซ้ำ
-        </label>
-        {scheduled && (
-          <select name="schedule" className="field mt-2 md:w-72" defaultValue="@hourly">
-            <option value="every:1800">ทุก 30 นาที</option>
-            <option value="@hourly">ทุกชั่วโมง</option>
-            <option value="@daily">ทุกวัน</option>
-          </select>
-        )}
-      </div>
-      </details>
+          <FieldDescription>ไม่ต้องคิดคำค้นเอง ระบบจะเลือกคำค้นและตำแหน่งใกล้เคียงใน Job Family เดียวกันให้</FieldDescription>
+        </Field>
 
-      <div className="mt-5 flex items-center gap-3">
-        <button type="submit" name="runNow" value="on" disabled={submitting || readyConnectors.length === 0} className="btn-primary disabled:opacity-50">
-          {submitting ? 'กำลังบันทึก…' : 'สร้าง & เริ่มทันที'}
-        </button>
-        <button type="submit" disabled={submitting || readyConnectors.length === 0} className="btn-ghost disabled:opacity-50">
-          บันทึกไว้เฉยๆ
-        </button>
+        <Field className="md:max-w-72">
+          <FieldLabel htmlFor="nt-target">จำนวน Resume ที่ต้องการ</FieldLabel>
+          <Input id="nt-target" name="targetCount" type="number" min={1} max={1000} defaultValue={15} required />
+          <FieldDescription>คนเดิมนับครั้งเดียว งานจะขึ้นว่าสำเร็จเมื่อครบเป้าเท่านั้น</FieldDescription>
+        </Field>
+      </FieldGroup>
+
+      <Collapsible>
+        <CollapsibleTrigger asChild>
+          <Button type="button" variant="ghost" size="sm" className="group/trigger -ml-2.5">
+            ตัวเลือกเพิ่มเติม
+            <ChevronDownIcon data-icon="inline-end" className="transition-transform group-data-[state=open]/trigger:rotate-180" />
+          </Button>
+        </CollapsibleTrigger>
+        {/* forceMount: ช่องในนี้ (เช่น connectorId) ต้องส่งไปกับฟอร์มแม้ตอนพับอยู่ */}
+        <CollapsibleContent forceMount className="data-[state=closed]:hidden">
+          <FieldGroup className="mt-4">
+            <div className="grid gap-5 md:grid-cols-2">
+              <Field>
+                <FieldLabel htmlFor="nt-name">ชื่องาน (ไม่บังคับ)</FieldLabel>
+                <Input id="nt-name" name="name" placeholder="เว้นว่างได้ ระบบตั้งชื่อจากรายละเอียดงานให้" />
+              </Field>
+              <Field>
+                <FieldLabel htmlFor="nt-connector">แหล่งค้นหา</FieldLabel>
+                <NativeSelect id="nt-connector" name="connectorId" required className="w-full" defaultValue={readyConnectors[0]?.id ?? ''}>
+                  {noConnector && <NativeSelectOption value="">ยังไม่มีบัญชีที่พร้อมใช้</NativeSelectOption>}
+                  {connectors.map((c) => (
+                    <NativeSelectOption key={c.id} value={c.id} disabled={!c.available}>
+                      {PLATFORM_LABEL[c.platform] ?? c.platform} · {c.label}{c.available ? ` (รอบละ ${c.scrape_limit})` : ` (ยังใช้ไม่ได้: ${c.block_reason})`}
+                    </NativeSelectOption>
+                  ))}
+                </NativeSelect>
+                {connectors.some((connector) => !connector.available) && (
+                  <FieldDescription>บัญชีที่ยังใช้ไม่ได้จะเลือกไม่ได้ กันไม่ให้สั่งงานแล้วล้มซ้ำ</FieldDescription>
+                )}
+              </Field>
+            </div>
+
+            <div className="grid gap-5 md:grid-cols-2">
+              <Field>
+                <FieldLabel htmlFor="nt-position">ตำแหน่ง (ไม่บังคับ)</FieldLabel>
+                <Input id="nt-position" name="position" placeholder="เช่น Developer" />
+              </Field>
+              <Field>
+                <FieldLabel htmlFor="nt-keyword">คำค้น (ไม่บังคับ)</FieldLabel>
+                <Input id="nt-keyword" name="keyword" placeholder="เช่น React" />
+              </Field>
+            </div>
+
+            {/* auto-expand to adjacent positions when short of target */}
+            <Field orientation="horizontal">
+              <Checkbox id="nt-expand" name="expandAdjacent" defaultChecked />
+              <FieldContent>
+                <FieldLabel htmlFor="nt-expand">ถ้าหาไม่ครบ ให้ขยายไปตำแหน่งใกล้เคียง</FieldLabel>
+                <FieldDescription>
+                  ถ้าได้ผู้สมัครน้อยกว่าเป้า ระบบจะให้ AI จัดกลุ่มงาน (Job Family) แล้วค้นตำแหน่งใกล้เคียงในกลุ่มเดียวกันจนครบ
+                  ใช้ AI ของบริษัท ไม่มีค่าใช้จ่าย ไม่ต้องตั้งคีย์
+                </FieldDescription>
+              </FieldContent>
+            </Field>
+
+            <Separator />
+
+            {/* filters (province ก่อน · gender · salary · education · age) */}
+            <FieldSet>
+              <FieldLegend variant="label">ตัวกรอง (ไม่บังคับ)</FieldLegend>
+              <FieldDescription>
+                ใช้ได้ทั้ง JobBKK และ JobThai ระบบเริ่มจาก Resume ที่เพิ่งอัปเดตและอยู่ลำดับต้นของแพลตฟอร์มก่อน
+                ส่วนอายุจะตรวจซ้ำจาก Resume จริงก่อนนับเข้ายอด
+              </FieldDescription>
+              <div className="grid gap-5 md:grid-cols-3">
+                <Field>
+                  <FieldLabel htmlFor="nt-industry">ประเภทงาน / สาขาอาชีพ</FieldLabel>
+                  <Input id="nt-industry" name="industry" placeholder="เช่น การขาย, IT Support" />
+                </Field>
+
+                <Field>
+                  <FieldLabel htmlFor="nt-province">จังหวัด</FieldLabel>
+                  <Input id="nt-province" name="province" list="province-options" placeholder="เช่น กรุงเทพมหานคร" />
+                  <datalist id="province-options">
+                    {PROVINCES.map((p) => (
+                      <option key={p} value={p} />
+                    ))}
+                  </datalist>
+                </Field>
+
+                <Field>
+                  <FieldLabel htmlFor="nt-gender">เพศ</FieldLabel>
+                  <NativeSelect id="nt-gender" name="gender" className="w-full" defaultValue="ไม่ระบุ">
+                    {GENDERS.map((g) => (
+                      <NativeSelectOption key={g} value={g}>{g}</NativeSelectOption>
+                    ))}
+                  </NativeSelect>
+                </Field>
+
+                <Field>
+                  <FieldLabel htmlFor="nt-education">วุฒิการศึกษา (ขั้นต่ำ)</FieldLabel>
+                  <NativeSelect id="nt-education" name="education" className="w-full" defaultValue="ไม่ระบุ">
+                    {EDUCATION_LEVELS.map((e) => (
+                      <NativeSelectOption key={e} value={e}>{e}</NativeSelectOption>
+                    ))}
+                  </NativeSelect>
+                </Field>
+
+                <Field>
+                  <FieldLabel htmlFor="nt-salary-min">เงินเดือน (บาท/เดือน)</FieldLabel>
+                  <div className="flex items-center gap-2">
+                    <NativeSelect id="nt-salary-min" name="salaryMin" className="w-full" defaultValue="" aria-label="เงินเดือนต่ำสุด">
+                      <NativeSelectOption value="">ต่ำสุด</NativeSelectOption>
+                      {SALARY_STEPS.map((s) => (
+                        <NativeSelectOption key={s} value={s}>{SALARY_LABELS[s]}</NativeSelectOption>
+                      ))}
+                    </NativeSelect>
+                    <span className="text-muted-foreground">ถึง</span>
+                    <NativeSelect name="salaryMax" className="w-full" defaultValue="" aria-label="เงินเดือนสูงสุด">
+                      <NativeSelectOption value="">สูงสุด</NativeSelectOption>
+                      {SALARY_STEPS.map((s) => (
+                        <NativeSelectOption key={s} value={s}>{SALARY_LABELS[s]}</NativeSelectOption>
+                      ))}
+                    </NativeSelect>
+                  </div>
+                </Field>
+
+                <Field>
+                  <FieldLabel htmlFor="nt-age-min">อายุ (ปี)</FieldLabel>
+                  <div className="flex items-center gap-2">
+                    <Input id="nt-age-min" name="ageMin" type="number" min={15} max={70} placeholder="ต่ำสุด" aria-label="อายุต่ำสุด" />
+                    <span className="text-muted-foreground">ถึง</span>
+                    <Input name="ageMax" type="number" min={15} max={70} placeholder="สูงสุด" aria-label="อายุสูงสุด" />
+                  </div>
+                </Field>
+              </div>
+            </FieldSet>
+
+            <Separator />
+
+            {/* schedule */}
+            <Field orientation="horizontal">
+              <Checkbox
+                id="nt-scheduled"
+                checked={scheduled}
+                onCheckedChange={(checked) => setScheduled(checked === true)}
+              />
+              <FieldLabel htmlFor="nt-scheduled">ตั้งเวลาทำงานซ้ำ</FieldLabel>
+            </Field>
+            {scheduled && (
+              <Field className="md:max-w-72">
+                <FieldLabel htmlFor="nt-schedule" className="sr-only">รอบการทำงานซ้ำ</FieldLabel>
+                <NativeSelect id="nt-schedule" name="schedule" className="w-full" defaultValue="@hourly">
+                  <NativeSelectOption value="every:1800">ทุก 30 นาที</NativeSelectOption>
+                  <NativeSelectOption value="@hourly">ทุกชั่วโมง</NativeSelectOption>
+                  <NativeSelectOption value="@daily">ทุกวัน</NativeSelectOption>
+                </NativeSelect>
+              </Field>
+            )}
+          </FieldGroup>
+        </CollapsibleContent>
+      </Collapsible>
+
+      <div className="flex flex-col gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <Button type="submit" name="runNow" value="on" disabled={submitting || noConnector}>
+            {submitting && <Spinner data-icon="inline-start" />}
+            {submitting ? 'กำลังบันทึก' : 'สร้างและเริ่มเลย'}
+          </Button>
+          <Button type="submit" variant="outline" disabled={submitting || noConnector}>
+            บันทึกไว้ก่อน
+          </Button>
+        </div>
+        {noConnector && <FieldError>ยังเริ่มค้นหาไม่ได้ ตรวจ Connector ที่ตั้งไว้ก่อน</FieldError>}
       </div>
-      {readyConnectors.length === 0 && <p className="mt-2 text-xs text-red-600">ยังเริ่มค้นหาไม่ได้ — ตรวจ Connector ที่ตั้งค่าไว้ก่อน</p>}
     </form>
   );
 }

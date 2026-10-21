@@ -3,10 +3,16 @@
 import { useEffect, useState } from 'react';
 import type { ProviderLimitRow } from '@/lib/repo';
 import { setProviderCapAction } from '@/lib/actions';
+import { cn } from '@/lib/utils';
+import { Button } from '@/components/ui/button';
+import { Card, CardAction, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { FieldLabel } from '@/components/ui/field';
+import { Input } from '@/components/ui/input';
+import { Progress } from '@/components/ui/progress';
 
-const PLATFORM: Record<string, { label: string; avatar: string }> = {
-  jobbkk: { label: 'JobBKK', avatar: 'bg-blue-500' },
-  jobthai: { label: 'JobThai', avatar: 'bg-orange-500' },
+const PLATFORM: Record<string, { label: string }> = {
+  jobbkk: { label: 'JobBKK' },
+  jobthai: { label: 'JobThai' },
 };
 
 export function ProviderLimitsPanel({ initialLimits }: { initialLimits: ProviderLimitRow[] }) {
@@ -33,49 +39,45 @@ export function ProviderLimitsPanel({ initialLimits }: { initialLimits: Provider
   }, []);
 
   if (limits.length === 0) {
-    return <p className="text-sm text-subtle">ยังไม่มีข้อมูลโควต้า</p>;
+    return <p className="text-sm text-muted-foreground">ยังไม่มีข้อมูลโควต้า</p>;
   }
 
   return (
     <div className="grid gap-4 sm:grid-cols-2">
       {limits.map((pl) => {
-        const meta = PLATFORM[pl.platform] ?? { label: pl.platform, avatar: 'bg-gray-400' };
+        const meta = PLATFORM[pl.platform] ?? { label: pl.platform };
         const pct = pl.daily_cap > 0 ? Math.min(100, Math.round((pl.used_today / pl.daily_cap) * 100)) : 0;
         const hot = pct >= 100;
+        const inputId = `provider-cap-${pl.platform}`;
         return (
-          <div key={pl.platform} className="card p-5">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2.5">
-                <span className={`h-2.5 w-2.5 rounded-full ${meta.avatar}`} />
-                <span className="font-medium">{meta.label}</span>
-              </div>
-              <span className="text-[13px] tabular-nums text-subtle">
+          <Card key={pl.platform}>
+            <CardHeader>
+              <CardTitle>{meta.label}</CardTitle>
+              <CardAction className="text-sm tabular-nums text-muted-foreground">
                 วันนี้{' '}
-                <span className={`font-semibold ${hot ? 'text-red-600' : 'text-ink'}`}>{pl.used_today}</span> /{' '}
+                <span className={cn('font-semibold', hot ? 'text-destructive' : 'text-foreground')}>{pl.used_today}</span> /{' '}
                 {pl.daily_cap}
-              </span>
-            </div>
-            <div className="my-3 h-2 w-full overflow-hidden rounded-full bg-black/[0.06]">
-              <div
-                className={`h-full rounded-full transition-all duration-500 ${hot ? 'bg-red-500' : 'bg-accent'}`}
-                style={{ width: `${pct}%` }}
-              />
-            </div>
-            <form action={setProviderCapAction} className="flex items-center gap-2">
-              <input type="hidden" name="platform" value={pl.platform} />
-              <label className="text-xs text-subtle">ปรับเพดาน</label>
-              <input
-                key={`${pl.platform}-${pl.daily_cap}-${pl.updated_at}`}
-                name="dailyCap"
-                type="number"
-                min={0}
-                max={5000}
-                defaultValue={pl.daily_cap}
-                className="field w-24 py-1.5"
-              />
-              <button className="btn-secondary btn-sm ml-auto">บันทึก</button>
-            </form>
-          </div>
+              </CardAction>
+            </CardHeader>
+            <CardContent className="flex flex-col gap-4">
+              <Progress value={pct} aria-label={`ใช้ไป ${pct}% ของเพดาน ${meta.label}`} />
+              <form action={setProviderCapAction} className="flex items-center gap-2">
+                <input type="hidden" name="platform" value={pl.platform} />
+                <FieldLabel htmlFor={inputId} className="text-muted-foreground">ปรับเพดาน</FieldLabel>
+                <Input
+                  key={`${pl.platform}-${pl.daily_cap}-${pl.updated_at}`}
+                  id={inputId}
+                  name="dailyCap"
+                  type="number"
+                  min={0}
+                  max={5000}
+                  defaultValue={pl.daily_cap}
+                  className="w-24"
+                />
+                <Button variant="secondary" size="sm" type="submit" className="ml-auto">บันทึก</Button>
+              </form>
+            </CardContent>
+          </Card>
         );
       })}
     </div>

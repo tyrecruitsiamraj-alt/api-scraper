@@ -6,6 +6,18 @@ import type { TaskRow } from '@/lib/repo';
 import { ScrapingStatusBar } from '@/components/ScrapingStatusBar';
 import { deleteTaskAction, expandAdjacentTaskAction, queueTaskAction, toggleTaskAction, updateTaskCriteriaAction } from '@/lib/actions';
 import { humanizeOperatorError, operatorJobTitle } from '@/lib/operator-copy';
+import { cn } from '@/lib/utils';
+import { CheckIcon, ChevronDownIcon, CircleAlertIcon, CircleIcon, PencilIcon, PlayIcon, PlusIcon, Trash2Icon, XIcon } from 'lucide-react';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
+import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from '@/components/ui/empty';
+import { Field, FieldDescription, FieldGroup, FieldLabel } from '@/components/ui/field';
+import { Input } from '@/components/ui/input';
+import { Progress } from '@/components/ui/progress';
+import { Spinner } from '@/components/ui/spinner';
 
 type LiveStatus = {
   id: string;
@@ -37,13 +49,13 @@ const PHASE_DONE_LABEL: Record<string, string> = {
   ocr: 'อ่านเอกสารแนบ (OCR) เสร็จแล้ว',
   enrich: 'เติมข้อมูล Candidate เรียบร้อยแล้ว',
 };
-const STATUS: Record<string, { label: string; cls: string }> = {
-  idle: { label: 'พร้อม', cls: 'bg-black/5 text-ink' },
-  queued: { label: 'รอคิว', cls: 'bg-amber-50 text-amber-700' },
-  running: { label: 'กำลังทำงาน', cls: 'bg-blue-50 text-blue-700' },
-  done: { label: 'เสร็จ', cls: 'bg-green-50 text-green-700' },
-  partial: { label: 'ยังไม่ครบเป้า', cls: 'bg-amber-50 text-amber-700' },
-  error: { label: 'ผิดพลาด', cls: 'bg-red-50 text-red-700' },
+const STATUS: Record<string, { label: string; variant: 'secondary' | 'outline' | 'destructive' }> = {
+  idle: { label: 'พร้อม', variant: 'outline' },
+  queued: { label: 'รอคิว', variant: 'outline' },
+  running: { label: 'กำลังทำงาน', variant: 'secondary' },
+  done: { label: 'เสร็จ', variant: 'secondary' },
+  partial: { label: 'ยังไม่ครบเป้า', variant: 'outline' },
+  error: { label: 'ผิดพลาด', variant: 'destructive' },
 };
 
 function scheduleLabel(cron: string | null): string {
@@ -73,26 +85,27 @@ function filterChips(criteria: Record<string, unknown>): string[] {
   if (val('education')) chips.push(`วุฒิ: ${val('education')}`);
   const smin = val('salaryMin');
   const smax = val('salaryMax');
-  if (smin || smax) chips.push(`เงินเดือน: ${fmtBaht(smin) || '–'} - ${fmtBaht(smax) || '–'}`);
+  if (smin || smax) chips.push(smin && smax ? `เงินเดือน: ${fmtBaht(smin)} ถึง ${fmtBaht(smax)}` : smin ? `เงินเดือน: ${fmtBaht(smin)} ขึ้นไป` : `เงินเดือน: ไม่เกิน ${fmtBaht(smax)}`);
   const amin = val('ageMin');
   const amax = val('ageMax');
-  if (amin || amax) chips.push(`อายุ: ${amin || '–'} - ${amax || '–'}`);
+  if (amin || amax) chips.push(amin && amax ? `อายุ: ${amin} ถึง ${amax} ปี` : amin ? `อายุ: ${amin} ปีขึ้นไป` : `อายุ: ไม่เกิน ${amax} ปี`);
   return chips;
 }
 
-function ExpandBtn({ taskId, position, tone }: { taskId: string; position: string; tone: 'yellow' | 'red' }) {
-  const cls =
-    tone === 'yellow' ? 'bg-amber-50 text-amber-700 hover:bg-amber-100' : 'bg-red-50 text-red-700 hover:bg-red-100';
+function ExpandBtn({ taskId, position }: { taskId: string; position: string }) {
   return (
-    <form action={expandAdjacentTaskAction} className="inline">
+    <form action={expandAdjacentTaskAction}>
       <input type="hidden" name="id" value={taskId} />
       <input type="hidden" name="position" value={position} />
-      <button className={`pill ${cls}`}>{tone === 'yellow' ? '🟡' : '🔴'} {position} +</button>
+      <Button variant="outline" size="xs">
+        <PlusIcon data-icon="inline-start" />
+        {position}
+      </Button>
     </form>
   );
 }
 
-/** Shows the AI Job-Family plan: what was auto-expanded (🟢) and what the user can add (🟡🔴). */
+/** แผน Job Family จาก AI: ตำแหน่งที่ขยายไปแล้ว (ใกล้มาก) และที่เสนอให้กดค้นเพิ่ม (ใกล้ปานกลาง/ใกล้น้อย) */
 function AdjacentPlanPanel({ task }: { task: TaskRow }) {
   const plan = task.adjacent_plan;
   if (!plan) return null;
@@ -100,29 +113,34 @@ function AdjacentPlanPanel({ task }: { task: TaskRow }) {
   const yellow = plan.suggested?.yellow ?? [];
   const red = plan.suggested?.red ?? [];
   return (
-    <div className="mt-3 rounded-lg border border-line/60 bg-black/[0.015] px-3 py-2.5 text-xs">
-      <div className="font-medium text-ink">
-        🧭 {plan.family_label ?? plan.family ?? 'Job Family'}
+    <div className="flex flex-col gap-2.5 rounded-lg bg-muted/50 p-3 text-sm leading-relaxed">
+      <p className="font-medium">
+        {String(plan.family_label ?? plan.family ?? 'Job Family').replace(/^\p{Extended_Pictographic}\uFE0F?\s*/u, '')}
         {typeof plan.filled === 'number' && plan.target ? (
-          <span className="ml-1 font-normal text-subtle">· เติมได้ {plan.filled}/{plan.target}</span>
+          <span className="ml-1 font-normal text-muted-foreground">· เติมได้ {plan.filled}/{plan.target}</span>
         ) : null}
-      </div>
+      </p>
       {green.length > 0 && (
-        <div className="mt-1.5 flex flex-wrap items-center gap-1">
-          <span className="text-subtle">ขยายไปแล้ว 🟢</span>
+        <div className="flex flex-wrap items-center gap-1.5">
+          <span className="text-muted-foreground">ขยายไปแล้ว (ใกล้มาก)</span>
           {green.map((g) => (
-            <span key={g} className="pill bg-green-50 text-green-700">{g}</span>
+            <Badge key={g} variant="secondary">{g}</Badge>
           ))}
         </div>
       )}
-      {(yellow.length > 0 || red.length > 0) && (
-        <div className="mt-1.5 flex flex-wrap items-center gap-1">
-          <span className="text-subtle">เสนอเพิ่ม (กดเพื่อค้นตำแหน่งนั้น):</span>
-          {yellow.map((p) => <ExpandBtn key={p} taskId={task.id} position={p} tone="yellow" />)}
-          {red.map((p) => <ExpandBtn key={p} taskId={task.id} position={p} tone="red" />)}
+      {yellow.length > 0 && (
+        <div className="flex flex-wrap items-center gap-1.5">
+          <span className="text-muted-foreground">ใกล้ปานกลาง กดเพื่อค้นเพิ่ม</span>
+          {yellow.map((p) => <ExpandBtn key={p} taskId={task.id} position={p} />)}
         </div>
       )}
-      {plan.reason && <p className="mt-1.5 text-subtle/80">{plan.reason}</p>}
+      {red.length > 0 && (
+        <div className="flex flex-wrap items-center gap-1.5">
+          <span className="text-muted-foreground">ใกล้น้อย กดเพื่อค้นเพิ่ม</span>
+          {red.map((p) => <ExpandBtn key={p} taskId={task.id} position={p} />)}
+        </div>
+      )}
+      {plan.reason && <p className="text-muted-foreground">{plan.reason}</p>}
     </div>
   );
 }
@@ -172,7 +190,14 @@ export function TaskList({ initialTasks }: { initialTasks: TaskRow[] }) {
   }, []);
 
   if (initialTasks.length === 0) {
-    return <div className="card px-5 py-16 text-center text-subtle">ยังไม่มีงาน Scraping — สร้างงานใหม่ด้านบน</div>;
+    return (
+      <Empty className="border">
+        <EmptyHeader>
+          <EmptyTitle>ยังไม่มีงานค้นหา</EmptyTitle>
+          <EmptyDescription>สร้างงานใหม่จากฟอร์มด้านบน</EmptyDescription>
+        </EmptyHeader>
+      </Empty>
+    );
   }
 
   const activeTask = initialTasks.find((t) => {
@@ -182,9 +207,9 @@ export function TaskList({ initialTasks }: { initialTasks: TaskRow[] }) {
   const activeLive = activeTask ? live[activeTask.id] : undefined;
 
   return (
-    <div className="space-y-4">
+    <div className="flex flex-col gap-4">
       {activeTask && (
-        <div className="sticky top-[4.25rem] z-20 sm:top-16">
+        <div className="sticky top-17 z-20 sm:top-16">
           <ScrapingStatusBar
             taskName={activeTask.name}
             status={activeLive?.status ?? activeTask.status}
@@ -198,7 +223,7 @@ export function TaskList({ initialTasks }: { initialTasks: TaskRow[] }) {
         </div>
       )}
 
-      <div className="space-y-3">
+      <div className="flex flex-col gap-3">
       {initialTasks.map((t) => {
         const s = live[t.id];
         const status = s?.status ?? t.status;
@@ -218,186 +243,231 @@ export function TaskList({ initialTasks }: { initialTasks: TaskRow[] }) {
         const alreadyComplete = status === 'done' && target > 0 && qualified >= target;
         const taskTitle = operatorJobTitle({ position: t.criteria?.position || t.criteria?.keyword, title: t.name, requestNo: t.source_request_no });
         const humanError = humanizeOperatorError(error);
+        const runDisabled = busy || !t.enabled || alreadyComplete || !t.connector_available;
+        const chips = filterChips(t.criteria);
 
         return (
-          <div key={t.id} className="card p-4">
-            <div className="flex flex-wrap items-start justify-between gap-3">
-              <div className="min-w-0">
-                <div className="flex items-center gap-2">
-                  <span className="font-medium text-ink">{taskTitle}</span>
-                  <span className={`pill ${meta.cls}`}>{meta.label}</span>
-                  {!t.enabled && <span className="pill bg-black/5 text-subtle">ปิดอยู่</span>}
+          <Card key={t.id}>
+            <CardHeader>
+              <CardTitle className="flex flex-wrap items-center gap-2">
+                {taskTitle}
+                <Badge variant={meta.variant}>{meta.label}</Badge>
+                {!t.enabled && <Badge variant="outline">ปิดอยู่</Badge>}
+              </CardTitle>
+              <CardDescription className="leading-relaxed">
+                {PLATFORM_LABEL[t.platform] ?? t.platform} · {t.connector_label} ·{' '}
+                {t.mode === 'count' ? `จำนวน ${t.target_count ?? '-'}` : `ตั้งแต่ ${t.updated_since ?? '-'}`} ·{' '}
+                {scheduleLabel(t.schedule_cron)}
+              </CardDescription>
+            </CardHeader>
+
+            <CardContent className="flex flex-col gap-3 leading-relaxed">
+              {chips.length > 0 && (
+                <p className="text-muted-foreground">{chips.join(' · ')}</p>
+              )}
+
+              {assessed > 0 && (
+                <div className="flex flex-wrap gap-1.5">
+                  <Badge variant="secondary">ผ่าน {qualified}</Badge>
+                  <Badge variant="outline">ต้องตรวจเพิ่ม {needsReview}</Badge>
+                  <Badge variant="destructive">ไม่ผ่าน {rejected}</Badge>
                 </div>
-                <div className="mt-1 text-xs text-subtle">
-                  {PLATFORM_LABEL[t.platform] ?? t.platform} · {t.connector_label} ·{' '}
-                  {t.mode === 'count' ? `จำนวน ${t.target_count ?? '-'}` : `ตั้งแต่ ${t.updated_since ?? '-'}`} ·{' '}
-                  {scheduleLabel(t.schedule_cron)}
+              )}
+
+              {alreadyComplete && (
+                <p className="text-muted-foreground">ได้ผู้สมัครผ่านเกณฑ์ครบ {qualified}/{target} แล้ว ถ้าจะค้นเพิ่ม ให้สร้างงานใหม่หรือเพิ่มเป้า</p>
+              )}
+
+              {!t.connector_available && t.connector_block_reason && (
+                <Alert>
+                  <CircleAlertIcon />
+                  <AlertTitle>ยังเริ่มงานนี้ไม่ได้</AlertTitle>
+                  <AlertDescription>
+                    {t.connector_block_reason}{' '}
+                    <Link href="/settings/connectors">ไปตรวจ Connector</Link>
+                  </AlertDescription>
+                </Alert>
+              )}
+
+              {/* ขั้นตอน: ดึงข้อมูล, OCR, เติมข้อมูล, เสร็จ */}
+              {(status !== 'idle' || got > 0) && (
+                <div className="flex flex-col gap-1.5">
+                  {status === 'queued' && <p className="text-muted-foreground">อยู่ในคิว รอเริ่มทำงาน</p>}
+                  {status === 'running' && phase === 'login' && (
+                    <p className="text-muted-foreground">กำลัง login เข้าแพลตฟอร์ม (เปิด browser)</p>
+                  )}
+
+                  <ol className="flex flex-col gap-1.5">
+                    {PHASES.map((p, idx) => {
+                      let state: 'done' | 'active' | 'pending' | 'error';
+                      if (status === 'done' || status === 'partial') state = 'done';
+                      else if (status === 'error') state = phaseIdx > idx ? 'done' : phaseIdx === idx ? 'error' : 'pending';
+                      else if (phaseIdx < 0) state = 'pending';
+                      else state = phaseIdx > idx ? 'done' : phaseIdx === idx ? 'active' : 'pending';
+
+                      return (
+                        <li
+                          key={p}
+                          className={cn(
+                            'flex items-center gap-2',
+                            state === 'active' && 'font-medium text-foreground',
+                            state === 'done' && 'text-muted-foreground',
+                            state === 'error' && 'text-destructive',
+                            state === 'pending' && 'text-muted-foreground opacity-60',
+                          )}
+                        >
+                          {state === 'done' ? (
+                            <CheckIcon className="size-3.5 shrink-0" aria-hidden="true" />
+                          ) : state === 'error' ? (
+                            <XIcon className="size-3.5 shrink-0" aria-hidden="true" />
+                          ) : state === 'active' ? (
+                            <Spinner className="size-3.5 shrink-0" />
+                          ) : (
+                            <CircleIcon className="size-3.5 shrink-0" aria-hidden="true" />
+                          )}
+                          <span>
+                            {state === 'done' ? PHASE_DONE_LABEL[p] : PHASE_LABEL[p]}
+                            {state === 'active' && (target > 0
+                              ? p === 'scraping'
+                                ? <span className="ml-1 font-normal tabular-nums">· ตรวจแล้ว {assessed} โปรไฟล์ · ผ่านเกณฑ์ {qualified}/{target}</span>
+                                : <span className="ml-1 font-normal tabular-nums">· {got}/{target}</span>
+                              : p === 'ocr' ? ' · ไม่มีเอกสารแนบ' : null)}
+                          </span>
+                        </li>
+                      );
+                    })}
+                  </ol>
+
+                  {busy && phaseIdx >= 0 && (
+                    <Progress value={target > 0 ? pct : 100} className="mt-1" aria-label="ความคืบหน้าขั้นตอนนี้" />
+                  )}
+
+                  {status === 'done' && (
+                    <p className="mt-1 flex items-center gap-2 font-medium">
+                      <CheckIcon className="size-3.5 shrink-0" aria-hidden="true" />
+                      ได้ Resume ผ่านเกณฑ์ครบ {qualified}/{target}
+                    </p>
+                  )}
+                  {status === 'partial' && (
+                    <p className="mt-1 font-medium">
+                      ได้ Resume ผ่านเกณฑ์ไม่ซ้ำ {qualified}/{target} กด “รันตอนนี้” เพื่อค้นต่อ
+                    </p>
+                  )}
                 </div>
-                  {assessed > 0 && (
-                  <div className="mt-2 flex flex-wrap gap-1.5 text-[11px]">
-                    <span className="pill bg-green-50 text-green-700">ผ่าน {qualified}</span>
-                    <span className="pill bg-amber-50 text-amber-700">ต้องตรวจเพิ่ม {needsReview}</span>
-                    <span className="pill bg-red-50 text-red-700">ไม่ผ่าน {rejected}</span>
-                  </div>
-                )}
-                {filterChips(t.criteria).length > 0 && (
-                  <div className="mt-2 flex flex-wrap gap-1.5">
-                    {filterChips(t.criteria).map((chip) => (
-                      <span key={chip} className="pill bg-black/5 text-[11px] text-subtle">
-                        {chip}
-                      </span>
-                    ))}
-                  </div>
-                )}
-                </div>
+              )}
 
-              <div className="flex items-center gap-2">
-                <Link href={`/scraping/${t.id}`} className="btn-ghost px-3 py-2 text-sm">เปิดงาน</Link>
-                <form action={queueTaskAction}>
-                  <input type="hidden" name="id" value={t.id} />
-                  <button className="btn-ghost px-4 py-2 text-sm disabled:opacity-40" disabled={busy || !t.enabled || alreadyComplete || !t.connector_available} title={t.connector_block_reason || undefined}>
-                    {alreadyComplete ? '✓ ครบเป้าแล้ว' : '▶ รันตอนนี้'}
-                  </button>
-                </form>
-                <form action={toggleTaskAction}>
-                  <input type="hidden" name="id" value={t.id} />
-                  <input type="hidden" name="enabled" value={(!t.enabled).toString()} />
-                  <button className="btn-ghost px-4 py-2 text-sm">{t.enabled ? 'ปิด' : 'เปิด'}</button>
-                </form>
-                <form action={deleteTaskAction}>
-                  <input type="hidden" name="id" value={t.id} />
-                  <button className="btn-ghost px-3 py-2 text-sm text-red-600 hover:bg-red-50">ลบ</button>
-                </form>
-              </div>
-            </div>
+              {status === 'done' && got === 0 && (
+                <Alert>
+                  <CircleAlertIcon />
+                  <AlertTitle>รอบนี้ไม่พบผลลัพธ์</AlertTitle>
+                  <AlertDescription>
+                    ส่วนใหญ่เป็นเพราะใส่ตัวกรองหลายอย่างพร้อมกัน (ตำแหน่ง จังหวัด วุฒิ อายุ) หรือคำค้นตำแหน่งไม่ตรงกับคำที่คนเขียนในเรซูเม่
+                    ลองเอาอายุหรือวุฒิออก แล้วกด “รันตอนนี้” อีกครั้ง
+                  </AlertDescription>
+                </Alert>
+              )}
+              {status === 'partial' && humanError && (
+                <p className="text-muted-foreground">{humanError.detail} · {humanError.next}</p>
+              )}
+              {status === 'error' && humanError && (
+                <Alert variant="destructive">
+                  <CircleAlertIcon />
+                  <AlertTitle>{humanError.title}</AlertTitle>
+                  <AlertDescription className="flex flex-col gap-1.5">
+                    <p>{humanError.detail}</p>
+                    <p className="font-medium">ทำต่อ: {humanError.next}</p>
+                    {humanError.technical && (
+                      <p className="rounded-md bg-muted px-2 py-1.5 font-mono text-xs wrap-break-word text-muted-foreground">
+                        สาเหตุระบบ: {humanError.technical}
+                      </p>
+                    )}
+                  </AlertDescription>
+                </Alert>
+              )}
 
-            {alreadyComplete && (
-              <p className="mt-2 text-xs text-subtle">งานนี้มีผู้สมัครผ่านครบ {qualified}/{target} แล้ว หากต้องการค้นเพิ่มให้สร้างงานใหม่หรือเพิ่มจำนวนเป้าหมาย</p>
-            )}
+              {/* แก้เกณฑ์การค้นหลังสร้าง — ปิดตอนกำลังวิ่ง (จะมีผลรอบถัดไปที่กดรัน) */}
+              {!busy && (
+                <Collapsible>
+                  <CollapsibleTrigger asChild>
+                    <Button variant="ghost" size="sm" className="group/trigger -ml-2.5 self-start">
+                      <PencilIcon data-icon="inline-start" />
+                      แก้เกณฑ์การค้น
+                      <ChevronDownIcon data-icon="inline-end" className="transition-transform group-data-[state=open]/trigger:rotate-180" />
+                    </Button>
+                  </CollapsibleTrigger>
+                  <CollapsibleContent>
+                    <form action={updateTaskCriteriaAction} className="mt-2 rounded-lg border p-3">
+                      <input type="hidden" name="id" value={t.id} />
+                      <FieldGroup className="gap-4">
+                        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+                          <Field>
+                            <FieldLabel htmlFor={`ed-pos-${t.id}`}>ตำแหน่ง</FieldLabel>
+                            <Input id={`ed-pos-${t.id}`} name="position" defaultValue={String(t.criteria?.position ?? '')} />
+                          </Field>
+                          <Field>
+                            <FieldLabel htmlFor={`ed-kw-${t.id}`}>คำค้น</FieldLabel>
+                            <Input id={`ed-kw-${t.id}`} name="keyword" defaultValue={String(t.criteria?.keyword ?? '')} />
+                          </Field>
+                          <Field>
+                            <FieldLabel htmlFor={`ed-prov-${t.id}`}>จังหวัด</FieldLabel>
+                            <Input id={`ed-prov-${t.id}`} name="province" defaultValue={String(t.criteria?.province ?? '')} />
+                          </Field>
+                          <Field>
+                            <FieldLabel htmlFor={`ed-target-${t.id}`}>เป้า (คน)</FieldLabel>
+                            <Input id={`ed-target-${t.id}`} name="targetCount" type="number" min={1} defaultValue={t.target_count ?? ''} />
+                          </Field>
+                        </div>
+                        <FieldDescription>ลบข้อความในช่องออกถ้าจะเลิกใช้เกณฑ์นั้น มีผลตอนกด “รันตอนนี้” รอบถัดไป</FieldDescription>
+                        <Field orientation="horizontal">
+                          <Button variant="secondary" size="sm">บันทึกเกณฑ์</Button>
+                        </Field>
+                      </FieldGroup>
+                    </form>
+                  </CollapsibleContent>
+                </Collapsible>
+              )}
 
-            {!t.connector_available && t.connector_block_reason && (
-              <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
-                <b>ยังเริ่มงานนี้ไม่ได้:</b> {t.connector_block_reason}
-                <Link href="/settings/connectors" className="ml-2 font-medium text-accent hover:underline">ไปตรวจ Connector</Link>
-              </div>
-            )}
+              <AdjacentPlanPanel task={t} />
+            </CardContent>
 
-            {/* phase checklist — narrates scrape → ocr → enrich → เสร็จสิ้น */}
-            {(status !== 'idle' || got > 0) && (
-              <div className="mt-3 space-y-1.5">
-                {status === 'queued' && <div className="text-xs text-amber-700">อยู่ในคิว — รอเริ่มทำงาน…</div>}
-                {status === 'running' && phase === 'login' && (
-                  <div className="text-xs text-blue-700">กำลัง login เข้าแพลตฟอร์ม (เปิด browser)…</div>
-                )}
-
-                {PHASES.map((p, idx) => {
-                  // state of this step relative to the current phase
-                  let state: 'done' | 'active' | 'pending' | 'error';
-                  if (status === 'done' || status === 'partial') state = 'done';
-                  else if (status === 'error') state = phaseIdx > idx ? 'done' : phaseIdx === idx ? 'error' : 'pending';
-                  else if (phaseIdx < 0) state = 'pending';
-                  else state = phaseIdx > idx ? 'done' : phaseIdx === idx ? 'active' : 'pending';
-
-                  return (
-                    <div key={p} className="flex items-center gap-2 text-xs">
-                      <span
-                        className={`grid h-4 w-4 shrink-0 place-items-center rounded-full text-[10px] ${
-                          state === 'done'
-                            ? 'bg-green-100 text-green-700'
-                            : state === 'error'
-                              ? 'bg-red-100 text-red-700'
-                              : state === 'active'
-                                ? 'bg-accent/15'
-                                : 'bg-black/5 text-subtle'
-                        }`}
-                      >
-                        {state === 'done' ? '✓' : state === 'error' ? '✕' : state === 'active' ? <span className="h-1.5 w-1.5 rounded-full bg-accent animate-pulse" /> : '○'}
-                      </span>
-                      <span className={state === 'active' ? 'font-medium text-ink' : state === 'pending' ? 'text-subtle/60' : 'text-subtle'}>
-                        {state === 'done' ? PHASE_DONE_LABEL[p] : PHASE_LABEL[p]}
-                        {state === 'active' && (target > 0
-                          ? p === 'scraping'
-                            ? <span className="ml-1 tabular-nums text-ink">ตรวจแล้ว {assessed} โปรไฟล์ · ผ่านเกณฑ์ {qualified}/{target}</span>
-                            : <span className="ml-1 tabular-nums text-ink">{got}/{target}</span>
-                          : p === 'ocr' ? ' — ไม่มีเอกสารแนบ' : null)}
-                      </span>
-                    </div>
-                  );
-                })}
-
-                {/* active-phase progress bar */}
-                {busy && phaseIdx >= 0 && (
-                  <div className="mt-1 h-1.5 w-full overflow-hidden rounded-full bg-black/5">
-                    <div className="h-full rounded-full bg-accent transition-all duration-500" style={{ width: `${target > 0 ? pct : 100}%` }} />
-                  </div>
-                )}
-
-                {status === 'done' && (
-                  <div className="mt-1 flex items-center gap-2 text-xs font-medium text-green-700">
-                    <span className="grid h-4 w-4 place-items-center rounded-full bg-green-100 text-[10px]">✓</span>
-                    ได้ Resume ผ่านเกณฑ์ครบ {qualified}/{target}
-                  </div>
-                )}
-                {status === 'partial' && (
-                  <div className="mt-1 flex items-center gap-2 text-xs font-medium text-amber-700">
-                    ได้ Resume ผ่านเกณฑ์ไม่ซ้ำ {qualified}/{target} — กด “รันตอนนี้” เพื่อค้นหาต่อ
-                  </div>
-                )}
-              </div>
-            )}
-
-            {/* finished-but-incomplete / no-result hints */}
-            {status === 'done' && got === 0 && (
-              <p className="mt-2 text-xs text-amber-700">
-                ไม่พบผลลัพธ์ในรอบนี้ — มักเกิดจากใส่ฟิลเตอร์ซ้อนกันแน่นเกิน (ตำแหน่ง + จังหวัด + วุฒิ + อายุ พร้อมกัน) หรือคำค้นตำแหน่งไม่ตรงกับที่คนไทยเขียนในเรซูเม่ ลองลดฟิลเตอร์ (เอาอายุ/วุฒิออก) แล้วกด “รันตอนนี้” อีกครั้ง
-              </p>
-            )}
-            {status === 'partial' && humanError && <p className="mt-2 text-xs text-amber-700">{humanError.detail} · {humanError.next}</p>}
-            {status === 'error' && humanError && (
-              <div className="mt-3 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-800">
-                <b>{humanError.title}</b>
-                <p className="mt-1">{humanError.detail}</p>
-                <p className="mt-1 font-medium">ทำต่อ: {humanError.next}</p>
-                {humanError.technical && (
-                  <p className="mt-2 break-words rounded-lg bg-white/60 px-2 py-1.5 font-mono text-[11px] text-red-900/80">
-                    สาเหตุระบบ: {humanError.technical}
-                  </p>
-                )}
-              </div>
-            )}
-
-            {/* แก้เกณฑ์การค้นหลังสร้าง — ปิดตอนกำลังวิ่ง (จะมีผลรอบถัดไปที่กดรัน) */}
-            {!busy && (
-              <details className="mt-3">
-                <summary className="inline-flex cursor-pointer select-none items-center gap-1 text-xs text-subtle hover:text-accent">
-                  ✎ แก้เกณฑ์การค้น
-                </summary>
-                <form action={updateTaskCriteriaAction} className="mt-2 grid items-end gap-2 rounded-lg border border-line/60 bg-black/[0.015] p-3 sm:grid-cols-5">
-                  <input type="hidden" name="id" value={t.id} />
-                  <div>
-                    <label className="mb-1 block text-[11px] text-subtle" htmlFor={`ed-pos-${t.id}`}>ตำแหน่ง</label>
-                    <input id={`ed-pos-${t.id}`} name="position" defaultValue={String(t.criteria?.position ?? '')} className="field w-full" />
-                  </div>
-                  <div>
-                    <label className="mb-1 block text-[11px] text-subtle" htmlFor={`ed-kw-${t.id}`}>คำค้น</label>
-                    <input id={`ed-kw-${t.id}`} name="keyword" defaultValue={String(t.criteria?.keyword ?? '')} className="field w-full" />
-                  </div>
-                  <div>
-                    <label className="mb-1 block text-[11px] text-subtle" htmlFor={`ed-prov-${t.id}`}>จังหวัด</label>
-                    <input id={`ed-prov-${t.id}`} name="province" defaultValue={String(t.criteria?.province ?? '')} className="field w-full" />
-                  </div>
-                  <div>
-                    <label className="mb-1 block text-[11px] text-subtle" htmlFor={`ed-target-${t.id}`}>เป้า (คน)</label>
-                    <input id={`ed-target-${t.id}`} name="targetCount" type="number" min={1} defaultValue={t.target_count ?? ''} className="field w-full" />
-                  </div>
-                  <button className="btn-secondary btn-sm">บันทึกเกณฑ์</button>
-                  <p className="text-[11px] text-subtle sm:col-span-5">ลบช่องว่าง = เอาเกณฑ์นั้นออก · มีผลตอนกด “รันตอนนี้” รอบถัดไป</p>
-                </form>
-              </details>
-            )}
-
-            <AdjacentPlanPanel task={t} />
-          </div>
+            <CardFooter className="flex flex-wrap gap-2">
+              <form action={queueTaskAction}>
+                <input type="hidden" name="id" value={t.id} />
+                <Button
+                  variant={runDisabled ? 'outline' : 'default'}
+                  disabled={runDisabled}
+                  title={t.connector_block_reason || undefined}
+                >
+                  {alreadyComplete ? (
+                    <>
+                      <CheckIcon data-icon="inline-start" />
+                      ครบเป้าแล้ว
+                    </>
+                  ) : (
+                    <>
+                      <PlayIcon data-icon="inline-start" />
+                      รันตอนนี้
+                    </>
+                  )}
+                </Button>
+              </form>
+              <Button variant="outline" asChild>
+                <Link href={`/scraping/${t.id}`}>เปิดงาน</Link>
+              </Button>
+              <form action={toggleTaskAction}>
+                <input type="hidden" name="id" value={t.id} />
+                <input type="hidden" name="enabled" value={(!t.enabled).toString()} />
+                <Button variant="ghost">{t.enabled ? 'ปิด' : 'เปิด'}</Button>
+              </form>
+              <form action={deleteTaskAction} className="ml-auto">
+                <input type="hidden" name="id" value={t.id} />
+                <Button variant="destructive">
+                  <Trash2Icon data-icon="inline-start" />
+                  ลบ
+                </Button>
+              </form>
+            </CardFooter>
+          </Card>
         );
       })}
       </div>

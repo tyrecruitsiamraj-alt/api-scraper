@@ -9,6 +9,21 @@ import {
   startSoRecruitScrapeAction,
 } from '@/lib/actions';
 import { EDUCATION_LEVELS, GENDERS, PROVINCES, SALARY_LABELS, SALARY_STEPS } from '@/lib/filter-options';
+import { cn } from '@/lib/utils';
+import { ArrowRightIcon, CheckIcon, ChevronDownIcon, CircleAlertIcon } from 'lucide-react';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { Card, CardAction, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
+import { Checkbox } from '@/components/ui/checkbox';
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
+import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from '@/components/ui/empty';
+import { Field, FieldGroup, FieldLabel, FieldLegend, FieldSet } from '@/components/ui/field';
+import { Input } from '@/components/ui/input';
+import { Item, ItemActions, ItemContent, ItemDescription, ItemTitle } from '@/components/ui/item';
+import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select';
+import { Progress } from '@/components/ui/progress';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 
 export type WorkCenterStage = 'intake' | 'working' | 'review' | 'completed' | 'attention';
 
@@ -85,12 +100,22 @@ function isOldItem(item: WorkCenterItem, now: number) {
   return now - new Date(item.createdAt).getTime() > OLD_AFTER_DAYS * 86_400_000;
 }
 
-function CountCard({ label, value, sub, tone }: { label: string; value: number; sub?: string; tone?: 'danger' }) {
+function Stat({
+  label,
+  value,
+  sub,
+  danger,
+}: {
+  label: string;
+  value: number;
+  sub?: string;
+  danger?: boolean;
+}) {
   return (
-    <div className="rounded-xl bg-black/[0.035] px-4 py-3">
-      <p className="text-xs text-subtle">{label}</p>
-      <p className={`mt-0.5 text-2xl font-semibold tabular-nums ${tone === 'danger' && value > 0 ? 'text-red-700' : 'text-ink'}`}>{value}</p>
-      {sub && <p className="mt-0.5 text-xs text-subtle">{sub}</p>}
+    <div className="flex flex-col gap-0.5">
+      <dt className="text-sm text-muted-foreground">{label}</dt>
+      <dd className={cn('text-2xl font-semibold tabular-nums', danger && value > 0 && 'text-destructive')}>{value}</dd>
+      {sub && <dd className="text-sm text-muted-foreground">{sub}</dd>}
     </div>
   );
 }
@@ -102,40 +127,55 @@ function ScrapCounters({ items }: { items: WorkCenterItem[] }) {
   const finished = jarvis.filter((i) => i.stage === 'completed' || i.stage === 'review').length;
   const problems = jarvis.filter((i) => i.stage === 'attention').length;
   return (
-    <section className="rounded-2xl border border-line bg-white p-4">
-      <h2 className="mb-3 text-sm font-semibold text-ink">Scrap</h2>
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-        <CountCard label="ส่งมาจาก Jarvis" value={jarvis.length} sub={waiting ? `รอกดเริ่ม ${waiting}` : 'เริ่มครบแล้ว'} />
-        <CountCard label="เริ่มแล้ว" value={started} sub="กำลังค้นหา" />
-        <CountCard label="เสร็จ" value={finished} />
-        <CountCard label="ติดปัญหา" value={problems} tone="danger" />
-      </div>
-    </section>
+    <Card>
+      <CardHeader>
+        <CardTitle>Scrap</CardTitle>
+        <CardDescription>คำขอค้นหาผู้สมัครจาก Jarvis</CardDescription>
+      </CardHeader>
+      <CardContent>
+        <dl className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+          <Stat label="ส่งมาจาก Jarvis" value={jarvis.length} sub={waiting ? `รอกดเริ่ม ${waiting}` : 'เริ่มครบแล้ว'} />
+          <Stat label="เริ่มแล้ว" value={started} sub="กำลังค้นหา" />
+          <Stat label="เสร็จ" value={finished} />
+          <Stat label="ติดปัญหา" value={problems} danger />
+        </dl>
+      </CardContent>
+    </Card>
   );
 }
 
 function PostCounters({ summary }: { summary: PostOrderSummary[] }) {
   return (
-    <section className="rounded-2xl border border-line bg-white p-4">
-      <div className="mb-3 flex items-center justify-between gap-2">
-        <h2 className="text-sm font-semibold text-ink">Autopost (คำสั่งโพสต์จาก Jarvis)</h2>
-        <Link href="/autopost/jobs" className="text-xs text-accent hover:underline">ไปหน้างานโพสต์ →</Link>
-      </div>
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-        {summary.map((s) => {
-          const parts = [
-            s.pending ? `รอโพสต์ ${s.pending}` : '',
-            s.inProgress ? `กำลังโพสต์ ${s.inProgress}` : '',
-            s.posted ? `โพสต์แล้ว ${s.posted}` : '',
-          ].filter(Boolean);
-          return (
-            <Link key={s.mode} href="/autopost/jobs" className="block rounded-xl transition hover:ring-1 hover:ring-line">
-              <CountCard label={s.label} value={s.pending + s.inProgress + s.posted} sub={parts.join(' · ') || 'ยังไม่มีคำสั่ง'} />
+    <Card>
+      <CardHeader>
+        <CardTitle>Autopost</CardTitle>
+        <CardDescription>คำสั่งโพสต์จาก Jarvis</CardDescription>
+        <CardAction>
+          <Button variant="ghost" size="sm" asChild>
+            <Link href="/autopost/jobs">
+              ไปหน้างานโพสต์
+              <ArrowRightIcon data-icon="inline-end" />
             </Link>
-          );
-        })}
-      </div>
-    </section>
+          </Button>
+        </CardAction>
+      </CardHeader>
+      <CardContent>
+        <dl className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+          {summary.map((s) => {
+            const parts = [
+              s.pending ? `รอโพสต์ ${s.pending}` : '',
+              s.inProgress ? `กำลังโพสต์ ${s.inProgress}` : '',
+              s.posted ? `โพสต์แล้ว ${s.posted}` : '',
+            ].filter(Boolean);
+            return (
+              <Link key={s.mode} href="/autopost/jobs" className="-m-2 rounded-lg p-2 transition-colors hover:bg-muted">
+                <Stat label={s.label} value={s.pending + s.inProgress + s.posted} sub={parts.join(' · ') || 'ยังไม่มีคำสั่ง'} />
+              </Link>
+            );
+          })}
+        </dl>
+      </CardContent>
+    </Card>
   );
 }
 
@@ -147,12 +187,12 @@ const STAGE_PRIORITY: Record<WorkCenterStage, number> = {
   completed: 4,
 };
 
-const STAGE_PILL: Record<WorkCenterStage, string> = {
-  intake: 'bg-amber-50 text-amber-800',
-  working: 'bg-sky-50 text-sky-800',
-  review: 'bg-orange-50 text-orange-800',
-  completed: 'bg-emerald-50 text-emerald-800',
-  attention: 'bg-red-50 text-red-800',
+const STAGE_BADGE: Record<WorkCenterStage, 'default' | 'secondary' | 'outline' | 'destructive'> = {
+  intake: 'outline',
+  working: 'secondary',
+  review: 'default',
+  completed: 'secondary',
+  attention: 'destructive',
 };
 
 function fmtDate(value: string) {
@@ -183,78 +223,72 @@ function scrapePlanSummary(f: Record<string, string>) {
   return bits.join(' · ') || 'ตามใบขอ';
 }
 
-function RoomSwitcher() {
+function StepLine({ steps }: { steps: Step[] }) {
+  const shown = steps.filter((s) => s.state !== 'skip');
+  if (shown.length === 0) return null;
   return (
-    <div className="grid gap-3 sm:grid-cols-2">
-      <div className="rounded-2xl border-2 border-emerald-600 bg-emerald-50 px-4 py-4">
-        <p className="text-xs font-semibold uppercase tracking-wide text-emerald-800">ห้องนี้</p>
-        <h2 className="mt-1 text-lg font-semibold text-emerald-950">ค้นหาผู้สมัคร</h2>
-        <p className="mt-1 text-sm text-emerald-900/80">รับใบขอ → เลือก JobBKK/JobThai → เริ่มค้นหา</p>
-      </div>
-      <Link
-        href="/autopost"
-        className="rounded-2xl border border-sky-200 bg-sky-50 px-4 py-4 transition hover:border-sky-400 hover:bg-sky-100"
-      >
-        <p className="text-xs font-semibold uppercase tracking-wide text-sky-800">ไปอีกห้อง</p>
-        <h2 className="mt-1 text-lg font-semibold text-sky-950">โพสต์ Facebook →</h2>
-        <p className="mt-1 text-sm text-sky-900/80">ใส่ caption + รูป แล้วสั่งโพสต์ที่ Autopost</p>
-      </Link>
-    </div>
+    <ol className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm" aria-label="ขั้นตอนของงาน">
+      {shown.map((s) => (
+        <li
+          key={s.label}
+          aria-current={s.state === 'active' ? 'step' : undefined}
+          className={cn(
+            'flex items-center gap-1',
+            s.state === 'done' && 'text-muted-foreground',
+            s.state === 'active' && 'font-medium text-foreground',
+            s.state === 'failed' && 'font-medium text-destructive',
+            s.state === 'todo' && 'text-muted-foreground opacity-60',
+          )}
+        >
+          {s.state === 'done' && <CheckIcon className="size-3.5" aria-hidden="true" />}
+          {s.state === 'failed' && <CircleAlertIcon className="size-3.5" aria-hidden="true" />}
+          {s.label}
+        </li>
+      ))}
+    </ol>
   );
 }
 
 function DisabledContentBanner({ requests }: { requests: DisabledContentRequest[] }) {
   if (requests.length === 0) return null;
   return (
-    <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div className="min-w-0 flex-1">
-          <p className="text-sm font-medium text-amber-950">
-            มี {requests.length} คำขอสร้างประกาศ — ระบบนี้ไม่รับแล้ว
-          </p>
-          <p className="mt-1 text-xs text-amber-900/80">
-            {requests.slice(0, 3).map((r) => r.title || r.requestNo).join(' · ')}
-            {requests.length > 3 ? ` · +${requests.length - 3}` : ''}
-          </p>
-        </div>
+    <Alert>
+      <CircleAlertIcon />
+      <AlertTitle>มีคำขอสร้างประกาศ {requests.length} รายการ ระบบนี้ไม่รับแล้ว</AlertTitle>
+      <AlertDescription className="flex flex-col gap-3">
+        <p>
+          {requests.slice(0, 3).map((r) => r.title || r.requestNo).join(' · ')}
+          {requests.length > 3 ? ` และอีก ${requests.length - 3} รายการ` : ''}
+        </p>
         <div className="flex flex-wrap gap-2">
-          <Link href="/autopost" className="btn-ghost btn-sm">ไปโพสต์ Facebook</Link>
           <form action={rejectDisabledContentRequestsAction}>
             {requests.map((r) => (
               <input key={r.requestNo} type="hidden" name="requestNo" value={r.requestNo} />
             ))}
-            <button className="btn-secondary btn-sm">ตีกลับทั้งหมด</button>
+            <Button variant="secondary" size="sm">ตีกลับทั้งหมด</Button>
           </form>
+          <Button variant="outline" size="sm" asChild>
+            <Link href="/autopost">ไปโพสต์ Facebook</Link>
+          </Button>
         </div>
-      </div>
-    </div>
+      </AlertDescription>
+    </Alert>
   );
 }
 
-function RejectBlock({ item }: { item: WorkCenterItem }) {
-  if (!item.requestNo) return null;
+function ConnectorSelect({ id, connectors, defaultValue }: { id: string; connectors: Option[]; defaultValue: string }) {
   return (
-    <details className="rounded-xl border border-line px-3 py-2" data-pause-refresh="1">
-      <summary className="cursor-pointer text-sm text-subtle">ตีกลับใบขอ</summary>
-      <form action={rejectRequestAction} className="mt-2 space-y-2">
-        <input type="hidden" name="requestNo" value={item.requestNo} />
-        <input type="hidden" name="requestType" value={item.kind === 'scraping' ? 'scraping' : 'content'} />
-        {item.checklist && item.checklist.length > 0 && (
-          <div className="flex flex-wrap gap-x-4 gap-y-1">
-            {item.checklist.map((c) => (
-              <label key={c.label} className="inline-flex items-center gap-1.5 text-sm">
-                <input type="checkbox" name="missing" value={c.label} defaultChecked={!c.ok} />
-                {c.label}{c.ok ? '' : ' (ขาด)'}
-              </label>
-            ))}
-          </div>
-        )}
-        <div className="flex flex-wrap gap-2">
-          <input name="reason" placeholder="เหตุผลเพิ่มเติม (ไม่บังคับ)" className="field min-w-[200px] flex-1" />
-          <button className="btn-secondary">ตีกลับ</button>
-        </div>
-      </form>
-    </details>
+    <Field className="min-w-52 flex-1">
+      <FieldLabel htmlFor={id}>บัญชีค้นหา</FieldLabel>
+      <NativeSelect id={id} name="connectorId" required defaultValue={defaultValue} className="w-full">
+        <NativeSelectOption value="" disabled>เลือก JobBKK หรือ JobThai</NativeSelectOption>
+        {connectors.map((c) => (
+          <NativeSelectOption key={c.id} value={c.id} disabled={!c.available}>
+            {c.label}{c.available ? '' : ` (${c.blockReason})`}
+          </NativeSelectOption>
+        ))}
+      </NativeSelect>
+    </Field>
   );
 }
 
@@ -263,7 +297,7 @@ function ScrapeQuickRunForm({ item, connectors }: { item: WorkCenterItem; connec
   const defaultConnector = connectors.find((c) => c.available)?.id ?? '';
   const canRun = Boolean(defaultConnector);
   return (
-    <form action={startSoRecruitScrapeAction} className="space-y-3" data-pause-refresh="1">
+    <form action={startSoRecruitScrapeAction} className="flex flex-col gap-2" data-pause-refresh="1">
       <input type="hidden" name="requestNo" value={item.requestNo ?? ''} />
       <input type="hidden" name="scrapePosition" value={f.position ?? ''} />
       <input type="hidden" name="scrapeKeyword" value={f.keyword ?? ''} />
@@ -277,27 +311,13 @@ function ScrapeQuickRunForm({ item, connectors }: { item: WorkCenterItem; connec
       <input type="hidden" name="scrapeAgeMin" value={f.age_min ?? ''} />
       <input type="hidden" name="scrapeAgeMax" value={f.age_max ?? ''} />
       <div className="flex flex-wrap items-end gap-2">
-        <div className="min-w-[200px] flex-1">
-          <label className="label" htmlFor={`connector-quick-${item.id}`}>บัญชีค้นหา</label>
-          <select
-            id={`connector-quick-${item.id}`}
-            name="connectorId"
-            required
-            defaultValue={defaultConnector}
-            className="field"
-          >
-            <option value="" disabled>เลือก JobBKK / JobThai…</option>
-            {connectors.map((c) => (
-              <option key={c.id} value={c.id} disabled={!c.available}>
-                {c.label}{c.available ? '' : ` — ${c.blockReason}`}
-              </option>
-            ))}
-          </select>
-        </div>
-        <button className="btn-primary" disabled={!canRun}>เริ่มค้นหา</button>
+        <ConnectorSelect id={`connector-quick-${item.id}`} connectors={connectors} defaultValue={defaultConnector} />
+        <Button disabled={!canRun}>เริ่มค้นหา</Button>
       </div>
       {!canRun && (
-        <Link href="/settings/connectors" className="text-xs text-accent hover:underline">เพิ่มบัญชีค้นหาก่อน</Link>
+        <Button variant="link" size="sm" asChild className="self-start px-0">
+          <Link href="/settings/connectors">เพิ่มบัญชีค้นหาก่อน</Link>
+        </Button>
       )}
     </form>
   );
@@ -306,96 +326,119 @@ function ScrapeQuickRunForm({ item, connectors }: { item: WorkCenterItem; connec
 function ScrapeIntakeForm({ item, connectors }: { item: WorkCenterItem; connectors: Option[] }) {
   const f = item.requestFields ?? {};
   return (
-    <form action={startSoRecruitScrapeAction} className="space-y-3" data-pause-refresh="1">
+    <form action={startSoRecruitScrapeAction} className="flex flex-col gap-4" data-pause-refresh="1">
       <input type="hidden" name="requestNo" value={item.requestNo ?? ''} />
-      <div className="rounded-xl border border-line bg-black/[0.02] px-3 py-3">
-        <div className="text-sm font-medium text-ink">แก้แผนก่อนเริ่ม</div>
-        <div className="mt-2 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-          <div>
-            <label className="label" htmlFor={`sp-pos-${item.id}`}>ตำแหน่ง</label>
-            <input id={`sp-pos-${item.id}`} name="scrapePosition" defaultValue={f.position ?? ''} className="field" />
-          </div>
-          <div>
-            <label className="label" htmlFor={`sp-kw-${item.id}`}>Keyword</label>
-            <input id={`sp-kw-${item.id}`} name="scrapeKeyword" defaultValue={f.keyword ?? ''} className="field" />
-          </div>
-          <div>
-            <label className="label" htmlFor={`sp-prov-${item.id}`}>จังหวัด</label>
-            <input id={`sp-prov-${item.id}`} name="scrapeProvince" list={`province-options-${item.id}`} defaultValue={f.location ?? ''} className="field" />
+      <input type="hidden" name="scrapeIndustry" value={f.industry ?? ''} />
+      <FieldSet className="rounded-lg border p-4">
+        <FieldLegend variant="label" className="px-1">แก้แผนก่อนเริ่ม</FieldLegend>
+        <FieldGroup className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          <Field>
+            <FieldLabel htmlFor={`sp-pos-${item.id}`}>ตำแหน่ง</FieldLabel>
+            <Input id={`sp-pos-${item.id}`} name="scrapePosition" defaultValue={f.position ?? ''} />
+          </Field>
+          <Field>
+            <FieldLabel htmlFor={`sp-kw-${item.id}`}>Keyword</FieldLabel>
+            <Input id={`sp-kw-${item.id}`} name="scrapeKeyword" defaultValue={f.keyword ?? ''} />
+          </Field>
+          <Field>
+            <FieldLabel htmlFor={`sp-prov-${item.id}`}>จังหวัด</FieldLabel>
+            <Input id={`sp-prov-${item.id}`} name="scrapeProvince" list={`province-options-${item.id}`} defaultValue={f.location ?? ''} />
             <datalist id={`province-options-${item.id}`}>
               {PROVINCES.map((province) => <option key={province} value={province} />)}
             </datalist>
-          </div>
-          <div>
-            <label className="label" htmlFor={`sp-target-${item.id}`}>เป้า (คน)</label>
-            <input id={`sp-target-${item.id}`} name="scrapeTarget" type="number" min={1} defaultValue={f.qty || ''} className="field" />
-          </div>
-          <div>
-            <label className="label" htmlFor={`sp-gender-${item.id}`}>เพศ</label>
-            <select id={`sp-gender-${item.id}`} name="scrapeGender" defaultValue={f.gender || 'ไม่ระบุ'} className="field">
-              {GENDERS.map((gender) => <option key={gender} value={gender}>{gender}</option>)}
-            </select>
-          </div>
-          <div>
-            <label className="label" htmlFor={`sp-edu-${item.id}`}>วุฒิ</label>
-            <select id={`sp-edu-${item.id}`} name="scrapeEducation" defaultValue={f.education || 'ไม่ระบุ'} className="field">
-              {EDUCATION_LEVELS.map((level) => <option key={level} value={level}>{level}</option>)}
-            </select>
-          </div>
-          <div className="sm:col-span-2">
-            <label className="label">เงินเดือน</label>
+          </Field>
+          <Field>
+            <FieldLabel htmlFor={`sp-target-${item.id}`}>เป้า (คน)</FieldLabel>
+            <Input id={`sp-target-${item.id}`} name="scrapeTarget" type="number" min={1} defaultValue={f.qty || ''} />
+          </Field>
+          <Field>
+            <FieldLabel htmlFor={`sp-gender-${item.id}`}>เพศ</FieldLabel>
+            <NativeSelect id={`sp-gender-${item.id}`} name="scrapeGender" defaultValue={f.gender || 'ไม่ระบุ'} className="w-full">
+              {GENDERS.map((gender) => <NativeSelectOption key={gender} value={gender}>{gender}</NativeSelectOption>)}
+            </NativeSelect>
+          </Field>
+          <Field>
+            <FieldLabel htmlFor={`sp-edu-${item.id}`}>วุฒิ</FieldLabel>
+            <NativeSelect id={`sp-edu-${item.id}`} name="scrapeEducation" defaultValue={f.education || 'ไม่ระบุ'} className="w-full">
+              {EDUCATION_LEVELS.map((level) => <NativeSelectOption key={level} value={level}>{level}</NativeSelectOption>)}
+            </NativeSelect>
+          </Field>
+          <Field className="sm:col-span-2">
+            <FieldLabel htmlFor={`sp-sal-min-${item.id}`}>เงินเดือน</FieldLabel>
             <div className="flex items-center gap-2">
-              <select name="scrapeSalaryMin" defaultValue={f.salary_min ?? ''} className="field">
-                <option value="">ต่ำสุด</option>
+              <NativeSelect id={`sp-sal-min-${item.id}`} name="scrapeSalaryMin" defaultValue={f.salary_min ?? ''} className="w-full" aria-label="เงินเดือนต่ำสุด">
+                <NativeSelectOption value="">ต่ำสุด</NativeSelectOption>
                 {salarySelectOptions(f.salary_min).map((step) => (
-                  <option key={`min-${step}`} value={step}>{salaryLabel(step)}</option>
+                  <NativeSelectOption key={`min-${step}`} value={step}>{salaryLabel(step)}</NativeSelectOption>
                 ))}
-              </select>
-              <span className="text-subtle">–</span>
-              <select name="scrapeSalaryMax" defaultValue={f.salary_max ?? ''} className="field">
-                <option value="">สูงสุด</option>
+              </NativeSelect>
+              <span className="text-muted-foreground">ถึง</span>
+              <NativeSelect name="scrapeSalaryMax" defaultValue={f.salary_max ?? ''} className="w-full" aria-label="เงินเดือนสูงสุด">
+                <NativeSelectOption value="">สูงสุด</NativeSelectOption>
                 {salarySelectOptions(f.salary_max).map((step) => (
-                  <option key={`max-${step}`} value={step}>{salaryLabel(step)}</option>
+                  <NativeSelectOption key={`max-${step}`} value={step}>{salaryLabel(step)}</NativeSelectOption>
                 ))}
-              </select>
+              </NativeSelect>
             </div>
-          </div>
-          <div>
-            <label className="label">อายุ</label>
+          </Field>
+          <Field>
+            <FieldLabel htmlFor={`sp-age-min-${item.id}`}>อายุ</FieldLabel>
             <div className="flex items-center gap-2">
-              <input name="scrapeAgeMin" type="number" min={15} max={80} defaultValue={f.age_min ?? ''} placeholder="ต่ำสุด" className="field" />
-              <span className="text-subtle">–</span>
-              <input name="scrapeAgeMax" type="number" min={15} max={80} defaultValue={f.age_max ?? ''} placeholder="สูงสุด" className="field" />
+              <Input id={`sp-age-min-${item.id}`} name="scrapeAgeMin" type="number" min={15} max={80} defaultValue={f.age_min ?? ''} placeholder="ต่ำสุด" aria-label="อายุต่ำสุด" />
+              <span className="text-muted-foreground">ถึง</span>
+              <Input name="scrapeAgeMax" type="number" min={15} max={80} defaultValue={f.age_max ?? ''} placeholder="สูงสุด" aria-label="อายุสูงสุด" />
             </div>
-          </div>
-          <input type="hidden" name="scrapeIndustry" value={f.industry ?? ''} />
-        </div>
-      </div>
+          </Field>
+        </FieldGroup>
+      </FieldSet>
       <div className="flex flex-wrap items-end gap-2">
-        <div className="min-w-[220px] flex-1">
-          <label className="label" htmlFor={`connector-${item.id}`}>บัญชีค้นหา</label>
-          <select
-            id={`connector-${item.id}`}
-            name="connectorId"
-            required
-            defaultValue={connectors.find((c) => c.available)?.id ?? ''}
-            className="field"
-          >
-            <option value="" disabled>เลือก JobBKK / JobThai…</option>
-            {connectors.map((c) => (
-              <option key={c.id} value={c.id} disabled={!c.available}>
-                {c.label}{c.available ? '' : ` — ${c.blockReason}`}
-              </option>
-            ))}
-          </select>
-        </div>
-        <button className="btn-primary" disabled={!connectors.some((c) => c.available)}>เริ่มค้นหา</button>
+        <ConnectorSelect
+          id={`connector-${item.id}`}
+          connectors={connectors}
+          defaultValue={connectors.find((c) => c.available)?.id ?? ''}
+        />
+        <Button disabled={!connectors.some((c) => c.available)}>เริ่มค้นหา</Button>
       </div>
     </form>
   );
 }
 
-function WorkAction({
+function RejectForm({ item }: { item: WorkCenterItem }) {
+  if (!item.requestNo) return null;
+  return (
+    <form action={rejectRequestAction} className="mt-3 flex flex-col gap-4 rounded-lg border p-4">
+      <input type="hidden" name="requestNo" value={item.requestNo} />
+      <input type="hidden" name="requestType" value={item.kind === 'scraping' ? 'scraping' : 'content'} />
+      {item.checklist && item.checklist.length > 0 && (
+        <FieldSet>
+          <FieldLegend variant="label">สิ่งที่ใบขอยังขาด</FieldLegend>
+          <div className="flex flex-wrap gap-x-5 gap-y-2">
+            {item.checklist.map((c) => {
+              const id = `missing-${item.id}-${c.label}`;
+              return (
+                <Field key={c.label} orientation="horizontal" className="w-auto">
+                  <Checkbox id={id} name="missing" value={c.label} defaultChecked={!c.ok} />
+                  <FieldLabel htmlFor={id} className="font-normal">
+                    {c.label}{c.ok ? '' : ' (ขาด)'}
+                  </FieldLabel>
+                </Field>
+              );
+            })}
+          </div>
+        </FieldSet>
+      )}
+      <div className="flex flex-wrap items-end gap-2">
+        <Field className="min-w-52 flex-1">
+          <FieldLabel htmlFor={`reject-reason-${item.id}`} className="sr-only">เหตุผลเพิ่มเติม</FieldLabel>
+          <Input id={`reject-reason-${item.id}`} name="reason" placeholder="เหตุผลเพิ่มเติม (ไม่บังคับ)" />
+        </Field>
+        <Button variant="secondary">ตีกลับ</Button>
+      </div>
+    </form>
+  );
+}
+
+function IntakeActions({
   item,
   connectors,
   expanded,
@@ -406,38 +449,60 @@ function WorkAction({
   expanded: boolean;
   onTogglePlan: () => void;
 }) {
-  if (item.stage === 'intake' && item.requestNo && item.kind === 'scraping') {
-    return (
-      <div className="w-full space-y-3" data-pause-refresh="1">
-        {expanded ? (
-          <ScrapeIntakeForm item={item} connectors={connectors} />
-        ) : (
-          <ScrapeQuickRunForm item={item} connectors={connectors} />
-        )}
-        <div className="flex flex-wrap gap-2">
-          <button type="button" className="btn-ghost btn-sm" onClick={onTogglePlan}>
+  return (
+    <div className="flex flex-col gap-3" data-pause-refresh="1">
+      {expanded ? (
+        <ScrapeIntakeForm item={item} connectors={connectors} />
+      ) : (
+        <ScrapeQuickRunForm item={item} connectors={connectors} />
+      )}
+      <Collapsible data-pause-refresh="1">
+        <div className="flex flex-wrap gap-1">
+          <Button type="button" variant="ghost" size="sm" onClick={onTogglePlan}>
             {expanded ? 'ย่อแผน' : 'แก้แผนก่อนรัน'}
-          </button>
-          <RejectBlock item={item} />
+          </Button>
+          {item.requestNo && (
+            <CollapsibleTrigger asChild>
+              <Button type="button" variant="ghost" size="sm" className="group/trigger">
+                ตีกลับใบขอ
+                <ChevronDownIcon data-icon="inline-end" className="transition-transform group-data-[state=open]/trigger:rotate-180" />
+              </Button>
+            </CollapsibleTrigger>
+          )}
         </div>
-      </div>
-    );
-  }
+        <CollapsibleContent>
+          <RejectForm item={item} />
+        </CollapsibleContent>
+      </Collapsible>
+    </div>
+  );
+}
 
+function FooterActions({ item }: { item: WorkCenterItem }) {
   if (item.stage === 'review' && item.kind === 'scraping' && item.taskId) {
     return (
-      <div className="flex flex-wrap gap-2">
+      <CardFooter className="flex flex-wrap gap-2">
         <form action={approveScrapeResultAction}>
           <input type="hidden" name="taskId" value={item.taskId} />
-          <button className="btn-primary">ยืนยันข้อมูลผู้สมัคร</button>
+          <Button>ยืนยันข้อมูลผู้สมัคร</Button>
         </form>
-        {item.href && <Link href={item.href} className="btn-secondary">เปิดดู Resume</Link>}
-      </div>
+        {item.href && (
+          <Button variant="outline" asChild>
+            <Link href={item.href}>เปิดดู Resume</Link>
+          </Button>
+        )}
+      </CardFooter>
     );
   }
 
   if (item.href) {
-    return <Link href={item.href} className="btn-primary">เปิดดูงาน</Link>;
+    return (
+      <CardFooter>
+        <Button variant={item.stage === 'attention' ? 'default' : 'outline'} asChild>
+          <Link href={item.href}>เปิดดูงาน</Link>
+        </Button>
+      </CardFooter>
+    );
   }
   return null;
 }
@@ -454,64 +519,82 @@ function WorkItemCard({
   const [expanded, setExpanded] = useState(Boolean(defaultExpanded));
   const f = item.requestFields ?? {};
   const missing = item.checklist?.filter((c) => !c.ok) ?? [];
+  const isIntake = item.stage === 'intake' && Boolean(item.requestNo) && item.kind === 'scraping';
   const metaBits = [
     item.requestNo,
     item.stage === 'intake' ? scrapePlanSummary(f) : item.context,
     fmtDate(item.createdAt),
   ].filter(Boolean);
+  const hasProgress = Boolean(item.progress && item.progress.target > 0);
 
   return (
-    <article className="rounded-2xl border border-line bg-white p-4 sm:p-5">
-      <div className="flex flex-wrap items-start justify-between gap-2">
-        <div className="min-w-0 flex-1">
-          <h3 className="text-base font-semibold text-ink">
-            {item.href ? (
-              <Link href={item.href} className="hover:text-accent hover:underline">
-                {item.title}
-              </Link>
-            ) : item.title}
-          </h3>
-          <p className="mt-1 text-xs text-subtle">{metaBits.join(' · ')}</p>
-        </div>
-        <span className={`pill shrink-0 ${STAGE_PILL[item.stage]}`}>{item.statusLabel}</span>
-      </div>
+    <Card>
+      <CardHeader>
+        <CardTitle className="leading-snug">
+          {item.href ? (
+            <Link href={item.href} className="underline-offset-4 hover:underline">
+              {item.title}
+            </Link>
+          ) : item.title}
+        </CardTitle>
+        <CardDescription className="leading-relaxed">{metaBits.join(' · ')}</CardDescription>
+        <CardAction>
+          <Badge variant={STAGE_BADGE[item.stage]}>{item.statusLabel}</Badge>
+        </CardAction>
+      </CardHeader>
 
-      {missing.length > 0 && (
-        <p className="mt-2 text-xs text-red-600">ขาดในใบขอ: {missing.map((m) => m.label).join(', ')}</p>
-      )}
+      <CardContent className="flex flex-col gap-4">
+        {item.steps && item.steps.length > 0 && <StepLine steps={item.steps} />}
 
-      {item.detail && item.stage === 'attention' && (
-        <p className="mt-3 whitespace-pre-wrap rounded-lg border-l-2 border-red-400 bg-red-50 px-3 py-2 text-sm text-red-800">
-          {item.detail.length > 280 ? `${item.detail.slice(0, 280)}…` : item.detail}
-        </p>
-      )}
+        {missing.length > 0 && (
+          <p className="text-sm leading-relaxed text-destructive">
+            ใบขอยังไม่มี: {missing.map((m) => m.label).join(', ')}
+          </p>
+        )}
 
-      {item.progress && item.progress.target > 0 && (
-        <div className="mt-3">
-          <div className="mb-1 flex justify-between text-xs text-subtle">
-            <span>Resume ผ่านเกณฑ์</span>
-            <span className="tabular-nums text-ink">{item.progress.qualified} / {item.progress.target}</span>
-          </div>
-          <div className="h-1.5 overflow-hidden rounded-full bg-black/[0.06]">
-            <div
-              className="h-full rounded-full bg-accent"
-              style={{ width: `${Math.min(100, Math.round((item.progress.qualified / item.progress.target) * 100))}%` }}
+        {item.detail && item.stage === 'attention' && (
+          <Alert variant="destructive">
+            <CircleAlertIcon />
+            <AlertDescription className="leading-relaxed whitespace-pre-wrap">
+              {item.detail.length > 280 ? `${item.detail.slice(0, 280)}…` : item.detail}
+            </AlertDescription>
+          </Alert>
+        )}
+
+        {hasProgress && item.progress && (
+          <div className="flex flex-col gap-1.5">
+            <div className="flex justify-between text-sm text-muted-foreground">
+              <span>Resume ผ่านเกณฑ์</span>
+              <span className="tabular-nums text-foreground">{item.progress.qualified} / {item.progress.target}</span>
+            </div>
+            <Progress
+              value={Math.min(100, Math.round((item.progress.qualified / item.progress.target) * 100))}
+              aria-label="Resume ผ่านเกณฑ์"
             />
           </div>
-        </div>
-      )}
+        )}
 
-      <div className="mt-4">
-        <WorkAction
-          item={item}
-          connectors={connectors}
-          expanded={expanded}
-          onTogglePlan={() => setExpanded((v) => !v)}
-        />
-      </div>
-    </article>
+        {isIntake && (
+          <IntakeActions
+            item={item}
+            connectors={connectors}
+            expanded={expanded}
+            onTogglePlan={() => setExpanded((v) => !v)}
+          />
+        )}
+      </CardContent>
+
+      {!isIntake && <FooterActions item={item} />}
+    </Card>
   );
 }
+
+const EMPTY_TEXT: Record<TabKey, string> = {
+  todo: 'ไม่มีงานที่ต้องตรวจตอนนี้',
+  running: 'ไม่มีงานที่กำลังค้นหา',
+  done: 'ยังไม่มีงานที่เสร็จ',
+  old: 'ไม่มีงานเก่าค้าง',
+};
 
 export function WorkCenter({
   items,
@@ -547,16 +630,11 @@ export function WorkCenter({
   const running = current.filter((i) => i.stage === 'working');
   const done = current.filter((i) => i.stage === 'completed');
 
-  const visible = tab === 'todo' ? todo
-    : tab === 'running' ? running
-      : tab === 'done' ? done
-        : old;
-
-  const tabs: { key: TabKey; label: string; count: number }[] = [
-    { key: 'todo', label: 'ต้องตรวจ', count: todo.length },
-    { key: 'running', label: 'กำลังค้นหา', count: running.length },
-    { key: 'done', label: 'เสร็จแล้ว', count: done.length },
-    { key: 'old', label: `งานเก่า (เกิน ${OLD_AFTER_DAYS} วัน)`, count: old.length },
+  const tabs: { key: TabKey; label: string; list: WorkCenterItem[] }[] = [
+    { key: 'todo', label: 'ต้องตรวจ', list: todo },
+    { key: 'running', label: 'กำลังค้นหา', list: running },
+    { key: 'done', label: 'เสร็จแล้ว', list: done },
+    { key: 'old', label: 'งานเก่า', list: old },
   ];
 
   const fbProblems = facebookAccounts.filter((a) => (
@@ -568,23 +646,37 @@ export function WorkCenter({
   )).length;
 
   return (
-    <div className="space-y-5">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight text-ink">ศูนย์งาน</h1>
-        <p className="mt-1 text-sm text-subtle">โฟกัสงานค้นหาผู้สมัคร — โพสต์ Facebook อยู่อีกห้อง</p>
-      </div>
+    <div className="flex flex-col gap-6">
+      <header className="flex flex-wrap items-end justify-between gap-4">
+        <div className="flex flex-col gap-1.5">
+          <h1 className="text-2xl leading-snug font-semibold">ศูนย์งาน</h1>
+          <p className="max-w-prose text-sm leading-relaxed text-muted-foreground">
+            ห้องค้นหาผู้สมัคร รับใบขอ เลือก JobBKK หรือ JobThai แล้วเริ่มค้นหา
+            ส่วนโพสต์ Facebook (caption และรูป) ทำที่ห้อง Autopost
+          </p>
+        </div>
+        <Button variant="outline" asChild>
+          <Link href="/autopost">
+            ไปห้องโพสต์ Facebook
+            <ArrowRightIcon data-icon="inline-end" />
+          </Link>
+        </Button>
+      </header>
 
-      <RoomSwitcher />
-      <ScrapCounters items={items} />
-      {postSummary.length > 0 && <PostCounters summary={postSummary} />}
       <DisabledContentBanner requests={disabledContentRequests} />
 
-      <section className="space-y-3">
-        <h2 className="text-base font-semibold text-ink">คำขอ Scrap จาก Jarvis รอกดเริ่ม</h2>
+      <section className="flex flex-col gap-3">
+        <h2 className="flex items-center gap-2 text-base font-semibold">
+          คำขอ Scrap จาก Jarvis รอกดเริ่ม
+          {jarvisWaiting.length > 0 && <Badge variant="secondary" className="tabular-nums">{jarvisWaiting.length}</Badge>}
+        </h2>
         {jarvisWaiting.length === 0 ? (
-          <div className="rounded-2xl border border-dashed border-line bg-white px-5 py-6 text-center text-sm text-subtle">
-            ไม่มีคำขอที่รอเริ่ม สั่ง Scrap จากหน้าใบขอใน Jarvis แล้วจะขึ้นที่นี่
-          </div>
+          <Empty className="border">
+            <EmptyHeader>
+              <EmptyTitle>ไม่มีคำขอที่รอเริ่ม</EmptyTitle>
+              <EmptyDescription>สั่ง Scrap จากหน้าใบขอใน Jarvis แล้วคำขอจะขึ้นที่นี่</EmptyDescription>
+            </EmptyHeader>
+          </Empty>
         ) : (
           jarvisWaiting.map((item, index) => (
             <WorkItemCard
@@ -597,54 +689,68 @@ export function WorkCenter({
         )}
       </section>
 
-      {(fbProblems > 0 || facebookAccounts.length === 0) && (
-        <details className="rounded-xl border border-line bg-white px-4 py-3">
-          <summary className="cursor-pointer text-sm text-subtle">
-            บัญชี Facebook ยังไม่พร้อม {facebookAccounts.length === 0 ? '(ยังไม่มีบัญชี)' : `(${fbProblems} บัญชี)`} — กดดูถ้าจะโพสต์
-          </summary>
-          <div className="mt-3 flex flex-wrap gap-2">
-            <Link href="/autopost/accounts" className="btn-secondary btn-sm">ไปเตรียมบัญชี</Link>
-            <Link href="/settings/connectors" className="btn-ghost btn-sm">ตั้งค่าบัญชี</Link>
-          </div>
-        </details>
-      )}
-
-      <div className="flex flex-wrap gap-2" role="tablist" aria-label="กรองงานค้นหา">
-        {tabs.map((t) => (
-          <button
-            key={t.key}
-            type="button"
-            role="tab"
-            aria-selected={tab === t.key}
-            onClick={() => setTab(t.key)}
-            className={`rounded-full px-4 py-2 text-sm font-medium transition ${
-              tab === t.key
-                ? 'bg-ink text-white'
-                : 'bg-black/[0.05] text-ink hover:bg-black/[0.08]'
-            }`}
-          >
-            {t.label}
-            <span className={`ml-1.5 tabular-nums ${tab === t.key ? 'text-white/80' : 'text-subtle'}`}>{t.count}</span>
-          </button>
-        ))}
+      <div className={cn('grid gap-4', postSummary.length > 0 && 'xl:grid-cols-2')}>
+        <ScrapCounters items={items} />
+        {postSummary.length > 0 && <PostCounters summary={postSummary} />}
       </div>
 
-      {visible.length === 0 ? (
-        <div className="rounded-2xl border border-dashed border-line bg-white px-5 py-12 text-center text-sm text-subtle">
-          {tab === 'todo' ? 'ไม่มีงานที่ต้องตรวจตอนนี้' : tab === 'running' ? 'ไม่มีงานที่กำลังค้นหา' : tab === 'done' ? 'ยังไม่มีงานที่เสร็จ' : 'ไม่มีงานเก่าค้าง'}
-        </div>
-      ) : (
-        <div className="space-y-3">
-          {visible.map((item) => (
-            <WorkItemCard
-              key={item.id}
-              item={item}
-              connectors={connectors}
-              defaultExpanded={false}
-            />
-          ))}
-        </div>
+      {(fbProblems > 0 || facebookAccounts.length === 0) && (
+        <Item variant="outline">
+          <ItemContent>
+            <ItemTitle>
+              บัญชี Facebook ยังไม่พร้อม {facebookAccounts.length === 0 ? '(ยังไม่มีบัญชี)' : `(${fbProblems} บัญชี)`}
+            </ItemTitle>
+            <ItemDescription>ต้องเตรียมก่อนถ้าจะโพสต์</ItemDescription>
+          </ItemContent>
+          <ItemActions>
+            <Button variant="outline" size="sm" asChild>
+              <Link href="/autopost/accounts">ไปเตรียมบัญชี</Link>
+            </Button>
+            <Button variant="ghost" size="sm" asChild>
+              <Link href="/settings/connectors">ตั้งค่าบัญชี</Link>
+            </Button>
+          </ItemActions>
+        </Item>
       )}
+
+      <Tabs value={tab} onValueChange={(v) => setTab(v as TabKey)} className="gap-4">
+        <TabsList aria-label="กรองงานค้นหา" className="max-w-full overflow-x-auto">
+          {tabs.map((t) => (
+            <TabsTrigger
+              key={t.key}
+              value={t.key}
+              className="px-3"
+              title={t.key === 'old' ? `งานที่สร้างไว้เกิน ${OLD_AFTER_DAYS} วัน` : undefined}
+            >
+              {t.label}
+              <span className="tabular-nums text-muted-foreground">{t.list.length}</span>
+            </TabsTrigger>
+          ))}
+        </TabsList>
+        {tabs.map((t) => (
+          <TabsContent key={t.key} value={t.key} className="flex flex-col gap-3">
+            {t.key === 'old' && t.list.length > 0 && (
+              <p className="text-sm text-muted-foreground">งานที่สร้างไว้เกิน {OLD_AFTER_DAYS} วัน</p>
+            )}
+            {t.list.length === 0 ? (
+              <Empty className="border py-12">
+                <EmptyHeader>
+                  <EmptyDescription>{EMPTY_TEXT[t.key]}</EmptyDescription>
+                </EmptyHeader>
+              </Empty>
+            ) : (
+              t.list.map((item) => (
+                <WorkItemCard
+                  key={item.id}
+                  item={item}
+                  connectors={connectors}
+                  defaultExpanded={false}
+                />
+              ))
+            )}
+          </TabsContent>
+        ))}
+      </Tabs>
     </div>
   );
 }

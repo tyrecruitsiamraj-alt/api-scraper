@@ -1,14 +1,14 @@
 import type { Metadata } from 'next';
-import { Kanit } from 'next/font/google';
+import { IBM_Plex_Sans_Thai } from 'next/font/google';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth';
 import { Providers } from '@/components/Providers';
 import './globals.css';
 
-const kanit = Kanit({
+const thai = IBM_Plex_Sans_Thai({
   subsets: ['latin', 'thai'],
-  weight: ['300', '400', '500', '600', '700'],
-  variable: '--font-kanit',
+  weight: ['400', '500', '600', '700'],
+  variable: '--font-thai',
   display: 'swap',
 });
 
@@ -21,7 +21,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
   // Resolve the session per request and hand it to the client provider.
   const session = await getServerSession(authOptions);
   return (
-    <html lang="th" className={kanit.variable}>
+    <html lang="th" className={thai.variable}>
       <body className="font-sans antialiased">
         <Providers session={session}>{children}</Providers>
       </body>

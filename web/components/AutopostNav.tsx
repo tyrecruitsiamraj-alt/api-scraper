@@ -2,39 +2,38 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 
 // แท็บย่อยใต้ "โพสต์ & ผลลัพธ์" — แยกงานที่กำลังทำ (ภาพรวม/คิว) ออกจากผลที่เก็บเกี่ยวได้ (leads)
 const ITEMS = [
-  { href: '/autopost', label: 'ภาพรวมการโพสต์', detail: 'งานที่รอ · สถานะระบบ · จำนวนที่โพสต์ได้' },
-  { href: '/autopost/example', label: 'ตัวอย่างประกาศ', detail: 'ภาพ · Caption · ลองแก้ข้อความ' },
-  { href: '/autopost/results', label: 'ผลลัพธ์และผู้สนใจ', detail: 'เบอร์ผู้สนใจที่เก็บได้ · โพสต์ที่ได้ผล' },
-  { href: '/autopost/report', label: 'รายงานสัปดาห์', detail: 'สรุปผลรายสัปดาห์ · ส่งหัวหน้า' },
+  { href: '/autopost', label: 'ภาพรวมการโพสต์', detail: 'งานที่รอ สถานะระบบ และจำนวนที่ยังโพสต์ได้' },
+  { href: '/autopost/example', label: 'ตัวอย่างประกาศ', detail: 'ภาพ Caption และลองแก้ข้อความ' },
+  { href: '/autopost/results', label: 'ผลลัพธ์และผู้สนใจ', detail: 'เบอร์ผู้สนใจที่เก็บได้ และโพสต์ที่ได้ผล' },
+  { href: '/autopost/report', label: 'รายงานสัปดาห์', detail: 'สรุปผลรายสัปดาห์สำหรับส่งหัวหน้า' },
 ];
 
 export function AutopostNav() {
   const pathname = usePathname();
+  // exact match — /autopost ไม่ควร active เมื่ออยู่ /autopost/results
+  const active =
+    ITEMS.find(
+      (item) =>
+        pathname === item.href || (item.href !== '/autopost' && pathname.startsWith(`${item.href}/`)),
+    )?.href ?? '';
+
   return (
-    <nav className="mb-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-4" aria-label="เมนูโพสต์ & ผลลัพธ์">
-      {ITEMS.map((item) => {
-        // exact match — /autopost ไม่ควร active เมื่ออยู่ /autopost/results
-        const active =
-          pathname === item.href ||
-          (item.href !== '/autopost' && pathname.startsWith(`${item.href}/`));
-        return (
-          <Link
-            key={item.href}
-            href={item.href}
-            className={`border px-4 py-3 transition ${
-              active
-                ? 'border-accent bg-accent text-white'
-                : 'border-line bg-white text-ink hover:border-accent/40 hover:bg-accent/[0.03]'
-            }`}
-          >
-            <span className="block text-sm font-medium">{item.label}</span>
-            <span className={`mt-0.5 block text-[11px] uppercase tracking-[0.06em] ${active ? 'text-white/75' : 'text-subtle'}`}>{item.detail}</span>
-          </Link>
-        );
-      })}
+    <nav aria-label="เมนูโพสต์และผลลัพธ์" className="max-w-full overflow-x-auto">
+      <Tabs value={active} activationMode="manual">
+        <TabsList>
+          {ITEMS.map((item) => (
+            <TabsTrigger key={item.href} value={item.href} asChild>
+              <Link href={item.href} title={item.detail}>
+                {item.label}
+              </Link>
+            </TabsTrigger>
+          ))}
+        </TabsList>
+      </Tabs>
     </nav>
   );
 }

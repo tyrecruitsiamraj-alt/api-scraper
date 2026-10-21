@@ -1,30 +1,40 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
+import { ArrowLeftIcon, DownloadIcon, ExternalLinkIcon } from 'lucide-react';
 import { getCandidate, recordCandidateActivity } from '@/lib/repo';
 import { AttachmentViewer } from '@/components/AttachmentViewer';
 import { markCandidateCalledAction, markCandidateViewedAction } from '@/lib/actions';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth';
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
+import { FieldLabel } from '@/components/ui/field';
+import { Input } from '@/components/ui/input';
+import { Separator } from '@/components/ui/separator';
 
 export const dynamic = 'force-dynamic';
 
 const PLATFORM_LABEL: Record<string, string> = { jobbkk: 'JobBKK', jobthai: 'JobThai' };
 
-function Field({ label, value }: { label: string; value?: string | null }) {
+function Info({ label, value }: { label: string; value?: string | null }) {
   return (
-    <div>
-      <dt className="text-xs text-subtle">{label}</dt>
-      <dd className="text-sm mt-0.5">{value || '—'}</dd>
+    <div className="flex flex-col gap-0.5">
+      <dt className="text-xs text-muted-foreground">{label}</dt>
+      <dd className="text-sm leading-relaxed">{value || '—'}</dd>
     </div>
   );
 }
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <section className="card p-6">
-      <h2 className="text-sm font-semibold text-subtle mb-4 uppercase tracking-wide">{title}</h2>
-      {children}
-    </section>
+    <Card>
+      <CardHeader>
+        <CardTitle>{title}</CardTitle>
+      </CardHeader>
+      <CardContent>{children}</CardContent>
+    </Card>
   );
 }
 
@@ -59,118 +69,123 @@ export default async function CandidateDetail({ params }: { params: { id: string
   const soft: string[] = Array.isArray(c.soft_skills) ? c.soft_skills : [];
 
   return (
-    <div>
+    <div className="flex flex-col gap-6">
       <div className="flex items-center justify-between gap-3">
-        <Link href="/candidates" className="text-sm text-subtle hover:text-accent">← กลับไปรายชื่อ</Link>
-        <a
-          href={`/api/candidates/${params.id}/pdf`}
-          className="inline-flex items-center gap-1.5 rounded-lg bg-ink px-3.5 py-2 text-sm font-medium text-white hover:opacity-90"
-        >
-          ⬇ ดาวน์โหลด PDF
-        </a>
+        <Button variant="ghost" size="sm" asChild>
+          <Link href="/candidates">
+            <ArrowLeftIcon data-icon="inline-start" />
+            กลับไปรายชื่อ
+          </Link>
+        </Button>
+        <Button asChild>
+          <a href={`/api/candidates/${params.id}/pdf`}>
+            <DownloadIcon data-icon="inline-start" />
+            ดาวน์โหลด PDF
+          </a>
+        </Button>
       </div>
 
-      <div className="card mt-3 mb-6 p-7 flex items-start gap-5">
-        {profile ? (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img
-            src={`/api/assets/${profile.id}`}
-            alt={c.full_name || 'profile'}
-            className="h-20 w-20 shrink-0 rounded-2xl border border-hairline object-cover"
-          />
-        ) : (
-          <div className="grid h-20 w-20 shrink-0 place-items-center rounded-2xl bg-ink text-white text-2xl">
-            {(c.first_name || c.full_name || '?').trim().charAt(0)}
+      <Card>
+        <CardContent className="flex items-start gap-5">
+          <Avatar className="size-20">
+            {profile && <AvatarImage src={`/api/assets/${profile.id}`} alt={c.full_name || 'profile'} />}
+            <AvatarFallback className="text-2xl">{(c.first_name || c.full_name || '?').trim().charAt(0)}</AvatarFallback>
+          </Avatar>
+          <div className="flex min-w-0 flex-1 flex-col gap-1">
+            <h1 className="text-2xl font-semibold">{c.full_name || '(ไม่มีชื่อ)'}</h1>
+            <p className="text-sm text-muted-foreground">{c.desired_positions || 'ไม่ระบุตำแหน่งที่ต้องการ'}</p>
+            <div className="mt-2 flex flex-wrap gap-2">
+              {(c.sources ?? []).map((s: any) => (
+                s.source_url ? (
+                  <Badge key={s.external_id} variant="outline" asChild>
+                    <a href={s.source_url} target="_blank" rel="noreferrer">
+                      {PLATFORM_LABEL[s.platform] ?? s.platform}
+                      <ExternalLinkIcon data-icon="inline-end" />
+                    </a>
+                  </Badge>
+                ) : (
+                  <Badge key={s.external_id} variant="outline">{PLATFORM_LABEL[s.platform] ?? s.platform}</Badge>
+                )
+              ))}
+            </div>
           </div>
-        )}
-        <div className="min-w-0 flex-1">
-          <h1 className="text-2xl font-semibold tracking-tight">{c.full_name || '(ไม่มีชื่อ)'}</h1>
-          <p className="text-sm text-subtle mt-1">{c.desired_positions || 'ไม่ระบุตำแหน่งที่ต้องการ'}</p>
-          <div className="mt-3 flex flex-wrap gap-2">
-            {(c.sources ?? []).map((s: any) => (
-              <span key={s.external_id} className="pill bg-black/5">
-                {PLATFORM_LABEL[s.platform] ?? s.platform}
-                {s.source_url && (
-                  <a href={s.source_url} target="_blank" rel="noreferrer" className="text-accent hover:underline">↗</a>
-                )}
-              </span>
-            ))}
+          <div className="hidden flex-col items-end gap-0.5 text-sm sm:flex">
+            <p className="font-medium">{c.phone || '—'}</p>
+            <p className="text-muted-foreground">{c.email || ''}</p>
+            {c.line_id && <p className="text-muted-foreground">LINE: {c.line_id}</p>}
           </div>
-        </div>
-        <div className="hidden sm:block text-right text-sm">
-          <p className="font-medium">{c.phone || '—'}</p>
-          <p className="text-subtle">{c.email || ''}</p>
-          {c.line_id && <p className="text-subtle">LINE: {c.line_id}</p>}
-        </div>
-      </div>
+        </CardContent>
+      </Card>
 
-      <section className="card mb-6 p-5">
-        <div className="flex flex-wrap items-start justify-between gap-4">
-          <div>
-            <h2 className="text-sm font-semibold">สถานะการติดตาม</h2>
-            <p className="mt-1 text-xs text-subtle">ใช้บันทึกว่าทีมเปิดอ่าน Resume แล้วหรือโทรหาผู้สมัครแล้ว</p>
+      <Card>
+        <CardHeader>
+          <CardTitle>สถานะการติดตาม</CardTitle>
+          <CardDescription>บันทึกว่าทีมเปิดอ่าน Resume หรือโทรหาผู้สมัครแล้วหรือยัง</CardDescription>
+        </CardHeader>
+        <CardContent className="flex flex-col gap-3">
+          <div className="flex flex-wrap items-center gap-2 text-sm">
+            <Badge variant={viewedAt ? 'secondary' : 'outline'}>{viewedAt ? 'เปิดอ่านแล้ว' : 'ยังไม่เปิดอ่าน'}</Badge>
+            {viewedAt && <span className="text-muted-foreground">{fmtActivity(viewedAt)}{viewedBy ? ` · ${viewedBy}` : ''}</span>}
           </div>
-          <div className="flex flex-wrap gap-2 text-xs">
-            <span className={`pill ${viewedAt ? 'bg-green-50 text-green-700' : 'bg-black/5 text-subtle'}`}>
-              {viewedAt ? `เปิดอ่านแล้ว · ${fmtActivity(viewedAt)}${viewedBy ? ` · ${viewedBy}` : ''}` : 'ยังไม่เปิดอ่าน'}
-            </span>
-            <span className={`pill ${c.called_at ? 'bg-blue-50 text-blue-700' : 'bg-black/5 text-subtle'}`}>
-              {c.called_at ? `โทรแล้ว · ${fmtActivity(c.called_at)}${c.called_by ? ` · ${c.called_by}` : ''}` : 'ยังไม่โทร'}
-            </span>
+          <div className="flex flex-wrap items-center gap-2 text-sm">
+            <Badge variant={c.called_at ? 'secondary' : 'outline'}>{c.called_at ? 'โทรแล้ว' : 'ยังไม่โทร'}</Badge>
+            {c.called_at && <span className="text-muted-foreground">{fmtActivity(c.called_at)}{c.called_by ? ` · ${c.called_by}` : ''}</span>}
           </div>
-        </div>
-        <div className="mt-4 flex flex-wrap items-end gap-2 border-t border-hairline/60 pt-4">
+          {c.latest_call_note && <p className="text-sm text-muted-foreground">บันทึกการโทรล่าสุด: {c.latest_call_note}</p>}
+        </CardContent>
+        <CardFooter className="flex-wrap gap-2">
           <form action={markCandidateViewedAction}>
             <input type="hidden" name="candidateId" value={c.id} />
-            <button className="btn-secondary" type="submit">{viewedAt ? 'บันทึกว่าเปิดอ่านอีกครั้ง' : 'ทำเครื่องหมายว่าเปิดอ่านแล้ว'}</button>
+            <Button variant="outline" type="submit">{viewedAt ? 'บันทึกการอ่านอีกครั้ง' : 'บันทึกว่าอ่านแล้ว'}</Button>
           </form>
-          <form action={markCandidateCalledAction} className="flex flex-wrap items-end gap-2">
+          <form action={markCandidateCalledAction} className="flex flex-wrap items-center gap-2">
             <input type="hidden" name="candidateId" value={c.id} />
-            <input name="note" className="field min-w-56" placeholder="ผลการโทร (ถ้ามี)" />
-            <button className="btn-primary" type="submit">{c.called_at ? 'บันทึกการโทรอีกครั้ง' : 'ทำเครื่องหมายว่าโทรแล้ว'}</button>
+            <FieldLabel htmlFor="call-note" className="sr-only">ผลการโทร</FieldLabel>
+            <Input id="call-note" name="note" className="w-auto min-w-56" placeholder="ผลการโทร (ถ้ามี)" />
+            <Button type="submit">{c.called_at ? 'บันทึกการโทรอีกครั้ง' : 'บันทึกว่าโทรแล้ว'}</Button>
           </form>
-        </div>
-        {c.latest_call_note && <p className="mt-3 text-xs text-subtle">บันทึกการโทรล่าสุด: {c.latest_call_note}</p>}
-      </section>
+        </CardFooter>
+      </Card>
 
       <div className="grid gap-5 lg:grid-cols-3">
-        <div className="lg:col-span-2 space-y-5">
+        <div className="flex flex-col gap-5 lg:col-span-2">
           <Section title="ข้อมูลส่วนตัว">
             <dl className="grid grid-cols-2 gap-x-6 gap-y-4 sm:grid-cols-3">
-              <Field label="คำนำหน้า" value={c.prefix} />
-              <Field label="ชื่อ" value={c.first_name} />
-              <Field label="นามสกุล" value={c.last_name} />
-              <Field label="เพศ" value={c.gender} />
-              <Field label="อายุ" value={c.age} />
-              <Field label="วันเกิด" value={c.birth_date} />
-              <Field label="จังหวัด" value={c.province} />
-              <Field label="สัญชาติ" value={c.nationality} />
-              <Field label="ศาสนา" value={c.religion} />
+              <Info label="คำนำหน้า" value={c.prefix} />
+              <Info label="ชื่อ" value={c.first_name} />
+              <Info label="นามสกุล" value={c.last_name} />
+              <Info label="เพศ" value={c.gender} />
+              <Info label="อายุ" value={c.age} />
+              <Info label="วันเกิด" value={c.birth_date} />
+              <Info label="จังหวัด" value={c.province} />
+              <Info label="สัญชาติ" value={c.nationality} />
+              <Info label="ศาสนา" value={c.religion} />
             </dl>
-            <div className="mt-4 border-t border-hairline pt-4">
-              <Field label="ที่อยู่" value={c.address} />
-            </div>
+            <Separator className="my-4" />
+            <dl>
+              <Info label="ที่อยู่" value={c.address} />
+            </dl>
           </Section>
 
           <Section title="งานที่ต้องการ">
             <dl className="grid grid-cols-2 gap-x-6 gap-y-4 sm:grid-cols-3">
-              <Field label="ตำแหน่ง" value={c.desired_positions} />
-              <Field label="เงินเดือนที่ต้องการ" value={c.expected_salary} />
-              <Field label="พื้นที่ทำงาน" value={c.desired_work_area} />
-              <Field label="ประเภทงาน" value={c.job_type} />
-              <Field label="เริ่มงานได้" value={c.available_start} />
+              <Info label="ตำแหน่ง" value={c.desired_positions} />
+              <Info label="เงินเดือนที่ต้องการ" value={c.expected_salary} />
+              <Info label="พื้นที่ทำงาน" value={c.desired_work_area} />
+              <Info label="ประเภทงาน" value={c.job_type} />
+              <Info label="เริ่มงานได้" value={c.available_start} />
             </dl>
           </Section>
 
           <Section title={`การศึกษา (${education.length})`}>
             {education.length === 0 ? (
-              <p className="text-sm text-subtle">—</p>
+              <p className="text-sm text-muted-foreground">—</p>
             ) : (
-              <ul className="space-y-3">
+              <ul className="flex flex-col gap-3">
                 {education.map((e, i) => (
-                  <li key={i} className="border-l-2 border-hairline pl-4">
+                  <li key={i} className="flex flex-col gap-0.5 border-l-2 pl-4">
                     <p className="text-sm font-medium">{e.institution || '—'}</p>
-                    <p className="text-xs text-subtle mt-0.5">
+                    <p className="text-sm text-muted-foreground">
                       {[e.degree, e.faculty, e.major].filter(Boolean).join(' · ')}
                       {e.gpa ? ` · GPA ${e.gpa}` : ''}
                       {e.graduation_year ? ` · ${e.graduation_year}` : ''}
@@ -183,17 +198,17 @@ export default async function CandidateDetail({ params }: { params: { id: string
 
           <Section title={`ประสบการณ์ทำงาน (${work.length})`}>
             {work.length === 0 ? (
-              <p className="text-sm text-subtle">—</p>
+              <p className="text-sm text-muted-foreground">—</p>
             ) : (
-              <ul className="space-y-4">
+              <ul className="flex flex-col gap-4">
                 {work.map((w, i) => (
-                  <li key={i} className="border-l-2 border-hairline pl-4">
+                  <li key={i} className="flex flex-col gap-0.5 border-l-2 pl-4">
                     <p className="text-sm font-medium">{w.position || '—'}{w.company ? ` — ${w.company}` : ''}</p>
-                    <p className="text-xs text-subtle mt-0.5">
+                    <p className="text-sm text-muted-foreground">
                       {[w.period || w.year, w.salary && `${w.salary} บาท`, w.business_type].filter(Boolean).join(' · ')}
                     </p>
                     {w.responsibilities && (
-                      <p className="text-xs text-ink/70 mt-1.5 whitespace-pre-line line-clamp-6">{w.responsibilities}</p>
+                      <p className="mt-1 line-clamp-6 text-sm leading-relaxed whitespace-pre-line text-muted-foreground">{w.responsibilities}</p>
                     )}
                   </li>
                 ))}
@@ -202,29 +217,31 @@ export default async function CandidateDetail({ params }: { params: { id: string
           </Section>
         </div>
 
-        <div className="space-y-5">
+        <div className="flex flex-col gap-5">
           <Section title="เอกสารแนบ">
             <AttachmentViewer assets={c.assets ?? []} />
           </Section>
 
           {(hard.length > 0 || soft.length > 0) && (
             <Section title="ทักษะ">
-              {hard.length > 0 && (
-                <div className="mb-3">
-                  <p className="text-xs text-subtle mb-2">Hard skills</p>
-                  <div className="flex flex-wrap gap-1.5">
-                    {hard.map((s, i) => <span key={i} className="pill bg-accent/10 text-accent">{s}</span>)}
+              <div className="flex flex-col gap-4">
+                {hard.length > 0 && (
+                  <div className="flex flex-col gap-2">
+                    <p className="text-xs text-muted-foreground">Hard skills</p>
+                    <div className="flex flex-wrap gap-1.5">
+                      {hard.map((s, i) => <Badge key={i} variant="secondary">{s}</Badge>)}
+                    </div>
                   </div>
-                </div>
-              )}
-              {soft.length > 0 && (
-                <div>
-                  <p className="text-xs text-subtle mb-2">Soft skills</p>
-                  <div className="flex flex-wrap gap-1.5">
-                    {soft.map((s, i) => <span key={i} className="pill bg-black/5">{s}</span>)}
+                )}
+                {soft.length > 0 && (
+                  <div className="flex flex-col gap-2">
+                    <p className="text-xs text-muted-foreground">Soft skills</p>
+                    <div className="flex flex-wrap gap-1.5">
+                      {soft.map((s, i) => <Badge key={i} variant="outline">{s}</Badge>)}
+                    </div>
                   </div>
-                </div>
-              )}
+                )}
+              </div>
             </Section>
           )}
         </div>

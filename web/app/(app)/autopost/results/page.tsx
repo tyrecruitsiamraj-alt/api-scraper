@@ -2,6 +2,11 @@ import Link from 'next/link';
 import { AutopostNav } from '@/components/AutopostNav';
 import { LeadPostCard } from '@/components/LeadPostCard';
 import { leadResultsSummary, leadsByPosition, topLeadPosts } from '@/lib/repo';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from '@/components/ui/empty';
+import { Progress } from '@/components/ui/progress';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 
 export const dynamic = 'force-dynamic';
 
@@ -11,13 +16,19 @@ const RANGES: { key: string; days?: number; label: string }[] = [
   { key: 'all', label: 'ทั้งหมด' },
 ];
 
-function Stat({ label, value, sub, accent }: { label: string; value: string | number; sub?: string; accent?: boolean }) {
+function Stat({ label, value, sub }: { label: string; value: string | number; sub?: string }) {
   return (
-    <div className="card p-5">
-      <div className="text-xs text-subtle">{label}</div>
-      <div className={`mt-1 text-3xl font-semibold tabular-nums tracking-tight ${accent ? 'text-accent' : ''}`}>{value}</div>
-      {sub && <div className="mt-1 text-xs text-subtle">{sub}</div>}
-    </div>
+    <Card size="sm">
+      <CardHeader>
+        <CardDescription>{label}</CardDescription>
+        <CardTitle className="truncate text-2xl font-semibold tabular-nums">{value}</CardTitle>
+      </CardHeader>
+      {sub && (
+        <CardContent>
+          <p className="text-xs text-muted-foreground">{sub}</p>
+        </CardContent>
+      )}
+    </Card>
   );
 }
 
@@ -38,22 +49,27 @@ export default async function AutopostResultsPage({
   const maxLeads = byPosition.length ? Math.max(...byPosition.map((p) => p.leads)) : 0;
 
   return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">ผลลัพธ์และผู้สนใจ</h1>
-        <p className="mt-1 text-sm text-subtle">เบอร์ผู้สนใจที่เก็บได้จากคอมเมนต์ พร้อมทักกลับ · โพสต์ตำแหน่งไหนได้ผลจริง</p>
+    <div className="flex flex-col gap-6">
+      <div className="flex flex-col gap-1">
+        <h1 className="text-2xl font-semibold">ผลลัพธ์และผู้สนใจ</h1>
+        <p className="text-sm leading-relaxed text-muted-foreground">
+          เบอร์ผู้สนใจที่เก็บได้จากคอมเมนต์ พร้อมข้อความทักกลับ และดูว่าโพสต์ตำแหน่งไหนได้ผล
+        </p>
       </div>
 
       <AutopostNav />
 
       {!summary ? (
-        <div className="card px-5 py-10 text-center text-sm text-subtle">
-          ยังไม่มีข้อมูลผลลัพธ์ — ตรวจสอบการเชื่อมต่อฐานข้อมูล Auto-Post หรือรอให้ตัวเก็บคอมเมนต์ทำงาน
-        </div>
+        <Empty className="border">
+          <EmptyHeader>
+            <EmptyTitle>ยังไม่มีข้อมูลผลลัพธ์</EmptyTitle>
+            <EmptyDescription>ตรวจการเชื่อมต่อฐานข้อมูล Auto-Post หรือรอให้ตัวเก็บคอมเมนต์ทำงาน</EmptyDescription>
+          </EmptyHeader>
+        </Empty>
       ) : (
         <>
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-            <Stat label="ผู้สนใจทั้งหมด" value={summary.leads_total.toLocaleString()} sub="เบอร์จากคอมเมนต์ (ตัดซ้ำแล้ว)" accent />
+            <Stat label="ผู้สนใจทั้งหมด" value={summary.leads_total.toLocaleString()} sub="เบอร์จากคอมเมนต์ ตัดเบอร์ซ้ำแล้ว" />
             <Stat label="ผู้สนใจใน 7 วัน" value={summary.leads_7d.toLocaleString()} sub={`วันนี้ ${summary.leads_today.toLocaleString()}`} />
             <Stat
               label="โพสต์ที่ได้ผู้สนใจ"
@@ -61,7 +77,7 @@ export default async function AutopostResultsPage({
               sub={`จากโพสต์ทั้งหมด ${summary.posts_total.toLocaleString()}`}
             />
             <Stat
-              label="ตำแหน่งเด่น"
+              label="ตำแหน่งที่ได้เบอร์มากสุด"
               value={summary.top_position ?? '—'}
               sub={summary.top_position ? `${summary.top_position_leads.toLocaleString()} เบอร์` : 'ยังไม่มีข้อมูล'}
             />
@@ -69,49 +85,62 @@ export default async function AutopostResultsPage({
 
           {/* leads แยกตามตำแหน่ง — ประกาศตำแหน่งไหนดึงคนได้ */}
           {byPosition.length > 0 && (
-            <div>
-              <h2 className="mb-3 text-base font-semibold">ผู้สนใจแยกตามตำแหน่ง</h2>
-              <div className="card divide-y divide-hairline">
-                {byPosition.map((p) => (
-                  <div key={p.position} className="flex items-center gap-3 px-4 py-2.5">
-                    <span className="w-40 shrink-0 truncate text-sm text-ink sm:w-56" title={p.position}>{p.position}</span>
-                    <div className="h-2 flex-1 overflow-hidden rounded-full bg-black/[0.05]">
-                      <div
-                        className="h-full rounded-full bg-accent"
-                        style={{ width: `${maxLeads ? Math.max(4, (p.leads / maxLeads) * 100) : 0}%` }}
-                      />
-                    </div>
-                    <span className="w-24 shrink-0 text-right text-xs text-subtle">
-                      <span className="font-semibold tabular-nums text-ink">{p.leads}</span> เบอร์ · {p.posts} โพสต์
-                    </span>
-                  </div>
-                ))}
-              </div>
-            </div>
+            <Card>
+              <CardHeader>
+                <CardTitle>ผู้สนใจแยกตามตำแหน่ง</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>ตำแหน่ง</TableHead>
+                      <TableHead className="w-1/3">
+                        <span className="sr-only">สัดส่วน</span>
+                      </TableHead>
+                      <TableHead className="text-right">เบอร์</TableHead>
+                      <TableHead className="text-right">โพสต์</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {byPosition.map((p) => (
+                      <TableRow key={p.position}>
+                        <TableCell className="max-w-56 truncate" title={p.position}>
+                          {p.position}
+                        </TableCell>
+                        <TableCell>
+                          <Progress value={maxLeads ? (p.leads / maxLeads) * 100 : 0} aria-label={`${p.position} ${p.leads} เบอร์`} />
+                        </TableCell>
+                        <TableCell className="text-right font-medium tabular-nums">{p.leads}</TableCell>
+                        <TableCell className="text-right tabular-nums text-muted-foreground">{p.posts}</TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </CardContent>
+            </Card>
           )}
 
           {/* โพสต์ที่เก็บ lead ได้ — เบอร์พร้อมทักกลับ */}
-          <div>
-            <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+          <div className="flex flex-col gap-3">
+            <div className="flex flex-wrap items-center justify-between gap-2">
               <h2 className="text-base font-semibold">โพสต์ที่ได้ผู้สนใจ ({posts.length})</h2>
-              <div className="flex items-center gap-1">
-                {RANGES.map((r) => (
-                  <Link
-                    key={r.key}
-                    href={r.key === 'all' ? '/autopost/results' : `/autopost/results?days=${r.key}`}
-                    className={`rounded-full px-3 py-1 text-xs font-medium transition ${
-                      rangeKey === r.key ? 'bg-accent text-white' : 'text-subtle hover:bg-black/[0.04]'
-                    }`}
-                  >
-                    {r.label}
-                  </Link>
-                ))}
-              </div>
+              <Tabs value={rangeKey} activationMode="manual">
+                <TabsList>
+                  {RANGES.map((r) => (
+                    <TabsTrigger key={r.key} value={r.key} asChild>
+                      <Link href={r.key === 'all' ? '/autopost/results' : `/autopost/results?days=${r.key}`}>{r.label}</Link>
+                    </TabsTrigger>
+                  ))}
+                </TabsList>
+              </Tabs>
             </div>
             {posts.length === 0 ? (
-              <div className="card px-5 py-10 text-center text-sm text-subtle">
-                ยังไม่มีโพสต์ที่พบผู้สนใจในช่วงนี้ — หลังเผยแพร่แล้ว ระบบจะตรวจคอมเมนต์และรวบรวมเบอร์ให้
-              </div>
+              <Empty className="border">
+                <EmptyHeader>
+                  <EmptyTitle>ยังไม่มีโพสต์ที่พบผู้สนใจในช่วงนี้</EmptyTitle>
+                  <EmptyDescription>หลังโพสต์แล้ว ระบบจะตรวจคอมเมนต์และรวบรวมเบอร์มาไว้ที่นี่</EmptyDescription>
+                </EmptyHeader>
+              </Empty>
             ) : (
               <div className="grid gap-3">
                 {posts.map((post) => (

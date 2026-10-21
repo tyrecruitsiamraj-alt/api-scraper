@@ -1,16 +1,39 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
+import { ChevronLeftIcon, ExternalLinkIcon } from 'lucide-react';
 import { autopostRun, autopostRunPosts } from '@/lib/repo';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from '@/components/ui/empty';
+import { Progress } from '@/components/ui/progress';
+import { Spinner } from '@/components/ui/spinner';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 
 export const dynamic = 'force-dynamic';
 
-const STATUS: Record<string, { label: string; cls: string }> = {
-  queued: { label: 'รอคิว', cls: 'bg-black/5 text-ink' },
-  running: { label: 'กำลังโพสต์', cls: 'bg-blue-50 text-blue-700' },
-  completed: { label: 'เสร็จ', cls: 'bg-green-50 text-green-700' },
-  failed: { label: 'ล้มเหลว', cls: 'bg-red-50 text-red-700' },
-  cancelled: { label: 'ยกเลิก', cls: 'bg-amber-50 text-amber-700' },
-};
+function RunStatus({ status }: { status: string }) {
+  switch (status) {
+    case 'running':
+      return (
+        <Badge variant="secondary">
+          <Spinner data-icon="inline-start" />
+          กำลังโพสต์
+        </Badge>
+      );
+    case 'queued':
+      return <Badge variant="outline">รอคิว</Badge>;
+    case 'completed':
+      return <Badge variant="secondary">เสร็จ</Badge>;
+    case 'failed':
+      return <Badge variant="destructive">ล้มเหลว</Badge>;
+    case 'cancelled':
+      return <Badge variant="ghost">ยกเลิก</Badge>;
+    default:
+      return <Badge variant="outline">{status}</Badge>;
+  }
+}
 
 function fmt(v: string | null): string {
   if (!v) return '—';
@@ -21,12 +44,12 @@ function fmt(v: string | null): string {
   }
 }
 
-function Field({ label, value }: { label: string; value?: unknown }) {
+function Detail({ label, value }: { label: string; value?: unknown }) {
   const v = value === null || value === undefined || value === '' ? '—' : String(value);
   return (
-    <div>
-      <dt className="text-xs text-subtle">{label}</dt>
-      <dd className="mt-0.5 text-sm">{v}</dd>
+    <div className="flex flex-col gap-0.5">
+      <dt className="text-xs text-muted-foreground">{label}</dt>
+      <dd className="text-sm">{v}</dd>
     </div>
   );
 }
@@ -35,71 +58,108 @@ export default async function AutopostRunDetail({ params }: { params: { id: stri
   const run = await autopostRun(params.id);
   if (!run) notFound();
   const posts = run.run_id ? await autopostRunPosts(run.run_id) : [];
-  const st = STATUS[run.status] ?? { label: run.status, cls: 'bg-black/5 text-ink' };
   const posted = posts.filter((p) => p.post_link && p.post_link.trim()).length;
+  const postedPct = posts.length > 0 ? Math.round((posted / posts.length) * 100) : 0;
 
   return (
-    <div className="space-y-6">
-      <Link href="/autopost/runs" className="text-sm text-subtle hover:text-accent">← กลับ รอบโพสต์</Link>
-
-      <div className="card p-6">
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div>
-            <h1 className="text-2xl font-semibold tracking-tight">{run.account || run.user_id || 'รอบโพสต์'}</h1>
-            <p className="mt-1 text-sm text-subtle">โพสต์สำเร็จ {posted} จาก {posts.length} กลุ่ม</p>
-          </div>
-          <span className={`pill ${st.cls}`}>{st.label}</span>
-        </div>
-        <dl className="mt-5 grid grid-cols-2 gap-4 sm:grid-cols-4">
-          <Field label="เครื่องที่ทำงาน" value={run.worker_id} />
-          <Field label="สั่งโดย" value={run.requested_by === 'auto-daily' ? 'รอบอัตโนมัติ 8:00' : run.requested_by} />
-          <Field label="เริ่ม" value={fmt(run.started_at)} />
-          <Field label="เสร็จ" value={fmt(run.finished_at)} />
-        </dl>
-        {run.error && <p className="mt-3 text-sm text-red-600">ข้อผิดพลาด: {run.error}</p>}
-      </div>
-
+    <div className="flex flex-col gap-6">
       <div>
-        <h2 className="mb-3 text-base font-semibold">โพสต์ลงกลุ่ม (จริง)</h2>
-        {posts.length === 0 ? (
-          <div className="card border-dashed p-6 text-center text-sm text-subtle">
-            ยังไม่มีบันทึกการโพสต์ต่อกลุ่มสำหรับรอบนี้ (อาจยังโพสต์ไม่เสร็จ หรือยังไม่ถูกหยิบ)
-          </div>
-        ) : (
-          <div className="card overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-hairline text-left text-xs text-subtle">
-                  <th className="px-4 py-2.5 font-medium">งาน</th>
-                  <th className="px-4 py-2.5 font-medium">กลุ่ม Facebook</th>
-                  <th className="px-4 py-2.5 font-medium text-right">คอมเมนต์</th>
-                  <th className="px-4 py-2.5 font-medium">เวลา</th>
-                  <th className="px-4 py-2.5 font-medium text-right">ลิงก์</th>
-                </tr>
-              </thead>
-              <tbody>
-                {posts.map((p) => (
-                  <tr key={p.id} className="border-b border-hairline/60 last:border-0 hover:bg-black/[0.015]">
-                    <td className="px-4 py-2.5">{p.job_title || '—'}</td>
-                    <td className="px-4 py-2.5">{p.group_name || p.group_id || '—'}</td>
-                    <td className="px-4 py-2.5 text-right tabular-nums">{p.comment_count}</td>
-                    <td className="px-4 py-2.5 text-subtle">{fmt(p.created_at)}</td>
-                    <td className="px-4 py-2.5 text-right">
-                      {p.post_link && p.post_link.trim() ? (
-                        <a href={p.post_link} target="_blank" rel="noreferrer" className="text-accent hover:underline">
-                          เปิดโพสต์จริง ↗
-                        </a>
-                      ) : (
-                        <span className="text-subtle">ไม่มีลิงก์ (โพสต์ไม่สำเร็จ?)</span>
-                      )}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
+        <Button asChild variant="ghost" size="sm">
+          <Link href="/autopost/runs">
+            <ChevronLeftIcon data-icon="inline-start" />
+            กลับไปรอบโพสต์
+          </Link>
+        </Button>
       </div>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-xl font-semibold">{run.account || run.user_id || 'รอบโพสต์'}</CardTitle>
+          <CardDescription>
+            โพสต์สำเร็จ {posted} จาก {posts.length} กลุ่ม
+          </CardDescription>
+          <CardAction>
+            <RunStatus status={run.status} />
+          </CardAction>
+        </CardHeader>
+        <CardContent className="flex flex-col gap-5">
+          {posts.length > 0 && <Progress value={postedPct} aria-label="สัดส่วนกลุ่มที่โพสต์สำเร็จ" />}
+          <dl className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+            <Detail label="เครื่องที่ทำงาน" value={run.worker_id} />
+            <Detail label="สั่งโดย" value={run.requested_by === 'auto-daily' ? 'รอบอัตโนมัติ 8:00' : run.requested_by} />
+            <Detail label="เริ่ม" value={fmt(run.started_at)} />
+            <Detail label="เสร็จ" value={fmt(run.finished_at)} />
+          </dl>
+          {run.error && (
+            <Alert variant="destructive">
+              <AlertTitle>ข้อผิดพลาด</AlertTitle>
+              <AlertDescription>{run.error}</AlertDescription>
+            </Alert>
+          )}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>โพสต์ลงกลุ่ม</CardTitle>
+          <CardDescription>รายการที่โพสต์ลง Facebook จริงในรอบนี้</CardDescription>
+        </CardHeader>
+        <CardContent>
+          {posts.length === 0 ? (
+            <Empty>
+              <EmptyHeader>
+                <EmptyTitle>ยังไม่มีบันทึกการโพสต์ของรอบนี้</EmptyTitle>
+                <EmptyDescription>อาจยังโพสต์ไม่เสร็จ หรือยังไม่มีเครื่องมารับงาน</EmptyDescription>
+              </EmptyHeader>
+            </Empty>
+          ) : (
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>งาน</TableHead>
+                  <TableHead>กลุ่ม Facebook</TableHead>
+                  <TableHead>ผล</TableHead>
+                  <TableHead className="text-right">คอมเมนต์</TableHead>
+                  <TableHead>เวลา</TableHead>
+                  <TableHead className="text-right">ลิงก์</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {posts.map((p) => {
+                  const hasLink = Boolean(p.post_link && p.post_link.trim());
+                  return (
+                    <TableRow key={p.id}>
+                      <TableCell>{p.job_title || '—'}</TableCell>
+                      <TableCell>{p.group_name || p.group_id || '—'}</TableCell>
+                      <TableCell>
+                        {hasLink ? (
+                          <Badge variant="secondary">โพสต์แล้ว</Badge>
+                        ) : (
+                          <Badge variant="outline">ไม่มีลิงก์</Badge>
+                        )}
+                      </TableCell>
+                      <TableCell className="text-right tabular-nums">{p.comment_count}</TableCell>
+                      <TableCell className="text-muted-foreground">{fmt(p.created_at)}</TableCell>
+                      <TableCell className="text-right">
+                        {hasLink ? (
+                          <Button asChild variant="ghost" size="sm">
+                            <a href={p.post_link!} target="_blank" rel="noreferrer">
+                              เปิดโพสต์
+                              <ExternalLinkIcon data-icon="inline-end" />
+                            </a>
+                          </Button>
+                        ) : (
+                          <span className="text-xs text-muted-foreground">อาจโพสต์ไม่สำเร็จ</span>
+                        )}
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
+              </TableBody>
+            </Table>
+          )}
+        </CardContent>
+      </Card>
     </div>
   );
 }

@@ -7,10 +7,10 @@ const AUTOPOST_ACCESS_TOKEN = process.env.AUTOPOST_ACCESS_TOKEN ?? '';
 
 export default function AutopostReportsPage() {
   return (
-    <div className="space-y-4">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">รายงาน Auto-Post</h1>
-        <p className="mt-1 text-sm text-subtle">สรุปผลการโพสต์และ lead ที่เก็บได้ ตามงาน/กลุ่ม/บัญชี</p>
+    <div className="flex flex-col gap-4">
+      <div className="flex flex-col gap-1">
+        <h1 className="text-2xl font-semibold">รายงาน Auto-Post</h1>
+        <p className="text-sm leading-relaxed text-muted-foreground">สรุปผลการโพสต์และ lead ที่เก็บได้ แยกตามงาน กลุ่ม และบัญชี</p>
       </div>
       <AutopostFrame baseUrl={AUTOPOST_URL} token={AUTOPOST_ACCESS_TOKEN} tab="reports" />
     </div>

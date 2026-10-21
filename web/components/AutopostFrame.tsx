@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 
 /**
  * ฝังหน้าจอ AUTO-POST ทีละ tab ในคอนโซล (แทน tab "Auto-Post" ก้อนเดียวเดิม).
@@ -26,28 +27,25 @@ export function AutopostFrame({
   }`;
 
   return (
-    <div className="space-y-3">
+    <div className="flex flex-col gap-3">
       {subTabs && subTabs.length > 0 && (
-        <div className="flex flex-wrap gap-1.5">
-          {subTabs.map((s) => (
-            <button
-              key={s.tab}
-              type="button"
-              onClick={() => setActive(s.tab)}
-              className={`whitespace-nowrap rounded-full px-3.5 py-1.5 text-[13px] font-medium transition ${
-                active === s.tab ? 'bg-accent text-white' : 'text-muted hover:bg-canvas hover:text-ink'
-              }`}
-            >
-              {s.label}
-            </button>
-          ))}
+        <div className="max-w-full overflow-x-auto">
+          <Tabs value={active} onValueChange={setActive}>
+            <TabsList>
+              {subTabs.map((s) => (
+                <TabsTrigger key={s.tab} value={s.tab}>
+                  {s.label}
+                </TabsTrigger>
+              ))}
+            </TabsList>
+          </Tabs>
         </div>
       )}
       <iframe
         key={active}
         src={src}
         title={`autopost-${active}`}
-        className="w-full rounded-xl border border-line bg-white"
+        className="w-full rounded-xl border bg-card"
         style={{ height }}
       />
     </div>

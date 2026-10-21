@@ -11,6 +11,7 @@ import {
   getPosterLayerBoxes,
   POSTER_CANVAS,
 } from '../../src/core/poster-template.js';
+import { cn } from '@/lib/utils';
 
 type Props = {
   fields: PosterFields;
@@ -27,7 +28,7 @@ export function PosterDragCanvas({
   sourceUrl,
   logoUrl = '/logo-SO.webp',
   enabled = true,
-  className = 'overflow-hidden rounded-3xl bg-white shadow-[0_20px_50px_rgba(11,42,85,0.18)]',
+  className = 'overflow-hidden rounded-xl border bg-card',
   onLayoutChange,
   onExtrasChange,
 }: Props) {
@@ -82,7 +83,7 @@ export function PosterDragCanvas({
     <div>
       <div
         ref={rootRef}
-        className={`relative aspect-square touch-none select-none ${className}`}
+        className={cn('relative aspect-square touch-none select-none', className)}
         aria-label={`ตัวอย่างโปสเตอร์ ${fields.title}`}
       >
         <div
@@ -98,7 +99,10 @@ export function PosterDragCanvas({
               type="button"
               data-poster-handle={layer.id}
               aria-label={`ลาก${layer.label}`}
-              className={`group absolute rounded-md border-2 transition ${active ? 'z-30 border-[#0d5fb8] bg-[#0d5fb8]/15' : extra ? 'z-20 border-transparent hover:border-amber-300 hover:bg-amber-50/20' : 'z-10 border-transparent hover:border-white/80 hover:bg-[#0d5fb8]/10'}`}
+              className={cn(
+                'group absolute rounded-md border-2 transition',
+                active ? 'z-30 border-[#0d5fb8] bg-[#0d5fb8]/15' : extra ? 'z-20 border-transparent hover:border-amber-300 hover:bg-amber-50/20' : 'z-10 border-transparent hover:border-white/80 hover:bg-[#0d5fb8]/10',
+              )}
               style={{
                 left: `${(layer.x / POSTER_CANVAS) * 100}%`,
                 top: `${(layer.y / POSTER_CANVAS) * 100}%`,
@@ -111,7 +115,11 @@ export function PosterDragCanvas({
               onPointerUp={endDrag}
               onPointerCancel={endDrag}
             >
-              <span className={`pointer-events-none absolute left-1 top-1 rounded-full px-2 py-0.5 text-[10px] font-medium shadow-sm ${active ? 'bg-[#0d5fb8] text-white' : extra ? 'bg-amber-700 text-white opacity-0 group-hover:opacity-100' : 'bg-black/60 text-white opacity-0 group-hover:opacity-100'} ${active ? 'opacity-100' : ''}`}>
+              <span className={cn(
+                'pointer-events-none absolute left-1 top-1 rounded-full px-2 py-0.5 text-[10px] font-medium shadow-xs',
+                active ? 'bg-[#0d5fb8] text-white' : extra ? 'bg-amber-700 text-white opacity-0 group-hover:opacity-100' : 'bg-black/60 text-white opacity-0 group-hover:opacity-100',
+                active && 'opacity-100',
+              )}>
                 {layer.label}
               </span>
             </button>
@@ -119,7 +127,7 @@ export function PosterDragCanvas({
         })}
       </div>
       {enabled && (
-        <p className="mt-3 text-xs leading-5 text-subtle">ลากรูปหรือข้อความไปวางตำแหน่งใหม่ · เพิ่มรูปหรือข้อความบนโปสเตอร์ชุดนี้ได้ · บันทึกแล้วตำแหน่งนี้จะติดไปกับรูปโพสต์ · ภาพต้นฉบับไม่ถูกสลับ</p>
+        <p className="mt-3 text-xs leading-relaxed text-muted-foreground">ลากรูปหรือข้อความเพื่อย้ายตำแหน่ง เมื่อบันทึก รูปที่ใช้โพสต์จะใช้ตำแหน่งนี้ ภาพต้นฉบับยังเป็นภาพเดิม</p>
       )}
     </div>
   );
