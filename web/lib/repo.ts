@@ -1916,6 +1916,8 @@ export async function createScrapeTaskFromSoRecruit(
        LEFT JOIN "jarvis_rm".jobs j ON j.id::text = r.job_id
        LEFT JOIN erp_open_requests e ON e.request_no = r.request_no
       WHERE r.request_no = $1 AND r.status = 'pending'
+        -- ใบขอเดียวกันอาจมีทั้งคำสั่งโพสต์และคำขอ Scrap: หยิบเฉพาะแถว Scrap
+        AND to_jsonb(r)->>'request_type' = 'scraping'
       LIMIT 1`,
     [requestNo],
   );
@@ -2203,7 +2205,8 @@ export async function createCampaignFromRequest(
                 NULL::text AS erp_title, NULL::text AS erp_province, NULL::int AS erp_qty, NULL::int AS erp_remaining
            FROM "jarvis_rm".job_posting_requests r
            LEFT JOIN "jarvis_rm".jobs j ON j.id::text = r.job_id
-          WHERE r.request_no = $1`,
+          WHERE r.request_no = $1
+            AND COALESCE(NULLIF(to_jsonb(r)->>'request_type', ''), 'content') = 'content'`,
         [requestNo],
       );
     } catch {
