@@ -1,9 +1,56 @@
 import Link from 'next/link';
-import { listPostAssignments } from '@/lib/repo';
-import { postAssignmentNowAction, runFacebookPreflightAction } from '@/lib/actions';
+import { listJarvisPostOrders, listPostAssignments, postModeLabel } from '@/lib/repo';
+import type { JarvisPostOrder } from '@/lib/repo';
+import { postAssignmentNowAction, postJarvisOrderAction, runFacebookPreflightAction } from '@/lib/actions';
 import { AutopostNav } from '@/components/AutopostNav';
 
 export const dynamic = 'force-dynamic';
+
+const JARVIS_STATUS: Record<string, { label: string; cls: string }> = {
+  pending: { label: 'รอโพสต์', cls: 'bg-amber-50 text-amber-800' },
+  in_progress: { label: 'กำลังโพสต์', cls: 'bg-blue-50 text-blue-700' },
+  posted: { label: 'โพสต์แล้ว', cls: 'bg-emerald-50 text-emerald-700' },
+};
+
+function JarvisOrderCard({ order }: { order: JarvisPostOrder }) {
+  const status = JARVIS_STATUS[order.jarvis_status] ?? { label: order.jarvis_status, cls: 'bg-black/5 text-ink' };
+  const blocker = order.issues[0]
+    ?? (!order.worker_online ? 'เครื่องที่ผูกกับบัญชี Facebook ยังออฟไลน์' : null);
+  const failed = order.jarvis_status === 'in_progress' && order.queue_status === 'failed';
+  return (
+    <div className="card space-y-3 p-5">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="font-semibold">{order.position}</div>
+          <div className="mt-1 text-xs text-subtle">
+            {order.request_no} · {postModeLabel(order.post_mode)} · {order.group_names.join(', ') || 'ไม่มีกลุ่ม'}
+            {order.account_label ? ` · โพสต์ด้วย ${order.account_label}` : ''}
+            {order.requested_by_name ? ` · สั่งโดย ${order.requested_by_name}` : ''}
+          </div>
+        </div>
+        <span className={`pill ${status.cls}`}>{status.label}</span>
+      </div>
+      <pre className="max-h-64 overflow-auto whitespace-pre-wrap rounded-lg bg-black/[0.03] p-3 font-sans text-sm">{order.caption}</pre>
+      {order.post_link && (
+        <a href={order.post_link} target="_blank" rel="noreferrer" className="text-sm text-accent underline">เปิดโพสต์บน Facebook</a>
+      )}
+      {failed && <p className="text-sm text-red-700">โพสต์ไม่สำเร็จ ดูสาเหตุในบันทึกการโพสต์ด้านล่างหน้า "ภาพรวมการโพสต์"</p>}
+      {order.jarvis_status === 'pending' && (
+        <>
+          {blocker && <p className="text-sm text-amber-700">โพสต์ไม่ได้ตอนนี้: {order.issues.length ? order.issues.join(' · ') : blocker}</p>}
+          <form action={postJarvisOrderAction} className="flex flex-wrap items-center gap-3">
+            <input type="hidden" name="requestNo" value={order.request_no} />
+            <label className="flex items-center gap-2 text-sm">
+              <input type="checkbox" name="confirm" value="yes" required disabled={Boolean(blocker)} />
+              ยืนยันว่าจะโพสต์จริงลงกลุ่ม
+            </label>
+            <button className="btn-primary btn-sm" disabled={Boolean(blocker)}>โพสต์</button>
+          </form>
+        </>
+      )}
+    </div>
+  );
+}
 
 const QUEUE_LABEL: Record<string, string> = {
   queued: 'รอคิว',
@@ -16,7 +63,9 @@ const QUEUE_LABEL: Record<string, string> = {
 // งานโพสต์ที่ผูกบัญชี+กลุ่มไว้แล้ว — สั่งโพสต์จริงหรือทดสอบแบบไม่โพสต์จากหน้านี้
 export default async function AutopostJobsPage({ searchParams }: { searchParams?: { notice?: string } }) {
   const notice = typeof searchParams?.notice === 'string' ? searchParams.notice : null;
-  const rows = await listPostAssignments();
+  const [orders, allRows] = await Promise.all([listJarvisPostOrders(), listPostAssignments()]);
+  // งานที่สร้างจาก Jarvis แสดงในการ์ดด้านบนแล้ว ไม่ต้องซ้ำในรายการงานเดิม
+  const rows = allRows.filter((row) => !row.id.startsWith('jv-'));
 
   return (
     <div className="space-y-6">
@@ -30,6 +79,17 @@ export default async function AutopostJobsPage({ searchParams }: { searchParams?
       <AutopostNav />
 
       {notice && <div className="card border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">{notice}</div>}
+
+      <div className="space-y-3">
+        <h2 className="text-base font-semibold">คำสั่งโพสต์จาก Jarvis</h2>
+        {orders.length === 0 ? (
+          <div className="card px-5 py-6 text-center text-sm text-subtle">ยังไม่มีคำสั่งโพสต์จาก Jarvis</div>
+        ) : (
+          orders.map((order) => <JarvisOrderCard key={order.request_no} order={order} />)
+        )}
+      </div>
+
+      <h2 className="text-base font-semibold">งานโพสต์อื่นในระบบ</h2>
 
       {rows.length === 0 ? (
         <div className="card px-5 py-8 text-center text-sm text-subtle">

@@ -63,6 +63,7 @@ import {
   getConnectorOption,
   enqueueFacebookPreflight,
   enqueueAssignmentPost,
+  postJarvisOrder,
   recordCandidateActivity,
   reassessCandidateJob,
 } from './repo';
@@ -87,6 +88,25 @@ export async function runWorkflowSelfTestAction() {
     await new Promise((resolve) => setTimeout(resolve, 300));
   }
   revalidatePath('/orchestrator');
+}
+
+export async function postJarvisOrderAction(formData: FormData) {
+  const session = await getServerSession(authOptions);
+  if (!session) throw new Error('unauthorized');
+  const requestNo = String(formData.get('requestNo') ?? '').trim();
+  let notice = `ส่ง ${requestNo} เข้าคิวโพสต์แล้ว รอเครื่อง Worker รับงาน`;
+  if (!requestNo) notice = 'ไม่พบคำสั่งโพสต์ที่เลือก';
+  else if (formData.get('confirm') !== 'yes') notice = 'ติ๊กยืนยันก่อนว่าจะโพสต์จริงลงกลุ่ม';
+  else {
+    try {
+      await postJarvisOrder(requestNo, session.user?.email ?? session.user?.name ?? null);
+    } catch (error) {
+      notice = error instanceof Error ? error.message : String(error);
+    }
+  }
+  revalidatePath('/autopost');
+  revalidatePath('/autopost/jobs');
+  redirect(`/autopost/jobs?notice=${encodeURIComponent(notice)}`);
 }
 
 export async function postAssignmentNowAction(formData: FormData) {
@@ -465,7 +485,9 @@ export async function rejectRequestAction(formData: FormData) {
     missing.length ? `ข้อมูลที่ต้องแก้/ขาด: ${missing.join(', ')}` : '',
     extra,
   ].filter(Boolean).join(' · ') || null;
-  if (requestNo) await rejectSoRecruitRequest(requestNo, reason);
+  const typeField = String(formData.get('requestType') ?? '').trim();
+  const requestType = typeField === 'content' || typeField === 'scraping' ? typeField : undefined;
+  if (requestNo) await rejectSoRecruitRequest(requestNo, reason, requestType);
   revalidatePath('/orchestrator/imports');
   revalidatePath('/orchestrator');
 }
@@ -478,7 +500,7 @@ export async function rejectDisabledContentRequestsAction(formData: FormData) {
   }
   const requestNos = formData.getAll('requestNo').map((v) => String(v).trim()).filter(Boolean);
   for (const requestNo of requestNos) {
-    await rejectSoRecruitRequest(requestNo, CONTENT_DISABLED_OPERATOR_MESSAGE);
+    await rejectSoRecruitRequest(requestNo, CONTENT_DISABLED_OPERATOR_MESSAGE, 'content');
   }
   revalidatePath('/orchestrator/imports');
   revalidatePath('/orchestrator');

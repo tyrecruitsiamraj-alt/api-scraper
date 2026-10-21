@@ -47,7 +47,8 @@ export default async function OrchestratorPage({ searchParams }: { searchParams?
   const scrapingReqs = reqs.filter((r) => r.request_type === 'scraping');
   const disabledContentReqs = contentEnabled
     ? []
-    : reqs.filter((r) => r.request_type === 'content');
+    // คำสั่งโพสต์แบบใหม่ (มี caption จาก Jarvis) ไปอยู่ห้อง Autopost — ไม่ใช่คำขอสร้างประกาศที่ปิดแล้ว
+    : reqs.filter((r) => r.request_type === 'content' && !String((r.job_snapshot ?? {}).caption ?? '').trim());
 
   const items: WorkCenterItem[] = [
     ...scrapingReqs.map((request): WorkCenterItem => {

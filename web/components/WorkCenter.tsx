@@ -165,6 +165,7 @@ function RejectBlock({ item }: { item: WorkCenterItem }) {
       <summary className="cursor-pointer text-sm text-subtle">ตีกลับใบขอ</summary>
       <form action={rejectRequestAction} className="mt-2 space-y-2">
         <input type="hidden" name="requestNo" value={item.requestNo} />
+        <input type="hidden" name="requestType" value={item.kind === 'scraping' ? 'scraping' : 'content'} />
         {item.checklist && item.checklist.length > 0 && (
           <div className="flex flex-wrap gap-x-4 gap-y-1">
             {item.checklist.map((c) => (

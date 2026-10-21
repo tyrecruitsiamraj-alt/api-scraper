@@ -8,6 +8,7 @@ import type { WorkflowReadiness } from '../../src/core/workflow-readiness.js';
 import { CONTENT_DISABLED_OPERATOR_MESSAGE, isContentGenerationEnabled, PRODUCT_MODULES } from './product-scope';
 import { renderPoster } from '../../src/core/poster.js';
 import { applyTrustedPosterFacts } from '../../src/core/campaign-facts.js';
+import { postCaptionIssues } from '../../src/core/post-caption-check.js';
 import { normalizePosterLayout, normalizePosterStandard, posterFieldsForQuality, posterStandardFromFields, POSTER_TEMPLATE_ID, POSTER_TEMPLATE_VERSION, withPosterTemplate, buildPosterSvg } from '../../src/core/poster-template.js';
 import type { PosterLayout, PosterStandard } from '../../src/core/poster-template.js';
 import { evaluateResumeQualification } from '../../src/core/resume-qualification.js';
@@ -1959,7 +1960,8 @@ export async function createScrapeTaskFromSoRecruit(
     await q(
       `UPDATE "jarvis_rm".job_posting_requests
           SET status = 'in_progress', updated_at = now()
-        WHERE request_no = $1 AND status = 'pending'`,
+        WHERE request_no = $1 AND status = 'pending'
+          AND to_jsonb(job_posting_requests)->>'request_type' = 'scraping'`,
       [requestNo],
     );
   } catch (e) {
@@ -1983,7 +1985,7 @@ export async function approveScrapeTaskResult(taskId: string, reviewedBy: string
       await q(
         `UPDATE "jarvis_rm".job_posting_requests
             SET status = 'completed', updated_at = now()
-          WHERE request_no = $1`,
+          WHERE request_no = $1 AND to_jsonb(job_posting_requests)->>'request_type' = 'scraping'`,
         [rows[0].source_request_no],
       );
     } catch (e) {
@@ -1993,12 +1995,19 @@ export async function approveScrapeTaskResult(taskId: string, reviewedBy: string
 }
 
 /** เปลี่ยนสถานะคำขอ So Recruit แบบ guarded เพื่อให้ระบบต้นทางเห็นความคืบหน้า. */
-export async function setSoRecruitRequestStatus(requestNo: string | null, status: 'in_progress' | 'posted' | 'completed') {
+export async function setSoRecruitRequestStatus(
+  requestNo: string | null,
+  status: 'in_progress' | 'posted' | 'completed',
+  requestType?: 'content' | 'scraping',
+) {
   if (!requestNo) return;
   try {
+    // ใบขอเดียวกันมีทั้งคำสั่งโพสต์และคำขอ Scrap — ระบุชนิดเพื่อไม่ให้สถานะข้ามกัน
     await q(
-      `UPDATE "jarvis_rm".job_posting_requests SET status = $2, updated_at = now() WHERE request_no = $1`,
-      [requestNo, status],
+      `UPDATE "jarvis_rm".job_posting_requests SET status = $2, updated_at = now()
+        WHERE request_no = $1
+          AND ($3::text IS NULL OR COALESCE(NULLIF(to_jsonb(job_posting_requests)->>'request_type', ''), 'content') = $3)`,
+      [requestNo, status, requestType ?? null],
     );
   } catch (e) {
     console.warn(`[orchestrator] เขียนสถานะกลับ So Recruit ไม่สำเร็จ (${requestNo}): ${(e as Error).message}`);
@@ -2006,13 +2015,20 @@ export async function setSoRecruitRequestStatus(requestNo: string | null, status
 }
 
 /** ตีกลับใบขอไป So Recruit พร้อมเหตุผล (เขียนลง notes ให้ผู้ขอเห็นว่าขาดอะไร). */
-export async function rejectSoRecruitRequest(requestNo: string | null, reason: string | null) {
+export async function rejectSoRecruitRequest(
+  requestNo: string | null,
+  reason: string | null,
+  requestType?: 'content' | 'scraping',
+) {
   if (!requestNo) return;
   const note = reason ? `ตีกลับ: ${reason}` : 'ตีกลับ — ข้อมูลไม่พอ/ไม่รับงาน';
   try {
+    // ใบขอเดียวกันมีทั้งคำสั่งโพสต์และคำขอ Scrap — ตีกลับเฉพาะชนิดที่กด
     await q(
-      `UPDATE "jarvis_rm".job_posting_requests SET status = 'rejected', notes = $2, updated_at = now() WHERE request_no = $1`,
-      [requestNo, note],
+      `UPDATE "jarvis_rm".job_posting_requests SET status = 'rejected', notes = $2, updated_at = now()
+        WHERE request_no = $1
+          AND ($3::text IS NULL OR COALESCE(NULLIF(to_jsonb(job_posting_requests)->>'request_type', ''), 'content') = $3)`,
+      [requestNo, note, requestType ?? null],
     );
   } catch (e) {
     console.warn(`[orchestrator] ตีกลับใบขอ So Recruit ไม่สำเร็จ (${requestNo}): ${(e as Error).message}`);
@@ -3227,6 +3243,206 @@ export async function enqueueFacebookPreflight(userId: string, requestedBy: stri
 
 function autopostId(): string {
   return Date.now().toString(36) + Math.random().toString(36).slice(2);
+}
+
+// ---------------------------------------------------------------------------
+// คำสั่งโพสต์จาก Jarvis (job_posting_requests request_type='content' ที่มี caption)
+// Jarvis ส่ง caption + post_mode + group_ids มาใน job_snapshot; ระบบนี้สร้างงานโพสต์
+// ใน Auto-Post ให้เมื่อคนกดโพสต์ แล้วเขียนสถานะกลับ (in_progress → posted).
+// ---------------------------------------------------------------------------
+export type JarvisPostOrder = {
+  request_no: string;
+  created_at: string;
+  requested_by_name: string | null;
+  jarvis_status: string;
+  position: string;
+  caption: string;
+  post_mode: string;
+  group_names: string[];
+  issues: string[];
+  account_id: string | null;
+  account_label: string | null;
+  worker_online: boolean;
+  job_id: string | null;
+  queue_status: string | null;
+  queue_at: string | null;
+  post_link: string | null;
+};
+
+const POST_MODE_LABEL: Record<string, string> = {
+  caption_only: 'caption อย่างเดียว',
+  caption_image: 'caption + รูป',
+  image_only: 'รูปอย่างเดียว',
+};
+export function postModeLabel(mode: string): string {
+  return POST_MODE_LABEL[mode] ?? mode;
+}
+
+/** id ของงาน/assignment ใน Auto-Post ที่สร้างจากใบขอ — คงที่ เพื่อกันสั่งซ้ำ */
+function jarvisPostJobId(requestNo: string): string {
+  return `jv-${requestNo.toLowerCase()}`;
+}
+
+type JarvisPostRow = {
+  request_no: string;
+  created_at: string;
+  requested_by_name: string | null;
+  status: string;
+  snapshot: Record<string, unknown> | null;
+};
+
+async function pickPostAccount(groupIds: string[]) {
+  if (!groupIds.length) return null;
+  const rows = await q<{ id: string; label: string; worker_online: boolean; group_ids: string[] }>(
+    `SELECT u.id, COALESCE(NULLIF(TRIM(u.name), ''), u.env_key, u.id) AS label,
+            EXISTS (SELECT 1 FROM ${AP}.workers w
+                     WHERE w.name=u.preferred_worker AND w.last_seen > now() - interval '2 minutes') AS worker_online,
+            COALESCE(u.group_ids::jsonb, '[]'::jsonb) AS group_ids
+       FROM ${AP}.users u
+      WHERE COALESCE(u.group_ids::jsonb, '[]'::jsonb) ?| $1::text[]
+        AND (u.paused_until IS NULL OR u.paused_until <= now())
+      ORDER BY 3 DESC, label`,
+    [groupIds],
+  );
+  return rows[0] ?? null;
+}
+
+export async function listJarvisPostOrders(): Promise<JarvisPostOrder[]> {
+  let rows: JarvisPostRow[];
+  try {
+    rows = await q<JarvisPostRow>(
+      `SELECT r.request_no, r.created_at, r.requested_by_name, r.status, to_jsonb(r)->'job_snapshot' AS snapshot
+         FROM "jarvis_rm".job_posting_requests r
+        WHERE COALESCE(NULLIF(to_jsonb(r)->>'request_type', ''), 'content') = 'content'
+          AND to_jsonb(r)->'job_snapshot' ? 'caption'
+          AND r.status IN ('pending', 'in_progress', 'posted')
+          AND r.created_at > now() - interval '30 days'
+        ORDER BY r.created_at DESC`,
+    );
+  } catch {
+    return [];
+  }
+  const groupNames = new Map(
+    (await q<{ id: string; name: string }>(`SELECT id, name FROM ${AP}.groups`).catch(() => [])).map((g) => [g.id, g.name]),
+  );
+  const out: JarvisPostOrder[] = [];
+  for (const row of rows) {
+    const s = row.snapshot ?? {};
+    const groupIds = Array.isArray(s.group_ids) ? s.group_ids.map(String) : [];
+    const caption = String(s.caption ?? '');
+    const postMode = String(s.post_mode ?? 'caption_only');
+    const jobId = jarvisPostJobId(row.request_no);
+    const issues = postCaptionIssues(caption);
+    if (postMode !== 'caption_only') issues.push(`ชนิด "${postModeLabel(postMode)}" ยังต้องรอระบบแนบรูป`);
+    if (!groupIds.length) issues.push('ยังไม่ได้เลือกกลุ่มใน Jarvis');
+    const account = await pickPostAccount(groupIds);
+    if (groupIds.length && !account) issues.push('ไม่มีบัญชี Facebook ที่ผูกกับกลุ่มนี้');
+    const queue = await q<{ status: string; created_at: string }>(
+      `SELECT status, created_at FROM ${AP}.post_run_queue
+        WHERE assignment_ids::jsonb ? $1 ORDER BY created_at DESC LIMIT 1`,
+      [jobId],
+    ).catch(() => []);
+    const posted = await q<{ post_link: string | null }>(
+      `SELECT post_link FROM ${AP}.post_logs
+        WHERE job_id = $1 AND COALESCE(post_link, '') <> '' ORDER BY created_at DESC LIMIT 1`,
+      [jobId],
+    ).catch(() => []);
+    let jarvisStatus = row.status;
+    // เขียนกลับ Jarvis เมื่อมีลิงก์โพสต์จริงแล้ว (ทำตอนเปิดหน้า ไม่ต้องมี job เบื้องหลัง)
+    if (posted[0] && jarvisStatus === 'in_progress') {
+      await setSoRecruitRequestStatus(row.request_no, 'posted', 'content');
+      jarvisStatus = 'posted';
+    }
+    out.push({
+      request_no: row.request_no,
+      created_at: row.created_at,
+      requested_by_name: row.requested_by_name,
+      jarvis_status: jarvisStatus,
+      position: String(s.position ?? '').trim() || row.request_no,
+      caption,
+      post_mode: postMode,
+      group_names: groupIds.map((id) => groupNames.get(id) ?? id),
+      issues,
+      account_id: account?.id ?? null,
+      account_label: account?.label ?? null,
+      worker_online: Boolean(account?.worker_online),
+      job_id: queue[0] ? jobId : null,
+      queue_status: queue[0]?.status ?? null,
+      queue_at: queue[0]?.created_at ?? null,
+      post_link: posted[0]?.post_link ?? null,
+    });
+  }
+  return out;
+}
+
+/**
+ * โพสต์คำสั่งจาก Jarvis 1 ใบ: สร้าง job + assignment ใน Auto-Post (id คงที่จากเลขใบขอ
+ * กันกดซ้ำ) แล้วส่งเข้าคิวโพสต์ของบัญชีที่ผูกกลุ่มนั้น จากนั้นตั้งสถานะ Jarvis เป็น in_progress.
+ */
+export async function postJarvisOrder(requestNo: string, requestedBy: string | null): Promise<string> {
+  const order = (await listJarvisPostOrders()).find((o) => o.request_no === requestNo);
+  if (!order) throw new Error(`ไม่พบคำสั่งโพสต์ ${requestNo}`);
+  if (order.jarvis_status !== 'pending') throw new Error('ใบนี้สั่งโพสต์ไปแล้ว');
+  if (order.issues.length) throw new Error(`ยังโพสต์ไม่ได้: ${order.issues.join(', ')}`);
+  if (!order.account_id) throw new Error('ไม่มีบัญชี Facebook ที่ผูกกับกลุ่มนี้');
+  if (!order.worker_online) throw new Error('เครื่องที่ผูกกับบัญชี Facebook ยังออฟไลน์ เปิด Autopost บนเครื่องนั้นก่อน');
+
+  const jobId = jarvisPostJobId(requestNo);
+  const queueId = autopostId();
+  const client = await pool().connect();
+  try {
+    await client.query('BEGIN');
+    const busy = await client.query<{ n: number }>(
+      `SELECT count(*)::int AS n FROM ${AP}.post_run_queue WHERE user_id=$1 AND status IN ('queued', 'running')`,
+      [order.account_id],
+    );
+    if ((busy.rows[0]?.n ?? 0) > 0) throw new Error('บัญชีนี้มีงานโพสต์รอคิวหรือกำลังโพสต์อยู่แล้ว ลองใหม่เมื่อเสร็จ');
+    const snapshot = await client.query<{ group_ids: string[] }>(
+      `SELECT COALESCE(to_jsonb(r)->'job_snapshot'->'group_ids', '[]'::jsonb) AS group_ids
+         FROM "jarvis_rm".job_posting_requests r
+        WHERE r.request_no=$1 AND r.status='pending'
+          AND COALESCE(NULLIF(to_jsonb(r)->>'request_type', ''), 'content')='content'
+        FOR UPDATE`,
+      [requestNo],
+    );
+    if (!snapshot.rows[0]) throw new Error('ใบนี้สั่งโพสต์ไปแล้ว');
+    const accountGroups = await client.query<{ group_ids: string[] }>(
+      `SELECT COALESCE(group_ids::jsonb, '[]'::jsonb) AS group_ids FROM ${AP}.users WHERE id=$1`,
+      [order.account_id],
+    );
+    const allowed = new Set((accountGroups.rows[0]?.group_ids ?? []).map(String));
+    const groups = snapshot.rows[0].group_ids.map(String).filter((id) => allowed.has(id));
+    if (!groups.length) throw new Error('กลุ่มที่เลือกใน Jarvis ไม่ได้ผูกกับบัญชี Facebook นี้');
+    const inserted = await client.query(
+      `INSERT INTO ${AP}.jobs (id, title, owner, company, caption, status)
+       VALUES ($1, $2, 'SO Recruitment', 'SO Recruitment', $3, 'pending')
+       ON CONFLICT (id) DO NOTHING`,
+      [jobId, `${order.position} · ${requestNo}`, order.caption],
+    );
+    if (inserted.rowCount === 0) throw new Error('ใบนี้มีงานโพสต์อยู่แล้ว');
+    await client.query(
+      `INSERT INTO ${AP}.assignments (id, job_ids, group_ids, user_id) VALUES ($1, $2::jsonb, $3::jsonb, $4)`,
+      [jobId, JSON.stringify([jobId]), JSON.stringify(groups), order.account_id],
+    );
+    // requested_by ≠ 'auto-daily' → worker ข้ามเพดานรายวันได้ เพราะคนสั่งเอง
+    await client.query(
+      `INSERT INTO ${AP}.post_run_queue (id, assignment_ids, user_id, status, requested_by, message)
+       VALUES ($1, $2::jsonb, $3, 'queued', $4, $5)`,
+      [queueId, JSON.stringify([jobId]), order.account_id, requestedBy || 'web', `Jarvis ${requestNo}`],
+    );
+    await client.query(
+      `UPDATE "jarvis_rm".job_posting_requests SET status='in_progress', updated_at=now() WHERE request_no=$1 AND status='pending'
+         AND COALESCE(NULLIF(to_jsonb(job_posting_requests)->>'request_type', ''), 'content')='content'`,
+      [requestNo],
+    );
+    await client.query('COMMIT');
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally {
+    client.release();
+  }
+  return queueId;
 }
 
 /** งานโพสต์ที่ผูกบัญชี+กลุ่มไว้แล้วใน Auto-Post — ให้สั่งโพสต์จากหน้าเว็บได้โดยตรง */

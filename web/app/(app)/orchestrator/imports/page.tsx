@@ -100,6 +100,7 @@ export default async function ImportsPage() {
                     ) : (
                       <form action={rejectRequestAction} className="inline-flex items-center gap-2">
                         <input type="hidden" name="requestNo" value={r.request_no} />
+                        <input type="hidden" name="requestType" value={r.request_type} />
                         <input type="hidden" name="reason" value={CONTENT_DISABLED_OPERATOR_MESSAGE} />
                         <button className="btn-secondary btn-sm">ตีกลับ (ไม่รับสร้างประกาศ)</button>
                       </form>
