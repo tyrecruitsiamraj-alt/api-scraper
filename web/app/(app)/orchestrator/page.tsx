@@ -3,10 +3,12 @@ import {
   listFacebookAccounts,
   listConnectorOptions,
   listTasks,
+  listJarvisPostOrders,
+  postModeLabel,
 } from '@/lib/repo';
 import { AutoRefresh } from '@/components/AutoRefresh';
 import { WorkerStatus } from '@/components/WorkerStatus';
-import { WorkCenter, type WorkCenterItem, type WorkCenterStage, type Step } from '@/components/WorkCenter';
+import { WorkCenter, type PostOrderSummary, type WorkCenterItem, type WorkCenterStage, type Step } from '@/components/WorkCenter';
 import { humanizeOperatorError, operatorJobTitle } from '@/lib/operator-copy';
 import { prefillScrapePlan } from '@/lib/scrape-intake.js';
 import { isContentGenerationEnabled, productScopeSummary } from '@/lib/product-scope';
@@ -36,12 +38,23 @@ function intakeSteps(): Step[] {
 }
 
 export default async function OrchestratorPage({ searchParams }: { searchParams?: { notice?: string } }) {
-  const [reqs, fb, connectors, tasks] = await Promise.all([
+  const [reqs, fb, connectors, tasks, postOrders] = await Promise.all([
     listSoRecruitPostingRequests(),
     listFacebookAccounts(),
     listConnectorOptions(),
     listTasks(),
+    listJarvisPostOrders(),
   ]);
+  const postSummary: PostOrderSummary[] = (['caption_only', 'caption_image', 'image_only'] as const).map((mode) => {
+    const ofMode = postOrders.filter((o) => o.post_mode === mode);
+    return {
+      mode,
+      label: postModeLabel(mode),
+      pending: ofMode.filter((o) => o.jarvis_status === 'pending').length,
+      inProgress: ofMode.filter((o) => o.jarvis_status === 'in_progress').length,
+      posted: ofMode.filter((o) => o.jarvis_status === 'posted').length,
+    };
+  });
   const contentEnabled = isContentGenerationEnabled();
 
   const scrapingReqs = reqs.filter((r) => r.request_type === 'scraping');
@@ -82,6 +95,7 @@ export default async function OrchestratorPage({ searchParams }: { searchParams?
         steps: intakeSteps(),
         checklist,
         requestFields,
+        fromJarvis: true,
       };
     }),
     ...tasks.filter((task) => task.status !== 'idle' || task.source_request_no).map((task): WorkCenterItem => {
@@ -119,6 +133,7 @@ export default async function OrchestratorPage({ searchParams }: { searchParams?
         },
         taskId: task.id,
         steps: scrapeSteps(task.status, task.review_status),
+        fromJarvis: Boolean(task.source_request_no),
       };
     }),
   ].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
@@ -141,6 +156,7 @@ export default async function OrchestratorPage({ searchParams }: { searchParams?
       </details>
       <WorkCenter
         items={items}
+        postSummary={postSummary}
         disabledContentRequests={disabledContentReqs.map((r) => ({
           requestNo: r.request_no,
           title: operatorJobTitle({

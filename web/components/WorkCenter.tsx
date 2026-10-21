@@ -46,6 +46,17 @@ export type WorkCenterItem = {
   steps?: Step[];
   checklist?: { label: string; ok: boolean }[];
   requestFields?: Record<string, string> | null;
+  /** มาจากคำขอใน Jarvis (ใบขอ) — ไม่ใช่งานที่สร้างเองในระบบนี้ */
+  fromJarvis?: boolean;
+};
+
+/** ตัวนับคำสั่งโพสต์จาก Jarvis แยกตามชนิด (จาก listJarvisPostOrders) */
+export type PostOrderSummary = {
+  mode: 'caption_only' | 'caption_image' | 'image_only';
+  label: string;
+  pending: number;
+  inProgress: number;
+  posted: number;
 };
 
 type Option = { id: string; label: string; available: boolean; blockReason: string | null };
@@ -64,7 +75,69 @@ export type DisabledContentRequest = {
   title: string;
 };
 
-type TabKey = 'todo' | 'running' | 'done';
+type TabKey = 'todo' | 'running' | 'done' | 'old';
+
+/** งานที่สร้างเกินกี่วันแล้วยังไม่ปิด ให้ย้ายไปแท็บงานเก่า ไม่บังงานใหม่ */
+const OLD_AFTER_DAYS = 14;
+
+function isOldItem(item: WorkCenterItem, now: number) {
+  if (item.stage === 'intake' || item.stage === 'working') return false;
+  return now - new Date(item.createdAt).getTime() > OLD_AFTER_DAYS * 86_400_000;
+}
+
+function CountCard({ label, value, sub, tone }: { label: string; value: number; sub?: string; tone?: 'danger' }) {
+  return (
+    <div className="rounded-xl bg-black/[0.035] px-4 py-3">
+      <p className="text-xs text-subtle">{label}</p>
+      <p className={`mt-0.5 text-2xl font-semibold tabular-nums ${tone === 'danger' && value > 0 ? 'text-red-700' : 'text-ink'}`}>{value}</p>
+      {sub && <p className="mt-0.5 text-xs text-subtle">{sub}</p>}
+    </div>
+  );
+}
+
+function ScrapCounters({ items }: { items: WorkCenterItem[] }) {
+  const jarvis = items.filter((i) => i.fromJarvis);
+  const waiting = jarvis.filter((i) => i.stage === 'intake').length;
+  const started = items.filter((i) => i.stage === 'working').length;
+  const finished = jarvis.filter((i) => i.stage === 'completed' || i.stage === 'review').length;
+  const problems = jarvis.filter((i) => i.stage === 'attention').length;
+  return (
+    <section className="rounded-2xl border border-line bg-white p-4">
+      <h2 className="mb-3 text-sm font-semibold text-ink">Scrap</h2>
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+        <CountCard label="ส่งมาจาก Jarvis" value={jarvis.length} sub={waiting ? `รอกดเริ่ม ${waiting}` : 'เริ่มครบแล้ว'} />
+        <CountCard label="เริ่มแล้ว" value={started} sub="กำลังค้นหา" />
+        <CountCard label="เสร็จ" value={finished} />
+        <CountCard label="ติดปัญหา" value={problems} tone="danger" />
+      </div>
+    </section>
+  );
+}
+
+function PostCounters({ summary }: { summary: PostOrderSummary[] }) {
+  return (
+    <section className="rounded-2xl border border-line bg-white p-4">
+      <div className="mb-3 flex items-center justify-between gap-2">
+        <h2 className="text-sm font-semibold text-ink">Autopost (คำสั่งโพสต์จาก Jarvis)</h2>
+        <Link href="/autopost/jobs" className="text-xs text-accent hover:underline">ไปหน้างานโพสต์ →</Link>
+      </div>
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+        {summary.map((s) => {
+          const parts = [
+            s.pending ? `รอโพสต์ ${s.pending}` : '',
+            s.inProgress ? `กำลังโพสต์ ${s.inProgress}` : '',
+            s.posted ? `โพสต์แล้ว ${s.posted}` : '',
+          ].filter(Boolean);
+          return (
+            <Link key={s.mode} href="/autopost/jobs" className="block rounded-xl transition hover:ring-1 hover:ring-line">
+              <CountCard label={s.label} value={s.pending + s.inProgress + s.posted} sub={parts.join(' · ') || 'ยังไม่มีคำสั่ง'} />
+            </Link>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
 
 const STAGE_PRIORITY: Record<WorkCenterStage, number> = {
   attention: 0,
@@ -445,11 +518,13 @@ export function WorkCenter({
   connectors,
   facebookAccounts,
   disabledContentRequests = [],
+  postSummary = [],
 }: {
   items: WorkCenterItem[];
   connectors: Option[];
   facebookAccounts: FbAccountOption[];
   disabledContentRequests?: DisabledContentRequest[];
+  postSummary?: PostOrderSummary[];
 }) {
   const [tab, setTab] = useState<TabKey>('todo');
 
@@ -463,18 +538,25 @@ export function WorkCenter({
     [items],
   );
 
-  const todo = sorted.filter((i) => ['attention', 'review', 'intake'].includes(i.stage));
-  const running = sorted.filter((i) => i.stage === 'working');
-  const done = sorted.filter((i) => i.stage === 'completed');
+  const now = Date.now();
+  // คำขอจาก Jarvis ที่รอกดเริ่ม แสดงบนสุดเสมอ ไม่ต้องหาในแท็บ
+  const jarvisWaiting = sorted.filter((i) => i.stage === 'intake');
+  const current = sorted.filter((i) => i.stage !== 'intake' && !isOldItem(i, now));
+  const old = sorted.filter((i) => isOldItem(i, now));
+  const todo = current.filter((i) => i.stage === 'attention' || i.stage === 'review');
+  const running = current.filter((i) => i.stage === 'working');
+  const done = current.filter((i) => i.stage === 'completed');
 
   const visible = tab === 'todo' ? todo
     : tab === 'running' ? running
-      : done;
+      : tab === 'done' ? done
+        : old;
 
   const tabs: { key: TabKey; label: string; count: number }[] = [
-    { key: 'todo', label: 'ต้องทำวันนี้', count: todo.length },
+    { key: 'todo', label: 'ต้องตรวจ', count: todo.length },
     { key: 'running', label: 'กำลังค้นหา', count: running.length },
     { key: 'done', label: 'เสร็จแล้ว', count: done.length },
+    { key: 'old', label: `งานเก่า (เกิน ${OLD_AFTER_DAYS} วัน)`, count: old.length },
   ];
 
   const fbProblems = facebookAccounts.filter((a) => (
@@ -493,7 +575,27 @@ export function WorkCenter({
       </div>
 
       <RoomSwitcher />
+      <ScrapCounters items={items} />
+      {postSummary.length > 0 && <PostCounters summary={postSummary} />}
       <DisabledContentBanner requests={disabledContentRequests} />
+
+      <section className="space-y-3">
+        <h2 className="text-base font-semibold text-ink">คำขอ Scrap จาก Jarvis รอกดเริ่ม</h2>
+        {jarvisWaiting.length === 0 ? (
+          <div className="rounded-2xl border border-dashed border-line bg-white px-5 py-6 text-center text-sm text-subtle">
+            ไม่มีคำขอที่รอเริ่ม สั่ง Scrap จากหน้าใบขอใน Jarvis แล้วจะขึ้นที่นี่
+          </div>
+        ) : (
+          jarvisWaiting.map((item, index) => (
+            <WorkItemCard
+              key={item.id}
+              item={item}
+              connectors={connectors}
+              defaultExpanded={jarvisWaiting.length === 1 && index === 0}
+            />
+          ))
+        )}
+      </section>
 
       {(fbProblems > 0 || facebookAccounts.length === 0) && (
         <details className="rounded-xl border border-line bg-white px-4 py-3">
@@ -529,16 +631,16 @@ export function WorkCenter({
 
       {visible.length === 0 ? (
         <div className="rounded-2xl border border-dashed border-line bg-white px-5 py-12 text-center text-sm text-subtle">
-          {tab === 'todo' ? 'ไม่มีงานค้นหาที่ต้องทำตอนนี้' : tab === 'running' ? 'ไม่มีงานที่กำลังค้นหา' : 'ยังไม่มีงานที่เสร็จ'}
+          {tab === 'todo' ? 'ไม่มีงานที่ต้องตรวจตอนนี้' : tab === 'running' ? 'ไม่มีงานที่กำลังค้นหา' : tab === 'done' ? 'ยังไม่มีงานที่เสร็จ' : 'ไม่มีงานเก่าค้าง'}
         </div>
       ) : (
         <div className="space-y-3">
-          {visible.map((item, index) => (
+          {visible.map((item) => (
             <WorkItemCard
               key={item.id}
               item={item}
               connectors={connectors}
-              defaultExpanded={tab === 'todo' && todo.length === 1 && index === 0 && item.stage === 'intake'}
+              defaultExpanded={false}
             />
           ))}
         </div>
