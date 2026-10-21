@@ -4,11 +4,10 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 
-// แท็บย่อยใต้ "งาน Scraping" — คลังผู้สมัคร + สร้างงาน Scraping อยู่ใต้หัวข้อเดียวกัน
+// แท็บย่อยของหน้าผู้สมัคร (งาน Scrap มีเมนูของตัวเองที่ /scraping)
 const ITEMS = [
   { href: '/candidates', label: 'คลังผู้สมัคร', detail: 'ค้นหาและกรองผู้สมัครที่ดึงมา' },
   { href: '/candidates/jobs', label: 'ผู้สมัครตามใบงาน', detail: 'เปิดงานแล้วดูคนที่ตรงที่สุดก่อน' },
-  { href: '/scraping', label: 'สร้างงานค้นหา', detail: 'กำหนดเงื่อนไขและติดตามผล' },
 ];
 
 export function ScrapingNav() {
