@@ -12,6 +12,8 @@ export {
 } from './humanBehavior';
 export type { PostDelaySettings } from './humanBehavior';
 export { postToGroup } from './postToGroup';
+export { maxJoinsPerRun, MEMBERSHIP_MESSAGE } from './groupMembership';
+export type { MembershipState } from './groupMembership';
 export { resolveJobImage } from './resolveJobImage';
 export { capturePostFailureArtifacts } from './capturePostFailureArtifacts';
 export { postToGroupWorker } from './postToGroupWorker';

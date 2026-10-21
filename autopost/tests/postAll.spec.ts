@@ -8,6 +8,7 @@ import {
   loadDynamicConfig,
   facebookLogin,
   postToGroup,
+  maxJoinsPerRun,
   resolveJobImage,
   runLog,
   getBetweenPostsDelaySec,
@@ -243,6 +244,9 @@ test('Dynamic Post: รันโพสต์ตาม Assignments', async ({ pag
       },
     });
 
+    /** โควต้ากดเข้าร่วมกลุ่มที่ยังไม่ได้เป็นสมาชิก ต่อบัญชีต่อรอบ (AUTO_JOIN_MAX_PER_RUN, 0 = ปิด) */
+    const joinBudget = { used: 0, max: maxJoinsPerRun() };
+
     /** circuit breaker: fail ติดกันหลายกลุ่ม = สัญญาณบัญชีโดนจำกัด — หยุดก่อนจะเผาบัญชี */
     let failStreak = 0;
     let lastJobId: string | null = null;
@@ -292,6 +296,7 @@ test('Dynamic Post: รันโพสต์ตาม Assignments', async ({ pag
       });
 
       let posted = false;
+      let membership: { state: string; message: string | null } | undefined;
       const maxAttempts = 2;
       for (let attempt = 1; attempt <= maxAttempts; attempt++) {
         const pageReady = await ensureActivePageForUser(user);
@@ -299,7 +304,7 @@ test('Dynamic Post: รันโพสต์ตาม Assignments', async ({ pag
         console.log(
           `🚀 [${userLabel}] โพสต์งาน "${job.title}" ไปกลุ่ม ${gID} (ครั้งที่ ${attempt}/${maxAttempts})`
         );
-        posted = await postToGroup(activePage, request, postItem, gID, {
+        const postOpts: Parameters<typeof postToGroup>[4] = {
           userLabel,
           posterName: user.poster_name || user.name || 'Poster',
           sheetUrl: item.sheet_url || DEFAULT_SHEET_URL || user.sheet_url || '',
@@ -308,8 +313,24 @@ test('Dynamic Post: รันโพสต์ตาม Assignments', async ({ pag
           userId: user.id,
           jobId: item.job_id,
           groupId: gID,
-        });
+          joinBudget,
+        };
+        posted = await postToGroup(activePage, request, postItem, gID, postOpts);
+        membership = postOpts.membership ?? membership;
+        if (membership?.state === 'joined') {
+          await runLog({
+            level: 'info',
+            message: `เข้าร่วมกลุ่ม ${gID} ให้แล้ว`,
+            assignment_id: item.assignment_id,
+            user_id: user.id,
+            job_id: item.job_id,
+            group_id: gID,
+            meta: { kind: 'join', state: 'joined' },
+          });
+        }
         if (posted) break;
+        // ยังไม่ได้เป็นสมาชิก (รออนุมัติ/ต้องตอบคำถาม/ครบโควต้า) — ลองซ้ำไม่ช่วย
+        if (membership && membership.state !== 'member' && membership.state !== 'joined') break;
         if (!activePage.isClosed()) break;
         if (attempt < maxAttempts) {
           console.log(`⚠️ [${userLabel}] browser ปิดระหว่างโพสต์กลุ่ม ${gID} — เตรียม retry อัตโนมัติ`);
@@ -327,10 +348,15 @@ test('Dynamic Post: รันโพสต์ตาม Assignments', async ({ pag
           group_id: gID,
         });
       } else {
-        failStreak += 1;
+        // ข้ามเพราะยังไม่ได้เป็นสมาชิก ไม่ใช่สัญญาณบัญชีโดนจำกัด — ไม่นับ circuit breaker
+        const membershipSkip = Boolean(membership && membership.state !== 'member' && membership.state !== 'joined');
+        if (!membershipSkip) failStreak += 1;
         await runLog({
           level: 'warn',
-          message: `โพสต์ไม่สำเร็จ: ${job.title} → กลุ่ม ${gID} (ถ้ามีจะบันทึก screenshot/HTML ไว้ที่โฟลเดอร์ artifacts/)`,
+          message: membershipSkip
+            ? `${membership!.message} (กลุ่ม ${gID})`
+            : `โพสต์ไม่สำเร็จ: ${job.title} → กลุ่ม ${gID} (ถ้ามีจะบันทึก screenshot/HTML ไว้ที่โฟลเดอร์ artifacts/)`,
+          ...(membershipSkip ? { meta: { kind: 'join', state: membership!.state } } : {}),
           assignment_id: item.assignment_id,
           user_id: user.id,
           job_id: item.job_id,
@@ -345,6 +371,8 @@ test('Dynamic Post: รันโพสต์ตาม Assignments', async ({ pag
           await pauseUserPosting(user.id, pauseHours, reason).catch(() => {});
           break;
         }
+        // ไม่ได้โพสต์อะไรลงกลุ่มนี้ — ไปกลุ่มถัดไปเลยไม่ต้องหน่วงเวลา
+        if (membershipSkip) continue;
       }
       postsSinceBreak += 1;
       const batchSize =

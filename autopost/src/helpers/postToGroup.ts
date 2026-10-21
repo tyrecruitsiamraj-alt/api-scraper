@@ -11,6 +11,7 @@ import {
   humanType,
 } from './humanBehavior';
 import { saveToSheet } from './saveToSheet';
+import { ensureGroupMembership, MEMBERSHIP_MESSAGE, type MembershipState } from './groupMembership';
 
 /** รวม goto my_posted + pending + สำรองฟีด + POST Sheet + postLog */
 const SAVE_TO_SHEET_MAX_MS = Math.min(240000, Math.max(30000, Number(process.env.SAVE_TO_SHEET_MAX_MS) || 120000));
@@ -31,6 +32,10 @@ export interface PostToGroupOptions {
   userId?: string;
   jobId?: string;
   groupId?: string;
+  /** โควต้ากดเข้าร่วมกลุ่มของรอบนี้ (ไม่ส่ง = ไม่กดเข้าร่วมให้) */
+  joinBudget?: { used: number; max: number };
+  /** ผลตรวจสมาชิกกลุ่มของการโพสต์ครั้งนี้ — postAll ใช้เขียน log */
+  membership?: { state: MembershipState; message: string | null };
 }
 
 /** ทำให้ชื่อกลุ่มที่อ่านจากหน้าเว็บเป็นข้อความเดียวสม่ำเสมอ (ใช้วิเคราะห์ย้อนหลังได้) */
@@ -320,6 +325,14 @@ export async function postToGroup(
 
     const postTriggerSel =
       'div[role="button"]:has-text("เขียนอะไรสักหน่อย"), div[role="button"]:has-text("Write something"), div[role="button"]:has-text("สร้างโพสต์สาธารณะ")';
+
+    // ยังไม่ได้เป็นสมาชิก = ไม่มีช่องเขียนโพสต์: กดเข้าร่วมให้ (มีโควต้าต่อรอบ) ถ้าเข้าไม่ได้ทันทีก็ข้ามกลุ่มนี้
+    if (options.joinBudget) {
+      const state = await ensureGroupMembership(page, options.joinBudget, userLabel);
+      options.membership = { state, message: state === 'member' ? null : MEMBERSHIP_MESSAGE[state] };
+      if (state !== 'member') console.log(`👥 [${userLabel}] กลุ่ม ${gID}: ${MEMBERSHIP_MESSAGE[state]}`);
+      if (state !== 'member' && state !== 'joined') return false;
+    }
 
     let composerDialog!: Locator;
     let captionEditor!: Locator;
