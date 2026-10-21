@@ -279,6 +279,24 @@ export function ScrapIntakeCard({
       </CardHeader>
       <CardContent className="flex flex-col gap-4">
         {item.detail && <p className="text-sm leading-relaxed text-muted-foreground">{item.detail}</p>}
+        {item.searchDescription && (
+          <Collapsible>
+            <CollapsibleTrigger asChild>
+              <Button variant="ghost" size="sm" className="-ml-2 self-start">
+                เนื้องานที่ใช้ค้น
+                <ChevronDownIcon data-icon="inline-end" />
+              </Button>
+            </CollapsibleTrigger>
+            <CollapsibleContent className="flex flex-col gap-2 pt-2">
+              <p className="text-sm text-muted-foreground">
+                ระบบวางแผนคำค้นจากเนื้องานนี้ ตำแหน่งในใบขอใช้เป็นแค่คำใบ้ (ตัดเบอร์โทรและลิงก์ออกแล้ว)
+              </p>
+              <pre className="max-h-60 overflow-auto rounded-lg bg-muted p-3 font-sans text-sm whitespace-pre-wrap">
+                {item.searchDescription}
+              </pre>
+            </CollapsibleContent>
+          </Collapsible>
+        )}
         {missing.length > 0 && (
           <p className="text-sm leading-relaxed text-destructive">
             ใบขอยังไม่มี: {missing.map((m) => m.label).join(', ')}

@@ -2,7 +2,7 @@ import 'server-only';
 import { q } from './db';
 import { listConnectorOptions, listSoRecruitPostingRequests, type TaskRow } from './repo';
 import { operatorJobTitle } from './operator-copy';
-import { prefillScrapePlan } from './scrape-intake.js';
+import { jobDescriptionFromJarvis, prefillScrapePlan } from './scrape-intake.js';
 import { deriveScrapStage } from './scrap-stage';
 import type { ScrapTaskRowData } from '@/components/scrap/ScrapTaskRow';
 
@@ -62,6 +62,8 @@ export type ScrapIntakeItem = {
   context: string | null;
   checklist: { label: string; ok: boolean }[];
   requestFields: Record<string, string>;
+  /** เนื้องานที่ระบบจะใช้วางแผนค้น (แคปชั่นใบเดียวกัน + ช่องข้อมูล) */
+  searchDescription: string;
 };
 
 export async function listScrapConnectorChoices(): Promise<ScrapConnectorChoice[]> {
@@ -80,6 +82,19 @@ export async function listScrapConnectorChoices(): Promise<ScrapConnectorChoice[
  */
 export async function listJarvisScrapRequests(): Promise<ScrapIntakeItem[]> {
   const requests = await listSoRecruitPostingRequests();
+  const scrapNos = requests.filter((r) => r.request_type === 'scraping').map((r) => r.request_no);
+  // แคปชั่นของคำสั่งโพสต์ใบเดียวกัน — ใช้ประกอบเนื้องานสำหรับค้นหา
+  const captions = new Map(
+    scrapNos.length
+      ? (await q<{ request_no: string; caption: string | null }>(
+        `SELECT DISTINCT ON (r.request_no) r.request_no, to_jsonb(r)->'job_snapshot'->>'caption' AS caption
+           FROM "jarvis_rm".job_posting_requests r
+          WHERE r.request_no = ANY($1::text[]) AND to_jsonb(r)->>'request_type' = 'content'
+          ORDER BY r.request_no, r.created_at DESC`,
+        [scrapNos],
+      ).catch(() => [])).map((row) => [row.request_no, row.caption ?? ''])
+      : [],
+  );
   return requests
     .filter((request) => request.request_type === 'scraping')
     .map((request): ScrapIntakeItem => {
@@ -108,6 +123,7 @@ export async function listJarvisScrapRequests(): Promise<ScrapIntakeItem[]> {
         context: requestFields.location || request.requested_by_name,
         checklist,
         requestFields,
+        searchDescription: jobDescriptionFromJarvis({ caption: captions.get(request.request_no) ?? '', snapshot: js }),
       };
     })
     .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());

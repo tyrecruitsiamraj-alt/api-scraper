@@ -5,6 +5,7 @@ import {
   buildScrapeCriteria,
   hydrateJobSnapshot,
   isHeadcountOnlyTitle,
+  jobDescriptionFromJarvis,
   keywordGroundedInDescription,
   normalizeScrapeEducation,
   normalizeScrapeGender,
@@ -239,4 +240,35 @@ test('hydrate copies duties into job_description without inventing filters', () 
     { detail: 'ตรวจสอบ ซ่อมแซม แก้ไขปรับปรุง ระบบสุขาภิบาล' },
   );
   assert.equal(hydrated.job_description, 'ตรวจสอบ ซ่อมแซม แก้ไขปรับปรุง ระบบสุขาภิบาล');
+});
+
+test('jobDescriptionFromJarvis: caption without phone/link lines plus missing fields', () => {
+  const desc = jobDescriptionFromJarvis({
+    caption: 'รับสมัครพนักงานขับรถ Valet parking ประจำปทุมวัน\nเงินเดือน 13,000\nโทร 0901978522 (คุณแบงค์)\nหรือสมัครงานได้ที่ : https://jarvis.example/apply/p/x\nอายุ 25–45 ปี',
+    snapshot: { position: 'พนักงาน', location: 'กรุงเทพมหานคร', income: '13,000', work_schedule: 'จันทร์-ศุกร์ 10:00-22:00', age_min: 25, age_max: 45 },
+  });
+  assert.match(desc, /Valet parking/);
+  assert.doesNotMatch(desc, /0901978522|https?:|สมัครงานได้ที่/);
+  assert.match(desc, /สถานที่ทำงาน: กรุงเทพมหานคร/);
+  assert.match(desc, /เวลางาน: จันทร์-ศุกร์/);
+  // already in the caption → not repeated
+  assert.doesNotMatch(desc, /รายได้: 13,000/);
+  assert.doesNotMatch(desc, /อายุ: 25-45/);
+});
+
+test('jobDescriptionFromJarvis: fields only when there is no caption', () => {
+  const desc = jobDescriptionFromJarvis({ snapshot: { position: 'แม่บ้าน', location: 'นนทบุรี', age_min: 30, age_max: 50 } });
+  assert.equal(desc, 'ตำแหน่ง: แม่บ้าน\nสถานที่ทำงาน: นนทบุรี\nอายุ: 30-50 ปี');
+});
+
+test('plan_from_description forces planning even when the position is grounded', () => {
+  const job_description = 'รับสมัครพนักงานขับรถ Valet parking';
+  assert.equal(resolveSearchIdentityFromDescription({ position: 'พนักงาน', job_description }).planFromDescription, false);
+  assert.equal(resolveSearchIdentityFromDescription({ position: 'พนักงาน', job_description, plan_from_description: true }).planFromDescription, true);
+  assert.equal(resolveSearchIdentityFromDescription({ position: 'พนักงาน', plan_from_description: true }).planFromDescription, false);
+});
+
+test('buildScrapeCriteria uses the description fallback only when the snapshot has none', () => {
+  assert.equal(buildScrapeCriteria({ snapshot: { position: 'ช่าง' }, descriptionFallback: 'งานซ่อมบำรุง' }).job_description, 'งานซ่อมบำรุง');
+  assert.equal(buildScrapeCriteria({ snapshot: { position: 'ช่าง', job_description: 'งานไฟฟ้า' }, descriptionFallback: 'งานซ่อมบำรุง' }).job_description, 'งานไฟฟ้า');
 });

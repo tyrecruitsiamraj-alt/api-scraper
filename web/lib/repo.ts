@@ -13,7 +13,7 @@ import { normalizePosterLayout, normalizePosterStandard, posterFieldsForQuality,
 import type { PosterLayout, PosterStandard } from '../../src/core/poster-template.js';
 import { evaluateResumeQualification } from '../../src/core/resume-qualification.js';
 import { selectPreferredScrapeWorker } from '../../src/core/worker-selection.js';
-import { assertAgeRange, buildScrapeCriteria, hydrateJobSnapshot } from './scrape-intake.js';
+import { assertAgeRange, buildScrapeCriteria, hydrateJobSnapshot, jobDescriptionFromJarvis } from './scrape-intake.js';
 
 // schema ของ autopost — แยกต่อ project ได้ผ่าน env (ไม่ตั้ง = so_autopost_jobs เดิม)
 // ใช้กับทุก query ข้าม schema ไปฝั่ง autopost. ค่าจาก env เราคุมเอง (ไม่ใช่ input ผู้ใช้)
@@ -1939,12 +1939,24 @@ export async function createScrapeTaskFromSoRecruit(
 
   // คนแก้บนการ์ดก่อนกด = ใช้ค่าที่แก้; ไม่แก้ = ใช้ตามใบขอที่ซ่อมจาก ERP/jobs แล้ว — ช่องว่างไม่ถูกเดา
   const snapshot = hydrateJobSnapshot(req[0].job_snapshot ?? {}, req[0].erp_snapshot, req[0].job_row);
-  const criteria = buildScrapeCriteria({
+  // ค้นจากเนื้องาน: แคปชั่นของคำสั่งโพสต์ใบเดียวกัน (ตัดเบอร์/ลิงก์) + ช่องข้อมูลของคำขอ Scrap
+  const captionRow = await q<{ caption: string | null }>(
+    `SELECT to_jsonb(r)->'job_snapshot'->>'caption' AS caption
+       FROM "jarvis_rm".job_posting_requests r
+      WHERE r.request_no = $1 AND to_jsonb(r)->>'request_type' = 'content'
+      ORDER BY r.created_at DESC LIMIT 1`,
+    [requestNo],
+  ).catch(() => []);
+  const descriptionFallback = jobDescriptionFromJarvis({ caption: captionRow[0]?.caption ?? '', snapshot });
+  const baseCriteria = buildScrapeCriteria({
     snapshot,
     overrides: overrides ?? {},
     erpTitle: req[0].erp_title || '',
     erpProvince: req[0].erp_province || '',
+    descriptionFallback,
   });
+  // วางแผนคำค้นจากเนื้องานแบบเดียวกับสร้างงานเอง (ตำแหน่งในใบขอเป็นแค่คำใบ้)
+  const criteria = baseCriteria.job_description ? { ...baseCriteria, plan_from_description: true } : baseCriteria;
   assertAgeRange(criteria);
   const position = criteria.position || req[0].erp_title || '';
   const target = Math.max(1, overrides?.target || req[0].erp_remaining || req[0].erp_qty || 20);

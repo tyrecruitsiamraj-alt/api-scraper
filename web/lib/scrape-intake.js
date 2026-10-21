@@ -140,8 +140,40 @@ export function resolveSearchIdentityFromDescription(criteria = {}) {
     keyword,
     hasPosition,
     grounded,
-    planFromDescription: Boolean(jobDesc && (!hasPosition || !grounded)),
+    // คำขอจาก Jarvis ตั้ง plan_from_description=true: วางแผนจากเนื้องานเสมอ เหมือนสร้างงานเอง
+    planFromDescription: Boolean(jobDesc && (criteria.plan_from_description === true || !hasPosition || !grounded)),
   };
+}
+
+const CONTACT_LINE = /(https?:\/\/|www\.|line\s*(id)?\s*[:：@]|@\w|โทร|ติดต่อ|สมัคร(งาน)?(ได้)?ที่|inbox|ทักแชท|\b0\d[\d\s-]{7,11}\d\b)/iu;
+
+/**
+ * เนื้องานสำหรับค้นหาจากคำขอ Jarvis: แคปชั่นของคำสั่งโพสต์ใบเดียวกัน (ตัดบรรทัดเบอร์/ลิงก์/ช่องทางสมัคร)
+ * แล้วต่อด้วยช่องข้อมูลที่แคปชั่นยังไม่มี. ไม่มีแคปชั่นก็ประกอบจากช่องข้อมูลอย่างเดียว.
+ */
+export function jobDescriptionFromJarvis({ caption = '', snapshot = {} } = {}) {
+  const lines = String(caption ?? '')
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line && !CONTACT_LINE.test(line));
+  const body = lines.join('\n');
+  const has = (value) => body.includes(clean(value));
+  const extras = [];
+  const field = (label, ...keys) => {
+    const value = snapshotText(snapshot, ...keys);
+    if (value && !has(value)) extras.push(`${label}: ${value}`);
+  };
+  field('ตำแหน่ง', 'position', 'request_name', 'title');
+  field('หน้าที่', 'job_description', 'job_detail', 'duties', 'responsibilities', 'detail');
+  field('สถานที่ทำงาน', 'location', 'province');
+  field('รายได้', 'income', 'salary');
+  field('เวลางาน', 'work_schedule');
+  field('เพศ', 'gender');
+  const ageMin = snapshotText(snapshot, 'age_min', 'min_age');
+  const ageMax = snapshotText(snapshot, 'age_max', 'max_age');
+  if ((ageMin || ageMax) && !/อายุ/u.test(body)) extras.push(`อายุ: ${[ageMin, ageMax].filter(Boolean).join('-')} ปี`);
+  field('คุณสมบัติ', 'qualifications', 'requirements');
+  return [body, ...extras].filter(Boolean).join('\n').slice(0, 2000).trim();
 }
 
 /**
@@ -153,6 +185,7 @@ export function buildScrapeCriteria({
   overrides = {},
   erpTitle = '',
   erpProvince = '',
+  descriptionFallback = '',
 } = {}) {
   const rawPosition = pickOverrideOrSnapshot(overrides, 'position', snapshot, 'position') || clean(erpTitle);
   const position = isHeadcountOnlyTitle(rawPosition) ? '' : rawPosition;
@@ -177,7 +210,7 @@ export function buildScrapeCriteria({
     'duties',
     'responsibilities',
     'detail',
-  );
+  ) || clean(descriptionFallback);
   const gender = normalizeScrapeGender(pickOverrideOrSnapshot(overrides, 'gender', snapshot, 'gender'));
   const education = normalizeScrapeEducation(pickOverrideOrSnapshot(overrides, 'education', snapshot, 'education', 'degree', 'edu'));
 
