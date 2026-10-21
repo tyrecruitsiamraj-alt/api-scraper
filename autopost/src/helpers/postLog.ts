@@ -2,7 +2,6 @@
  * บันทึก Post Log ลง Database (รูปแบบ Log File)
  * วันที่-เวลา | ผู้โพสต์ | เจ้าของงาน | ชื่องาน | หน่วยงาน | ชื่อกลุ่ม | จำนวนสมาชิก | ลิงก์โพสต์ | สถานะ | จำนวน Comment | เบอร์โทรลูกค้า
  */
-const API_URL = process.env.RUN_LOG_API_URL || 'http://localhost:3000';
 
 export interface PostLogData {
   poster_name: string;
@@ -21,25 +20,16 @@ export interface PostLogData {
   group_id?: string;
 }
 
-const POST_LOG_FETCH_MS = Math.min(60000, Math.max(3000, Number(process.env.POST_LOG_FETCH_MS) || 12000));
-
+/**
+ * เขียนตรงลง Postgres (มี DATABASE_URL) ก่อน แล้วค่อย fallback ไป /api/post-logs พร้อม worker token
+ * logic อยู่ที่ server/post-log-writer.js (CJS) เพื่อให้เทสต์ด้วย node --test ได้
+ */
 export async function postLog(data: PostLogData): Promise<void> {
-  const runId = process.env.RUN_ID;
-  if (!runId) return;
   try {
-    const ctrl = new AbortController();
-    const t = setTimeout(() => ctrl.abort(), POST_LOG_FETCH_MS);
-    try {
-      await fetch(`${API_URL}/api/post-logs`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...data, run_id: runId }),
-        signal: ctrl.signal,
-      });
-    } finally {
-      clearTimeout(t);
-    }
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const { writePostLog } = require('../../server/post-log-writer');
+    await writePostLog(data);
   } catch (e) {
-    console.warn('[postLog] บันทึกลง API ไม่สำเร็จ:', (e as Error).message || String(e), '→ ตรวจ RUN_LOG_API_URL / เครือข่าย');
+    console.warn('[postLog] บันทึก post_logs ไม่สำเร็จ:', (e as Error).message || String(e));
   }
 }
