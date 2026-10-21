@@ -79,7 +79,7 @@ export default async function AutopostJobsPage(props: { searchParams?: Promise<{
   const legacy = assignments.filter((row) => !row.id.startsWith('jv-'));
 
   const live = tasks.filter((t) => t.status === 'queued' || t.status === 'running');
-  const problem = tasks.filter((t) => !live.includes(t) && (t.stage.state === 'failed' || t.counts.failed > 0));
+  const problem = tasks.filter((t) => !live.includes(t) && (t.stage.state === 'failed' || t.counts.failed > 0 || t.counts.not_member > 0));
   const done = tasks.filter((t) => !live.includes(t) && !problem.includes(t));
   const defaultTab = live.length ? 'live' : problem.length ? 'problem' : 'done';
 

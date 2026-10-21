@@ -103,7 +103,7 @@ export default async function OrchestratorPage(props: { searchParams?: Promise<{
   const pendingPosts = postOrders.filter((o) => o.jarvis_status === 'pending');
   const livePosts = postTasks.filter((t) => t.status === 'queued' || t.status === 'running');
   const problemPosts = postTasks.filter(
-    (t) => !livePosts.includes(t) && (t.stage.state === 'failed' || t.counts.failed > 0) && new Date(t.created_at).getTime() > weekAgo,
+    (t) => !livePosts.includes(t) && (t.stage.state === 'failed' || t.counts.failed > 0 || t.counts.not_member > 0) && new Date(t.created_at).getTime() > weekAgo,
   );
   const postedGroups7d = postTasks
     .filter((t) => new Date(t.created_at).getTime() > weekAgo)

@@ -1,4 +1,4 @@
-export type PostGroupStatus = 'posted' | 'failed' | 'posting' | 'waiting' | 'skipped';
+export type PostGroupStatus = 'posted' | 'failed' | 'not_member' | 'posting' | 'waiting' | 'skipped';
 
 export type PostTaskGroup = {
   group_id: string;
@@ -21,6 +21,7 @@ export type PostTaskCounts = {
   posted: number;
   failed: number;
   posting: number;
+  not_member: number;
   waiting: number;
   skipped: number;
 };

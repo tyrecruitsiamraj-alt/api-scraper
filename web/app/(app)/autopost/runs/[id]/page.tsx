@@ -101,6 +101,29 @@ export default async function PostTaskPage(props: { params: Promise<{ id: string
         </CardContent>
       </Card>
 
+      {task.counts.not_member > 0 && (
+        <Alert>
+          <AlertTitle>ยังไม่ได้เข้ากลุ่ม {task.counts.not_member} กลุ่ม</AlertTitle>
+          <AlertDescription className="flex flex-col gap-2">
+            <p>
+              ระบบกดเข้าร่วมให้ได้รอบละไม่เกิน 5 กลุ่ม กลุ่มที่ต้องตอบคำถามหรือรอแอดมินอนุมัติ ต้องเข้าร่วมเองด้วยบัญชี {task.account ?? 'ที่โพสต์'} แล้วค่อยโพสต์ซ้ำ
+            </p>
+            <ul className="flex flex-col gap-1">
+              {task.groups
+                .filter((g) => g.status === 'not_member')
+                .map((g) => (
+                  <li key={g.group_id} className="flex flex-wrap items-center gap-2">
+                    <a href={`https://www.facebook.com/groups/${g.group_id}`} target="_blank" rel="noreferrer" className="underline">
+                      {g.name}
+                    </a>
+                    <span className="text-muted-foreground">{String(g.error ?? '').replace(/\s*\(.*$/, '')}</span>
+                  </li>
+                ))}
+            </ul>
+          </AlertDescription>
+        </Alert>
+      )}
+
       {task.error && (
         <Alert variant="destructive">
           <AlertTitle>รอบนี้มีปัญหา</AlertTitle>

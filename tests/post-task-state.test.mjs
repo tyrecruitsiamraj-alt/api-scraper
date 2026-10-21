@@ -19,7 +19,7 @@ test('running run: posted, failed, posting and waiting groups in plan order', ()
     postLogs: [{ group_id: 'g1', post_link: 'https://fb/p/1', post_status: 'รออนุมัติ', comment_count: 3, reactions: 7, shares: 1, created_at: at(2) }],
   });
   assert.deepEqual(groups.map((g) => g.status), ['posted', 'failed', 'posting', 'waiting']);
-  assert.deepEqual(counts, { planned: 4, posted: 1, failed: 1, posting: 1, waiting: 1, skipped: 0 });
+  assert.deepEqual(counts, { planned: 4, posted: 1, failed: 1, posting: 1, not_member: 0, waiting: 1, skipped: 0 });
   assert.equal(current.order, 3);
   assert.equal(groups[0].post_link, 'https://fb/p/1');
   assert.equal(groups[0].reactions, 7);
@@ -68,4 +68,21 @@ test('a retry after a failure shows the latest result', () => {
 test('completed run where every group failed is a failed stage', () => {
   assert.equal(postTaskStage('completed', { planned: 2, posted: 0, failed: 2 }).state, 'failed');
   assert.equal(postTaskStage('queued').label, 'รอเครื่องรับงาน');
+});
+
+test('a group skipped for membership is not_member, not failed', () => {
+  const { groups, counts } = buildPostTaskGroups({
+    plan: [{ group_id: 'g1' }, { group_id: 'g2' }],
+    runStatus: 'completed',
+    attempts: [
+      { group_id: 'g1', level: 'info', kind: 'group_start', at: at(1) },
+      { group_id: 'g1', level: 'warn', kind: 'join', message: 'ยังไม่ได้เป็นสมาชิก ส่งคำขอเข้ากลุ่มแล้ว รอแอดมินอนุมัติ (กลุ่ม g1)', at: at(2) },
+      { group_id: 'g2', level: 'success', at: at(3) },
+    ],
+  });
+  assert.equal(groups[0].status, 'not_member');
+  assert.match(groups[0].error, /รอแอดมินอนุมัติ/);
+  assert.equal(counts.failed, 0);
+  assert.equal(counts.not_member, 1);
+  assert.equal(postTaskStage('completed', counts).state, 'done');
 });

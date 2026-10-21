@@ -21,6 +21,7 @@ export function thaiTime(value: string | null | undefined, withDate = true): str
 export const GROUP_STATUS: Record<PostGroupStatus, { label: string; block: string; badge: string }> = {
   posted: { label: 'สำเร็จ', block: 'bg-success', badge: 'border-success/30 bg-success/10 text-success' },
   failed: { label: 'ไม่สำเร็จ', block: 'bg-destructive', badge: 'border-destructive/30 bg-destructive/10 text-destructive' },
+  not_member: { label: 'ยังไม่ได้เข้ากลุ่ม', block: 'bg-warning/60', badge: 'border-warning/40 bg-warning/10 text-warning' },
   posting: { label: 'กำลังโพสต์', block: 'bg-warning animate-pulse', badge: 'border-warning/40 bg-warning/10 text-warning' },
   waiting: { label: 'รอคิว', block: 'bg-muted-foreground/25', badge: '' },
   skipped: { label: 'ไม่ได้โพสต์', block: 'border border-dashed border-muted-foreground/40', badge: '' },
@@ -75,6 +76,7 @@ export function countsLine(task: PostTask): string {
   const c = task.counts;
   const parts = [`สั่ง ${c.planned} กลุ่ม`, `สำเร็จ ${c.posted}`];
   if (c.failed) parts.push(`ไม่สำเร็จ ${c.failed}`);
+  if (c.not_member) parts.push(`ยังไม่ได้เข้ากลุ่ม ${c.not_member}`);
   if (task.current) parts.push(`กำลังโพสต์กลุ่มที่ ${task.current.order}`);
   else if (c.waiting) parts.push(`รอ ${c.waiting}`);
   if (c.skipped) parts.push(`ไม่ได้โพสต์ ${c.skipped}`);

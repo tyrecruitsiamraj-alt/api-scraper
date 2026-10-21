@@ -25,7 +25,7 @@ function num(value) {
 /**
  * @param {object} input
  * @param {Array<{group_id: string}>} input.plan กลุ่มตามลำดับที่จะโพสต์ (จาก log แผน หรือจาก assignment ถ้ารอบเก่าไม่มีแผน)
- * @param {Array<{group_id: string|null, level: string, kind?: string|null, message?: string|null, at: string}>} input.attempts run_logs ของรอบนี้
+ * @param {Array<{group_id: string|null, level: string, kind?: string|null, message?: string|null, at: string}>} input.attempts run_logs ของรอบนี้ (kind=join = ข้ามเพราะยังไม่ได้เป็นสมาชิก)
  * @param {Array<object>} input.postLogs post_logs ของรอบนี้
  * @param {string} input.runStatus queued | running | completed | failed | cancelled
  * @param {(fbGroupId: string) => string} [input.groupName]
@@ -55,8 +55,9 @@ export function buildPostTaskGroups({ plan = [], attempts = [], postLogs = [], r
     let status;
     let error = null;
     if (result && (!start || ts(result.at) >= ts(start.at))) {
-      status = result.level === 'success' ? 'posted' : 'failed';
-      if (status === 'failed') error = result.message ?? null;
+      // warn ที่มาจากการตรวจสมาชิกกลุ่ม (meta.kind=join) = ยังไม่ได้เข้ากลุ่ม ไม่ใช่โพสต์พัง
+      status = result.level === 'success' ? 'posted' : result.kind === 'join' ? 'not_member' : 'failed';
+      if (status !== 'posted') error = result.message ?? null;
     } else if (start) {
       if (runStatus === 'running') status = 'posting';
       else {
@@ -93,6 +94,7 @@ export function buildPostTaskGroups({ plan = [], attempts = [], postLogs = [], r
       posted: count('posted'),
       failed: count('failed'),
       posting: count('posting'),
+      not_member: count('not_member'),
       waiting: count('waiting'),
       skipped: count('skipped'),
     },
