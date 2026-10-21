@@ -232,6 +232,17 @@ test('Dynamic Post: รันโพสต์ตาม Assignments', async ({ pag
       activePostSettings = user.post_settings;
     }
 
+    // แผนของรอบนี้ตามลำดับที่จะโพสต์ — หน้าเว็บใช้บอกว่าสั่งกี่กลุ่มและกำลังโพสต์กลุ่มที่เท่าไร
+    await runLog({
+      level: 'info',
+      message: `แผนโพสต์ ${planItems.length} กลุ่ม`,
+      user_id: user.id,
+      meta: {
+        kind: 'plan',
+        items: planItems.map((i) => ({ assignment_id: i.assignment_id, job_id: i.job_id, group_id: i.fb_group_id })),
+      },
+    });
+
     /** circuit breaker: fail ติดกันหลายกลุ่ม = สัญญาณบัญชีโดนจำกัด — หยุดก่อนจะเผาบัญชี */
     let failStreak = 0;
     let lastJobId: string | null = null;
@@ -270,6 +281,15 @@ test('Dynamic Post: รันโพสต์ตาม Assignments', async ({ pag
         imagePath: imagePath || undefined,
       };
       const gID = item.fb_group_id;
+      await runLog({
+        level: 'info',
+        message: `กำลังโพสต์ลงกลุ่ม ${gID}`,
+        assignment_id: item.assignment_id,
+        user_id: user.id,
+        job_id: item.job_id,
+        group_id: gID,
+        meta: { kind: 'group_start' },
+      });
 
       let posted = false;
       const maxAttempts = 2;
