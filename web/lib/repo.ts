@@ -3350,9 +3350,17 @@ export async function listJarvisPostOrders(): Promise<JarvisPostOrder[]> {
         WHERE job_id = $1 AND COALESCE(post_link, '') <> '' ORDER BY created_at DESC LIMIT 1`,
       [jobId],
     ).catch(() => []);
+    // post_logs (มีลิงก์) ส่งผ่าน API ของ Auto-Post ซึ่งตอนนี้บันทึกไม่เข้า — run_logs ระดับ success
+    // ของงานนี้ (worker เขียนตรง) ก็นับเป็นหลักฐานว่าโพสต์สำเร็จแล้ว
+    const succeeded = posted[0]
+      ? true
+      : (await q<{ n: number }>(
+        `SELECT count(*)::int AS n FROM ${AP}.run_logs WHERE job_id = $1 AND level = 'success'`,
+        [jobId],
+      ).catch(() => [{ n: 0 }]))[0].n > 0;
     let jarvisStatus = row.status;
-    // เขียนกลับ Jarvis เมื่อมีลิงก์โพสต์จริงแล้ว (ทำตอนเปิดหน้า ไม่ต้องมี job เบื้องหลัง)
-    if (posted[0] && jarvisStatus === 'in_progress') {
+    // เขียนกลับ Jarvis เมื่อมีหลักฐานว่าโพสต์แล้ว (ทำตอนเปิดหน้า ไม่ต้องมี job เบื้องหลัง)
+    if (succeeded && jarvisStatus === 'in_progress') {
       await setSoRecruitRequestStatus(row.request_no, 'posted', 'content');
       jarvisStatus = 'posted';
     }
