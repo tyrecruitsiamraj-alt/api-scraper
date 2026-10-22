@@ -1,6 +1,9 @@
 import type { Page } from '@playwright/test';
 
 /** รอโดยไม่ throw เมื่อแท็บ/Browser ถูกปิดระหว่างเก็บ Comment (กันหยุดทั้งงาน 142 โพสต์) */
+/** คอมเมนต์ 1 รายการที่อ่านจากหน้าโพสต์ (aria ใช้หาคอมเมนต์เดิมตอนตอบกลับ) */
+export type ScrapedComment = { aria: string; name: string; text: string; commentUrl: string | null; profileUrl: string | null };
+
 export async function safePageWait(page: Page, ms: number): Promise<void> {
   if (page.isClosed()) return;
   try {
@@ -183,7 +186,14 @@ export async function scrapeCommentsAndPhones(
   page: Page,
   postUrl: string,
   opts?: { excludeAuthorNames?: string[] }
-): Promise<{ phones: string[]; commentCount: number; postBodyPhones: string[]; reactions: number; shares: number }> {
+): Promise<{
+  phones: string[];
+  commentCount: number;
+  postBodyPhones: string[];
+  reactions: number;
+  shares: number;
+  comments: ScrapedComment[];
+}> {
   if (page.isClosed()) {
     throw new Error('Target page, context or browser has been closed');
   }
@@ -257,7 +267,7 @@ export async function scrapeCommentsAndPhones(
       .filter(Boolean)
   );
 
-  type EvalOut = { commentBlocks: string[]; captionExclusionText: string };
+  type EvalOut = { commentBlocks: string[]; captionExclusionText: string; comments: ScrapedComment[] };
   const evaluated = await page
     .evaluate((names) => {
       const excluded = new Set((Array.isArray(names) ? names : []).map((x) => String(x || '').trim().toLowerCase()));
@@ -315,10 +325,39 @@ export async function scrapeCommentsAndPhones(
         '[aria-label*="Commenter" i]',
         '[aria-label*="comment by" i]',
       ];
+      const comments: Array<{ aria: string; name: string; text: string; commentUrl: string | null; profileUrl: string | null }> = [];
+      const seenAria = new Set<string>();
+      // "ความคิดเห็นโดย สมชาย ใจดี เมื่อ 2 ชั่วโมงที่แล้ว" / "Comment by Somchai 2 hours ago" → ชื่อ
+      const nameFromAria = (aria: string) =>
+        aria
+          .replace(/^(Comment by|Reply by|ความคิดเห็นโดย|ความคิดเห็นของ|การตอบกลับโดย|ตอบกลับโดย)\s*/i, '')
+          .replace(/\s+(เมื่อ|เมื่อวาน|[0-9]+\s*(วินาที|นาที|ชั่วโมง|ชม\.|วัน|สัปดาห์|เดือน|ปี)|a\s+|an\s+|[0-9]+\s*(second|minute|hour|day|week|month|year)s?).*$/i, '')
+          .trim();
+      const ACTION_LINE = /^(ถูกใจ|ตอบกลับ|แชร์|แก้ไขแล้ว|Like|Reply|Share|Edited|ผู้เขียน|Author|Top fan|แฟนตัวยง|[0-9]+\s*(วินาที|นาที|ชม\.|ชั่วโมง|วัน|สัปดาห์|ส\.|ว\.|น\.)|[0-9]+\s*[smhdwy]|[0-9]+)$/i;
       for (const sel of primarySelectors) {
         try {
           document.querySelectorAll(sel).forEach((el) => {
-            pushBlock((el as HTMLElement).innerText);
+            const html = el as HTMLElement;
+            pushBlock(html.innerText);
+            const aria = html.getAttribute('aria-label') || '';
+            if (!aria || seenAria.has(aria)) return;
+            seenAria.add(aria);
+            const lines = String(html.innerText || '').split('\n').map((x) => x.trim()).filter(Boolean);
+            const name = nameFromAria(aria) || lines[0] || '';
+            if (!name || excluded.has(name.toLowerCase())) return;
+            const textLines = lines.filter((line, i) => !(i === 0 && line === name) && !ACTION_LINE.test(line));
+            const commentLink = html.querySelector('a[href*="comment_id="]') as HTMLAnchorElement | null;
+            const profileLink = Array.from(html.querySelectorAll('a[href]')).find((a) => {
+              const href = (a as HTMLAnchorElement).href;
+              return /facebook\.com\//.test(href) && !/comment_id=|\/hashtag\//.test(href);
+            }) as HTMLAnchorElement | undefined;
+            comments.push({
+              aria,
+              name,
+              text: textLines.join('\n').slice(0, 2000),
+              commentUrl: commentLink ? commentLink.href : null,
+              profileUrl: profileLink ? profileLink.href.split('?')[0] : null,
+            });
           });
         } catch {
           /* ignore */
@@ -332,9 +371,9 @@ export async function scrapeCommentsAndPhones(
         }
       }
 
-      return { commentBlocks: out, captionExclusionText };
+      return { commentBlocks: out, captionExclusionText, comments };
     }, [...excludedNames])
-    .catch((): EvalOut => ({ commentBlocks: [], captionExclusionText: '' }));
+    .catch((): EvalOut => ({ commentBlocks: [], captionExclusionText: '', comments: [] }));
 
   const commentBlocks = Array.isArray(evaluated?.commentBlocks) ? evaluated.commentBlocks : [];
   let commentBlob = commentBlocks.length > 0 ? commentBlocks.join('\n') : '';
@@ -367,5 +406,42 @@ export async function scrapeCommentsAndPhones(
   const commentCount =
     commentBlocks.length > 0 ? commentBlocks.length : Math.max(0, n - 1);
   const { reactions, shares } = await readReactionsAndShares(page);
-  return { phones, commentCount, postBodyPhones, reactions, shares };
+  const comments = Array.isArray(evaluated?.comments) ? evaluated.comments : [];
+  return { phones, commentCount, postBodyPhones, reactions, shares, comments };
+}
+
+/**
+ * ตอบใต้คอมเมนต์หนึ่ง (หาด้วย aria-label เดิมของคอมเมนต์) — คืน null เมื่อสำเร็จ หรือข้อความ error
+ * ต้องอยู่บนหน้าโพสต์ที่ scrapeCommentsAndPhones เปิดไว้แล้ว
+ */
+export async function replyToComment(page: Page, aria: string, text: string): Promise<string | null> {
+  try {
+    const comment = page.locator(`[aria-label="${aria.replace(/"/g, '\\"')}"]`).first();
+    if (!(await comment.isVisible({ timeout: 3000 }).catch(() => false))) return 'ไม่เจอคอมเมนต์บนหน้าโพสต์';
+    // ปุ่ม "ตอบกลับ" อยู่ในแถวปุ่มใต้ข้อความ — ไล่ขึ้นไปหากล่องที่มีปุ่มนี้
+    const container = comment.locator(
+      'xpath=ancestor-or-self::*[.//*[@role="button" and (normalize-space()="ตอบกลับ" or normalize-space()="Reply")]][1]'
+    );
+    const replyBtn = container.getByRole('button', { name: /^(ตอบกลับ|Reply)$/ }).first();
+    if (!(await replyBtn.isVisible({ timeout: 3000 }).catch(() => false))) return 'ไม่เจอปุ่มตอบกลับ';
+    await replyBtn.scrollIntoViewIfNeeded().catch(() => {});
+    await replyBtn.click({ timeout: 5000 });
+    await safePageWait(page, 1200);
+    // กดตอบกลับแล้ว Facebook โฟกัสช่องพิมพ์ตอบให้ ถ้าไม่โฟกัสก็ใช้ช่องพิมพ์อันล่าสุดบนหน้า
+    const focused = await page.evaluate(() => document.activeElement?.getAttribute('contenteditable') === 'true');
+    const target = focused
+      ? page.locator('[contenteditable="true"]:focus').first()
+      : page.locator('div[contenteditable="true"][role="textbox"]').last();
+    const lines = text.split('\n');
+    for (let i = 0; i < lines.length; i++) {
+      await target.pressSequentially(lines[i], { delay: 35 });
+      if (i < lines.length - 1) await page.keyboard.press('Shift+Enter');
+    }
+    await safePageWait(page, 500);
+    await page.keyboard.press('Enter');
+    await safePageWait(page, 2500);
+    return null;
+  } catch (e) {
+    return String((e as Error).message || e).slice(0, 200);
+  }
 }

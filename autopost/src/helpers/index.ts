@@ -36,4 +36,6 @@ export {
   keepLatestPhonePerSelection,
   safePageWait,
   scrapeCommentsAndPhones,
+  replyToComment,
 } from './collectPostComments';
+export type { ScrapedComment } from './collectPostComments';

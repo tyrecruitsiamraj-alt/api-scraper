@@ -40,6 +40,12 @@ const AUTO_COLLECT_TZ = String(process.env.AUTO_COLLECT_TZ || 'Asia/Bangkok').tr
 const AUTO_COLLECT_HOUR = Math.min(23, Math.max(0, Number(process.env.AUTO_COLLECT_HOUR) || 7));
 const AUTO_COLLECT_MINUTE = Math.min(59, Math.max(0, Number(process.env.AUTO_COLLECT_MINUTE) || 15));
 const AUTO_COLLECT_STATE_PATH = path.join(PROJECT_ROOT, 'data', '.collect-auto-last-date.txt');
+/**
+ * เก็บถี่ (ตอบคอมเมนต์ทันใจ): ตั้ง AUTO_COLLECT_EVERY_MINUTES เช่น 120 = ทุก 2 ชม.
+ * เก็บโพสต์ย้อนหลัง AUTO_COLLECT_LOOKBACK_DAYS วัน (default 3) — ใช้แทนรอบวันละครั้ง
+ */
+const AUTO_COLLECT_EVERY_MINUTES = Math.max(0, Number(process.env.AUTO_COLLECT_EVERY_MINUTES) || 0);
+const AUTO_COLLECT_LOOKBACK_DAYS = Math.min(14, Math.max(1, Number(process.env.AUTO_COLLECT_LOOKBACK_DAYS) || 3));
 
 if (!API_BASE) {
   console.error('[collect-worker] missing WORKER_API_BASE');
@@ -135,8 +141,17 @@ async function fetchJson(url) {
   return data;
 }
 
-async function enqueueDailyCollectForYesterday() {
+function daysAgoByTz(days, timeZone) {
+  const [y, m, d] = formatDateByTz(new Date(), timeZone).split('-').map((x) => Number(x));
+  const utcMid = new Date(Date.UTC(y, m - 1, d));
+  utcMid.setUTCDate(utcMid.getUTCDate() - days);
+  return formatDateByTz(utcMid, 'UTC');
+}
+
+async function enqueueDailyCollectForYesterday(range) {
   const yesterday = getYesterdayByTz(AUTO_COLLECT_TZ);
+  const startDate = range?.start || yesterday;
+  const endDate = range?.end || yesterday;
   console.log(`[collect-worker] auto-daily: preparing jobs for ${yesterday} (${AUTO_COLLECT_TZ})`);
   const users = await fetchJson(`${API_BASE}/api/users`);
   const runs = [];
@@ -146,8 +161,8 @@ async function enqueueDailyCollectForYesterday() {
     try {
       const q =
         `${API_BASE}/api/post-logs/for-comment-collect` +
-        `?start_date=${encodeURIComponent(yesterday)}` +
-        `&end_date=${encodeURIComponent(yesterday)}` +
+        `?start_date=${encodeURIComponent(startDate)}` +
+        `&end_date=${encodeURIComponent(endDate)}` +
         `&user_id=${encodeURIComponent(uid)}` +
         `&limit=2000`;
       const out = await fetchJson(q);
@@ -181,9 +196,26 @@ async function enqueueDailyCollectForYesterday() {
 }
 
 let autoCollectRunning = false;
+let lastIntervalCollectAt = 0;
 async function tickAutoDailySchedule() {
   if (!AUTO_COLLECT_ENABLED) return;
   if (autoCollectRunning) return;
+  if (AUTO_COLLECT_EVERY_MINUTES > 0) {
+    if (Date.now() - lastIntervalCollectAt < AUTO_COLLECT_EVERY_MINUTES * 60_000) return;
+    autoCollectRunning = true;
+    lastIntervalCollectAt = Date.now();
+    try {
+      const start = daysAgoByTz(AUTO_COLLECT_LOOKBACK_DAYS, AUTO_COLLECT_TZ);
+      const end = daysAgoByTz(0, AUTO_COLLECT_TZ);
+      console.log(`[collect-worker] auto-interval: posts ${start}..${end}`);
+      await enqueueDailyCollectForYesterday({ start, end });
+    } catch (e) {
+      console.error('[collect-worker] auto-interval failed:', e.message || e);
+    } finally {
+      autoCollectRunning = false;
+    }
+    return;
+  }
   const now = getNowInTz(AUTO_COLLECT_TZ);
   const due = now.hour > AUTO_COLLECT_HOUR || (now.hour === AUTO_COLLECT_HOUR && now.minute >= AUTO_COLLECT_MINUTE);
   if (!due) return;
@@ -332,7 +364,9 @@ console.log(`[collect-worker] api=${API_BASE}`);
 console.log(`[collect-worker] worker_id=${workerId}`);
 console.log(`[collect-worker] concurrency=${CONCURRENCY}`);
 console.log(`[collect-worker] job max duration ${Math.round(JOB_MAX_MS / 60000)} min (WORKER_COLLECT_JOB_MAX_MS)`);
-if (AUTO_COLLECT_ENABLED) {
+if (AUTO_COLLECT_ENABLED && AUTO_COLLECT_EVERY_MINUTES > 0) {
+  console.log(`[collect-worker] auto-interval every ${AUTO_COLLECT_EVERY_MINUTES} min, posts from last ${AUTO_COLLECT_LOOKBACK_DAYS} days`);
+} else if (AUTO_COLLECT_ENABLED) {
   console.log(
     `[collect-worker] auto-daily enabled at ${String(AUTO_COLLECT_HOUR).padStart(2, '0')}:${String(AUTO_COLLECT_MINUTE).padStart(2, '0')} (${AUTO_COLLECT_TZ})`
   );

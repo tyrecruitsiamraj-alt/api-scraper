@@ -48,7 +48,9 @@ New-Item -ItemType Directory -Force -Path $LogDir | Out-Null
 
 $Patterns = @{
   Scrape   = @('scraper-pool\.mjs', 'workers[/\\]runner\.js', 'npm.*scraper:pool', 'start-scrape\.cmd')
-  Autopost = @('post-remote-worker-supervisor\.js', 'post-remote-worker\.js', 'npm.*worker:post', 'start-autopost\.cmd')
+  Autopost = @('post-remote-worker-supervisor\.js', 'post-remote-worker\.js', 'npm.*worker:post', 'start-autopost\.cmd', 'collect-remote-worker\.js', 'npm.*worker:collect', 'start-collect\.cmd')
+  # ตัวเก็บ/ตอบคอมเมนต์ เปิด-ปิดพร้อมสวิตช์ Autopost (ปิดอยู่ในกลุ่ม Autopost ด้านบน)
+  Collect  = @('collect-remote-worker\.js', 'npm.*worker:collect', 'start-collect\.cmd')
 }
 
 function Get-MatchingProcesses([string[]]$Patterns) {
@@ -247,6 +249,8 @@ function Start-WorkerWindow([string]$Title, [string]$WorkDir, [string]$NpmScript
     "set WORKER_BUILD_SHA=$sha"
     'set WORKER_CAPABILITIES=post,preflight'
     'set AUTO_POST_DAILY_ENABLED=0'
+    'set AUTO_COLLECT_ENABLED=1'
+    'set AUTO_COLLECT_EVERY_MINUTES=120'
     "title $Title"
     "echo [%date% %time%] starting $NpmScript>> `"$logPath`""
     "`"$npm`" run $NpmScript"
@@ -296,6 +300,12 @@ function Start-ScrapeWorker {
 function Start-AutopostWorker {
   $autopost = Join-Path $Root 'autopost'
   Start-WorkerWindow -Title 'SO AutoPost Worker (worker:post)' -WorkDir $autopost -NpmScript 'worker:post' -Group 'Autopost'
+  # เก็บคอมเมนต์ทุก 2 ชม. + ตอบตามแม่แบบ (ชื่อหน้าต่างขึ้นต้น SO AutoPost Worker ให้ปิดพร้อมกัน)
+  try {
+    Start-WorkerWindow -Title 'SO AutoPost Worker (worker:collect)' -WorkDir $autopost -NpmScript 'worker:collect' -Group 'Collect'
+  } catch {
+    try { $footer.Text = "เปิดตัวเก็บคอมเมนต์ไม่สำเร็จ: $($_.Exception.Message)" } catch { }
+  }
 }
 
 function Save-RestartAfterUpdate([bool]$Scrape, [bool]$Autopost) {

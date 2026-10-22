@@ -12,7 +12,15 @@ import {
   runLog,
   safePageWait,
   scrapeCommentsAndPhones,
+  replyToComment,
 } from '../src/helpers';
+
+/* eslint-disable @typescript-eslint/no-var-requires */
+// ผู้สนใจจากคอมเมนต์: เขียนลง DB ตรง (worker มี DATABASE_URL) — ดู server/comment-leads.js
+const commentLeads = require('../server/comment-leads');
+const leadsDb = process.env.DATABASE_URL ? require('../server/db') : null;
+/** ตอบคอมเมนต์ต่อรอบเก็บ (ทุกโพสต์รวมกัน) — ตอบเยอะเกิน Facebook มองว่าเป็นสแปม; 0 = ไม่ตอบ */
+const AUTO_REPLY_MAX_PER_RUN = Math.max(0, Math.min(50, Number(process.env.AUTO_REPLY_MAX_PER_RUN ?? 10)));
 
 type CollectPlan = {
   user_id: string;
@@ -103,6 +111,9 @@ test('collectComments', async ({ page }) => {
     sessionKey: String(user.env_key || user.id || user.email || 'default'),
   });
   const excludedPhones = buildExcludedPhoneSet((user as { contact_phone?: string }).contact_phone);
+  if (leadsDb) await commentLeads.ensureCommentLeadsTable(leadsDb).catch(() => {});
+  let repliesLeft = AUTO_REPLY_MAX_PER_RUN;
+  const leadTotals = { saved: 0, replied: 0, needsHuman: 0 };
   const pendingByPost = new Map<
     string,
     { commentCount: number; phones: string[]; reactions: number; shares: number; item: CollectPlan['posts'][number] }
@@ -130,9 +141,53 @@ test('collectComments', async ({ page }) => {
       const ownerNames = [user.poster_name || '', user.name || '', item.owner || '', item.company || '', item.poster_name || '']
         .map((x) => String(x || '').trim())
         .filter(Boolean);
-      const { phones, commentCount, postBodyPhones, reactions, shares } = await scrapeCommentsAndPhones(active, item.post_link, {
+      const { phones, commentCount, postBodyPhones, reactions, shares, comments } = await scrapeCommentsAndPhones(active, item.post_link, {
         excludeAuthorNames: ownerNames,
       });
+      if (leadsDb && comments.length) {
+        try {
+          const info = (
+            await leadsDb.query(
+              `SELECT pl.group_id, pl.job_id, pl.user_id, j.caption, j.title
+                 FROM post_logs pl LEFT JOIN jobs j ON j.id = pl.job_id WHERE pl.id = $1`,
+              [item.post_log_id]
+            )
+          ).rows[0] || {};
+          const rows = await commentLeads.saveComments(
+            leadsDb,
+            {
+              post_log_id: item.post_log_id,
+              post_link: item.post_link,
+              job_id: info.job_id || item.job_id,
+              group_id: info.group_id,
+              user_id: info.user_id || user.id,
+              caption: info.caption,
+              position: String(info.title || item.job_title || '').split(' · ')[0],
+            },
+            comments
+          );
+          leadTotals.saved += comments.length;
+          leadTotals.needsHuman += rows.filter((r: { needs_human: boolean; replied_at: unknown; reply_text: unknown }) => r.needs_human && !r.reply_text).length;
+          // ตอบเฉพาะคอมเมนต์ที่ยังเห็นบนหน้านี้ (หา aria ของคอมเมนต์จาก key เดียวกัน)
+          const ariaByKey = new Map(comments.map((c) => [commentLeads.commentKey(c, item.post_link), c.aria]));
+          for (const row of commentLeads.pendingReplies(rows)) {
+            if (repliesLeft <= 0) break;
+            const aria = ariaByKey.get(row.comment_key);
+            if (!aria) continue;
+            repliesLeft -= 1;
+            const err = await replyToComment(active, aria, row.reply_text);
+            await commentLeads.markReplied(leadsDb, row.id, err);
+            if (!err) leadTotals.replied += 1;
+            await safePageWait(active, 15000 + Math.floor(Math.random() * 20000));
+          }
+        } catch (leadErr) {
+          await runLog({
+            level: 'warn',
+            message: `[${idx}/${plan.posts.length}] บันทึก/ตอบคอมเมนต์ไม่สำเร็จ: ${String((leadErr as Error).message).slice(0, 160)}`,
+            user_id: user.id,
+          });
+        }
+      }
       const excludedForThisPost = new Set(excludedPhones);
       postBodyPhones
         .map((x) => normalizeThaiPhoneDigits(x))
@@ -194,6 +249,14 @@ test('collectComments', async ({ page }) => {
       customer_phone: phoneStr,
       reactions: st.reactions,
       shares: st.shares,
+    });
+  }
+  if (leadsDb) {
+    await runLog({
+      level: 'info',
+      message: `คอมเมนต์รอบนี้ ${leadTotals.saved} รายการ · ตอบแล้ว ${leadTotals.replied} · รอคนตอบ ${leadTotals.needsHuman}`,
+      user_id: user.id,
+      meta: { kind: 'comment_leads', ...leadTotals },
     });
   }
   await runLog({
