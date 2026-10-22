@@ -7,6 +7,7 @@ import { authOptions } from './auth';
 import { encryptSecret } from './crypto';
 import { kickWorker } from './worker-kick';
 import { postCaptionIssues } from '../../src/core/post-caption-check.js';
+import { dismissCommentLead, jarvisLeadsConfigured, requestAiCall, saveManualReply } from './comment-leads';
 import { q } from './db';
 import { CONTENT_DISABLED_OPERATOR_MESSAGE, isContentGenerationEnabled } from './product-scope';
 import { normalizePosterExtras, normalizePosterLayout } from '../../src/core/poster-template.js';
@@ -163,6 +164,44 @@ export async function returnJarvisPostOrderAction(formData: FormData) {
   revalidatePath('/autopost/jobs');
   revalidatePath('/orchestrator');
   redirect(`/autopost/jobs?notice=${encodeURIComponent(notice)}`);
+}
+
+/** พิมพ์คำตอบให้คอมเมนต์ที่ระบบตอบเองไม่ได้ */
+export async function replyCommentLeadAction(formData: FormData) {
+  const session = await getServerSession(authOptions);
+  if (!session) throw new Error('unauthorized');
+  const id = String(formData.get('id') ?? '').trim();
+  const text = String(formData.get('reply') ?? '').replace(/\r\n/g, '\n').trim();
+  let notice = 'บันทึกคำตอบแล้ว ระบบจะโพสต์ใต้คอมเมนต์ในรอบเก็บคอมเมนต์ถัดไป';
+  if (!id || !text) notice = 'พิมพ์คำตอบก่อนบันทึก';
+  else if (text.length > 1000) notice = 'คำตอบยาวเกิน 1,000 ตัวอักษร';
+  else if (!(await saveManualReply(id, text, session.user?.email ?? session.user?.name ?? null))) notice = 'คอมเมนต์นี้ถูกตอบไปแล้ว';
+  revalidatePath('/autopost/leads');
+  redirect(`/autopost/leads?notice=${encodeURIComponent(notice)}`);
+}
+
+/** ไม่ต้องตอบคอมเมนต์นี้ */
+export async function dismissCommentLeadAction(formData: FormData) {
+  await requireSession();
+  const id = String(formData.get('id') ?? '').trim();
+  if (id) await dismissCommentLead(id);
+  revalidatePath('/autopost/leads');
+  redirect(`/autopost/leads?notice=${encodeURIComponent('ไม่ตอบคอมเมนต์นี้แล้ว')}`);
+}
+
+/** ส่งคนที่เลือก (มีเบอร์) ให้ AI โทร */
+export async function requestAiCallAction(formData: FormData) {
+  const session = await getServerSession(authOptions);
+  if (!session) throw new Error('unauthorized');
+  const ids = formData.getAll('leadId').map(String).filter(Boolean);
+  let notice = 'เลือกคนที่จะให้ AI โทรก่อน';
+  if (ids.length) {
+    const { requested, skipped } = await requestAiCall(ids, session.user?.email ?? session.user?.name ?? null);
+    notice = `ขอให้ AI โทร ${requested} คน${skipped ? ` (ข้าม ${skipped} คน: ไม่มีเบอร์หรือขอไปแล้ว)` : ''}`;
+    if (!jarvisLeadsConfigured()) notice += ' · ยังไม่ได้เชื่อม API ของ Jarvis รายชื่อจะรอส่งจนกว่าจะเชื่อม';
+  }
+  revalidatePath('/autopost/leads');
+  redirect(`/autopost/leads?notice=${encodeURIComponent(notice)}`);
 }
 
 export async function postAssignmentNowAction(formData: FormData) {
