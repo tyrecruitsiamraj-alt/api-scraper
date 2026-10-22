@@ -26,8 +26,18 @@ export const MEMBERSHIP_MESSAGE: Record<Exclude<MembershipState, 'member'>, stri
   unknown: 'ไม่เจอช่องเขียนโพสต์และปุ่มเข้าร่วมกลุ่ม',
 };
 
-const COMPOSER_TRIGGER =
-  'div[role="button"]:has-text("เขียนอะไรสักหน่อย"), div[role="button"]:has-text("Write something"), div[role="button"]:has-text("สร้างโพสต์สาธารณะ")';
+/** ช่องเขียนโพสต์ในหน้ากลุ่ม — Facebook ใช้หลายคำ (ไทย/อังกฤษ) และบางทีมีแค่ aria-label */
+export const COMPOSER_TRIGGER = [
+  'div[role="button"]:has-text("เขียนอะไรสักหน่อย")',
+  'div[role="button"]:has-text("เขียนบางอย่าง")',
+  'div[role="button"]:has-text("สร้างโพสต์สาธารณะ")',
+  'div[role="button"]:has-text("Write something")',
+  'div[role="button"]:has-text("Create a public post")',
+  'div[role="button"][aria-label*="เขียนอะไร"]',
+  'div[role="button"][aria-label*="สร้างโพสต์"]',
+  'div[role="button"][aria-label*="Write something"]',
+  'div[role="button"][aria-label*="Create a public post"]',
+].join(', ');
 const JOIN_BUTTON =
   'div[role="button"]:has-text("เข้าร่วมกลุ่ม"), div[role="button"][aria-label="เข้าร่วมกลุ่ม"], div[role="button"]:has-text("Join group"), div[role="button"][aria-label="Join group"]';
 const PENDING_MARK =
@@ -73,4 +83,22 @@ export async function ensureGroupMembership(
   await page.waitForTimeout(2000);
   if (await visible(page, COMPOSER_TRIGGER, 10000)) return 'joined';
   return (await visible(page, PENDING_MARK, 1500)) ? 'pending' : 'unknown';
+}
+
+/** ข้อความบนหน้ากลุ่มที่น่าจะบอกเหตุผลว่าทำไมไม่มีช่องโพสต์ (ใช้เขียน log) */
+export async function readGroupPageHint(page: Page): Promise<string> {
+  const text = await page
+    .locator('div[role="main"]')
+    .first()
+    .innerText({ timeout: 3000 })
+    .catch(() => '');
+  const lines = String(text || '')
+    .split(/\n+/)
+    .map((line) => line.trim())
+    .filter((line) => line.length >= 4 && line.length <= 160);
+  const hint =
+    lines.find((line) => /โพสต์|อนุมัติ|แอดมิน|ผู้ดูแล|จำกัด|ปิด|ถูกระงับ|ส่วนตัว|post|approv|admin|restrict|paused|private/i.test(line)) ||
+    lines.slice(0, 2).join(' / ');
+  // วงเล็บตัดท้ายข้อความในหน้าเว็บ — เปลี่ยนเป็นวงเล็บเหลี่ยม
+  return hint.replace(/[()]/g, (c) => (c === '(' ? '[' : ']')).slice(0, 160);
 }

@@ -11,7 +11,7 @@ import {
   humanType,
 } from './humanBehavior';
 import { saveToSheet } from './saveToSheet';
-import { ensureGroupMembership, MEMBERSHIP_MESSAGE, type MembershipState } from './groupMembership';
+import { COMPOSER_TRIGGER, ensureGroupMembership, MEMBERSHIP_MESSAGE, readGroupPageHint, type MembershipState } from './groupMembership';
 
 /** รวม goto my_posted + pending + สำรองฟีด + POST Sheet + postLog */
 const SAVE_TO_SHEET_MAX_MS = Math.min(240000, Math.max(30000, Number(process.env.SAVE_TO_SHEET_MAX_MS) || 120000));
@@ -323,14 +323,27 @@ export async function postToGroup(
       })
       .catch(() => '0');
 
-    const postTriggerSel =
-      'div[role="button"]:has-text("เขียนอะไรสักหน่อย"), div[role="button"]:has-text("Write something"), div[role="button"]:has-text("สร้างโพสต์สาธารณะ")';
+    const postTriggerSel = COMPOSER_TRIGGER;
 
     // ยังไม่ได้เป็นสมาชิก = ไม่มีช่องเขียนโพสต์: กดเข้าร่วมให้ (มีโควต้าต่อรอบ) ถ้าเข้าไม่ได้ทันทีก็ข้ามกลุ่มนี้
     if (options.joinBudget) {
       const state = await ensureGroupMembership(page, options.joinBudget, userLabel);
-      options.membership = { state, message: state === 'member' ? null : MEMBERSHIP_MESSAGE[state] };
-      if (state !== 'member') console.log(`👥 [${userLabel}] กลุ่ม ${gID}: ${MEMBERSHIP_MESSAGE[state]}`);
+      let message: string | null = state === 'member' ? null : MEMBERSHIP_MESSAGE[state];
+      if (state === 'unknown') {
+        // ไม่เจอทั้งช่องโพสต์และปุ่มเข้าร่วม: เก็บภาพ/HTML ไว้ที่ artifacts/ และข้อความบนหน้าไว้ใน log
+        const hint = await readGroupPageHint(page);
+        if (hint) message = `${message} หน้ากลุ่มเขียนว่า: ${hint}`;
+        await capturePostFailureArtifacts({
+          page,
+          userLabel,
+          groupId: gID,
+          reason: 'no_composer_no_join',
+          jobId: options.jobId,
+          assignmentId: options.assignmentId,
+        });
+      }
+      options.membership = { state, message };
+      if (state !== 'member') console.log(`👥 [${userLabel}] กลุ่ม ${gID}: ${message}`);
       if (state !== 'member' && state !== 'joined') return false;
     }
 

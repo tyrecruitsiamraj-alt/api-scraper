@@ -2004,9 +2004,15 @@ function baseDailyCap(user) {
 async function getEffectiveDailyCap(user) {
   const capBase = baseDailyCap(user);
   if (String(process.env.POST_WARMUP_DISABLED || '') === '1') return capBase;
+  // อายุบัญชีนับจากโพสต์สำเร็จครั้งแรก: post_logs (มีลิงก์) หรือ run_logs success
+  // เดิมนับแค่ post_logs ซึ่งเพิ่งเริ่มเก็บได้ — บัญชีที่โพสต์มานานเลยโดนวอร์มเป็นบัญชีใหม่ (5 กลุ่ม/วัน)
   const { rows } = await query(
-    `SELECT EXTRACT(EPOCH FROM (NOW() - MIN(created_at))) / 86400.0 AS age_days
-     FROM post_logs WHERE user_id = $1`,
+    `SELECT EXTRACT(EPOCH FROM (NOW() - MIN(first_at))) / 86400.0 AS age_days
+     FROM (
+       SELECT MIN(created_at) AS first_at FROM post_logs WHERE user_id = $1
+       UNION ALL
+       SELECT MIN(created_at) FROM run_logs WHERE user_id = $1 AND level = 'success'
+     ) t`,
     [String(user.id)]
   );
   return warmupCap(capBase, Number(rows[0]?.age_days));
