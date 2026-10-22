@@ -34,7 +34,8 @@ function hasFacebookSavedSession(projectRoot, user) {
 function userCredentials(user) {
   const base = `USER_${String(user.env_key || user.id).toUpperCase().replace(/[^A-Z0-9_]/g, '_')}`;
   const email = String(user.email || process.env[`${base}_EMAIL`] || '').trim();
-  const password = String(user.password || process.env[`${base}_PASSWORD`] || '').trim();
+  const { decryptCredential } = require('./credential-crypto');
+  const password = decryptCredential(String(user.password || process.env[`${base}_PASSWORD`] || '').trim());
   return { email, password };
 }
 

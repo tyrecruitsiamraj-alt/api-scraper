@@ -10,6 +10,12 @@ import type {
   DynamicAssignment,
 } from '../types/config';
 
+/** รหัสผ่านที่เก็บแบบ enc:v1 ต้องถอดก่อนให้บอทกรอก (ดู server/credential-crypto.js) */
+function plainPassword(value: string): string {
+  const { decryptCredential } = require('../../server/credential-crypto');
+  return decryptCredential(value);
+}
+
 const DEFAULT_SHEET_URL =
   process.env.DEFAULT_SHEET_URL ||
   'https://script.google.com/macros/s/AKfycbzqB97xnjUC7QZwTq2QnXUI372lxsO9acZTVxXJ3HF9G-T71h-HqccaNyMR6E612MYQ/exec';
@@ -101,7 +107,7 @@ async function loadMasterConfigFromDb(userId: number): Promise<MasterConfig> {
 
   const base = `USER_${String(user.env_key || user.id)}`.toUpperCase().replace(/[^A-Z0-9_]/g, '_');
   const email = (user as { email?: string }).email || process.env[`${base}_EMAIL`] || '';
-  const password = (user as { password?: string }).password || process.env[`${base}_PASSWORD`] || '';
+  const password = plainPassword((user as { password?: string }).password || process.env[`${base}_PASSWORD`] || '');
 
   return {
     account: {
@@ -203,7 +209,7 @@ async function loadWorkerConfigFromDb(): Promise<WorkerConfig> {
 
   const base = `USER_${String(user.env_key || user.id)}`.toUpperCase().replace(/[^A-Z0-9_]/g, '_');
   const email = (user as { email?: string }).email || process.env[`${base}_EMAIL`] || '';
-  const password = (user as { password?: string }).password || process.env[`${base}_PASSWORD`] || '';
+  const password = plainPassword((user as { password?: string }).password || process.env[`${base}_PASSWORD`] || '');
 
   return {
     account: {
@@ -284,7 +290,7 @@ function mergeCredentials<T extends { env_key?: string; id: string; email?: stri
       const base = `USER_${String(u.env_key || u.id)}`.toUpperCase().replace(/[^A-Z0-9_]/g, '_');
       return process.env[`${base}_PASSWORD`] || '';
     })();
-    return { ...u, email, password };
+    return { ...u, email, password: plainPassword(password) };
   });
 }
 
