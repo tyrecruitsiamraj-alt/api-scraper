@@ -181,8 +181,8 @@ async function runPlaywrightForJob(job) {
       clearTimeout(timer);
       if (code === 0) resolve();
       else {
-        const diagnostic = outputTail.trim().split(/\r?\n/).slice(-12).join('\n');
-        reject(new Error(`post worker exit code ${code}${diagnostic ? `\n${diagnostic}` : ' (ไม่มี diagnostic output)'}`));
+        const { describeWorkerFailure } = require('../server/worker-diagnostic');
+        reject(new Error(describeWorkerFailure(code, outputTail)));
       }
     });
     child.on('error', (err) => {

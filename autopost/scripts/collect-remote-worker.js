@@ -260,18 +260,30 @@ async function runPlaywrightForJob(job) {
     const child = isWin
       ? spawn('cmd.exe', ['/d', '/c', 'npx', ...args], {
           cwd: PROJECT_ROOT,
-          stdio: 'inherit',
+          stdio: ['ignore', 'pipe', 'pipe'],
           env,
           shell: false,
           windowsHide: false,
         })
       : spawn('npx', args, {
           cwd: PROJECT_ROOT,
-          stdio: 'inherit',
+          stdio: ['ignore', 'pipe', 'pipe'],
           env,
           shell: false,
           windowsHide: false,
         });
+    // เก็บท้าย output ไว้สรุปสาเหตุตอนล้มเหลว (ยังพิมพ์ออกหน้าจอเหมือนเดิม)
+    let outputTail = '';
+    const rememberOutput = (chunk, stream) => {
+      const text = String(chunk || '');
+      if (stream === 'stderr') process.stderr.write(text);
+      else process.stdout.write(text);
+      outputTail = `${outputTail}${text}`
+        .replace(/((?:password|token|secret|api[_-]?key)\s*[=:]\s*)\S+/gi, '$1[redacted]')
+        .slice(-12000);
+    };
+    child.stdout?.on('data', (chunk) => rememberOutput(chunk, 'stdout'));
+    child.stderr?.on('data', (chunk) => rememberOutput(chunk, 'stderr'));
     let settled = false;
     const timer = setTimeout(() => {
       if (settled) return;
@@ -291,7 +303,11 @@ async function runPlaywrightForJob(job) {
       if (err) reject(err);
       else resolve();
     };
-    child.on('close', (code) => finish(code === 0 ? null : new Error(`collect worker exit code ${code}`)));
+    child.on('close', (code) => {
+      if (code === 0) return finish(null);
+      const { describeWorkerFailure } = require('../server/worker-diagnostic');
+      finish(new Error(describeWorkerFailure(code, outputTail)));
+    });
     child.on('error', finish);
   });
 }

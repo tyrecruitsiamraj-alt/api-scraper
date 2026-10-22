@@ -127,7 +127,7 @@ export default async function PostTaskPage(props: { params: Promise<{ id: string
       {task.error && (
         <Alert variant="destructive">
           <AlertTitle>รอบนี้มีปัญหา</AlertTitle>
-          <AlertDescription>{task.error}</AlertDescription>
+          <AlertDescription className="whitespace-pre-line break-words">{task.error}</AlertDescription>
         </Alert>
       )}
 
