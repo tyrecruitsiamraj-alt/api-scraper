@@ -1650,6 +1650,25 @@ app.post('/api/worker/post/sweep-stale', async (req, res) => {
   }
 });
 
+/** รอบเก็บคอมเมนต์อัตโนมัติ (worker:collect) — ใช้ worker token เพราะ /api/users และ /api/run/collect-comments ต้องล็อกอินคอนโซล */
+app.post('/api/worker/collect/enqueue-recent', async (req, res) => {
+  try {
+    if (!requirePostWorkerToken(req, res)) return;
+    const start_date = String(req.body?.start_date || '').trim();
+    const end_date = String(req.body?.end_date || start_date).trim();
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(start_date) || !/^\d{4}-\d{2}-\d{2}$/.test(end_date)) {
+      return res.status(400).json({ error: 'start_date / end_date ต้องเป็น YYYY-MM-DD' });
+    }
+    const out = await db.enqueueRecentCollectJobs({ start_date, end_date });
+    if (out.queued.length > 0) {
+      logger.info('collect_queue.enqueue_recent', { start_date, end_date, users: out.queued.length });
+    }
+    res.json({ ok: true, ...out });
+  } catch (e) {
+    res.status(500).json({ error: e.message || String(e) });
+  }
+});
+
 app.post('/api/worker/collect/claim', async (req, res) => {
   try {
     if (!requirePostWorkerToken(req, res)) return;

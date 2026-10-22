@@ -2403,6 +2403,48 @@ async function enqueueCollectRunJob(data = {}) {
   return rows[0] || null;
 }
 
+/**
+ * รอบเก็บคอมเมนต์อัตโนมัติของ worker: เข้าคิวเก็บโพสต์ช่วงวันที่ให้ทุกบัญชี
+ * ข้ามบัญชีที่มีงานเก็บค้างอยู่ (queued/running) กันคิวพอกเมื่อรอบก่อนยังไม่จบ
+ * @returns {Promise<{ queued: Array<{user_id: string, posts: number, queue_id: string|null}>, skipped: Array<{user_id: string, reason: string}> }>}
+ */
+async function enqueueRecentCollectJobs({ start_date, end_date, requested_by = 'auto-collect' } = {}) {
+  await ensureCollectRunQueueTable();
+  const users = await getUsers();
+  const { rows: busyRows } = await query(
+    `SELECT DISTINCT user_id FROM collect_run_queue WHERE status IN ('queued', 'running')`
+  );
+  const busy = new Set(busyRows.map((r) => String(r.user_id)));
+  const queued = [];
+  const skipped = [];
+  for (const u of users) {
+    const uid = String(u?.id || '').trim();
+    if (!uid) continue;
+    if (busy.has(uid)) {
+      skipped.push({ user_id: uid, reason: 'busy' });
+      continue;
+    }
+    try {
+      const { rows } = await getPostLogsForCommentCollect({ start_date, end_date, user_id: uid, limit: 2000 });
+      const ids = (rows || []).map((r) => String(r?.id || '').trim()).filter(Boolean);
+      if (ids.length === 0) {
+        skipped.push({ user_id: uid, reason: 'no_posts' });
+        continue;
+      }
+      const row = await enqueueCollectRunJob({
+        user_id: uid,
+        post_log_ids: ids,
+        requested_by,
+        message: `auto collect ${ids.length} posts ${start_date}..${end_date}`,
+      });
+      queued.push({ user_id: uid, posts: ids.length, queue_id: row?.id || null });
+    } catch (e) {
+      skipped.push({ user_id: uid, reason: e.message || String(e) });
+    }
+  }
+  return { queued, skipped };
+}
+
 async function claimNextCollectRunJob(workerId, runId) {
   await ensureCollectRunQueueTable();
   const wid = String(workerId || '').trim() || 'worker';
@@ -2659,6 +2701,7 @@ module.exports = {
   failStaleRunningPostJobs,
   ensureCollectRunQueueTable,
   enqueueCollectRunJob,
+  enqueueRecentCollectJobs,
   claimNextCollectRunJob,
   completeCollectRunJob,
   getCollectRunQueueSummary,

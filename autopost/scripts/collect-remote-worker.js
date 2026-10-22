@@ -134,13 +134,6 @@ function saveLastAutoCollectDate(dateStr) {
   }
 }
 
-async function fetchJson(url) {
-  const res = await fetch(url, { headers: { Accept: 'application/json' } });
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data.error || `${url} ${res.status}`);
-  return data;
-}
-
 function daysAgoByTz(days, timeZone) {
   const [y, m, d] = formatDateByTz(new Date(), timeZone).split('-').map((x) => Number(x));
   const utcMid = new Date(Date.UTC(y, m - 1, d));
@@ -152,47 +145,18 @@ async function enqueueDailyCollectForYesterday(range) {
   const yesterday = getYesterdayByTz(AUTO_COLLECT_TZ);
   const startDate = range?.start || yesterday;
   const endDate = range?.end || yesterday;
-  console.log(`[collect-worker] auto-daily: preparing jobs for ${yesterday} (${AUTO_COLLECT_TZ})`);
-  const users = await fetchJson(`${API_BASE}/api/users`);
-  const runs = [];
-  for (const u of Array.isArray(users) ? users : []) {
-    const uid = String(u?.id || '').trim();
-    if (!uid) continue;
-    try {
-      const q =
-        `${API_BASE}/api/post-logs/for-comment-collect` +
-        `?start_date=${encodeURIComponent(startDate)}` +
-        `&end_date=${encodeURIComponent(endDate)}` +
-        `&user_id=${encodeURIComponent(uid)}` +
-        `&limit=2000`;
-      const out = await fetchJson(q);
-      const rows = Array.isArray(out?.rows) ? out.rows : [];
-      const post_log_ids = rows
-        .map((r) => String(r?.id || '').trim())
-        .filter(Boolean);
-      if (post_log_ids.length > 0) {
-        runs.push({ user_id: uid, post_log_ids });
-      }
-    } catch (e) {
-      console.error(`[collect-worker] auto-daily: skip user ${uid}: ${e.message || e}`);
-    }
+  console.log(`[collect-worker] auto-collect: preparing jobs for ${startDate}..${endDate} (${AUTO_COLLECT_TZ})`);
+  // ใช้ worker token — /api/users และ /api/run/collect-comments ต้องล็อกอินคอนโซล worker เรียกไม่ได้
+  const out = await callApi('/api/worker/collect/enqueue-recent', { start_date: startDate, end_date: endDate });
+  const queued = Array.isArray(out?.queued) ? out.queued : [];
+  const busy = (Array.isArray(out?.skipped) ? out.skipped : []).filter((s) => s.reason === 'busy').length;
+  const queuedPosts = queued.reduce((sum, q) => sum + (Number(q.posts) || 0), 0);
+  if (queued.length === 0) {
+    console.log(`[collect-worker] auto-collect: no posts to collect${busy ? ` (${busy} บัญชียังเก็บรอบก่อนไม่เสร็จ)` : ''}`);
+  } else {
+    console.log(`[collect-worker] auto-collect: queued ${queuedPosts} posts across ${queued.length} users`);
   }
-  if (runs.length === 0) {
-    console.log('[collect-worker] auto-daily: no posts from yesterday to collect');
-    return { queuedUsers: 0, queuedPosts: 0, date: yesterday };
-  }
-  const res = await fetch(`${API_BASE}/api/run/collect-comments`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ runs }),
-  });
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok || data?.ok === false) {
-    throw new Error(data?.error || (Array.isArray(data?.errors) && data.errors[0]?.error) || 'enqueue daily collect failed');
-  }
-  const queuedPosts = runs.reduce((s, r) => s + (Array.isArray(r.post_log_ids) ? r.post_log_ids.length : 0), 0);
-  console.log(`[collect-worker] auto-daily: queued ${queuedPosts} posts across ${runs.length} users`);
-  return { queuedUsers: runs.length, queuedPosts, date: yesterday };
+  return { queuedUsers: queued.length, queuedPosts, date: endDate };
 }
 
 let autoCollectRunning = false;
