@@ -201,7 +201,11 @@ export default async function PostTaskPage(props: { params: Promise<{ id: string
             <CardDescription>สร้างงานโพสต์รอบใหม่จาก {order.request_no} ลงกลุ่มที่เลือก</CardDescription>
           </CardHeader>
           <CardContent>
-            <RepostForm order={order} />
+            <RepostForm
+              order={order}
+              defaultOpen={task.groups.some((g) => g.status !== 'posted')}
+              unfinishedFbIds={task.groups.filter((g) => g.status !== 'posted').map((g) => g.group_id)}
+            />
           </CardContent>
         </Card>
       )}

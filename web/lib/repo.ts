@@ -3339,6 +3339,8 @@ export type JarvisGroupResult = {
 };
 export type JarvisRepostGroup = {
   id: string;
+  /** Facebook group id — ใช้จับคู่กับผลรายกลุ่มของรอบโพสต์ */
+  fb_group_id: string;
   name: string;
   account_label: string | null;
   /** โพสต์งานนี้ลงกลุ่มนี้ได้อีกเมื่อไร (null = ได้เลย) */
@@ -3502,6 +3504,7 @@ export async function listJarvisPostOrders(): Promise<JarvisPostOrder[]> {
       const until = last ? last + REPOST_MIN_GAP_DAYS * 86_400_000 : 0;
       return {
         id: g.id,
+        fb_group_id: String(g.fb_group_id),
         name: g.name,
         account_label: g.account_label,
         blocked_until: until > Date.now() ? new Date(until).toISOString() : null,

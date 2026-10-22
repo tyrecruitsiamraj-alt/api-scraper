@@ -1,6 +1,5 @@
-import Link from 'next/link';
 import { ChevronDownIcon } from 'lucide-react';
-import { postJarvisOrderAction, repostJarvisOrderAction, returnJarvisPostOrderAction } from '@/lib/actions';
+import { postJarvisOrderAction, returnJarvisPostOrderAction } from '@/lib/actions';
 import { postModeLabel, REPOST_MIN_GAP_DAYS } from '@/lib/repo';
 import type { JarvisPostOrder } from '@/lib/repo';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
@@ -9,9 +8,10 @@ import { Button } from '@/components/ui/button';
 import { Card, CardAction, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
-import { Field, FieldDescription, FieldLabel, FieldLegend, FieldSet } from '@/components/ui/field';
+import { Field, FieldLabel } from '@/components/ui/field';
 import { thaiTime } from './post-ui';
 import { CaptionEditor } from './CaptionEditor';
+import { RepostGroupPicker } from './RepostGroupPicker';
 import { Textarea } from '@/components/ui/textarea';
 
 /** ติ๊กยืนยัน + ปุ่ม — server action เช็ก confirm=yes อีกชั้นและแจ้งกลับถ้าไม่ได้ติ๊ก */
@@ -28,9 +28,17 @@ export function ConfirmAndSubmit({ id, label, disabled }: { id: string; label: s
 }
 
 /** โพสต์ใบสั่งจาก Jarvis ที่โพสต์ไปแล้วซ้ำ ลงกลุ่มที่เลือก */
-export function RepostForm({ order, defaultOpen = false }: { order: JarvisPostOrder; defaultOpen?: boolean }) {
+export function RepostForm({
+  order,
+  defaultOpen = false,
+  unfinishedFbIds = [],
+}: {
+  order: JarvisPostOrder;
+  defaultOpen?: boolean;
+  /** Facebook group id ของกลุ่มที่รอบนี้ไม่สำเร็จ/ยังไม่ได้โพสต์ — ใช้กับปุ่มเลือกอัตโนมัติ */
+  unfinishedFbIds?: string[];
+}) {
   const busy = order.queue_status === 'queued' || order.queue_status === 'running';
-  const pickable = order.repost_groups.filter((g) => g.account_label && !g.blocked_until);
   return (
     <Collapsible className="w-full" defaultOpen={defaultOpen}>
       <CollapsibleTrigger asChild>
@@ -39,38 +47,14 @@ export function RepostForm({ order, defaultOpen = false }: { order: JarvisPostOr
           <ChevronDownIcon data-icon="inline-end" />
         </Button>
       </CollapsibleTrigger>
-      <CollapsibleContent>
-        <form action={repostJarvisOrderAction} className="mt-4 flex flex-col gap-4">
-          <input type="hidden" name="requestNo" value={order.request_no} />
-          <FieldSet>
-            <FieldLegend variant="label">เลือกกลุ่ม</FieldLegend>
-            <FieldDescription>
-              กลุ่มเดิมต้องเว้น {REPOST_MIN_GAP_DAYS} วัน เพิ่มกลุ่มได้ที่{' '}
-              <Link href="/settings/posting">ตั้งค่าการโพสต์</Link>
-            </FieldDescription>
-            {order.repost_groups.map((g) => {
-              const id = `repost-${order.request_no}-${g.id}`;
-              const disabled = busy || !g.account_label || Boolean(g.blocked_until);
-              return (
-                <Field key={g.id} orientation="horizontal" data-disabled={disabled || undefined}>
-                  <Checkbox id={id} name="groupId" value={g.id} disabled={disabled} />
-                  <FieldLabel htmlFor={id} className="font-normal">
-                    {g.name}
-                    <span className="text-muted-foreground">
-                      {!g.account_label
-                        ? ' · ยังไม่มีบัญชี Facebook ที่ผูกกลุ่มนี้'
-                        : g.blocked_until
-                          ? ` · โพสต์ซ้ำได้หลัง ${thaiTime(g.blocked_until)}`
-                          : ` · โพสต์ด้วย ${g.account_label}`}
-                    </span>
-                  </FieldLabel>
-                </Field>
-              );
-            })}
-          </FieldSet>
-          {busy && <p className="text-sm text-muted-foreground">มีรอบโพสต์ของใบนี้รอคิวอยู่ รอให้เสร็จก่อน</p>}
-          <ConfirmAndSubmit id={`repost-confirm-${order.request_no}`} label="โพสต์ซ้ำ" disabled={busy || !pickable.length} />
-        </form>
+      <CollapsibleContent className="mt-4">
+        <RepostGroupPicker
+          requestNo={order.request_no}
+          groups={order.repost_groups}
+          busy={busy}
+          gapDays={REPOST_MIN_GAP_DAYS}
+          unfinishedFbIds={unfinishedFbIds}
+        />
       </CollapsibleContent>
     </Collapsible>
   );
