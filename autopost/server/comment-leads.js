@@ -78,7 +78,9 @@ function classifyComment(text) {
   const t = String(text || '').trim();
   if (phonesIn(t).length) return 'phone';
   if (QUESTION_RE.test(t)) return 'question';
-  if (!t || INTEREST_RE.test(t) || (/^สนใจ/u.test(t) && t.length <= 40)) return 'interest';
+  // ไม่มีข้อความ (สติกเกอร์/รูป หรืออ่านคอมเมนต์ไม่ออก) — ไม่ตอบเอง ให้คนดู
+  if (!t) return 'other';
+  if (INTEREST_RE.test(t) || (/^สนใจ/u.test(t) && t.length <= 40)) return 'interest';
   return 'other';
 }
 

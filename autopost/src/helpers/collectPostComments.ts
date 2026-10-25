@@ -334,10 +334,16 @@ export async function scrapeCommentsAndPhones(
           .replace(/\s+(เมื่อ|เมื่อวาน|[0-9]+\s*(วินาที|นาที|ชั่วโมง|ชม\.|วัน|สัปดาห์|เดือน|ปี)|a\s+|an\s+|[0-9]+\s*(second|minute|hour|day|week|month|year)s?).*$/i, '')
           .trim();
       const ACTION_LINE = /^(ถูกใจ|ตอบกลับ|แชร์|แก้ไขแล้ว|Like|Reply|Share|Edited|ผู้เขียน|Author|Top fan|แฟนตัวยง|[0-9]+\s*(วินาที|นาที|ชม\.|ชั่วโมง|วัน|สัปดาห์|ส\.|ว\.|น\.)|[0-9]+\s*[smhdwy]|[0-9]+)$/i;
+      // selector แบบ *= จับรายการแจ้งเตือนด้วย เช่น "ทำเครื่องหมายว่าอ่านแล้ว, X ตอบกลับความคิดเห็นของเขา..."
+      // จึงรับเฉพาะ aria ที่ขึ้นต้นด้วยคำของคอมเมนต์ และไม่อยู่ในแผงแจ้งเตือน/เมนูด้านบน
+      const COMMENT_ARIA = /^(Comment by|Reply by|Commenter|ความคิดเห็นโดย|ความคิดเห็นของ|การตอบกลับโดย|ตอบกลับโดย)/i;
+      const inNotifications = (el: Element) =>
+        !!el.closest('[role="navigation"], [role="banner"], [aria-label*="การแจ้งเตือน"], [aria-label*="Notifications" i]');
       for (const sel of primarySelectors) {
         try {
           document.querySelectorAll(sel).forEach((el) => {
             const html = el as HTMLElement;
+            if (!COMMENT_ARIA.test((html.getAttribute('aria-label') || '').trim()) || inNotifications(html)) return;
             pushBlock(html.innerText);
             const aria = html.getAttribute('aria-label') || '';
             if (!aria || seenAria.has(aria)) return;

@@ -50,6 +50,8 @@ app.use((req, res, next) => {
   if (ACCESS_GATE_EXEMPT.test(p)) return next();
   // Worker (Playwright) ส่งลิงก์โพสต์กลับมาที่นี่เมื่อเขียน DB ตรงไม่ได้ — ใช้ POST_WORKER_TOKEN แทน access token
   if (req.method === 'POST' && p === '/api/post-logs' && isValidPostWorkerToken(req)) return next();
+  // ตัวเก็บคอมเมนต์ส่งยอดไลก์/คอมเมนต์/แชร์กลับมาที่นี่ด้วย worker token (handler ตรวจ token ซ้ำอีกชั้น)
+  if (req.method === 'PATCH' && /^\/api\/post-logs\/[^/]+\/collect-result$/.test(p) && isValidPostWorkerToken(req)) return next();
 
   // ?access_token= ถูกต้อง → ตั้ง cookie แล้ว redirect ทิ้ง query (กัน token ค้างใน URL/แชร์ลิงก์)
   const qToken = String(req.query.access_token || '').trim();

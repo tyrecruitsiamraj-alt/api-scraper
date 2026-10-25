@@ -21,6 +21,9 @@ test('classifyComment sorts phone, interest, question and other', () => {
   assert.equal(classifyComment('รับผู้หญิงไหมคะ'), 'question');
   assert.equal(classifyComment('อายุ 52 สมัครได้ป่าว'), 'question');
   assert.equal(classifyComment('เคยขับรถผู้บริหารมา 10 ปี มีใบขับขี่ท 2'), 'other');
+  // อ่านข้อความไม่ได้ (สติกเกอร์ หรือจับผิดจุด) ต้องไม่ได้คำตอบอัตโนมัติ
+  assert.equal(classifyComment(''), 'other');
+  assert.equal(classifyComment('   '), 'other');
 });
 
 test('contactFromCaption picks the apply link, phone and contact name', () => {
