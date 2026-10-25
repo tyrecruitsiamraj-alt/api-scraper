@@ -193,6 +193,7 @@ export async function scrapeCommentsAndPhones(
   reactions: number;
   shares: number;
   comments: ScrapedComment[];
+  diag: { articles: number; labels: string[]; summary: string | null };
 }> {
   if (page.isClosed()) {
     throw new Error('Target page, context or browser has been closed');
@@ -267,7 +268,8 @@ export async function scrapeCommentsAndPhones(
       .filter(Boolean)
   );
 
-  type EvalOut = { commentBlocks: string[]; captionExclusionText: string; comments: ScrapedComment[] };
+  type CollectDiag = { articles: number; labels: string[]; summary: string | null };
+  type EvalOut = { commentBlocks: string[]; captionExclusionText: string; comments: ScrapedComment[]; diag: CollectDiag };
   const evaluated = await page
     .evaluate((names) => {
       const excluded = new Set((Array.isArray(names) ? names : []).map((x) => String(x || '').trim().toLowerCase()));
@@ -370,24 +372,33 @@ export async function scrapeCommentsAndPhones(
         }
       }
 
-      if (out.length === 0) {
-        const arts = Array.from(document.querySelectorAll('[role="article"]'));
-        for (let i = 1; i < arts.length; i++) {
-          pushBlock((arts[i] as HTMLElement).innerText);
-        }
-      }
+      // ข้อมูลสำหรับไล่ปัญหาเมื่อหาคอมเมนต์ไม่เจอ: รูปแบบ aria-label (ปิดชื่อคนด้วย ·) + ยอดสรุปใต้โพสต์
+      const UI_WORD = /^(comment|comments|reply|replies|by|from|on|to|your|his|her|their|ความคิดเห็น\S*|ตอบกลับ\S*|การตอบกลับ\S*|โดย|จาก|ของ|เมื่อ|ที่แล้ว|[0-9]+|นาที|ชั่วโมง|ชม\.|วัน|สัปดาห์|ago|minutes?|hours?|days?|weeks?)$/i;
+      const maskLabel = (label: string) =>
+        label.split(/\s+/).filter(Boolean).slice(0, 12).map((w) => (UI_WORD.test(w.replace(/[,:"]/g, '')) ? w : '·')).join(' ');
+      const labels = new Set<string>();
+      document
+        .querySelectorAll('[role="article"][aria-label], [aria-label*="ความคิดเห็น"], [aria-label*="comment" i], [aria-label*="ตอบกลับ"], [aria-label*="reply" i]')
+        .forEach((el) => {
+          if (labels.size >= 30) return;
+          const lab = (el.getAttribute('aria-label') || '').trim();
+          if (lab) labels.add(`${el.getAttribute('role') || el.tagName.toLowerCase()}: ${maskLabel(lab)}`);
+        });
+      const rootText = (rootArticle as HTMLElement | null)?.innerText || '';
+      const summaryMatch = rootText.match(/([\d,.]+\s*[KMพัน]*)\s*(ความคิดเห็น|comments?)\b/i);
+      const diag = {
+        articles: document.querySelectorAll('[role="article"]').length,
+        labels: [...labels],
+        summary: summaryMatch ? summaryMatch[0] : null,
+      };
 
-      return { commentBlocks: out, captionExclusionText, comments };
+      return { commentBlocks: out, captionExclusionText, comments, diag };
     }, [...excludedNames])
-    .catch((): EvalOut => ({ commentBlocks: [], captionExclusionText: '', comments: [] }));
+    .catch((): EvalOut => ({ commentBlocks: [], captionExclusionText: '', comments: [], diag: { articles: 0, labels: [], summary: null } }));
 
   const commentBlocks = Array.isArray(evaluated?.commentBlocks) ? evaluated.commentBlocks : [];
-  let commentBlob = commentBlocks.length > 0 ? commentBlocks.join('\n') : '';
-  if (!commentBlob) {
-    for (let i = 1; i < maxN; i++) {
-      commentBlob += '\n' + (await articles.nth(i).innerText().catch(() => ''));
-    }
-  }
+  // หาคอมเมนต์ไม่เจอ = ไม่มีเบอร์จากคอมเมนต์ (เดิมเดาจากกล่องอื่นบนหน้า ได้เบอร์/ยอดคอมเมนต์ผิด)
+  const commentBlob = commentBlocks.join('\n');
 
   const postBodyPhones = extractPhonesFromText(postBodyText);
   const captionExclusionPhones = normalizedPhoneSetFromText(String(evaluated?.captionExclusionText || ''));
@@ -409,11 +420,13 @@ export async function scrapeCommentsAndPhones(
   }
   const phones = phonesDedup;
 
-  const commentCount =
-    commentBlocks.length > 0 ? commentBlocks.length : Math.max(0, n - 1);
+  // นับจากคอมเมนต์ที่จับได้ ถ้าจับไม่ได้ใช้ยอด "N ความคิดเห็น" ใต้โพสต์ ไม่งั้น 0 (ไม่เดาจากจำนวนกล่องบนหน้า)
+  const diag = evaluated?.diag ?? { articles: n, labels: [], summary: null };
+  const summaryCount = diag.summary ? Number(String(diag.summary).replace(/[^\d]/g, '')) || 0 : 0;
+  const commentCount = commentBlocks.length > 0 ? commentBlocks.length : summaryCount;
   const { reactions, shares } = await readReactionsAndShares(page);
   const comments = Array.isArray(evaluated?.comments) ? evaluated.comments : [];
-  return { phones, commentCount, postBodyPhones, reactions, shares, comments };
+  return { phones, commentCount, postBodyPhones, reactions, shares, comments, diag };
 }
 
 /**

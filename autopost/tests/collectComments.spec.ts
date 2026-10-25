@@ -141,9 +141,18 @@ test('collectComments', async ({ page }) => {
       const ownerNames = [user.poster_name || '', user.name || '', item.owner || '', item.company || '', item.poster_name || '']
         .map((x) => String(x || '').trim())
         .filter(Boolean);
-      const { phones, commentCount, postBodyPhones, reactions, shares, comments } = await scrapeCommentsAndPhones(active, item.post_link, {
+      const { phones, commentCount, postBodyPhones, reactions, shares, comments, diag } = await scrapeCommentsAndPhones(active, item.post_link, {
         excludeAuthorNames: ownerNames,
       });
+      if (!comments.length) {
+        // จับคอมเมนต์รายคนไม่ได้ — เก็บรูปแบบ aria-label (ปิดชื่อแล้ว) ไว้ไล่ว่า Facebook เปลี่ยน markup เป็นแบบไหน
+        await runLog({
+          level: 'info',
+          message: `อ่านคอมเมนต์รายคนไม่ได้ (ยอดใต้โพสต์: ${diag.summary || '-'})`,
+          user_id: plan.user_id,
+          meta: { kind: 'collect_diag', post_log_id: item.post_log_id, ...diag },
+        });
+      }
       if (leadsDb && comments.length) {
         try {
           const info = (
