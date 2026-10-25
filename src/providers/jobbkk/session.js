@@ -8,8 +8,9 @@ import { dismissOverlays } from '../../core/popup.js';
 const BASE = 'https://www.jobbkk.com';
 const STORAGE_PATH = join(AUTH_DIR, 'jobbkk.json');
 const LOGIN_URL = () => envString('JOBBKK_EMPLOYER_LOGIN_URL', 'https://www.jobbkk.com/login/employer_login');
-const DASHBOARD_URL = () => envString('JOBBKK_DASHBOARD_URL', 'https://www.jobbkk.com/employer/dashboard');
-const DASHBOARD_URL_ALT = () => envString('JOBBKK_DASHBOARD_URL_ALT', 'https://www.jobbkk.com/dashboard/employer');
+// ต.ค. 2026: หน้าสมาชิกนายจ้างอยู่ที่ /dashboard/employer ส่วน /employer/dashboard เป็นหน้า 404
+const DASHBOARD_URL = () => envString('JOBBKK_DASHBOARD_URL', 'https://www.jobbkk.com/dashboard/employer');
+const DASHBOARD_URL_ALT = () => envString('JOBBKK_DASHBOARD_URL_ALT', 'https://www.jobbkk.com/employer/dashboard');
 // Fail-fast: cap the fresh-login wait so a bot-check/CAPTCHA hang errors quickly (with a debug
 // screenshot) instead of freezing for minutes. Tunable via env; defaults 45s wait / 30s page-load.
 const LOGIN_TIMEOUT_MS = () => envInt('JOBBKK_LOGIN_TIMEOUT_MS', 45_000);
@@ -66,6 +67,9 @@ async function withOperationTimeout(promise, ms, message) {
  * Is this context's session still a valid logged-in employer session?
  * Cheap HTTP check via the request context (reuses cookies, no rendering).
  */
+/** หน้า 404 ของ JobBKK ยังคง URL เดิมไว้ — ดูแค่ URL จะนึกว่าเข้าหน้านายจ้างได้แล้ว */
+export const JOBBKK_NOT_FOUND_RE = /ไม่พบหน้าที่ท่านต้องการ|This page is not available/i;
+
 async function probeEmployerSession(context, url) {
   const res = await context.request
     .get(url, { maxRedirects: 5, timeout: LOGIN_REQUEST_TIMEOUT_MS() })
@@ -74,7 +78,7 @@ async function probeEmployerSession(context, url) {
   if (!isEmployerSessionUrl(res.url())) return false;
   const body = await res.text().catch(() => '');
   // logged-out pages bounce to the login form (legacy or Ant Design)
-  return !htmlHasEmployerLoginForm(body);
+  return !htmlHasEmployerLoginForm(body) && !JOBBKK_NOT_FOUND_RE.test(body);
 }
 
 async function isLoggedIn(context) {
@@ -82,14 +86,20 @@ async function isLoggedIn(context) {
   return probeEmployerSession(context, DASHBOARD_URL_ALT());
 }
 
+async function onEmployerPage(page) {
+  if (!isEmployerSessionUrl(page.url())) return false;
+  const text = await page.locator('body').innerText({ timeout: 5_000 }).catch(() => '');
+  return !JOBBKK_NOT_FOUND_RE.test(String(text).slice(0, 2_000));
+}
+
 /** Navigate to an employer landing page, trying both live JobBKK dashboard shapes. */
 async function gotoEmployerDashboard(page) {
   for (const url of [DASHBOARD_URL(), DASHBOARD_URL_ALT()]) {
     await page.goto(url, { waitUntil: 'domcontentloaded', timeout: LOGIN_GOTO_TIMEOUT_MS() }).catch(() => {});
     await page.waitForLoadState('networkidle').catch(() => {});
-    if (isEmployerSessionUrl(page.url())) return true;
+    if (await onEmployerPage(page)) return true;
   }
-  return isEmployerSessionUrl(page.url());
+  return onEmployerPage(page);
 }
 
 // Prefer Ant Design ids first — live JobBKK (2026) no longer ships #username_emp.

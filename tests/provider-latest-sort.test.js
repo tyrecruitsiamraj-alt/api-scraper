@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { buildSearchUrl, confirmLatestUpdatedOrder, isLatestUpdatedSortSelected, normalizeUpdatedSince } from '../src/providers/jobthai/client.js';
+import { buildSearchUrl, splitPositions, confirmLatestUpdatedOrder, isLatestUpdatedSortSelected, normalizeUpdatedSince } from '../src/providers/jobthai/client.js';
 import { findLatestSortOption, isDescendingLatest, parseProviderUpdatedAt } from '../src/providers/jobbkk/latest-sort.js';
 
 test('JobThai บังคับเรียงวันที่แก้ไขล่าสุดและส่งวันที่เริ่มอัปเดตแบบ exact date', () => {
@@ -61,4 +61,26 @@ test('JobThai ยอมรับคำว่าวันที่อัปเด
   const order = confirmLatestUpdatedOrder(html);
   assert.equal(order.ok, true);
   assert.equal(order.via, 'list_dates');
+});
+
+test('JobThai ส่งช่องอายุ/เงินเดือนเฉพาะเมื่อช่วงที่ขออยู่ในช่องเดียว', () => {
+  const wide = new URL(buildSearchUrl({ position: 'พนักงานขับรถ', ageMin: '25', ageMax: '45', salaryMin: '10000' }));
+  assert.equal(wide.searchParams.get('age'), '');
+  assert.equal(wide.searchParams.get('salary'), '');
+  const fits = new URL(buildSearchUrl({ position: 'พนักงานขับรถ', ageMin: '26', ageMax: '30', salaryMin: '15001', salaryMax: '20000' }));
+  assert.equal(fits.searchParams.get('age'), '3');
+  assert.equal(fits.searchParams.get('salary'), '3');
+  assert.equal(new URL(buildSearchUrl({ ageMin: '40' })).searchParams.get('age'), '5');
+});
+
+test('JobThai ส่งช่วงอัปเดตเสมอ (เว็บใช้ 1 สัปดาห์ถ้าไม่ส่ง)', () => {
+  assert.equal(new URL(buildSearchUrl({ position: 'x' })).searchParams.get('time'), '30');
+  assert.equal(new URL(buildSearchUrl({ position: 'x', updatedWithinDays: 60 })).searchParams.get('time'), '90');
+  assert.equal(new URL(buildSearchUrl({ position: 'x', updatedWithinDays: 999 })).searchParams.get('time'), '365');
+});
+
+test('JobThai แยกหลายตำแหน่งในช่องเดียวแล้วค้นทีละตำแหน่ง', () => {
+  assert.deepEqual(splitPositions('พนักงานขับรถผู้บริหาร\nพนักงานขับรถส่วนกลาง'), ['พนักงานขับรถผู้บริหาร', 'พนักงานขับรถส่วนกลาง']);
+  assert.deepEqual(splitPositions('ช่างไฟฟ้า/อิเล็กทรอนิกส์'), ['ช่างไฟฟ้า/อิเล็กทรอนิกส์']);
+  assert.deepEqual(splitPositions(''), ['']);
 });

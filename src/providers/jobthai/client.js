@@ -41,30 +41,36 @@ function mapLevel(education) {
   return '';
 }
 
+/**
+ * ช่องเงินเดือนและอายุของ JobThai เลือกได้ช่องเดียว (ดูฟอร์ม findresume.php ต.ค. 2026)
+ *   salary: 1 ≤10,000 · 2 10,001–15,000 · 3 15,001–20,000 · 4 20,001–30,000 · 5 30,001–50,000 · 6 50,001–100,000 · 7 >100,000
+ *   age:    1 <20 · 2 20–25 · 3 25–30 · 4 30–35 · 5 >35
+ * เดิมเอาค่าต่ำสุดไปเลือกช่อง เช่น อายุ 25–45 กลายเป็น "20–25" และเงินเดือน 10,000+ กลายเป็น "ไม่เกิน 10,000"
+ * ผลค้นหาเลยเหลือ 0 ตอนนี้ส่งช่องนั้นเฉพาะเมื่อช่วงที่ขอทั้งช่วงอยู่ในช่องเดียว ไม่งั้นเว้นว่าง (ไม่จำกัด)
+ * แล้วให้ตัวคัดโปรไฟล์ (core/candidate-match.js) คัดอายุจากโปรไฟล์จริงแทน
+ */
+const SALARY_BUCKETS = [
+  ['1', 0, 10_000], ['2', 10_001, 15_000], ['3', 15_001, 20_000], ['4', 20_001, 30_000],
+  ['5', 30_001, 50_000], ['6', 50_001, 100_000], ['7', 100_001, Infinity],
+];
+const AGE_BUCKETS = [['1', 0, 19], ['2', 20, 25], ['3', 25, 30], ['4', 30, 35], ['5', 36, Infinity]];
+
+function bucketFor(buckets, minValue, maxValue) {
+  const min = digits(minValue);
+  const max = digits(maxValue);
+  if (!Number.isFinite(min) && !Number.isFinite(max)) return '';
+  const lo = Number.isFinite(min) ? min : 0;
+  const hi = Number.isFinite(max) ? max : Infinity;
+  const hit = buckets.find(([, bLo, bHi]) => lo >= bLo && hi <= bHi);
+  return hit ? hit[0] : '';
+}
+
 function mapSalary(salaryMin, salaryMax) {
-  const min = digits(salaryMin);
-  const max = digits(salaryMax);
-  const ref = Number.isFinite(min) ? min : Number.isFinite(max) ? max : NaN;
-  if (!Number.isFinite(ref)) return '';
-  if (ref <= 10_000) return '1';
-  if (ref <= 15_000) return '2';
-  if (ref <= 20_000) return '3';
-  if (ref <= 30_000) return '4';
-  if (ref <= 50_000) return '5';
-  if (ref <= 100_000) return '6';
-  return '7';
+  return bucketFor(SALARY_BUCKETS, salaryMin, salaryMax);
 }
 
 function mapAge(ageMin, ageMax) {
-  const min = digits(ageMin);
-  const max = digits(ageMax);
-  const ref = Number.isFinite(min) ? min : Number.isFinite(max) ? max : NaN;
-  if (!Number.isFinite(ref)) return '';
-  if (ref < 20) return '1';
-  if (ref <= 25) return '2';
-  if (ref <= 30) return '3';
-  if (ref <= 35) return '4';
-  return '5';
+  return bucketFor(AGE_BUCKETS, ageMin, ageMax);
 }
 
 function mapGender(gender) {
@@ -184,6 +190,26 @@ export function normalizeUpdatedSince(value) {
   return text;
 }
 
+/** ช่อง "อัปเดตภายใน" ของ JobThai รับได้แค่ค่าเหล่านี้ (วัน) — ไม่ส่งเลยเว็บจะใช้ 1 สัปดาห์ */
+const TIME_WINDOWS = [3, 7, 30, 90, 180, 365];
+const DEFAULT_TIME_WINDOW_DAYS = 30;
+
+export function timeWindowValue(days) {
+  const n = digits(days);
+  const want = Number.isFinite(n) && n > 0 ? n : DEFAULT_TIME_WINDOW_DAYS;
+  return String(TIME_WINDOWS.find((w) => w >= want) ?? TIME_WINDOWS[TIME_WINDOWS.length - 1]);
+}
+
+/** ใบงานบางใบใส่หลายตำแหน่งในช่องเดียว (ขึ้นบรรทัดใหม่, จุลภาค, "หรือ") — ค้นทีละตำแหน่ง */
+export function splitPositions(position) {
+  if (!hasValue(position)) return [''];
+  const parts = String(position)
+    .split(/\r?\n|,|，|\s+หรือ\s+/u)
+    .map((t) => t.trim())
+    .filter(Boolean);
+  return parts.length ? [...new Set(parts)] : [''];
+}
+
 export function buildSearchUrl(criteria, page = 1) {
   const updatedSince = normalizeUpdatedSince(criteria.updatedSince);
   const p = new URLSearchParams({
@@ -207,6 +233,8 @@ export function buildSearchUrl(criteria, page = 1) {
   if (updatedSince) {
     p.set('time', '65535');
     p.set('theDate', updatedSince);
+  } else {
+    p.set('time', timeWindowValue(criteria.updatedWithinDays));
   }
   if (page > 1) p.set('page', String(page));
   return `${SEARCH}?${p.toString()}`;
@@ -262,34 +290,41 @@ export async function searchResumeIds(session, criteria, runtime) {
   const need = criteria.maxCandidates;
   const ids = [];
   const seen = new Set();
-  let url = buildSearchUrl(criteria);
   let pagesScanned = 0;
+  const positions = splitPositions(criteria.position);
 
-  while (ids.length < need && url) {
-    pagesScanned += 1;
-    const html = await getText(request, url, runtime);
-    if (pagesScanned === 1) {
-      const order = confirmLatestUpdatedOrder(html);
-      if (!order.ok) {
-        // Web runs must still return cards. We already request JobThai's default
-        // latest sort (`sort=`). Missing #mainsort must not abort the job.
-        console.warn(`[jobthai] sort unverified (${order.detail}); continuing with requested default latest sort`);
-      } else if (order.via === 'list_dates' && runtime?.debug) {
-        console.warn('[jobthai] sort control unclear; accepted newest-first list dates');
-      }
-    }
-    for (const id of extractIdsFromList(html)) {
-      if (!seen.has(id)) {
-        seen.add(id);
-        ids.push(id);
-        if (ids.length >= need) break;
-      }
-    }
+  for (const position of positions) {
     if (ids.length >= need) break;
-    const next = nextPageUrl(html);
-    if (!next) break;
-    url = next;
-    await sleep(requestGapMs(runtime));
+    let url = buildSearchUrl({ ...criteria, position });
+    let pagesForPosition = 0;
+    while (ids.length < need && url) {
+      pagesScanned += 1;
+      pagesForPosition += 1;
+      const html = await getText(request, url, runtime);
+      if (pagesForPosition === 1) {
+        const order = confirmLatestUpdatedOrder(html);
+        if (!order.ok) {
+          // Web runs must still return cards. We already request JobThai's default
+          // latest sort (`sort=`). Missing #mainsort must not abort the job.
+          console.warn(`[jobthai] sort unverified (${order.detail}); continuing with requested default latest sort`);
+        } else if (order.via === 'list_dates' && runtime?.debug) {
+          console.warn('[jobthai] sort control unclear; accepted newest-first list dates');
+        }
+      }
+      for (const id of extractIdsFromList(html)) {
+        if (!seen.has(id)) {
+          seen.add(id);
+          ids.push(id);
+          if (ids.length >= need) break;
+        }
+      }
+      if (ids.length >= need) break;
+      const next = nextPageUrl(html);
+      if (!next) break;
+      url = next;
+      await sleep(requestGapMs(runtime));
+    }
+    if (ids.length < need && positions.length > 1) await sleep(requestGapMs(runtime));
   }
 
   return { ids: ids.slice(0, need), totalAvailable: null, pagesScanned };
