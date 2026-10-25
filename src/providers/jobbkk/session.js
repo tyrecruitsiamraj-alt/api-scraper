@@ -66,19 +66,20 @@ async function withOperationTimeout(promise, ms, message) {
 /**
  * Is this context's session still a valid logged-in employer session?
  * Cheap HTTP check via the request context (reuses cookies, no rendering).
+ *
+ * หน้า 404 ของ JobBKK (เช่น /employer/dashboard) ยังคง URL เดิมไว้ — ดูแค่ URL จะนึกว่าเข้าหน้านายจ้างได้แล้ว
+ * ใช้ HTTP status แยก: หน้าจริงตอบ 200, หน้า 404 ตอบ 404. ห้ามหาข้อความ "ไม่พบหน้า" ใน HTML ดิบ
+ * เพราะ Next.js ฝังแม่แบบหน้า 404 มาในทุกหน้า รวมถึงหน้าสมาชิกนายจ้างที่ล็อกอินอยู่จริง
  */
-/** หน้า 404 ของ JobBKK ยังคง URL เดิมไว้ — ดูแค่ URL จะนึกว่าเข้าหน้านายจ้างได้แล้ว */
-export const JOBBKK_NOT_FOUND_RE = /ไม่พบหน้าที่ท่านต้องการ|This page is not available/i;
-
 async function probeEmployerSession(context, url) {
   const res = await context.request
     .get(url, { maxRedirects: 5, timeout: LOGIN_REQUEST_TIMEOUT_MS() })
     .catch(() => null);
   if (!res) return false;
-  if (!isEmployerSessionUrl(res.url())) return false;
+  if (!isEmployerSessionUrl(res.url()) || res.status() === 404) return false;
   const body = await res.text().catch(() => '');
   // logged-out pages bounce to the login form (legacy or Ant Design)
-  return !htmlHasEmployerLoginForm(body) && !JOBBKK_NOT_FOUND_RE.test(body);
+  return !htmlHasEmployerLoginForm(body);
 }
 
 async function isLoggedIn(context) {
@@ -86,20 +87,14 @@ async function isLoggedIn(context) {
   return probeEmployerSession(context, DASHBOARD_URL_ALT());
 }
 
-async function onEmployerPage(page) {
-  if (!isEmployerSessionUrl(page.url())) return false;
-  const text = await page.locator('body').innerText({ timeout: 5_000 }).catch(() => '');
-  return !JOBBKK_NOT_FOUND_RE.test(String(text).slice(0, 2_000));
-}
-
 /** Navigate to an employer landing page, trying both live JobBKK dashboard shapes. */
 async function gotoEmployerDashboard(page) {
   for (const url of [DASHBOARD_URL(), DASHBOARD_URL_ALT()]) {
-    await page.goto(url, { waitUntil: 'domcontentloaded', timeout: LOGIN_GOTO_TIMEOUT_MS() }).catch(() => {});
+    const res = await page.goto(url, { waitUntil: 'domcontentloaded', timeout: LOGIN_GOTO_TIMEOUT_MS() }).catch(() => null);
     await page.waitForLoadState('networkidle').catch(() => {});
-    if (await onEmployerPage(page)) return true;
+    if (res?.status() !== 404 && isEmployerSessionUrl(page.url())) return true;
   }
-  return onEmployerPage(page);
+  return isEmployerSessionUrl(page.url());
 }
 
 // Prefer Ant Design ids first — live JobBKK (2026) no longer ships #username_emp.
