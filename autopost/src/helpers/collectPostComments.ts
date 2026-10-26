@@ -193,7 +193,7 @@ export async function scrapeCommentsAndPhones(
   reactions: number;
   shares: number;
   comments: ScrapedComment[];
-  diag: { articles: number; labels: string[]; summary: string | null };
+  diag: { articles: number; labels: string[]; summary: string | null; commentLinks: number };
 }> {
   if (page.isClosed()) {
     throw new Error('Target page, context or browser has been closed');
@@ -268,7 +268,7 @@ export async function scrapeCommentsAndPhones(
       .filter(Boolean)
   );
 
-  type CollectDiag = { articles: number; labels: string[]; summary: string | null };
+  type CollectDiag = { articles: number; labels: string[]; summary: string | null; commentLinks: number };
   type EvalOut = { commentBlocks: string[]; captionExclusionText: string; comments: ScrapedComment[]; diag: CollectDiag };
   const evaluated = await page
     .evaluate((names) => {
@@ -373,9 +373,10 @@ export async function scrapeCommentsAndPhones(
       }
 
       // ข้อมูลสำหรับไล่ปัญหาเมื่อหาคอมเมนต์ไม่เจอ: รูปแบบ aria-label (ปิดชื่อคนด้วย ·) + ยอดสรุปใต้โพสต์
-      const UI_WORD = /^(comment|comments|reply|replies|by|from|on|to|your|his|her|their|ความคิดเห็น\S*|ตอบกลับ\S*|การตอบกลับ\S*|โดย|จาก|ของ|เมื่อ|ที่แล้ว|[0-9]+|นาที|ชั่วโมง|ชม\.|วัน|สัปดาห์|ago|minutes?|hours?|days?|weeks?)$/i;
+      // คำของหน้าเว็บที่ไม่ใช่ชื่อคน (ดูแบบ "มีคำนี้อยู่ในคำ" เพราะภาษาไทยไม่เว้นวรรค เช่น "แสดงความคิดเห็น")
+      const UI_PART = /ความคิดเห็น|ตอบกลับ|แสดง|เขียน|ถูกใจ|แชร์|ดู|เพิ่มเติม|ก่อนหน้า|ทั้งหมด|โดย|จาก|ของ|เมื่อ|ที่แล้ว|นาที|ชั่วโมง|ชม\.|วัน|สัปดาห์|comment|repl|like|share|view|more|previous|write|by|from|ago|minute|hour|day|week|^[0-9]+$/i;
       const maskLabel = (label: string) =>
-        label.split(/\s+/).filter(Boolean).slice(0, 12).map((w) => (UI_WORD.test(w.replace(/[,:"]/g, '')) ? w : '·')).join(' ');
+        label.split(/\s+/).filter(Boolean).slice(0, 12).map((w) => (UI_PART.test(w.replace(/[,:"]/g, '')) ? w : '·')).join(' ');
       const labels = new Set<string>();
       document
         .querySelectorAll('[role="article"][aria-label], [aria-label*="ความคิดเห็น"], [aria-label*="comment" i], [aria-label*="ตอบกลับ"], [aria-label*="reply" i]')
@@ -386,15 +387,24 @@ export async function scrapeCommentsAndPhones(
         });
       const rootText = (rootArticle as HTMLElement | null)?.innerText || '';
       const summaryMatch = rootText.match(/([\d,.]+\s*[KMพัน]*)\s*(ความคิดเห็น|comments?)\b/i);
+      // โครงกล่อง article แต่ละกล่อง: aria (ปิดชื่อ) · จำนวนบรรทัด · มีลิงก์คอมเมนต์ไหม
+      const articleShapes = Array.from(document.querySelectorAll('[role="article"]'))
+        .slice(0, 12)
+        .map((el) => {
+          const lines = String((el as HTMLElement).innerText || '').split('\n').filter((x) => x.trim()).length;
+          const hasCommentLink = !!el.querySelector('a[href*="comment_id="]');
+          return `${maskLabel(el.getAttribute('aria-label') || '-')} | lines=${lines} | commentLink=${hasCommentLink}`;
+        });
       const diag = {
         articles: document.querySelectorAll('[role="article"]').length,
-        labels: [...labels],
+        labels: [...labels, ...articleShapes.map((a) => `article: ${a}`)],
         summary: summaryMatch ? summaryMatch[0] : null,
+        commentLinks: document.querySelectorAll('a[href*="comment_id="]').length,
       };
 
       return { commentBlocks: out, captionExclusionText, comments, diag };
     }, [...excludedNames])
-    .catch((): EvalOut => ({ commentBlocks: [], captionExclusionText: '', comments: [], diag: { articles: 0, labels: [], summary: null } }));
+    .catch((): EvalOut => ({ commentBlocks: [], captionExclusionText: '', comments: [], diag: { articles: 0, labels: [], summary: null, commentLinks: 0 } }));
 
   const commentBlocks = Array.isArray(evaluated?.commentBlocks) ? evaluated.commentBlocks : [];
   // หาคอมเมนต์ไม่เจอ = ไม่มีเบอร์จากคอมเมนต์ (เดิมเดาจากกล่องอื่นบนหน้า ได้เบอร์/ยอดคอมเมนต์ผิด)
@@ -421,7 +431,7 @@ export async function scrapeCommentsAndPhones(
   const phones = phonesDedup;
 
   // นับจากคอมเมนต์ที่จับได้ ถ้าจับไม่ได้ใช้ยอด "N ความคิดเห็น" ใต้โพสต์ ไม่งั้น 0 (ไม่เดาจากจำนวนกล่องบนหน้า)
-  const diag = evaluated?.diag ?? { articles: n, labels: [], summary: null };
+  const diag = evaluated?.diag ?? { articles: n, labels: [], summary: null, commentLinks: 0 };
   const summaryCount = diag.summary ? Number(String(diag.summary).replace(/[^\d]/g, '')) || 0 : 0;
   const commentCount = commentBlocks.length > 0 ? commentBlocks.length : summaryCount;
   const { reactions, shares } = await readReactionsAndShares(page);
