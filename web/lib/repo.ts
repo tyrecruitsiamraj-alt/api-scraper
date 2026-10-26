@@ -1588,9 +1588,23 @@ export async function enqueueScrapeForTask(taskId: string, ownerUser: string | n
   // During a controlled rollout, resume scraping may be deliberately assigned
   // to one known-good machine.  Without this, an older Mac that happens to come
   // back online can win the alphabetical worker list and receive the next job.
-  const configuredWorker = String(process.env.SCRAPE_PREFERRED_WORKER ?? '').trim();
+  // เครื่องที่เลือกจาก Jarvis มาก่อนค่าตั้งของระบบ และไม่สลับไปเครื่องอื่นเอง
+  const chosenWorker = String((criteria as Record<string, unknown> | null)?.preferred_worker ?? '').trim();
+  if (chosenWorker) {
+    const chosen = selectPreferredScrapeWorker(readyWorkers, chosenWorker);
+    if (!chosen) {
+      await q(
+        `UPDATE scrape_tasks
+            SET status='idle', phase='idle', last_error=$2, updated_at=now()
+          WHERE id=$1 AND status <> 'running'`,
+        [taskId, `ยังไม่เริ่มค้นหา: เครื่อง ${chosenWorker} ที่เลือกไว้ยังไม่พร้อมรับงาน (ออฟไลน์หรือยังไม่ได้เปิด Scrape)`],
+      );
+      return false;
+    }
+  }
+  const configuredWorker = chosenWorker || String(process.env.SCRAPE_PREFERRED_WORKER ?? '').trim();
   let preferredWorker = selectPreferredScrapeWorker(readyWorkers, configuredWorker);
-  if (!preferredWorker && configuredWorker) {
+  if (!preferredWorker && configuredWorker && !chosenWorker) {
     // Preferred machine offline — fall back to any ready scraper so desk "รันตอนนี้" still moves.
     preferredWorker = selectPreferredScrapeWorker(readyWorkers, '');
     if (preferredWorker) {
@@ -1956,7 +1970,11 @@ export async function createScrapeTaskFromSoRecruit(
     descriptionFallback,
   });
   // วางแผนคำค้นจากเนื้องานแบบเดียวกับสร้างงานเอง (ตำแหน่งในใบขอเป็นแค่คำใบ้)
-  const criteria = baseCriteria.job_description ? { ...baseCriteria, plan_from_description: true } : baseCriteria;
+  const described = baseCriteria.job_description ? { ...baseCriteria, plan_from_description: true } : baseCriteria;
+  // เครื่องที่พนักงานเลือกใน Jarvis (job_snapshot.scrape_worker) — ทุกรอบของงานนี้จะรันที่เครื่องนั้น
+  const rawSnapshot = (req[0].job_snapshot ?? {}) as Record<string, unknown>;
+  const chosenWorker = String(rawSnapshot.scrape_worker ?? '').trim();
+  const criteria = chosenWorker ? { ...described, preferred_worker: chosenWorker } : described;
   assertAgeRange(criteria);
   const position = criteria.position || req[0].erp_title || '';
   const target = Math.max(1, overrides?.target || req[0].erp_remaining || req[0].erp_qty || 20);
@@ -3307,6 +3325,8 @@ export type JarvisPostOrder = {
   issues: string[];
   account_id: string | null;
   account_label: string | null;
+  /** เครื่องที่พนักงานเลือกใน Jarvis (job_snapshot.worker) — null = ใช้เครื่องที่ผูกกับบัญชี */
+  target_worker: string | null;
   worker_online: boolean;
   job_id: string | null;
   queue_status: string | null;
@@ -3448,6 +3468,17 @@ export async function listJarvisPostOrders(): Promise<JarvisPostOrder[]> {
     if (postMode !== 'caption_only') issues.push(`ชนิด "${postModeLabel(postMode)}" ยังต้องรอระบบแนบรูป`);
     if (!groupIds.length) issues.push('ยังไม่ได้เลือกกลุ่มใน Jarvis');
     const requestedAccountId = typeof s.account_id === 'string' && s.account_id.trim() ? s.account_id.trim() : null;
+    const targetWorker = typeof s.worker === 'string' && s.worker.trim() ? s.worker.trim() : null;
+    const targetOnline = targetWorker
+      ? Boolean(
+          (
+            await q<{ online: boolean }>(
+              `SELECT EXISTS (SELECT 1 FROM ${AP}.workers WHERE lower(name)=lower($1) AND last_seen > now() - interval '2 minutes') AS online`,
+              [targetWorker],
+            ).catch(() => [{ online: false }])
+          )[0]?.online,
+        )
+      : false;
     const { account, issue: accountIssue } = await resolvePostAccount(groupIds, requestedAccountId);
     if (accountIssue) issues.push(accountIssue);
     else if (groupIds.length && !account) issues.push('ไม่มีบัญชี Facebook ที่ผูกกับกลุ่มนี้');
@@ -3567,7 +3598,8 @@ export async function listJarvisPostOrders(): Promise<JarvisPostOrder[]> {
       issues,
       account_id: account?.id ?? null,
       account_label: account?.label ?? null,
-      worker_online: Boolean(account?.worker_online),
+      target_worker: targetWorker,
+      worker_online: targetWorker ? targetOnline : Boolean(account?.worker_online),
       job_id: queue[0] ? jobId : null,
       queue_status: queue[0]?.status ?? null,
       queue_at: queue[0]?.created_at ?? null,
@@ -3662,10 +3694,17 @@ export async function postJarvisOrder(requestNo: string, requestedBy: string | n
   if (order.jarvis_status !== 'pending') throw new Error('ใบนี้สั่งโพสต์ไปแล้ว');
   if (order.issues.length) throw new Error(`ยังโพสต์ไม่ได้: ${order.issues.join(', ')}`);
   if (!order.account_id) throw new Error('ไม่มีบัญชี Facebook ที่ผูกกับกลุ่มนี้');
-  if (!order.worker_online) throw new Error('เครื่องที่ผูกกับบัญชี Facebook ยังออฟไลน์ เปิด Autopost บนเครื่องนั้นก่อน');
+  if (!order.worker_online) {
+    throw new Error(
+      order.target_worker
+        ? `เครื่อง ${order.target_worker} ที่เลือกใน Jarvis ยังออฟไลน์ เปิด Autopost บนเครื่องนั้นก่อน`
+        : 'เครื่องที่ผูกกับบัญชี Facebook ยังออฟไลน์ เปิด Autopost บนเครื่องนั้นก่อน',
+    );
+  }
 
   const jobId = jarvisPostJobId(requestNo);
   const queueId = autopostId();
+  await q(`ALTER TABLE ${AP}.post_run_queue ADD COLUMN IF NOT EXISTS target_worker VARCHAR(255)`);
   const client = await pool().connect();
   try {
     await client.query('BEGIN');
@@ -3703,9 +3742,9 @@ export async function postJarvisOrder(requestNo: string, requestedBy: string | n
     );
     // requested_by ≠ 'auto-daily' → worker ข้ามเพดานรายวันได้ เพราะคนสั่งเอง
     await client.query(
-      `INSERT INTO ${AP}.post_run_queue (id, assignment_ids, user_id, status, requested_by, message)
-       VALUES ($1, $2::jsonb, $3, 'queued', $4, $5)`,
-      [queueId, JSON.stringify([jobId]), order.account_id, requestedBy || 'web', `Jarvis ${requestNo}`],
+      `INSERT INTO ${AP}.post_run_queue (id, assignment_ids, user_id, status, requested_by, message, target_worker)
+       VALUES ($1, $2::jsonb, $3, 'queued', $4, $5, $6)`,
+      [queueId, JSON.stringify([jobId]), order.account_id, requestedBy || 'web', `Jarvis ${requestNo}`, order.target_worker],
     );
     await client.query(
       `UPDATE "jarvis_rm".job_posting_requests SET status='in_progress', updated_at=now() WHERE request_no=$1 AND status='pending'

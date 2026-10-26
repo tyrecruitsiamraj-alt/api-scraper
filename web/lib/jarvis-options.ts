@@ -32,6 +32,8 @@ export type JarvisAccountOption = {
   /** ข้อความภาษาไทยสำหรับแจ้งพนักงาน (เช่น popup) — null เมื่อพร้อม */
   warning: string | null;
   group_ids: string[];
+  /** เครื่องที่มี session ล็อกอินบัญชีนี้อยู่ (โพสต์จากเครื่องอื่นได้ แต่ต้องล็อกอินใหม่บนเครื่องนั้น) */
+  session_workers: string[];
 };
 
 export type JarvisGroupOption = {
@@ -42,6 +44,8 @@ export type JarvisGroupOption = {
   url: string;
   account_ids: string[];
   last_posted_at: string | null;
+  /** ผลย้อนหลัง 30 วัน — comments/phone_leads ขึ้นกับตัวเก็บคอมเมนต์ (ยังอ่านคอมเมนต์รายคนไม่ได้ ตัวเลขอาจต่ำกว่าจริง) */
+  stats_30d: { attempts: number; posted: number; comments: number; phone_leads: number };
 };
 
 export type JarvisWorkerOption = {
@@ -54,6 +58,8 @@ export type JarvisWorkerOption = {
   scrape_queue: { running: number; queued: number };
   /** รวมงานที่ยังไม่จบ ใช้เทียบว่าเครื่องไหนคิวแน่น */
   load: number;
+  /** บัญชี Facebook ที่ล็อกอินอยู่บนเครื่องนี้ */
+  fb_account_ids: string[];
 };
 
 export type JarvisScrapeAccountOption = {
@@ -128,11 +134,11 @@ function machine(workerId: string | null): string | null {
 export async function getJarvisOptions(): Promise<JarvisOptions> {
   const [accountRows, groupRows, postQueueRows, autopostWorkers, scraperWorkers, scrapeQueueRows, connectorRows] = await Promise.all([
     q<{
-      id: string; name: string; worker: string | null; worker_online: boolean; daily_cap: number | null;
+      id: string; env_key: string | null; email: string | null; name: string; worker: string | null; worker_online: boolean; daily_cap: number | null;
       paused_until: string | null; pause_reason: string | null; group_ids: string[];
       posted_today: number; age_days: number | null; running: number; queued: number;
     }>(
-      `SELECT u.id,
+      `SELECT u.id, u.env_key, u.email,
               COALESCE(NULLIF(TRIM(u.name), ''), u.env_key, u.id) AS name,
               u.preferred_worker AS worker,
               EXISTS (SELECT 1 FROM ${AP}.workers w WHERE w.name = u.preferred_worker AND w.last_seen > now() - ${ONLINE}) AS worker_online,
@@ -154,12 +160,31 @@ export async function getJarvisOptions(): Promise<JarvisOptions> {
          FROM ${AP}.users u
         ORDER BY 2`,
     ),
-    q<{ id: string; fb_group_id: string; name: string | null; account_ids: string[]; last_posted_at: string | null }>(
+    q<{
+      id: string; fb_group_id: string; name: string | null; account_ids: string[]; last_posted_at: string | null;
+      attempts: number; posted: number; comments: number; phone_leads: number;
+    }>(
       `SELECT g.id, g.fb_group_id, g.name,
               COALESCE((SELECT jsonb_agg(u.id) FROM ${AP}.users u WHERE COALESCE(u.group_ids::jsonb, '[]'::jsonb) ? g.id), '[]'::jsonb) AS account_ids,
-              (SELECT max(rl.created_at) FROM ${AP}.run_logs rl WHERE rl.group_id = g.fb_group_id AND rl.level = 'success') AS last_posted_at
+              (SELECT max(rl.created_at) FROM ${AP}.run_logs rl WHERE rl.group_id = g.fb_group_id AND rl.level = 'success') AS last_posted_at,
+              (SELECT count(*) FROM ${AP}.run_logs rl WHERE rl.group_id = g.fb_group_id AND rl.level IN ('success', 'warn', 'error')
+                  AND rl.created_at > now() - interval '30 days')::int AS attempts,
+              (SELECT count(*) FROM ${AP}.run_logs rl WHERE rl.group_id = g.fb_group_id AND rl.level = 'success'
+                  AND rl.created_at > now() - interval '30 days')::int AS posted,
+              COALESCE((SELECT sum(pl.comment_count) FROM ${AP}.post_logs pl WHERE pl.group_id = g.fb_group_id
+                  AND pl.created_at > now() - interval '30 days'), 0)::int AS comments,
+              COALESCE((SELECT count(*) FROM ${AP}.comment_leads cl WHERE cl.group_id = g.fb_group_id AND cl.phone IS NOT NULL
+                  AND cl.first_seen_at > now() - interval '30 days'), 0)::int AS phone_leads
          FROM ${AP}.groups g
         ORDER BY g.name`,
+    ).catch(async () =>
+      // comment_leads ยังไม่ถูกสร้าง (ตัวเก็บคอมเมนต์ยังไม่เคยรัน) — ไม่นับเบอร์
+      q<{ id: string; fb_group_id: string; name: string | null; account_ids: string[]; last_posted_at: string | null; attempts: number; posted: number; comments: number; phone_leads: number }>(
+        `SELECT g.id, g.fb_group_id, g.name,
+                COALESCE((SELECT jsonb_agg(u.id) FROM ${AP}.users u WHERE COALESCE(u.group_ids::jsonb, '[]'::jsonb) ? g.id), '[]'::jsonb) AS account_ids,
+                NULL::timestamptz AS last_posted_at, 0 AS attempts, 0 AS posted, 0 AS comments, 0 AS phone_leads
+           FROM ${AP}.groups g ORDER BY g.name`,
+      ),
     ),
     // งานโพสต์ที่รอคิวยังไม่มี worker_id — นับให้เครื่องที่บัญชีผูกไว้ (เครื่องนั้นจะเป็นคนรับ)
     q<{ worker: string | null; status: string; n: number }>(
@@ -168,8 +193,10 @@ export async function getJarvisOptions(): Promise<JarvisOptions> {
         WHERE p.status IN ('queued', 'running')
         GROUP BY 1, 2`,
     ),
-    q<{ name: string; last_seen: string; online: boolean; build: string | null }>(
-      `SELECT name, last_seen, last_seen > now() - ${ONLINE} AS online, meta->>'build_sha' AS build FROM ${AP}.workers`,
+    q<{ name: string; last_seen: string; online: boolean; build: string | null; fb_sessions: string[] | null }>(
+      `SELECT name, last_seen, last_seen > now() - ${ONLINE} AS online, meta->>'build_sha' AS build,
+              meta->'fb_sessions' AS fb_sessions
+         FROM ${AP}.workers`,
     ).catch(() => []),
     // ตัว Scrap รันเป็น slot (scraper-1, scraper-2) — ชื่อเครื่องอยู่ใน meta.machine_name
     q<{ name: string; machine: string | null; last_seen: string; online: boolean; build: string | null }>(
@@ -197,6 +224,19 @@ export async function getJarvisOptions(): Promise<JarvisOptions> {
     ).catch(() => []),
   ]);
 
+  // ชื่อไฟล์ session = facebook-<key>.json โดย key คิดแบบเดียวกับ facebookLogin (env_key → id → email)
+  const sessionKey = (r: { env_key: string | null; id: string; email: string | null }) =>
+    String(r.env_key || r.id || r.email || 'default').replace(/[^a-zA-Z0-9_-]+/g, '_').toLowerCase();
+  const sessionWorkers = new Map<string, string[]>();
+  for (const w of autopostWorkers) {
+    const machineName = machine(w.name) ?? w.name;
+    for (const key of Array.isArray(w.fb_sessions) ? w.fb_sessions : []) {
+      const list = sessionWorkers.get(String(key).toLowerCase()) ?? [];
+      if (!list.includes(machineName)) list.push(machineName);
+      sessionWorkers.set(String(key).toLowerCase(), list);
+    }
+  }
+
   const accounts: JarvisAccountOption[] = accountRows.map((r) => {
     const daily_cap = effectiveDailyCap(r.daily_cap, r.age_days);
     const base = {
@@ -215,6 +255,7 @@ export async function getJarvisOptions(): Promise<JarvisOptions> {
       remaining_today: Math.max(0, daily_cap - base.posted_today),
       ...accountStatus(base),
       group_ids: (r.group_ids ?? []).map(String),
+      session_workers: sessionWorkers.get(sessionKey(r)) ?? [],
     };
   });
 
@@ -225,13 +266,19 @@ export async function getJarvisOptions(): Promise<JarvisOptions> {
     url: `https://www.facebook.com/groups/${g.fb_group_id}`,
     account_ids: (g.account_ids ?? []).map(String),
     last_posted_at: g.last_posted_at,
+    stats_30d: {
+      attempts: Number(g.attempts) || 0,
+      posted: Number(g.posted) || 0,
+      comments: Number(g.comments) || 0,
+      phone_leads: Number(g.phone_leads) || 0,
+    },
   }));
 
   const workerMap = new Map<string, JarvisWorkerOption>();
   const touch = (name: string): JarvisWorkerOption => {
     let w = workerMap.get(name);
     if (!w) {
-      w = { name, kinds: [], online: false, last_seen: null, build: null, post_queue: { running: 0, queued: 0 }, scrape_queue: { running: 0, queued: 0 }, load: 0 };
+      w = { name, kinds: [], online: false, last_seen: null, build: null, post_queue: { running: 0, queued: 0 }, scrape_queue: { running: 0, queued: 0 }, load: 0, fb_account_ids: [] };
       workerMap.set(name, w);
     }
     return w;
@@ -272,6 +319,12 @@ export async function getJarvisOptions(): Promise<JarvisOptions> {
       if (r.status === 'running') c.running += r.n;
       else c.queued += r.n;
       connectorQueue.set(id, c);
+    }
+  }
+  for (const a of accounts) {
+    for (const wName of a.session_workers) {
+      const w = touch(wName);
+      if (!w.fb_account_ids.includes(a.id)) w.fb_account_ids.push(a.id);
     }
   }
   const workers = [...workerMap.values()]
