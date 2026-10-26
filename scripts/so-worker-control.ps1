@@ -236,6 +236,9 @@ function Start-WorkerWindow([string]$Title, [string]$WorkDir, [string]$NpmScript
   $npm = Resolve-NpmCmd
   $sha = Get-WorkerBuildSha
   $logPath = Join-Path $LogDir ($(if ($Group -eq 'Scrape') { 'scrape-pool.log' } else { 'autopost.log' }))
+  $outLogPath = Join-Path $LogDir ("$($NpmScript -replace '[^A-Za-z0-9_-]', '-').out.log")
+  # เริ่มไฟล์ output ใหม่ทุกครั้งที่กดเปิด ไม่ให้ไฟล์โตไม่จบ (เก็บรอบก่อนไว้ 1 รอบ)
+  if (Test-Path -LiteralPath $outLogPath) { Move-Item -LiteralPath $outLogPath -Destination "$outLogPath.prev" -Force -ErrorAction SilentlyContinue }
   $stamp = Get-Date -Format 'yyyy-MM-dd HH:mm:ss'
   Add-Content -Path $logPath -Value "`n==== $stamp start $Title via npm run $NpmScript ====`n" -Encoding UTF8
 
@@ -252,9 +255,16 @@ function Start-WorkerWindow([string]$Title, [string]$WorkDir, [string]$NpmScript
     'set AUTO_COLLECT_ENABLED=1'
     'set AUTO_COLLECT_EVERY_MINUTES=120'
     "title $Title"
+    # worker ปิดตัวเอง (crash / เน็ตหลุด) = เปิดใหม่เองใน 10 วินาที ปิดจริงได้ด้วยสวิตช์ (taskkill ทั้งหน้าต่าง)
+    # output ทั้งหมดของ worker เก็บไว้ที่ <script>.out.log ไว้ไล่สาเหตุ
+    ':loop'
     "echo [%date% %time%] starting $NpmScript>> `"$logPath`""
-    "`"$npm`" run $NpmScript"
-    "echo [%date% %time%] exited errorlevel=%errorlevel%>> `"$logPath`""
+    "echo ==== [%date% %time%] start $NpmScript ====>> `"$outLogPath`""
+    # ต้องมี call: npm คือ npm.cmd ถ้าเรียกตรง ๆ จาก .cmd จะไม่กลับมาทำบรรทัดถัดไป (ลูปเปิดใหม่จะไม่ทำงาน)
+    "call `"$npm`" run $NpmScript >> `"$outLogPath`" 2>&1"
+    "echo [%date% %time%] exited errorlevel=%errorlevel% - restart in 10s>> `"$logPath`""
+    'timeout /t 10 /nobreak >nul'
+    'goto loop'
   ) -join "`r`n"
   [System.IO.File]::WriteAllText($launcher, $content, [System.Text.Encoding]::ASCII)
 
