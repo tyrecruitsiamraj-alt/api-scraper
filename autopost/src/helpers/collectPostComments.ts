@@ -278,7 +278,7 @@ export async function scrapeCommentsAndPhones(
 
       const insideCommentThread = (el: Element | null) =>
         !!el?.closest(
-          '[aria-label*="Comment by" i], [aria-label*="ความคิดเห็นโดย" i], [aria-label*="ความคิดเห็นของ" i], [aria-label*="Commenter" i]'
+          '[aria-label*="Comment by" i], [aria-label*="Comment from" i], [aria-label*="ความคิดเห็นโดย" i], [aria-label*="ความคิดเห็นของ" i], [aria-label*="ความคิดเห็นจาก" i], [aria-label*="การตอบกลับจาก" i], [aria-label*="Commenter" i]'
         );
 
       const pushBlock = (raw: string) => {
@@ -307,6 +307,8 @@ export async function scrapeCommentsAndPhones(
               '[aria-label*="Comment by" i]',
               '[aria-label*="ความคิดเห็นโดย" i]',
               '[aria-label*="ความคิดเห็นของ" i]',
+              '[aria-label*="ความคิดเห็นจาก" i]',
+              '[aria-label*="การตอบกลับจาก" i]',
               '[aria-label*="Commenter" i]',
               '[role="article"] [role="article"]',
               '[data-testid*="UFI2Comment" i]',
@@ -320,25 +322,29 @@ export async function scrapeCommentsAndPhones(
         }
       }
 
+      // ต.ค. 2026 Facebook ใช้ "ความคิดเห็นจาก <ชื่อ> เมื่อ 3 วันที่แล้ว" (เดิม "ความคิดเห็นโดย")
       const primarySelectors = [
         '[aria-label*="Comment by" i]',
+        '[aria-label*="Comment from" i]',
+        '[aria-label*="Reply from" i]',
+        '[aria-label*="ความคิดเห็นจาก" i]',
+        '[aria-label*="การตอบกลับจาก" i]',
         '[aria-label*="ความคิดเห็นโดย" i]',
         '[aria-label*="ความคิดเห็นของ" i]',
         '[aria-label*="Commenter" i]',
-        '[aria-label*="comment by" i]',
       ];
       const comments: Array<{ aria: string; name: string; text: string; commentUrl: string | null; profileUrl: string | null }> = [];
       const seenAria = new Set<string>();
       // "ความคิดเห็นโดย สมชาย ใจดี เมื่อ 2 ชั่วโมงที่แล้ว" / "Comment by Somchai 2 hours ago" → ชื่อ
       const nameFromAria = (aria: string) =>
         aria
-          .replace(/^(Comment by|Reply by|ความคิดเห็นโดย|ความคิดเห็นของ|การตอบกลับโดย|ตอบกลับโดย)\s*/i, '')
+          .replace(/^(Comment by|Comment from|Reply by|Reply from|ความคิดเห็นจาก|ความคิดเห็นโดย|ความคิดเห็นของ|การตอบกลับจาก|การตอบกลับโดย|ตอบกลับจาก|ตอบกลับโดย)\s*/i, '')
           .replace(/\s+(เมื่อ|เมื่อวาน|[0-9]+\s*(วินาที|นาที|ชั่วโมง|ชม\.|วัน|สัปดาห์|เดือน|ปี)|a\s+|an\s+|[0-9]+\s*(second|minute|hour|day|week|month|year)s?).*$/i, '')
           .trim();
       const ACTION_LINE = /^(ถูกใจ|ตอบกลับ|แชร์|แก้ไขแล้ว|Like|Reply|Share|Edited|ผู้เขียน|Author|Top fan|แฟนตัวยง|[0-9]+\s*(วินาที|นาที|ชม\.|ชั่วโมง|วัน|สัปดาห์|ส\.|ว\.|น\.)|[0-9]+\s*[smhdwy]|[0-9]+)$/i;
       // selector แบบ *= จับรายการแจ้งเตือนด้วย เช่น "ทำเครื่องหมายว่าอ่านแล้ว, X ตอบกลับความคิดเห็นของเขา..."
       // จึงรับเฉพาะ aria ที่ขึ้นต้นด้วยคำของคอมเมนต์ และไม่อยู่ในแผงแจ้งเตือน/เมนูด้านบน
-      const COMMENT_ARIA = /^(Comment by|Reply by|Commenter|ความคิดเห็นโดย|ความคิดเห็นของ|การตอบกลับโดย|ตอบกลับโดย)/i;
+      const COMMENT_ARIA = /^(Comment by|Comment from|Reply by|Reply from|Commenter|ความคิดเห็นจาก|ความคิดเห็นโดย|ความคิดเห็นของ|การตอบกลับจาก|การตอบกลับโดย|ตอบกลับจาก|ตอบกลับโดย)/i;
       const inNotifications = (el: Element) =>
         !!el.closest('[role="navigation"], [role="banner"], [aria-label*="การแจ้งเตือน"], [aria-label*="Notifications" i]');
       for (const sel of primarySelectors) {
