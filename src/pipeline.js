@@ -314,6 +314,8 @@ export async function runConnector(connector, criteria, runtime, opts = {}) {
         if (!isResumeBodyComplete(parsed)) {
           const gaps = resumeBodyGaps(parsed);
           reasonCounts.incomplete_profile = (reasonCounts.incomplete_profile || 0) + 1;
+          // นับแยกว่าขาดช่องไหน — แยกได้ว่าคนกรอกไม่ครบจริง หรือตัวอ่านโปรไฟล์อ่านช่องนั้นไม่ออก
+          for (const gap of gaps) reasonCounts[`incomplete:${gap}`] = (reasonCounts[`incomplete:${gap}`] || 0) + 1;
           console.warn(`  ✗ skip incomplete resume ${id}: ${gaps.join(',')}`);
           return; // do not upsert incomplete rows — desk must only show complete data
         }
@@ -354,6 +356,7 @@ export async function runConnector(connector, criteria, runtime, opts = {}) {
             if (provider.finalizeCandidateRecord) parsed = provider.finalizeCandidateRecord(parsed);
             if (!isResumeBodyComplete(parsed)) {
               reasonCounts.incomplete_profile = (reasonCounts.incomplete_profile || 0) + 1;
+              for (const gap of resumeBodyGaps(parsed)) reasonCounts[`incomplete:${gap}`] = (reasonCounts[`incomplete:${gap}`] || 0) + 1;
               console.warn(`  ✗ skip incomplete resume ${id} after attach refetch: ${resumeBodyGaps(parsed).join(',')}`);
               return;
             }
