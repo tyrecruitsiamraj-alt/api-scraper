@@ -228,6 +228,18 @@ export function knownPositionsFromDescription(description) {
   };
 }
 
+/**
+ * ตำแหน่งที่นับว่า "สายงานตรง" ตอนคัดโปรไฟล์ เมื่องานระบุตำแหน่งตรง ๆ (ไม่ได้วางแผนจากเนื้องาน)
+ * เดิมรับเฉพาะชื่อตำแหน่งนั้นทั้งคำ เช่น "พนักงานขับรถ นายไทย" ทำให้คนที่เคย "ขับรถส่วนกลาง"
+ * ถูกตัดว่าไม่ตรงสายงาน ตอนนี้รับตำแหน่งในสายงานเดียวกันจากพจนานุกรมด้วย (ถ้าพจนานุกรมรู้จัก)
+ */
+export function acceptedPositionsForTitle(title) {
+  const direct = String(title || '').trim();
+  if (!direct) return [];
+  const family = knownPositionsFromDescription(direct);
+  return cleanList([direct, ...(family?.positions || [])]);
+}
+
 function cleanList(v) {
   if (!Array.isArray(v)) return [];
   const seen = new Set();

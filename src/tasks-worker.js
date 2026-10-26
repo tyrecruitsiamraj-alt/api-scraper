@@ -34,7 +34,7 @@ import { runConnector } from './pipeline.js';
 import { extractAttachment } from './core/ollama.js';
 import { contactsFromText } from './core/contacts.js';
 import { finalizeCandidateRecord, hasUsefulEducation, hasUsefulWorkExperience } from './providers/jobbkk/parser.js';
-import { suggestAdjacentPositions, positionsFromDescription } from './core/job-family.js';
+import { acceptedPositionsForTitle, suggestAdjacentPositions, positionsFromDescription } from './core/job-family.js';
 import { resolveSearchIdentityFromDescription } from '../web/lib/scrape-intake.js';
 import { filterZeroYieldExpansionTerms } from './core/scrape-failure-learning.js';
 
@@ -179,7 +179,7 @@ export async function runTask(t, runtime) {
   if (directPosition && !(qualificationSpec.accepted_positions || []).length) {
     qualificationSpec = {
       ...qualificationSpec,
-      accepted_positions: [directPosition],
+      accepted_positions: acceptedPositionsForTitle(directPosition),
       scorecard_version: 'candidate-fit-v1',
     };
   }
