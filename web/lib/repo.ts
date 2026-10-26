@@ -532,6 +532,8 @@ export type UnifiedConnectorRow = {
   pause_reason: string | null;
   used_today: number | null;
   preferred_worker: string | null;
+  /** บัญชี Facebook ที่ใช้งานมานานแล้ว — ไม่ต้องจำกัดโพสต์ช่วงวอร์มบัญชีใหม่ */
+  skip_warmup: boolean | null;
 };
 
 export async function listAllConnectors() {
@@ -541,7 +543,7 @@ export async function listAllConnectors() {
     `SELECT platform || ':' || id::text AS key, platform, label, username,
             scrape_limit, daily_cap, enabled, cooldown_until, last_login_at, created_at,
             NULL::timestamptz AS paused_until, NULL::text AS pause_reason,
-            NULL::integer AS used_today, NULL::text AS preferred_worker
+            NULL::integer AS used_today, NULL::text AS preferred_worker, NULL::boolean AS skip_warmup
        FROM connectors`,
   );
 
@@ -561,7 +563,8 @@ export async function listAllConnectors() {
                    AND (pl.created_at AT TIME ZONE 'Asia/Bangkok')::date
                        = (now() AT TIME ZONE 'Asia/Bangkok')::date
               ), 0) AS used_today,
-              NULLIF(to_jsonb(u)->>'preferred_worker', '') AS preferred_worker
+              NULLIF(to_jsonb(u)->>'preferred_worker', '') AS preferred_worker,
+              COALESCE((to_jsonb(u)->>'skip_warmup')::boolean, false) AS skip_warmup
          FROM ${AP}.users u`,
     );
   } catch {
@@ -577,7 +580,8 @@ export async function listAllConnectors() {
                 NULL::timestamptz AS last_login_at, u.created_at,
                 NULL::timestamptz AS paused_until, NULL::text AS pause_reason,
                 0::integer AS used_today,
-                NULLIF(to_jsonb(u)->>'preferred_worker', '') AS preferred_worker
+                NULLIF(to_jsonb(u)->>'preferred_worker', '') AS preferred_worker,
+                false AS skip_warmup
            FROM ${AP}.users u`,
       );
     } catch {
@@ -668,17 +672,19 @@ export async function insertFacebookConnector(c: {
   contactPhone?: string;
   dailyCap: number;
   preferredWorker?: string;
+  skipWarmup?: boolean;
 }) {
   // These control columns are runtime migrations in the legacy Auto-Post server.
   // Ensure the one needed by this native Settings form before inserting.
   await q(`ALTER TABLE ${AP}.users ADD COLUMN IF NOT EXISTS daily_cap INTEGER`);
   await q(`ALTER TABLE ${AP}.users ADD COLUMN IF NOT EXISTS preferred_worker VARCHAR(255)`);
+  await q(`ALTER TABLE ${AP}.users ADD COLUMN IF NOT EXISTS skip_warmup BOOLEAN NOT NULL DEFAULT false`);
   const id = `fb_${randomUUID().replace(/-/g, '').slice(0, 24)}`;
   await q(
     `INSERT INTO ${AP}.users
        (id, env_key, name, poster_name, email, password, group_ids, blacklist_groups,
-        post_settings, contact_phone, daily_cap, preferred_worker)
-     VALUES ($1,$1,$2,$3,$4,$5,'[]'::jsonb,'[]'::jsonb,'{}'::jsonb,$6,$7,$8)`,
+        post_settings, contact_phone, daily_cap, preferred_worker, skip_warmup)
+     VALUES ($1,$1,$2,$3,$4,$5,'[]'::jsonb,'[]'::jsonb,'{}'::jsonb,$6,$7,$8,$9)`,
     [
       id,
       c.label,
@@ -688,6 +694,7 @@ export async function insertFacebookConnector(c: {
       c.contactPhone || null,
       c.dailyCap,
       c.preferredWorker?.trim() || null,
+      Boolean(c.skipWarmup),
     ],
   );
   return id;
@@ -718,8 +725,12 @@ export async function updateScraperConnector(
 /** แก้ข้อมูลบัญชี Facebook. password ว่าง = ไม่เปลี่ยนรหัสเดิม. */
 export async function updateFacebookAccount(
   id: string,
-  c: { label: string; username: string; password: string | null },
+  c: { label: string; username: string; password: string | null; skipWarmup?: boolean },
 ) {
+  if (c.skipWarmup !== undefined) {
+    await q(`ALTER TABLE ${AP}.users ADD COLUMN IF NOT EXISTS skip_warmup BOOLEAN NOT NULL DEFAULT false`);
+    await q(`UPDATE ${AP}.users SET skip_warmup=$2, updated_at=now() WHERE id=$1`, [id, c.skipWarmup]);
+  }
   if (c.password) {
     await q(
       `UPDATE ${AP}.users SET name=$2, poster_name=$2, email=$3, password=$4, updated_at=now() WHERE id=$1`,

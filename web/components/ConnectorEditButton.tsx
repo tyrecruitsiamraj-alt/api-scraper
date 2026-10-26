@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { editConnectorAction } from '@/lib/actions';
 import { Button } from '@/components/ui/button';
+import { Checkbox } from '@/components/ui/checkbox';
 import {
   Dialog,
   DialogClose,
@@ -13,7 +14,7 @@ import {
   DialogTitle,
   DialogTrigger,
 } from '@/components/ui/dialog';
-import { Field, FieldDescription, FieldGroup, FieldLabel } from '@/components/ui/field';
+import { Field, FieldContent, FieldDescription, FieldGroup, FieldLabel } from '@/components/ui/field';
 import { Input } from '@/components/ui/input';
 
 /**
@@ -25,11 +26,14 @@ export function ConnectorEditButton({
   platform,
   label,
   username,
+  skipWarmup = false,
 }: {
   id: string;
   platform: string;
   label: string;
   username: string;
+  /** Facebook: บัญชีที่ใช้งานมานานแล้ว ไม่ต้องวอร์ม */
+  skipWarmup?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const isFb = platform === 'facebook';
@@ -62,6 +66,15 @@ export function ConnectorEditButton({
               <Input id={`${fieldId}-password`} name="password" type="password" />
               <FieldDescription>เว้นว่างไว้ถ้าจะใช้รหัสเดิม</FieldDescription>
             </Field>
+            {isFb && (
+              <Field orientation="horizontal">
+                <Checkbox id={`${fieldId}-skip-warmup`} name="skipWarmup" value="1" defaultChecked={skipWarmup} />
+                <FieldContent>
+                  <FieldLabel htmlFor={`${fieldId}-skip-warmup`}>บัญชีนี้ใช้งานมานานแล้ว</FieldLabel>
+                  <FieldDescription>ติ๊กแล้วจะไม่จำกัดโพสต์ช่วงวอร์มบัญชีใหม่ (5–12 กลุ่มต่อวันใน 3 สัปดาห์แรก)</FieldDescription>
+                </FieldContent>
+              </Field>
+            )}
           </FieldGroup>
           <DialogFooter>
             <DialogClose asChild>

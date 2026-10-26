@@ -85,9 +85,9 @@ export type JarvisOptions = {
 };
 
 /** เพดานโพสต์/วัน: daily_cap > POST_DAILY_CAP > 15 แล้ววอร์มตามอายุบัญชี (เหมือน worker) */
-export function effectiveDailyCap(dailyCap: number | null, ageDays: number | null, env = process.env): number {
+export function effectiveDailyCap(dailyCap: number | null, ageDays: number | null, env = process.env, skipWarmup = false): number {
   const base = Math.max(1, Number(dailyCap) || Number(env.POST_DAILY_CAP) || 15);
-  if (String(env.POST_WARMUP_DISABLED || '') === '1') return base;
+  if (skipWarmup || String(env.POST_WARMUP_DISABLED || '') === '1') return base;
   const age = ageDays == null ? NaN : Number(ageDays);
   const ramp = !Number.isFinite(age) || age < 7 ? 5 : age < 14 ? 8 : age < 21 ? 12 : base;
   return Math.min(base, ramp);
@@ -134,11 +134,11 @@ function machine(workerId: string | null): string | null {
 export async function getJarvisOptions(): Promise<JarvisOptions> {
   const [accountRows, groupRows, postQueueRows, autopostWorkers, scraperWorkers, scrapeQueueRows, connectorRows] = await Promise.all([
     q<{
-      id: string; env_key: string | null; email: string | null; name: string; worker: string | null; worker_online: boolean; daily_cap: number | null;
+      id: string; env_key: string | null; email: string | null; skip_warmup: boolean; name: string; worker: string | null; worker_online: boolean; daily_cap: number | null;
       paused_until: string | null; pause_reason: string | null; group_ids: string[];
       posted_today: number; age_days: number | null; running: number; queued: number;
     }>(
-      `SELECT u.id, u.env_key, u.email,
+      `SELECT u.id, u.env_key, u.email, COALESCE((to_jsonb(u)->>'skip_warmup')::boolean, false) AS skip_warmup,
               COALESCE(NULLIF(TRIM(u.name), ''), u.env_key, u.id) AS name,
               u.preferred_worker AS worker,
               EXISTS (SELECT 1 FROM ${AP}.workers w WHERE w.name = u.preferred_worker AND w.last_seen > now() - ${ONLINE}) AS worker_online,
@@ -238,7 +238,7 @@ export async function getJarvisOptions(): Promise<JarvisOptions> {
   }
 
   const accounts: JarvisAccountOption[] = accountRows.map((r) => {
-    const daily_cap = effectiveDailyCap(r.daily_cap, r.age_days);
+    const daily_cap = effectiveDailyCap(r.daily_cap, r.age_days, process.env, r.skip_warmup);
     const base = {
       worker: r.worker,
       worker_online: r.worker_online,

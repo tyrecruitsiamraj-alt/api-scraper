@@ -997,6 +997,7 @@ export async function createConnectorAction(formData: FormData) {
       contactPhone: String(formData.get('contactPhone') ?? '').trim(),
       dailyCap,
       preferredWorker: String(formData.get('preferredWorker') ?? '').trim(),
+      skipWarmup: formData.has('skipWarmup'),
     });
     revalidatePath('/settings');
     revalidatePath('/settings/connectors');
@@ -1049,7 +1050,7 @@ export async function editConnectorAction(formData: FormData) {
   const password = String(formData.get('password') ?? '').trim();
   if (!id || !label) throw new Error('กรุณากรอกชื่อที่แสดง');
   if (platform === 'facebook') {
-    await updateFacebookAccount(id, { label, username, password: password || null });
+    await updateFacebookAccount(id, { label, username, password: password || null, skipWarmup: formData.has('skipWarmup') });
   } else {
     await updateScraperConnector(id, { label, username, passwordEnc: password ? encryptSecret(password) : null });
   }

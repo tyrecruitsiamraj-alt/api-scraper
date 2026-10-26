@@ -2022,7 +2022,8 @@ function baseDailyCap(user) {
  */
 async function getEffectiveDailyCap(user) {
   const capBase = baseDailyCap(user);
-  if (String(process.env.POST_WARMUP_DISABLED || '') === '1') return capBase;
+  /** บัญชีที่ใช้งานมานานแล้ว (ติ๊กในหน้าตั้งค่า) ไม่ต้องวอร์ม */
+  if (user?.skip_warmup === true || String(process.env.POST_WARMUP_DISABLED || '') === '1') return capBase;
   // อายุบัญชีนับจากโพสต์สำเร็จครั้งแรก: post_logs (มีลิงก์) หรือ run_logs success
   // เดิมนับแค่ post_logs ซึ่งเพิ่งเริ่มเก็บได้ — บัญชีที่โพสต์มานานเลยโดนวอร์มเป็นบัญชีใหม่ (5 กลุ่ม/วัน)
   const { rows } = await query(
@@ -2058,7 +2059,9 @@ async function getUsersPostingStatus() {
   const ageMap = new Map(ageRows.rows.map((r) => [String(r.user_id), Number(r.age_days)]));
   const now = Date.now();
   return users.map((u) => {
-    const cap = warmupCap(baseDailyCap(u), ageMap.has(String(u.id)) ? ageMap.get(String(u.id)) : NaN);
+    const cap = u.skip_warmup === true
+      ? baseDailyCap(u)
+      : warmupCap(baseDailyCap(u), ageMap.has(String(u.id)) ? ageMap.get(String(u.id)) : NaN);
     const posted = todayMap.get(String(u.id)) || 0;
     const isPaused = !!(u.paused_until && new Date(u.paused_until).getTime() > now);
     return { ...u, posted_today: posted, effective_cap: cap, is_full: posted >= cap, is_paused: isPaused };

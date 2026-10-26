@@ -128,7 +128,7 @@ export default async function SettingsConnectorsPage() {
                               />
                               <Button variant="secondary" size="sm" type="submit">บันทึกเครื่อง</Button>
                             </form>
-                            <ConnectorEditButton id={id} platform="facebook" label={c.label} username={c.username ?? ''} />
+                            <ConnectorEditButton id={id} platform="facebook" label={c.label} username={c.username ?? ''} skipWarmup={Boolean(c.skip_warmup)} />
                             <form action={deleteFacebookAccountAction}>
                               <input type="hidden" name="id" value={id} />
                               <Button variant="destructive" size="sm" type="submit" aria-label={`ลบ ${c.label}`}>ลบ</Button>
