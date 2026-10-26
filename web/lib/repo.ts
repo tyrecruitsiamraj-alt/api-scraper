@@ -3709,7 +3709,9 @@ export async function postJarvisOrder(requestNo: string, requestedBy: string | n
   try {
     await client.query('BEGIN');
     const busy = await client.query<{ n: number }>(
-      `SELECT count(*)::int AS n FROM ${AP}.post_run_queue WHERE user_id=$1 AND status IN ('queued', 'running')`,
+      // งานทดสอบแบบไม่โพสต์ (preflight) ที่รอคิวอยู่ไม่นับว่าบัญชีไม่ว่าง — มันต้องรันก่อนงานโพสต์อยู่แล้ว
+      `SELECT count(*)::int AS n FROM ${AP}.post_run_queue
+        WHERE user_id=$1 AND status IN ('queued', 'running') AND COALESCE(mode, 'post') = 'post'`,
       [order.account_id],
     );
     if ((busy.rows[0]?.n ?? 0) > 0) throw new Error('บัญชีนี้มีงานโพสต์รอคิวหรือกำลังโพสต์อยู่แล้ว ลองใหม่เมื่อเสร็จ');
