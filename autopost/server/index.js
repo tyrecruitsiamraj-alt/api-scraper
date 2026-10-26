@@ -1512,7 +1512,17 @@ app.post('/api/worker/post/claim', async (req, res) => {
     const buildSha = String(req.body?.build_sha || '').trim();
     const sourceSha = String(req.body?.source_sha || '').trim();
     // heartbeat: worker โพลทุก ~5 วิ → แตะ last_seen ให้เว็บเห็นว่าเครื่องยังมีชีวิต (fail-soft ใน db)
-    await db.touchWorkerHeartbeat(workerName || workerId, { worker_id: workerId, build_sha: buildSha, source_sha: sourceSha, capabilities });
+    /** session Facebook ที่มีบนเครื่องนี้ (ชื่อไฟล์ .auth/facebook-<key>.json) — ให้หน้าเว็บ/Jarvis รู้ว่าบัญชีไหนใช้เครื่องไหนได้ */
+    const fbSessions = Array.isArray(req.body?.fb_sessions)
+      ? req.body.fb_sessions.map((item) => String(item).trim()).filter(Boolean).slice(0, 200)
+      : undefined;
+    await db.touchWorkerHeartbeat(workerName || workerId, {
+      worker_id: workerId,
+      build_sha: buildSha,
+      source_sha: sourceSha,
+      capabilities,
+      ...(fbSessions ? { fb_sessions: fbSessions } : {}),
+    });
     // A Web/server deploy must not invalidate an already compatible Windows/Mac
     // worker. Pin a SHA only for a deliberate incident rollback via the
     // environment; capability is the normal release contract.

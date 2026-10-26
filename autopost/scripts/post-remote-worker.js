@@ -226,6 +226,19 @@ async function processJob(job) {
   }
 }
 
+/** บัญชี Facebook ที่มี session บนเครื่องนี้: .auth/facebook-<key>.json (key = env_key/id แบบที่ facebookLogin ใช้) */
+function listFacebookSessionKeys() {
+  try {
+    const fs = require('fs');
+    return fs
+      .readdirSync(path.join(PROJECT_ROOT, '.auth'))
+      .map((name) => (name.match(/^facebook-(.+)\.json$/) || [])[1])
+      .filter(Boolean);
+  } catch {
+    return [];
+  }
+}
+
 async function tick() {
   if (claiming) return;
   if (activeJobs >= CONCURRENCY) return;
@@ -238,6 +251,7 @@ async function tick() {
         build_sha: workerBuildSha,
         source_sha: workerSourceSha,
         capabilities: WORKER_CAPABILITIES,
+        fb_sessions: listFacebookSessionKeys(),
       });
       const job = claimed?.job || null;
       if (!job) break;

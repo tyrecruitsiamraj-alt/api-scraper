@@ -1735,6 +1735,8 @@ async function recordPostFailureLesson(row) {
 async function ensurePostRunQueueUserColumn() {
   await ensurePostRunQueueTable();
   await query(`ALTER TABLE post_run_queue ADD COLUMN IF NOT EXISTS user_id VARCHAR(50)`);
+  /** เครื่องที่พนักงานเลือกจาก Jarvis — ถ้ามี ให้เครื่องนี้หยิบงานเท่านั้น (ทับ pin ของบัญชี) */
+  await query(`ALTER TABLE post_run_queue ADD COLUMN IF NOT EXISTS target_worker VARCHAR(255)`);
   /** DB บังคับ: บัญชีเดียวมีงาน running ได้แถวเดียว (กัน 2 Chrome ใช้บัญชีเดียวพร้อมกัน) */
   await query(
     `CREATE UNIQUE INDEX IF NOT EXISTS post_run_queue_one_running_per_user
@@ -1923,7 +1925,13 @@ async function claimNextPostRunJob(workerId, runId, workerName, capabilities = [
            AND (u.paused_until IS NULL OR u.paused_until <= NOW())
            /** pin บัญชี→เครื่อง: บัญชีที่ผูกเครื่องไว้ ให้เครื่องนั้นหยิบเท่านั้น
                (บัญชีไม่ผูก = ใครหยิบก็ได้; worker เก่าที่ไม่ส่งชื่อ = หยิบได้เฉพาะบัญชีไม่ผูก) */
-           AND (u.preferred_worker IS NULL OR TRIM(u.preferred_worker) = '' OR u.preferred_worker = $3)
+           /** งานที่ระบุเครื่อง (target_worker จาก Jarvis) ให้เครื่องนั้นหยิบเท่านั้น */
+           AND (
+             CASE WHEN NULLIF(TRIM(q.target_worker), '') IS NOT NULL
+                  THEN lower(TRIM(q.target_worker)) = lower(COALESCE($3, ''))
+                  ELSE (u.preferred_worker IS NULL OR TRIM(u.preferred_worker) = '' OR u.preferred_worker = $3)
+             END
+           )
            /** lock ต่อบัญชี: บัญชีที่มีงาน running อยู่ ห้ามรับงานใหม่ */
            AND NOT EXISTS (
              SELECT 1 FROM post_run_queue r
