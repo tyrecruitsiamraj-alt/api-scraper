@@ -144,11 +144,11 @@ test('collectComments', async ({ page }) => {
       const { phones, commentCount, postBodyPhones, reactions, shares, comments, diag } = await scrapeCommentsAndPhones(active, item.post_link, {
         excludeAuthorNames: ownerNames,
       });
-      if (!comments.length) {
-        // จับคอมเมนต์รายคนไม่ได้ — เก็บรูปแบบ aria-label (ปิดชื่อแล้ว) ไว้ไล่ว่า Facebook เปลี่ยน markup เป็นแบบไหน
+      if (!comments.length || !reactions) {
+        // จับคอมเมนต์รายคนหรือยอดไลก์ไม่ได้ — เก็บรูปแบบ aria-label (ปิดชื่อแล้ว) ไว้ไล่ว่า Facebook เปลี่ยน markup เป็นแบบไหน
         await runLog({
           level: 'info',
-          message: `อ่านคอมเมนต์รายคนไม่ได้ (ยอดใต้โพสต์: ${diag.summary || '-'})`,
+          message: `${comments.length ? 'อ่านยอดไลก์ไม่ได้' : 'อ่านคอมเมนต์รายคนไม่ได้'} (ยอดใต้โพสต์: ${diag.summary || '-'})`,
           user_id: plan.user_id,
           meta: { kind: 'collect_diag', post_log_id: item.post_log_id, ...diag },
         });

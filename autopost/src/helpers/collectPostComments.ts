@@ -147,7 +147,7 @@ function normalizedPhoneSetFromText(text: string): Set<string> {
  * FB เปลี่ยน markup บ่อย จึงจับจากหลายทาง (aria-label + ข้อความ) และคืน 0 ถ้าไม่เจอ
  * (ไม่ throw — การเก็บคอมเมนต์/เบอร์เดิมต้องไม่พังเพราะอ่านตัวเลขนี้ไม่ได้).
  */
-async function readReactionsAndShares(page: Page): Promise<{ reactions: number; shares: number }> {
+async function readReactionsAndShares(page: Page): Promise<{ reactions: number; shares: number; labels: string[] }> {
   try {
     return await page.evaluate(() => {
       const thaiNum = (s: string): number => {
@@ -161,24 +161,37 @@ async function readReactionsAndShares(page: Page): Promise<{ reactions: number; 
         else if (u.includes('แสน')) n *= 1e5;
         return Math.round(n);
       };
-      // reactions: ปุ่ม/ป้ายจำนวนคนที่แสดงความรู้สึก
-      let reactions = 0;
-      const reactSel = document.querySelector(
-        '[aria-label*="reaction" i], [aria-label*="คนที่แสดงความรู้สึก"], [aria-label*="ถูกใจ"]'
-      );
-      if (reactSel) {
-        const lab = reactSel.getAttribute('aria-label') || reactSel.textContent || '';
-        reactions = thaiNum(lab);
-      }
-      // shares: ข้อความ "N shares" / "แชร์ N ครั้ง" / "N การแชร์"
-      let shares = 0;
-      const body = document.body.innerText || '';
-      const sm = body.match(/([\d.,]+[KMก-๙]*)\s*(shares?|การแชร์|ครั้ง)/i) || body.match(/แชร์\s*([\d.,]+[KMก-๙]*)/i);
-      if (sm) shares = thaiNum(sm[1]);
-      return { reactions: reactions || 0, shares: shares || 0 };
+      const COMMENT_SCOPE =
+        '[aria-label^="ความคิดเห็นจาก"], [aria-label^="ความคิดเห็นโดย"], [aria-label^="Comment by" i], [aria-label^="Comment from" i]';
+      // อ่านเฉพาะในโพสต์ (ไม่เอาไลก์ของคอมเมนต์ หรือของโพสต์อื่นบนหน้า)
+      const root = (document.querySelector('[role="article"]') as HTMLElement | null) || document.body;
+      const REACT_WORD = /ความรู้สึก|ถูกใจ|reaction|likes?\b/i;
+      const labels: string[] = [];
+      const counts: number[] = [];
+      root.querySelectorAll('[aria-label]').forEach((el) => {
+        if (el.closest(COMMENT_SCOPE)) return;
+        const lab = (el.getAttribute('aria-label') || '').trim();
+        if (!REACT_WORD.test(lab)) return;
+        // เก็บรูปแบบไว้ไล่ปัญหา (ตัวเลขกับคำของหน้าเว็บเก็บไว้ ชื่อคนปิดเป็น ·)
+        if (labels.length < 12) {
+          labels.push(lab.split(/\s+/).slice(0, 12).map((w) => (/\d|ความรู้สึก|ถูกใจ|คน|อื่น|ทั้งหมด|reaction|like|other|and|และ|:/i.test(w) ? w : '·')).join(' '));
+        }
+        // ปุ่ม "ถูกใจ" เฉย ๆ ไม่มีตัวเลข — นับเฉพาะป้ายที่มีจำนวน
+        if (/\d/.test(lab)) counts.push(thaiNum(lab));
+      });
+      // ข้อความสรุปใต้โพสต์ เช่น "ความรู้สึกทั้งหมด:\n6" / "All reactions:\n6"
+      const rootText = root.innerText || '';
+      const summary = rootText.match(/(?:ความรู้สึกทั้งหมด|All reactions)\s*:?\s*([\d.,]+\s*[KMพันหมื่นแสนล้าน]*)/i);
+      if (summary) counts.push(thaiNum(summary[1]));
+      const reactions = counts.length ? Math.max(...counts) : 0;
+      // shares: "N shares" / "แชร์ N ครั้ง" / "N การแชร์" (ไม่นับ "ครั้ง" ลอย ๆ)
+      const sm =
+        rootText.match(/([\d.,]+\s*[KMพัน]*)\s*(?:shares?|การแชร์)/i) || rootText.match(/แชร์\s*([\d.,]+\s*[KMพัน]*)\s*ครั้ง/i);
+      const shares = sm ? thaiNum(sm[1]) : 0;
+      return { reactions: reactions || 0, shares: shares || 0, labels };
     });
   } catch {
-    return { reactions: 0, shares: 0 };
+    return { reactions: 0, shares: 0, labels: [] };
   }
 }
 
@@ -439,9 +452,11 @@ export async function scrapeCommentsAndPhones(
   // นับจากคอมเมนต์ที่จับได้ ถ้าจับไม่ได้ใช้ยอด "N ความคิดเห็น" ใต้โพสต์ ไม่งั้น 0 (ไม่เดาจากจำนวนกล่องบนหน้า)
   const diag = evaluated?.diag ?? { articles: n, labels: [], summary: null, commentLinks: 0 };
   const summaryCount = diag.summary ? Number(String(diag.summary).replace(/[^\d]/g, '')) || 0 : 0;
-  const commentCount = commentBlocks.length > 0 ? commentBlocks.length : summaryCount;
-  const { reactions, shares } = await readReactionsAndShares(page);
   const comments = Array.isArray(evaluated?.comments) ? evaluated.comments : [];
+  // นับคอมเมนต์จากรายคนที่ไม่ซ้ำ (กล่องเดียวกันมีหลายชั้นที่ติด aria เดียวกัน เดิมนับซ้ำเป็น 2)
+  const commentCount = comments.length > 0 ? comments.length : commentBlocks.length > 0 ? commentBlocks.length : summaryCount;
+  const { reactions, shares, labels: reactionLabels } = await readReactionsAndShares(page);
+  if (reactionLabels.length) diag.labels = [...diag.labels, ...reactionLabels.map((l) => `react: ${l}`)];
   return { phones, commentCount, postBodyPhones, reactions, shares, comments, diag };
 }
 
