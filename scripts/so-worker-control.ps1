@@ -254,6 +254,8 @@ function Start-WorkerWindow([string]$Title, [string]$WorkDir, [string]$NpmScript
     'set AUTO_POST_DAILY_ENABLED=0'
     'set AUTO_COLLECT_ENABLED=1'
     'set AUTO_COLLECT_EVERY_MINUTES=120'
+    # ตัวโพสต์: รันพร้อมกันได้ 3 บัญชี (Chrome 3 หน้าต่าง) — ตัวเก็บคอมเมนต์ใช้ WORKER_COLLECT_CONCURRENCY แยก
+    $(if ($NpmScript -eq 'worker:post') { 'set WORKER_CONCURRENCY=3' } else { 'rem' })
     "title $Title"
     # worker ปิดตัวเอง (crash / เน็ตหลุด) = เปิดใหม่เองใน 10 วินาที ปิดจริงได้ด้วยสวิตช์ (taskkill ทั้งหน้าต่าง)
     # output ทั้งหมดของ worker เก็บไว้ที่ <script>.out.log ไว้ไล่สาเหตุ
