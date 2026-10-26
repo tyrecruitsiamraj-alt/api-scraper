@@ -3372,6 +3372,30 @@ type JarvisPostRow = {
   snapshot: Record<string, unknown> | null;
 };
 
+/**
+ * บัญชีที่จะโพสต์ใบนี้: ถ้า Jarvis ส่ง job_snapshot.account_id มา ใช้บัญชีนั้น (ต้องผูกทุกกลุ่มที่เลือก)
+ * ไม่งั้นเลือกบัญชีที่ผูกกลุ่มให้เอง
+ */
+async function resolvePostAccount(groupIds: string[], requestedAccountId: string | null) {
+  if (!requestedAccountId) return { account: await pickPostAccount(groupIds), issue: null as string | null };
+  const rows = await q<{ id: string; label: string; worker_online: boolean; group_ids: string[]; paused: boolean }>(
+    `SELECT u.id, COALESCE(NULLIF(TRIM(u.name), ''), u.env_key, u.id) AS label,
+            EXISTS (SELECT 1 FROM ${AP}.workers w
+                     WHERE w.name=u.preferred_worker AND w.last_seen > now() - interval '2 minutes') AS worker_online,
+            COALESCE(u.group_ids::jsonb, '[]'::jsonb) AS group_ids,
+            (u.paused_until IS NOT NULL AND u.paused_until > now()) AS paused
+       FROM ${AP}.users u WHERE u.id = $1`,
+    [requestedAccountId],
+  );
+  const account = rows[0];
+  if (!account) return { account: null, issue: 'บัญชี Facebook ที่เลือกใน Jarvis ไม่มีในระบบ' };
+  if (account.paused) return { account, issue: `บัญชี ${account.label} ถูกพักอยู่` };
+  const owned = new Set((account.group_ids ?? []).map(String));
+  const missing = groupIds.filter((id) => !owned.has(id));
+  if (missing.length) return { account, issue: `บัญชี ${account.label} ยังไม่ได้ผูก ${missing.length} กลุ่มที่เลือก` };
+  return { account, issue: null };
+}
+
 async function pickPostAccount(groupIds: string[]) {
   if (!groupIds.length) return null;
   const rows = await q<{ id: string; label: string; worker_online: boolean; group_ids: string[] }>(
@@ -3423,8 +3447,10 @@ export async function listJarvisPostOrders(): Promise<JarvisPostOrder[]> {
     const issues = postCaptionIssues(caption);
     if (postMode !== 'caption_only') issues.push(`ชนิด "${postModeLabel(postMode)}" ยังต้องรอระบบแนบรูป`);
     if (!groupIds.length) issues.push('ยังไม่ได้เลือกกลุ่มใน Jarvis');
-    const account = await pickPostAccount(groupIds);
-    if (groupIds.length && !account) issues.push('ไม่มีบัญชี Facebook ที่ผูกกับกลุ่มนี้');
+    const requestedAccountId = typeof s.account_id === 'string' && s.account_id.trim() ? s.account_id.trim() : null;
+    const { account, issue: accountIssue } = await resolvePostAccount(groupIds, requestedAccountId);
+    if (accountIssue) issues.push(accountIssue);
+    else if (groupIds.length && !account) issues.push('ไม่มีบัญชี Facebook ที่ผูกกับกลุ่มนี้');
     // รวมรอบโพสต์ซ้ำ (assignment jv-…-rN) ด้วย
     const queue = await q<{ status: string; created_at: string }>(
       `SELECT status, created_at FROM ${AP}.post_run_queue

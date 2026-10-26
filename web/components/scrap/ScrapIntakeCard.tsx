@@ -65,9 +65,15 @@ function ConnectorSelect({ id, connectors, defaultValue }: { id: string; connect
   );
 }
 
+/** ค่าเริ่มต้นของช่องบัญชีค้นหา: บัญชีที่เลือกใน Jarvis (ถ้าพร้อมใช้) ไม่งั้นบัญชีแรกที่พร้อม */
+function pickDefaultConnector(item: ScrapIntakeItem, connectors: ScrapConnectorChoice[]): string {
+  const requested = item.requestedConnectorIds.find((id) => connectors.some((c) => c.id === id && c.available));
+  return requested ?? connectors.find((c) => c.available)?.id ?? '';
+}
+
 function ScrapeQuickRunForm({ item, connectors }: { item: ScrapIntakeItem; connectors: ScrapConnectorChoice[] }) {
   const f = item.requestFields ?? {};
-  const defaultConnector = connectors.find((c) => c.available)?.id ?? '';
+  const defaultConnector = pickDefaultConnector(item, connectors);
   const canRun = Boolean(defaultConnector);
   return (
     <form action={startSoRecruitScrapeAction} className="flex flex-col gap-2" data-pause-refresh="1">
@@ -168,7 +174,7 @@ function ScrapeIntakeForm({ item, connectors }: { item: ScrapIntakeItem; connect
         <ConnectorSelect
           id={`connector-${item.id}`}
           connectors={connectors}
-          defaultValue={connectors.find((c) => c.available)?.id ?? ''}
+          defaultValue={pickDefaultConnector(item, connectors)}
         />
         <Button disabled={!connectors.some((c) => c.available)}>เริ่มค้นหา</Button>
       </div>

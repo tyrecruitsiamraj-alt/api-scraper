@@ -64,6 +64,8 @@ export type ScrapIntakeItem = {
   requestFields: Record<string, string>;
   /** เนื้องานที่ระบบจะใช้วางแผนค้น (แคปชั่นใบเดียวกัน + ช่องข้อมูล) */
   searchDescription: string;
+  /** บัญชีค้นหาที่พนักงานเลือกใน Jarvis (job_snapshot.scrape_connector_ids) — ใช้เป็นค่าเริ่มต้นของช่องเลือก */
+  requestedConnectorIds: string[];
 };
 
 export async function listScrapConnectorChoices(): Promise<ScrapConnectorChoice[]> {
@@ -124,6 +126,9 @@ export async function listJarvisScrapRequests(): Promise<ScrapIntakeItem[]> {
         checklist,
         requestFields,
         searchDescription: jobDescriptionFromJarvis({ caption: captions.get(request.request_no) ?? '', snapshot: js }),
+        requestedConnectorIds: (Array.isArray(js.scrape_connector_ids) ? js.scrape_connector_ids : [js.scrape_connector_id])
+          .map((v) => String(v ?? '').trim())
+          .filter(Boolean),
       };
     })
     .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
