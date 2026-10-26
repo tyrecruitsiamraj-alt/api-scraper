@@ -383,6 +383,17 @@ async function upsertGroupByFbId(fbGroupId, name = null, province = null) {
   return rows[0];
 }
 
+/** worker อ่านชื่อกลุ่มจากหน้า Facebook แล้วบันทึก (เดิมเป็น "Group <เลขกลุ่ม>") — คืน true ถ้าเปลี่ยน */
+async function saveGroupName(fbGroupId, name) {
+  const clean = String(name || '').trim().slice(0, 150);
+  if (!clean) return false;
+  const { rowCount } = await query(
+    `UPDATE groups SET name = $2 WHERE fb_group_id = $1 AND name IS DISTINCT FROM $2`,
+    [String(fbGroupId), clean]
+  );
+  return rowCount > 0;
+}
+
 async function updateGroup(id, data) {
   await ensureGroupsDepartmentColumn();
   const positions = data.job_positions !== undefined ? JSON.stringify(normalizeStringArray(data.job_positions)) : null;
@@ -2612,6 +2623,7 @@ async function pingDb() {
 }
 
 module.exports = {
+  saveGroupName,
   query,
   getPool,
   pingDb,
