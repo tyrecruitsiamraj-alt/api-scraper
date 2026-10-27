@@ -91,12 +91,19 @@ export function NewUnifiedConnectorForm({ workers = [] }: { workers?: string[] }
             {platform && (
               <>
               <FieldGroup className="grid gap-4 md:grid-cols-2">
-                {!facebook && (
-                  <Field className="md:col-span-2">
-                    <FieldLabel htmlFor="new-connector-label">ชื่อเรียก</FieldLabel>
-                    <Input id="new-connector-label" name="label" required placeholder="JobBKK - ทีม HR 1" />
-                  </Field>
-                )}
+                <Field className="md:col-span-2">
+                  <FieldLabel htmlFor="new-connector-label">{facebook ? 'ชื่อบัญชี Facebook' : 'ชื่อเรียก'}</FieldLabel>
+                  <Input
+                    key={facebook ? 'fb-label' : 'label'}
+                    id="new-connector-label"
+                    name="label"
+                    required
+                    placeholder={facebook ? 'เช่น Tyni Aiit' : 'JobBKK - ทีม HR 1'}
+                  />
+                  {facebook && (
+                    <FieldDescription>พิมพ์ให้ตรงกับชื่อบนหน้าโปรไฟล์ ระบบใช้ชื่อนี้หาลิงก์โพสต์ของบัญชีนี้ในกลุ่ม</FieldDescription>
+                  )}
+                </Field>
                 <Field>
                   <FieldLabel htmlFor="new-connector-username">{facebook ? 'อีเมลหรือเบอร์ที่ใช้เข้าสู่ระบบ' : 'ชื่อผู้ใช้'}</FieldLabel>
                   <Input id="new-connector-username" name="username" required autoComplete="off" placeholder={facebook ? 'email@example.com หรือ 08x...' : 'ชื่อผู้ใช้ของบัญชี'} />
