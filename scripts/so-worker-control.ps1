@@ -234,6 +234,10 @@ function Start-WorkerWindow([string]$Title, [string]$WorkDir, [string]$NpmScript
     throw "ไม่พบโฟลเดอร์งาน: $WorkDir"
   }
   $npm = Resolve-NpmCmd
+  # ใส่โฟลเดอร์ของ node ไว้หน้า PATH ใน .cmd เอง — หน้าต่างที่เปิดผ่าน start /MIN บางครั้งไม่มี node ใน PATH
+  # (npm run จะเรียก "node scripts/..." แล้วขึ้น 'node' is not recognized)
+  $nodeDir = Split-Path -Parent (Resolve-NodeExe)
+  $npmDir = Split-Path -Parent $npm
   $sha = Get-WorkerBuildSha
   $logPath = Join-Path $LogDir ($(if ($Group -eq 'Scrape') { 'scrape-pool.log' } else { 'autopost.log' }))
   $outLogPath = Join-Path $LogDir ("$($NpmScript -replace '[^A-Za-z0-9_-]', '-').out.log")
@@ -249,6 +253,7 @@ function Start-WorkerWindow([string]$Title, [string]$WorkDir, [string]$NpmScript
     '@echo off'
     'chcp 65001 >nul'
     "cd /d `"$WorkDir`""
+    "set `"PATH=$nodeDir;$npmDir;%PATH%`""
     "set WORKER_BUILD_SHA=$sha"
     'set WORKER_CAPABILITIES=post,preflight'
     'set AUTO_POST_DAILY_ENABLED=0'
@@ -265,7 +270,8 @@ function Start-WorkerWindow([string]$Title, [string]$WorkDir, [string]$NpmScript
     # ต้องมี call: npm คือ npm.cmd ถ้าเรียกตรง ๆ จาก .cmd จะไม่กลับมาทำบรรทัดถัดไป (ลูปเปิดใหม่จะไม่ทำงาน)
     "call `"$npm`" run $NpmScript >> `"$outLogPath`" 2>&1"
     "echo [%date% %time%] exited errorlevel=%errorlevel% - restart in 10s>> `"$logPath`""
-    'timeout /t 10 /nobreak >nul'
+    # ใช้ ping รอแทน timeout: timeout ต้องมีคีย์บอร์ด ในหน้าต่างย่อมันจบทันที ทำให้เปิดซ้ำรัว ๆ
+    'ping -n 11 127.0.0.1 >nul'
     'goto loop'
   ) -join "`r`n"
   [System.IO.File]::WriteAllText($launcher, $content, [System.Text.Encoding]::ASCII)
