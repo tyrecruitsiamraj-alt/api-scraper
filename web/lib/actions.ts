@@ -978,8 +978,9 @@ export async function setAccountWorkerAction(formData: FormData) {
 export async function createConnectorAction(formData: FormData) {
   await requireSession();
   const platform = String(formData.get('platform') ?? '').trim();
-  const label = String(formData.get('label') ?? '').trim();
   const username = String(formData.get('username') ?? '').trim();
+  // บัญชี Facebook ไม่มีช่องชื่อเรียกแล้ว — ใช้อีเมล/เบอร์ที่ล็อกอินเป็นชื่อแทน (แก้ทีหลังได้ในปุ่มแก้ไข)
+  const label = String(formData.get('label') ?? '').trim() || (platform === 'facebook' ? username : '');
   const password = String(formData.get('password') ?? '');
   const requestedScrapeLimit = Number.parseInt(String(formData.get('scrapeLimit') ?? '15'), 10);
   const requestedDailyCap = Number.parseInt(String(formData.get('dailyCap') ?? (platform === 'facebook' ? '15' : '200')), 10);

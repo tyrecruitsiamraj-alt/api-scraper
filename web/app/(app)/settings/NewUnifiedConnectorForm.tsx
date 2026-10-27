@@ -13,13 +13,10 @@ import {
   FieldDescription,
   FieldGroup,
   FieldLabel,
-  FieldLegend,
   FieldSeparator,
-  FieldSet,
-  FieldTitle,
 } from '@/components/ui/field';
 import { Input } from '@/components/ui/input';
-import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
+import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select';
 import { Spinner } from '@/components/ui/spinner';
 
 const PLATFORMS = [
@@ -30,7 +27,8 @@ const PLATFORMS = [
 
 export function NewUnifiedConnectorForm({ workers = [] }: { workers?: string[] }) {
   const [open, setOpen] = useState(false);
-  const [platform, setPlatform] = useState('jobbkk');
+  // ยังไม่เลือก = '' — ต้องเลือกประเภทก่อน ช่องอื่นถึงจะขึ้น
+  const [platform, setPlatform] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
   const facebook = platform === 'facebook';
@@ -51,7 +49,7 @@ export function NewUnifiedConnectorForm({ workers = [] }: { workers?: string[] }
         setError('');
         try {
           await createConnectorAction(fd);
-          setPlatform('jobbkk');
+          setPlatform('');
           setOpen(false);
         } catch (e) {
           setError(e instanceof Error ? e.message : 'เพิ่มบัญชีไม่สำเร็จ');
@@ -73,69 +71,64 @@ export function NewUnifiedConnectorForm({ workers = [] }: { workers?: string[] }
 
         <CardContent>
           <FieldGroup>
-            <FieldSet>
-              <FieldLegend variant="label">ประเภทบัญชี</FieldLegend>
-              <RadioGroup
+            <Field>
+              <FieldLabel htmlFor="new-connector-platform">ประเภทบัญชี</FieldLabel>
+              <NativeSelect
+                id="new-connector-platform"
+                name="platform"
+                required
                 value={platform}
-                onValueChange={(value) => { setPlatform(value); setError(''); }}
-                className="grid gap-2 sm:grid-cols-3"
+                onChange={(e) => { setPlatform(e.target.value); setError(''); }}
+                className="w-full"
               >
+                <NativeSelectOption value="" disabled>เลือกประเภทบัญชี</NativeSelectOption>
                 {PLATFORMS.map((p) => (
-                  <FieldLabel key={p.value} htmlFor={`new-connector-${p.value}`}>
-                    <Field orientation="horizontal">
-                      <FieldContent>
-                        <FieldTitle>{p.label}</FieldTitle>
-                        <FieldDescription>{p.detail}</FieldDescription>
-                      </FieldContent>
-                      <RadioGroupItem value={p.value} id={`new-connector-${p.value}`} />
-                    </Field>
-                  </FieldLabel>
+                  <NativeSelectOption key={p.value} value={p.value}>{`${p.label} · ${p.detail}`}</NativeSelectOption>
                 ))}
-              </RadioGroup>
-            </FieldSet>
-            <input type="hidden" name="platform" value={platform} />
+              </NativeSelect>
+            </Field>
 
-            <FieldGroup className="grid gap-4 md:grid-cols-2">
-              <Field className="md:col-span-2">
-                <FieldLabel htmlFor="new-connector-label">ชื่อเรียก</FieldLabel>
-                <Input id="new-connector-label" name="label" required placeholder={facebook ? 'Facebook - ทีมสรรหา 1' : 'JobBKK - ทีม HR 1'} />
-              </Field>
-              <Field>
-                <FieldLabel htmlFor="new-connector-username">{facebook ? 'อีเมลหรือเบอร์ที่ใช้เข้าสู่ระบบ' : 'ชื่อผู้ใช้'}</FieldLabel>
-                <Input id="new-connector-username" name="username" required autoComplete="off" placeholder={facebook ? 'email@example.com หรือ 08x...' : 'ชื่อผู้ใช้ของบัญชี'} />
-              </Field>
-              <Field>
-                <FieldLabel htmlFor="new-connector-password">รหัสผ่าน</FieldLabel>
-                <Input id="new-connector-password" name="password" type="password" required autoComplete="new-password" />
-              </Field>
-
-              {facebook && (
-                <>
-                  <Field>
-                    <FieldLabel htmlFor="new-connector-poster">ชื่อที่ใช้โพสต์</FieldLabel>
-                    <Input id="new-connector-poster" name="posterName" placeholder="เว้นว่างไว้จะใช้ชื่อเรียก" />
-                  </Field>
-                  <Field>
-                    <FieldLabel htmlFor="new-connector-phone">เบอร์ของบัญชีเอง</FieldLabel>
-                    <Input id="new-connector-phone" name="contactPhone" placeholder="ใช้แยกเบอร์เราออกจากรายชื่อผู้สนใจ" />
-                  </Field>
+            {platform && (
+              <>
+              <FieldGroup className="grid gap-4 md:grid-cols-2">
+                {!facebook && (
                   <Field className="md:col-span-2">
-                    <FieldLabel htmlFor="new-connector-worker">เครื่องประจำของบัญชี</FieldLabel>
-                    <Input
-                      id="new-connector-worker"
-                      name="preferredWorker"
-                      list="facebook-worker-names"
-                      placeholder="ชื่อเครื่อง เช่น SONB-RM009"
-                      className="font-mono"
-                    />
-                    <datalist id="facebook-worker-names">
-                      {workers.map((worker) => <option key={worker} value={worker} />)}
-                    </datalist>
-                    <FieldDescription>
-                      ใช้เครื่องเดิมกับบัญชีนี้ทุกครั้ง Facebook จะขอยืนยันตัวตนน้อยลง ถ้ายังไม่รู้ชื่อเครื่องเว้นว่างไว้ก่อนได้
-                    </FieldDescription>
+                    <FieldLabel htmlFor="new-connector-label">ชื่อเรียก</FieldLabel>
+                    <Input id="new-connector-label" name="label" required placeholder="JobBKK - ทีม HR 1" />
                   </Field>
-                </>
+                )}
+                <Field>
+                  <FieldLabel htmlFor="new-connector-username">{facebook ? 'อีเมลหรือเบอร์ที่ใช้เข้าสู่ระบบ' : 'ชื่อผู้ใช้'}</FieldLabel>
+                  <Input id="new-connector-username" name="username" required autoComplete="off" placeholder={facebook ? 'email@example.com หรือ 08x...' : 'ชื่อผู้ใช้ของบัญชี'} />
+                </Field>
+                <Field>
+                  <FieldLabel htmlFor="new-connector-password">รหัสผ่าน</FieldLabel>
+                  <Input id="new-connector-password" name="password" type="password" required autoComplete="new-password" />
+                </Field>
+
+                {facebook && (
+                  <>
+                    <Field className="md:col-span-2">
+                      <FieldLabel htmlFor="new-connector-phone">เบอร์ของบัญชีเอง</FieldLabel>
+                      <Input id="new-connector-phone" name="contactPhone" placeholder="ใช้แยกเบอร์เราออกจากรายชื่อผู้สนใจ" />
+                    </Field>
+                    <Field className="md:col-span-2">
+                      <FieldLabel htmlFor="new-connector-worker">เครื่องประจำของบัญชี</FieldLabel>
+                      <Input
+                        id="new-connector-worker"
+                        name="preferredWorker"
+                        list="facebook-worker-names"
+                        placeholder="ชื่อเครื่อง เช่น SONB-RM009"
+                        className="font-mono"
+                      />
+                      <datalist id="facebook-worker-names">
+                        {workers.map((worker) => <option key={worker} value={worker} />)}
+                      </datalist>
+                      <FieldDescription>
+                        ใช้เครื่องเดิมกับบัญชีนี้ทุกครั้ง Facebook จะขอยืนยันตัวตนน้อยลง ถ้ายังไม่รู้ชื่อเครื่องเว้นว่างไว้ก่อนได้
+                      </FieldDescription>
+                    </Field>
+                  </>
               )}
             </FieldGroup>
 
@@ -175,6 +168,8 @@ export function NewUnifiedConnectorForm({ workers = [] }: { workers?: string[] }
                 </AlertDescription>
               </Alert>
             )}
+            </>
+            )}
             {error && (
               <Alert variant="destructive">
                 <AlertCircleIcon />
@@ -185,7 +180,7 @@ export function NewUnifiedConnectorForm({ workers = [] }: { workers?: string[] }
         </CardContent>
 
         <CardFooter className="flex-wrap gap-2">
-          <Button type="submit" disabled={submitting}>
+          <Button type="submit" disabled={submitting || !platform}>
             {submitting && <Spinner data-icon="inline-start" />}
             {submitting ? 'กำลังบันทึก' : 'เพิ่มบัญชี'}
           </Button>
