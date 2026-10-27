@@ -1055,6 +1055,7 @@ export async function editConnectorAction(formData: FormData) {
   } else {
     await updateScraperConnector(id, { label, username, passwordEnc: password ? encryptSecret(password) : null });
   }
+  revalidatePath('/settings');
   revalidatePath('/settings/connectors');
 }
 
@@ -1063,6 +1064,7 @@ export async function deleteFacebookAccountAction(formData: FormData) {
   await requireSession();
   const id = String(formData.get('id') ?? '').trim();
   if (id) await deleteFacebookAccount(id);
+  revalidatePath('/settings');
   revalidatePath('/settings/connectors');
 }
 

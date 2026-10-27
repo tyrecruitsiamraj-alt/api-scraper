@@ -27,6 +27,7 @@ export function ConnectorEditButton({
   label,
   username,
   skipWarmup = false,
+  hasPassword = false,
 }: {
   id: string;
   platform: string;
@@ -34,6 +35,8 @@ export function ConnectorEditButton({
   username: string;
   /** Facebook: บัญชีที่ใช้งานมานานแล้ว ไม่ต้องวอร์ม */
   skipWarmup?: boolean;
+  /** มีรหัสผ่านบันทึกไว้แล้ว */
+  hasPassword?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const isFb = platform === 'facebook';
@@ -63,8 +66,16 @@ export function ConnectorEditButton({
             </Field>
             <Field>
               <FieldLabel htmlFor={`${fieldId}-password`}>รหัสผ่าน</FieldLabel>
-              <Input id={`${fieldId}-password`} name="password" type="password" />
-              <FieldDescription>เว้นว่างไว้ถ้าจะใช้รหัสเดิม</FieldDescription>
+              <Input
+                id={`${fieldId}-password`}
+                name="password"
+                type="password"
+                autoComplete="new-password"
+                placeholder={hasPassword ? '••••••••' : undefined}
+              />
+              <FieldDescription>
+                {hasPassword ? 'บันทึกรหัสผ่านไว้แล้ว ระบบไม่โชว์รหัสเดิม เว้นว่างไว้ถ้าจะใช้รหัสเดิม' : 'ยังไม่มีรหัสผ่าน'}
+              </FieldDescription>
             </Field>
             {isFb && (
               <Field orientation="horizontal">

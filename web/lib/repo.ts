@@ -534,6 +534,8 @@ export type UnifiedConnectorRow = {
   preferred_worker: string | null;
   /** บัญชี Facebook ที่ใช้งานมานานแล้ว — ไม่ต้องจำกัดโพสต์ช่วงวอร์มบัญชีใหม่ */
   skip_warmup: boolean | null;
+  /** มีรหัสผ่านบันทึกไว้แล้ว (ไม่ส่งตัวรหัสออกไป) */
+  has_password: boolean;
 };
 
 export async function listAllConnectors() {
@@ -543,7 +545,8 @@ export async function listAllConnectors() {
     `SELECT platform || ':' || id::text AS key, platform, label, username,
             scrape_limit, daily_cap, enabled, cooldown_until, last_login_at, created_at,
             NULL::timestamptz AS paused_until, NULL::text AS pause_reason,
-            NULL::integer AS used_today, NULL::text AS preferred_worker, NULL::boolean AS skip_warmup
+            NULL::integer AS used_today, NULL::text AS preferred_worker, NULL::boolean AS skip_warmup,
+            (NULLIF(password_enc, '') IS NOT NULL) AS has_password
        FROM connectors`,
   );
 
@@ -564,7 +567,8 @@ export async function listAllConnectors() {
                        = (now() AT TIME ZONE 'Asia/Bangkok')::date
               ), 0) AS used_today,
               NULLIF(to_jsonb(u)->>'preferred_worker', '') AS preferred_worker,
-              COALESCE((to_jsonb(u)->>'skip_warmup')::boolean, false) AS skip_warmup
+              COALESCE((to_jsonb(u)->>'skip_warmup')::boolean, false) AS skip_warmup,
+              (NULLIF(u.password, '') IS NOT NULL) AS has_password
          FROM ${AP}.users u`,
     );
   } catch {
@@ -581,7 +585,8 @@ export async function listAllConnectors() {
                 NULL::timestamptz AS paused_until, NULL::text AS pause_reason,
                 0::integer AS used_today,
                 NULLIF(to_jsonb(u)->>'preferred_worker', '') AS preferred_worker,
-                false AS skip_warmup
+                false AS skip_warmup,
+                (NULLIF(u.password, '') IS NOT NULL) AS has_password
            FROM ${AP}.users u`,
       );
     } catch {
