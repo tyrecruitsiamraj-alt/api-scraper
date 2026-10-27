@@ -164,10 +164,19 @@ async function readReactionsAndShares(page: Page): Promise<{ reactions: number; 
       const COMMENT_SCOPE =
         '[aria-label^="ความคิดเห็นจาก"], [aria-label^="ความคิดเห็นโดย"], [aria-label^="Comment by" i], [aria-label^="Comment from" i]';
       // อ่านเฉพาะในโพสต์ (ไม่เอาไลก์ของคอมเมนต์ หรือของโพสต์อื่นบนหน้า)
-      const root = (document.querySelector('[role="article"]') as HTMLElement | null) || document.body;
-      const REACT_WORD = /ความรู้สึก|ถูกใจ|reaction|likes?\b/i;
+      // ลิงก์โพสต์เปิดเป็นหน้าต่างซ้อนบนฟีดกลุ่ม — กล่องโพสต์แรกของหน้าอาจเป็นโพสต์อื่นในฟีดด้านหลัง
+      // จึงอ่านในหน้าต่างโพสต์ก่อน (dialog ที่มีช่องเขียนความคิดเห็น) ถ้าไม่มีค่อยใช้กล่องโพสต์แรก
+      const postDialog = Array.from(document.querySelectorAll('[role="dialog"]')).find((d) =>
+        d.querySelector('[aria-label*="ความคิดเห็น"], [aria-label*="comment" i]')
+      ) as HTMLElement | undefined;
+      const root =
+        postDialog ||
+        (document.querySelector('[role="article"]') as HTMLElement | null) ||
+        document.body;
+      const REACT_WORD = /ความรู้สึก|ถูกใจ|รักเลย|ห่วงใย|ฮ่า|ว้าว|เศร้า|โกรธ|reaction|likes?\b|love|care|haha|wow|sad|angry/i;
       const labels: string[] = [];
       const counts: number[] = [];
+      const byType = new Map<string, number>();
       root.querySelectorAll('[aria-label]').forEach((el) => {
         if (el.closest(COMMENT_SCOPE)) return;
         const lab = (el.getAttribute('aria-label') || '').trim();
@@ -177,8 +186,12 @@ async function readReactionsAndShares(page: Page): Promise<{ reactions: number; 
           labels.push(lab.split(/\s+/).slice(0, 12).map((w) => (/\d|ความรู้สึก|ถูกใจ|คน|อื่น|ทั้งหมด|reaction|like|other|and|และ|:/i.test(w) ? w : '·')).join(' '));
         }
         // ปุ่ม "ถูกใจ" เฉย ๆ ไม่มีตัวเลข — นับเฉพาะป้ายที่มีจำนวน
-        if (/\d/.test(lab)) counts.push(thaiNum(lab));
+        // Facebook แยกจำนวนตามชนิด เช่น "ถูกใจ: 3 คน", "รักเลย: 3 คน" → ต้องรวมทุกชนิด (ชนิดละครั้ง)
+        const typed = lab.match(/^([^:]{1,20}):\s*([\d.,]+\s*[KMพันหมื่นแสนล้าน]*)\s*(?:คน|people|person)?$/i);
+        if (typed) byType.set(typed[1].trim().toLowerCase(), thaiNum(typed[2]));
+        else if (/\d/.test(lab)) counts.push(thaiNum(lab));
       });
+      if (byType.size) counts.push([...byType.values()].reduce((sum, n) => sum + n, 0));
       // ข้อความสรุปใต้โพสต์ เช่น "ความรู้สึกทั้งหมด:\n6" / "All reactions:\n6"
       const rootText = root.innerText || '';
       const summary = rootText.match(/(?:ความรู้สึกทั้งหมด|All reactions)\s*:?\s*([\d.,]+\s*[KMพันหมื่นแสนล้าน]*)/i);
@@ -305,7 +318,12 @@ export async function scrapeCommentsAndPhones(
         out.push(text);
       };
 
-      const rootArticle = document.querySelector('[role="article"]');
+      // อ่านเฉพาะในหน้าต่างโพสต์ (ถ้ามี) ไม่ให้ไปเก็บคอมเมนต์ของโพสต์อื่นในฟีดด้านหลัง
+      const postDialog = Array.from(document.querySelectorAll('[role="dialog"]')).find((d) =>
+        d.querySelector('[aria-label*="ความคิดเห็น"], [aria-label*="comment" i]')
+      );
+      const scope: ParentNode = postDialog || document;
+      const rootArticle = scope.querySelector('[role="article"]');
       let captionExclusionText = '';
       if (rootArticle) {
         const storyMsgs = Array.from(rootArticle.querySelectorAll('[data-ad-preview="message"], [data-testid="post_message"]')).filter(
@@ -362,7 +380,7 @@ export async function scrapeCommentsAndPhones(
         !!el.closest('[role="navigation"], [role="banner"], [aria-label*="การแจ้งเตือน"], [aria-label*="Notifications" i]');
       for (const sel of primarySelectors) {
         try {
-          document.querySelectorAll(sel).forEach((el) => {
+          scope.querySelectorAll(sel).forEach((el) => {
             const html = el as HTMLElement;
             if (!COMMENT_ARIA.test((html.getAttribute('aria-label') || '').trim()) || inNotifications(html)) return;
             pushBlock(html.innerText);
