@@ -13,6 +13,7 @@ import {
   safePageWait,
   scrapeCommentsAndPhones,
   replyToComment,
+  findMyPostLink,
 } from '../src/helpers';
 
 /* eslint-disable @typescript-eslint/no-var-requires */
@@ -26,7 +27,9 @@ type CollectPlan = {
   user_id: string;
   posts: Array<{
     post_log_id: string;
+    /** ว่าง = ตอนโพสต์หาลิงก์ไม่เจอ ให้หาใหม่จาก group_id */
     post_link: string;
+    group_id?: string;
     job_id?: string;
     job_title?: string;
     owner?: string;
@@ -45,6 +48,19 @@ function readPlan(): CollectPlan {
   }
   const raw = fs.readFileSync(p, 'utf8');
   return JSON.parse(raw) as CollectPlan;
+}
+
+async function patchFoundLink(postLogId: string, body: { post_link: string; post_status: string }): Promise<void> {
+  const base = (process.env.RUN_LOG_API_URL || 'http://127.0.0.1:3000').replace(/\/$/, '');
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  if (process.env.COLLECT_PATCH_TOKEN) headers['x-collect-token'] = process.env.COLLECT_PATCH_TOKEN;
+  if (process.env.COLLECT_WORKER_TOKEN) headers['x-worker-token'] = process.env.COLLECT_WORKER_TOKEN;
+  const res = await fetch(`${base}/api/post-logs/${encodeURIComponent(postLogId)}/found-link`, {
+    method: 'PATCH',
+    headers,
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) throw new Error(`found-link ${res.status}: ${await res.text()}`);
 }
 
 async function patchCollectResult(
@@ -137,6 +153,30 @@ test('collectComments', async ({ page }) => {
           userLabel: user.name || user.id,
           sessionKey: String(user.env_key || user.id || user.email || 'default'),
         });
+      }
+      if (!item.post_link) {
+        if (!item.group_id) continue;
+        const knownLinks = plan.posts.filter((p) => p.post_link && p.group_id === item.group_id).map((p) => p.post_link);
+        const found = await findMyPostLink(active, item.group_id, { jobTitle: item.job_title, knownLinks });
+        if (!found) {
+          await runLog({
+            level: 'info',
+            message: `[${idx}/${plan.posts.length}] ยังหาลิงก์โพสต์ในกลุ่ม ${item.group_name || item.group_id} ไม่เจอ (อาจยังรออนุมัติหรือถูกลบ) ข้ามไปก่อน`,
+            user_id: user.id,
+            meta: { post_log_id: item.post_log_id, group_id: item.group_id },
+          });
+          continue;
+        }
+        await patchFoundLink(item.post_log_id, { post_link: found.link, post_status: found.status });
+        await runLog({
+          level: 'success',
+          message: `[${idx}/${plan.posts.length}] เจอลิงก์โพสต์ที่ขาดแล้ว (${found.status}) ${found.link}`,
+          user_id: user.id,
+          meta: { post_log_id: item.post_log_id, group_id: item.group_id, post_link: found.link },
+        });
+        item.post_link = found.link;
+        // โพสต์ยังรออนุมัติ คนอื่นยังไม่เห็น ไม่มีคอมเมนต์ให้เก็บ
+        if (found.status !== 'อนุมัติเเล้ว') continue;
       }
       const ownerNames = [user.poster_name || '', user.name || '', item.owner || '', item.company || '', item.poster_name || '']
         .map((x) => String(x || '').trim())
@@ -250,6 +290,7 @@ test('collectComments', async ({ page }) => {
   }
 
   for (const item of plan.posts) {
+    if (!item.post_link) continue; // ยังหาลิงก์ไม่เจอ ไม่มีอะไรให้บันทึก
     const st = pendingByPost.get(item.post_log_id) || { commentCount: 0, phones: [], reactions: 0, shares: 0, item };
     const phonesFinal = st.phones || [];
     const phoneStr = phonesFinal.length ? phonesFinal.join(', ').slice(0, CUSTOMER_PHONE_MAX_LEN) : '';

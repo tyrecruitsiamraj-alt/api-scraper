@@ -86,3 +86,18 @@ test('a group skipped for membership is not_member, not failed', () => {
   assert.equal(counts.not_member, 1);
   assert.equal(postTaskStage('completed', counts).state, 'done');
 });
+
+test('a join warn without "ยังไม่ได้เป็นสมาชิก" is failed with its reason', () => {
+  const { groups, counts } = buildPostTaskGroups({
+    plan: [{ group_id: 'g1' }],
+    runStatus: 'completed',
+    attempts: [
+      { group_id: 'g1', level: 'info', kind: 'group_start', at: at(1) },
+      { group_id: 'g1', level: 'warn', kind: 'join', message: 'ไม่เจอช่องเขียนโพสต์และปุ่มเข้าร่วมกลุ่ม (กลุ่ม g1)', at: at(2) },
+    ],
+  });
+  assert.equal(groups[0].status, 'failed');
+  assert.match(groups[0].error, /ไม่เจอช่องเขียนโพสต์/);
+  assert.equal(counts.not_member, 0);
+  assert.equal(counts.failed, 1);
+});

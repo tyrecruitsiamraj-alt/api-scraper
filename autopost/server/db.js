@@ -1257,14 +1257,29 @@ async function getPostLogsForCommentCollect(opts = {}) {
     LEFT JOIN users u ON u.id = pl.user_id
     WHERE (pl.created_at AT TIME ZONE 'Asia/Bangkok')::date BETWEEN $1::date AND $2::date
       AND ${userMatchSql}
-      AND pl.post_link IS NOT NULL
-      AND TRIM(pl.post_link) <> ''
+      AND (
+        (pl.post_link IS NOT NULL AND TRIM(pl.post_link) <> '')
+        OR (
+          $5::boolean
+          AND NULLIF(TRIM(COALESCE(pl.group_id, '')), '') IS NOT NULL
+          AND pl.created_at > NOW() - INTERVAL '7 days'
+          AND NOT EXISTS (
+            SELECT 1 FROM post_logs o
+            WHERE o.id <> pl.id
+              AND o.user_id = pl.user_id
+              AND o.group_id = pl.group_id
+              AND COALESCE(o.job_id, '') = COALESCE(pl.job_id, '')
+              AND o.post_link IS NOT NULL AND TRIM(o.post_link) <> ''
+          )
+        )
+      )
     ORDER BY pl.created_at ASC
     LIMIT $4
   `;
   const [statsRes, { rows }] = await Promise.all([
     query(statsSql, [startStr, endStr, userId]),
-    query(sql, [startStr, endStr, userId, limit]),
+    // include_missing_link: โพสต์ 7 วันล่าสุดที่ยังไม่มีลิงก์ (เช่นรอแอดมินอนุมัติตอนโพสต์) ให้ตัวเก็บคอมเมนต์ไปหาลิงก์ซ้ำ
+    query(sql, [startStr, endStr, userId, limit, opts.include_missing_link === true]),
   ]);
   const s = statsRes.rows[0] || {};
   return {
@@ -1318,6 +1333,20 @@ async function updatePostLogCollectResult(id, commentCount, customerPhone, react
       toInt(shares),
     ],
   );
+}
+
+/** ตัวเก็บคอมเมนต์หาลิงก์โพสต์ที่ขาดเจอ — เขียนทับเฉพาะแถวที่ยังไม่มีลิงก์ */
+async function updatePostLogFoundLink(id, postLink, postStatus) {
+  const link = String(postLink || '').trim();
+  if (!/^https:\/\/www\.facebook\.com\/groups\/[^/]+\/(posts|permalink)\/\d+/.test(link)) {
+    throw new Error('post_link ต้องเป็นลิงก์โพสต์ในกลุ่ม Facebook');
+  }
+  const { rowCount } = await query(
+    `UPDATE post_logs SET post_link = $2, post_status = COALESCE(NULLIF($3, ''), post_status)
+      WHERE id = $1 AND (post_link IS NULL OR TRIM(post_link) = '')`,
+    [String(id), link, String(postStatus || '').trim()],
+  );
+  return rowCount > 0;
 }
 
 /** รายงานโพสต์: JOIN users + assignments (ผู้ทำ) + นับ total + แยกตามวัน/เจ้าของงาน */
@@ -2447,7 +2476,13 @@ async function enqueueRecentCollectJobs({ start_date, end_date, requested_by = '
       continue;
     }
     try {
-      const { rows } = await getPostLogsForCommentCollect({ start_date, end_date, user_id: uid, limit: 2000 });
+      const { rows } = await getPostLogsForCommentCollect({
+        start_date,
+        end_date,
+        user_id: uid,
+        limit: 2000,
+        include_missing_link: true,
+      });
       const ids = (rows || []).map((r) => String(r?.id || '').trim()).filter(Boolean);
       if (ids.length === 0) {
         skipped.push({ user_id: uid, reason: 'no_posts' });
@@ -2688,6 +2723,7 @@ module.exports = {
   createPostLog,
   getPostLogs,
   getPostLogsForCommentCollect,
+  updatePostLogFoundLink,
   getPostLogsByIdsForUser,
   updatePostLogCollectResult,
   ensurePostLogsEngagementColumns,

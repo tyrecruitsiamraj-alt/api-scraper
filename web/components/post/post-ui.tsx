@@ -27,6 +27,14 @@ export const GROUP_STATUS: Record<PostGroupStatus, { label: string; block: strin
   skipped: { label: 'ไม่ได้โพสต์', block: 'border border-dashed border-muted-foreground/40', badge: '' },
 };
 
+/** เหตุผลสั้น ๆ ของกลุ่มที่โพสต์ไม่ได้ ตัด "(กลุ่ม …)" และข้อความหน้ากลุ่มที่ยาวออก */
+export function shortGroupReason(error: string | null | undefined): string {
+  return String(error ?? '')
+    .replace(/\s*\(.*$/, '')
+    .replace(/\s*หน้ากลุ่มเขียนว่า:.*$/, '')
+    .trim();
+}
+
 export function GroupStatusBadge({ status }: { status: PostGroupStatus }) {
   const s = GROUP_STATUS[status];
   return (

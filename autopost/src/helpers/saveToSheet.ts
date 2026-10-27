@@ -385,3 +385,44 @@ export async function saveToSheet(
     console.error('[saveToSheet] บันทึก Sheet ไม่สำเร็จ:', (err as Error).message);
   }
 }
+
+function squash(s: string): string {
+  return String(s || '').replace(/\s+/g, ' ').trim().toLowerCase();
+}
+
+/**
+ * หาลิงก์โพสต์ของเราเองในกลุ่ม ภายหลังวันโพสต์ (ใช้ตอนเก็บคอมเมนต์ กับโพสต์ที่ตอนนั้นหาลิงก์ไม่เจอ)
+ * เปิด my_posted_content แล้ว my_pending_content เลือกโพสต์ที่มีชื่องานตรงกัน และไม่ใช่ลิงก์ที่รู้อยู่แล้ว
+ * ไม่มีชื่องาน จะเลือกให้ก็ต่อเมื่อหน้านั้นมีโพสต์ใหม่ให้เลือกแค่โพสต์เดียว
+ */
+export async function findMyPostLink(
+  page: Page,
+  gID: string,
+  opts: { jobTitle?: string; knownLinks?: string[] } = {}
+): Promise<{ link: string; status: 'อนุมัติเเล้ว' | 'รออนุมัติ' } | null> {
+  const known = new Set((opts.knownLinks || []).map((l) => normalizeFbHref(l).split('?')[0].replace(/\/$/, '')));
+  const title = squash(opts.jobTitle || '');
+  const pages = [
+    { url: `https://www.facebook.com/groups/${gID}/my_posted_content`, status: 'อนุมัติเเล้ว' as const },
+    { url: `https://www.facebook.com/groups/${gID}/my_pending_content`, status: 'รออนุมัติ' as const },
+  ];
+  for (const item of pages) {
+    await ensureNoDialogBlockingNavigation(page);
+    await page.goto(item.url, { waitUntil: 'domcontentloaded', timeout: 60000 });
+    await page.waitForTimeout(MY_CONTENT_WAIT_MS);
+    const articles = page.locator('[role="main"] div[role="article"]');
+    const count = Math.min(await articles.count(), 20);
+    const candidates: Array<{ link: string; matches: boolean }> = [];
+    for (let i = 0; i < count; i++) {
+      const art = articles.nth(i);
+      const link = await findGroupPostPermalinkInArticle(art, gID);
+      if (!link || known.has(link.replace(/\/$/, ''))) continue;
+      if (candidates.some((c) => c.link === link)) continue;
+      const text = squash(await art.innerText().catch(() => ''));
+      candidates.push({ link, matches: Boolean(title) && text.includes(title) });
+    }
+    const hit = title ? candidates.find((c) => c.matches) : candidates.length === 1 ? candidates[0] : undefined;
+    if (hit) return { link: hit.link, status: item.status };
+  }
+  return null;
+}

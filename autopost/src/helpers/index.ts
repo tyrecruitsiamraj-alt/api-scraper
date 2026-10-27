@@ -18,7 +18,7 @@ export { resolveJobImage } from './resolveJobImage';
 export { capturePostFailureArtifacts } from './capturePostFailureArtifacts';
 export { postToGroupWorker } from './postToGroupWorker';
 export type { PostToGroupOptions } from './postToGroup';
-export { saveToSheet } from './saveToSheet';
+export { saveToSheet, findMyPostLink } from './saveToSheet';
 export { runLog } from './runLog';
 export {
   buildDailyPostPlanForUser,

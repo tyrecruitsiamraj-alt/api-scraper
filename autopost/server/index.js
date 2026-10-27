@@ -51,7 +51,7 @@ app.use((req, res, next) => {
   // Worker (Playwright) ส่งลิงก์โพสต์กลับมาที่นี่เมื่อเขียน DB ตรงไม่ได้ — ใช้ POST_WORKER_TOKEN แทน access token
   if (req.method === 'POST' && p === '/api/post-logs' && isValidPostWorkerToken(req)) return next();
   // ตัวเก็บคอมเมนต์ส่งยอดไลก์/คอมเมนต์/แชร์กลับมาที่นี่ด้วย worker token (handler ตรวจ token ซ้ำอีกชั้น)
-  if (req.method === 'PATCH' && /^\/api\/post-logs\/[^/]+\/collect-result$/.test(p) && isValidPostWorkerToken(req)) return next();
+  if (req.method === 'PATCH' && /^\/api\/post-logs\/[^/]+\/(collect-result|found-link)$/.test(p) && isValidPostWorkerToken(req)) return next();
 
   // ?access_token= ถูกต้อง → ตั้ง cookie แล้ว redirect ทิ้ง query (กัน token ค้างใน URL/แชร์ลิงก์)
   const qToken = String(req.query.access_token || '').trim();
@@ -1418,6 +1418,22 @@ app.patch('/api/post-logs/:id/collect-result', async (req, res) => {
   }
 });
 
+/** ตัวเก็บคอมเมนต์หาลิงก์โพสต์ที่ตอนโพสต์หาไม่เจอ (เช่นรอแอดมินอนุมัติ) แล้วส่งกลับมาบันทึก */
+app.patch('/api/post-logs/:id/found-link', async (req, res) => {
+  try {
+    const token = req.get('x-collect-token');
+    const workerAuthed = USE_REMOTE_POST_WORKER && isValidPostWorkerToken(req);
+    if (!leadCollectBot.isCollectPatchTokenValid(token) && !workerAuthed) {
+      return res.status(403).json({ error: 'Forbidden' });
+    }
+    const { post_link, post_status } = req.body || {};
+    const updated = await db.updatePostLogFoundLink(req.params.id, post_link, post_status);
+    res.json({ ok: true, updated });
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
 /** CSV สดระหว่างเก็บ Comment — รีเฟรชใน Excel: ข้อมูล → รีเฟรชทั้งหมด / Power Query ตั้งช่วงรีเฟรช */
 app.get('/api/run/collect-export/live.csv', async (req, res) => {
   try {
@@ -1691,11 +1707,13 @@ app.post('/api/worker/collect/claim', async (req, res) => {
     const user_id = String(job.user_id || '').trim();
     const post_log_ids = Array.isArray(job.post_log_ids) ? job.post_log_ids.map(String).filter(Boolean) : [];
     const rows = await db.getPostLogsByIdsForUser(post_log_ids, user_id);
+    // แถวที่ยังไม่มีลิงก์ส่งไปด้วยถ้ารู้กลุ่ม ให้ worker ไปหาลิงก์ในหน้า "โพสต์ของฉัน" ของกลุ่มนั้น
     const posts = rows
-      .filter((r) => r.post_link && String(r.post_link).trim())
+      .filter((r) => (r.post_link && String(r.post_link).trim()) || (r.group_id && String(r.group_id).trim()))
       .map((r) => ({
         post_log_id: String(r.id),
-        post_link: String(r.post_link).trim(),
+        post_link: String(r.post_link || '').trim(),
+        group_id: String(r.group_id || '').trim(),
         job_id: String(r.job_id || ''),
         job_title: String(r.job_title || ''),
         owner: String(r.owner || ''),

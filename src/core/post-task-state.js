@@ -55,8 +55,10 @@ export function buildPostTaskGroups({ plan = [], attempts = [], postLogs = [], r
     let status;
     let error = null;
     if (result && (!start || ts(result.at) >= ts(start.at))) {
-      // warn ที่มาจากการตรวจสมาชิกกลุ่ม (meta.kind=join) = ยังไม่ได้เข้ากลุ่ม ไม่ใช่โพสต์พัง
-      status = result.level === 'success' ? 'posted' : result.kind === 'join' ? 'not_member' : 'failed';
+      // warn จากการตรวจสมาชิก (meta.kind=join) ที่ขึ้นต้น "ยังไม่ได้เป็นสมาชิก" = ยังไม่ได้เข้ากลุ่มจริง
+      // กรณีอื่น เช่น "ไม่เจอช่องเขียนโพสต์และปุ่มเข้าร่วมกลุ่ม" ยังไม่รู้ว่าเป็นสมาชิกไหม นับเป็นโพสต์ไม่ได้
+      const notMember = result.kind === 'join' && /^ยังไม่ได้เป็นสมาชิก/.test(String(result.message ?? '').trim());
+      status = result.level === 'success' ? 'posted' : notMember ? 'not_member' : 'failed';
       if (status !== 'posted') error = result.message ?? null;
     } else if (start) {
       if (runStatus === 'running') status = 'posting';

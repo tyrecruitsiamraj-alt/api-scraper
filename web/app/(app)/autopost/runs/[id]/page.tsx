@@ -6,7 +6,7 @@ import { listJarvisPostOrders } from '@/lib/repo';
 import { AutoRefresh } from '@/components/AutoRefresh';
 import { GroupDetailDialog } from '@/components/post/GroupDetailDialog';
 import { RepostForm } from '@/components/post/jarvis-forms';
-import { GroupStatusBadge, GroupStrip, PostTaskSteps, taskStageBadge, thaiTime } from '@/components/post/post-ui';
+import { GroupStatusBadge, GroupStrip, PostTaskSteps, shortGroupReason, taskStageBadge, thaiTime } from '@/components/post/post-ui';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import {
@@ -116,7 +116,7 @@ export default async function PostTaskPage(props: { params: Promise<{ id: string
                     <a href={`https://www.facebook.com/groups/${g.group_id}`} target="_blank" rel="noreferrer" className="underline">
                       {g.name}
                     </a>
-                    <span className="text-muted-foreground">{String(g.error ?? '').replace(/\s*\(.*$/, '')}</span>
+                    <span className="text-muted-foreground">{shortGroupReason(g.error)}</span>
                   </li>
                 ))}
             </ul>
@@ -177,7 +177,12 @@ export default async function PostTaskPage(props: { params: Promise<{ id: string
                       </div>
                     </TableCell>
                     <TableCell>
-                      <GroupStatusBadge status={g.status} />
+                      <div className="flex flex-col items-start gap-1">
+                        <GroupStatusBadge status={g.status} />
+                        {(g.status === 'failed' || g.status === 'not_member') && shortGroupReason(g.error) && (
+                          <span className="max-w-64 whitespace-normal text-xs text-muted-foreground">{shortGroupReason(g.error)}</span>
+                        )}
+                      </div>
                     </TableCell>
                     <TableCell className="hidden md:table-cell text-muted-foreground">{g.approval ?? '-'}</TableCell>
                     <TableCell className="text-right tabular-nums">{num(g.reactions)}</TableCell>
