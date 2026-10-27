@@ -11,10 +11,11 @@
 
 ถ้าบัญชีเต็มหรือถูกพัก ให้ขึ้น popup เตือนก่อนส่งคำสั่ง
 
-ระบบ So Scraping มี API ให้แล้ว Jarvis ต้องทำ 3 อย่าง:
+ระบบ So Scraping มี API ให้แล้ว Jarvis ต้องทำ 4 อย่าง:
 1. แสดงตัวเลือกจาก API options
 2. บันทึกค่าที่พนักงานเลือกลงใน `job_snapshot`
 3. เรียก API start ให้งานเริ่มทันที พนักงานไม่ต้องเข้าระบบ So Scraping
+4. ดึงผลงานจาก API status มาแสดงในหน้าใบงานของ Jarvis
 
 ## 1. ดึงตัวเลือก
 
@@ -197,7 +198,100 @@ Content-Type: application/json
 ```
 - `queued: false` แปลว่าสร้างงานแล้วแต่ยังเริ่มไม่ได้ (เช่น เครื่องที่เลือกยังไม่เปิด Scrape) เหตุผลอยู่ใน `message` ให้แสดงให้พนักงานเห็น
 
-## 4. ลำดับในฟอร์มที่แนะนำ
+## 4. ดูผลงาน
+
+```
+GET https://so-scraping.vercel.app/api/integrations/jarvis/status?request_no=OPL6905114
+x-api-key: <JARVIS_INTEGRATION_KEY>
+```
+
+- ขอได้ครั้งละหลายใบ คั่นด้วยจุลภาค ไม่เกิน 20 ใบ เช่น `?request_no=OPL6905114,OPL6910068`
+- ใช้ตอนเปิดหน้าใบงาน หรือรีเฟรชทุก 1–2 นาทีระหว่างงานยังไม่จบ (`run_status` เป็น `queued` / `running` หรือ Scrap `group` เป็น `working`)
+- ยอดไลก์และคอมเมนต์อัปเดตทุกราว 2 ชั่วโมง (รอบเก็บคอมเมนต์ของเครื่อง)
+
+**ตัวอย่างงานโพสต์ (`type: "content"`)**
+```json
+{
+  "requests": [
+    {
+      "request_no": "OPL6905114",
+      "type": "content",
+      "jarvis_status": "in_progress",
+      "position": "พนักงานขับรถ นายไทย",
+      "account": { "id": "fb_898d82093abe46eeab1980d8", "name": "Tyni Aiit" },
+      "worker": "SONB-RM009",
+      "run_status": "running",
+      "run_queued_at": "2026-10-27T01:24:07.458Z",
+      "summary": { "groups": 18, "posted": 4, "failed": 0, "waiting": 14, "reactions": 0, "comments": 0, "shares": 0, "phone_leads": 0 },
+      "groups": [
+        {
+          "fb_group_id": "226719385068994",
+          "name": "พนักงานขับรถผู้บริหาร มืออาชีพ กรุงเทพและปริมณฑล",
+          "status": "posted",
+          "at": "2026-10-27T01:33:31.532Z",
+          "error": null,
+          "post_link": "https://www.facebook.com/groups/226719385068994/posts/1762979614776289/",
+          "approval": "อนุมัติเเล้ว",
+          "reactions": 0,
+          "comments": 0,
+          "shares": 0,
+          "collected_at": null
+        }
+      ],
+      "issues": [],
+      "detail_url": "https://so-scraping.vercel.app/autopost/jobs"
+    }
+  ]
+}
+```
+
+| ฟิลด์ | ความหมาย |
+|---|---|
+| `run_status` | `queued` รอเครื่อง · `running` กำลังโพสต์ · `completed` จบรอบ · `failed` รอบนี้ล้ม · `null` ยังไม่เริ่ม |
+| `groups[].status` | `posted` สำเร็จ · `failed` ไม่สำเร็จ (เหตุผลใน `error`) · `waiting` ยังไม่ถึงคิว |
+| `groups[].approval` | สถานะโพสต์ในกลุ่ม เช่น "อนุมัติเเล้ว" / "รออนุมัติ" (แอดมินกลุ่มต้องอนุมัติก่อนคนอื่นเห็น) |
+| `summary.phone_leads` | จำนวนคนที่ทิ้งเบอร์ในคอมเมนต์ของใบนี้ |
+| `issues` | เหตุผลที่ยังเริ่มงานไม่ได้ (ถ้ามี) |
+
+**ตัวอย่างงาน Scrap (`type: "scraping"`)**
+```json
+{
+  "requests": [
+    {
+      "request_no": "OPL6910068",
+      "type": "scraping",
+      "jarvis_status": "in_progress",
+      "tasks": [
+        {
+          "task_id": "7d976c2b-2598-42e4-aa5a-1d1c08442de4",
+          "platform": "JobBKK",
+          "account": "JobBKK-HR1",
+          "group": "attention",
+          "status_label": "ได้ไม่ครบเป้า",
+          "step": "ขั้น 4/7 · ค้นหาและคัดโปรไฟล์",
+          "note": "ค้นครบแล้วแต่ยังได้คนไม่ครบเป้า",
+          "target": 1,
+          "qualified": 0,
+          "needs_review": 0,
+          "rejected": 6,
+          "last_error": "ยังไม่ครบเป้า: ...",
+          "last_run_at": "2026-10-26T02:17:21.888Z",
+          "detail_url": "https://so-scraping.vercel.app/scraping/7d976c2b-2598-42e4-aa5a-1d1c08442de4"
+        }
+      ]
+    }
+  ]
+}
+```
+
+- 1 ใบงาน Scrap อาจมีหลาย `tasks` (เช่น JobThai กับ JobBKK)
+- `group`: `working` กำลังทำ · `review` ต้องตรวจรับ · `attention` ติดปัญหา · `done` เสร็จแล้ว · `idle` ยังไม่เริ่ม
+- `qualified` = ผู้สมัครที่ผ่านเกณฑ์ เทียบกับ `target`
+- `detail_url` เปิดดูรายละเอียดและรายชื่อผู้สมัครในระบบ So Scraping
+
+ใบที่ไม่พบจะได้ `{ "request_no": "...", "type": "unknown", "error": "ไม่พบคำสั่งนี้" }`
+
+## 5. ลำดับในฟอร์มที่แนะนำ
 
 1. เปิดฟอร์ม → เรียก options
 2. **Autopost**: เลือกบัญชี (แสดง `posted_today/daily_cap` และสถานะ) → เลือกกลุ่มของบัญชีนั้น (แสดงชื่อกลุ่มกับ `stats_30d`) → เลือกเครื่อง (ค่าเริ่มต้น = `accounts[].worker` แสดง `load` ทุกเครื่อง)
@@ -205,6 +299,7 @@ Content-Type: application/json
 4. กดส่ง → popup เตือนก่อนถ้า: บัญชีเป็น `full` / `paused` / `worker_offline`, เครื่องที่เลือกออฟไลน์, หรือบัญชียังไม่ได้ล็อกอินบนเครื่องที่เลือก
 5. บันทึก `job_posting_requests` พร้อม `job_snapshot` ตามข้อ 2
 6. เรียก `POST /start` ตามข้อ 3 แล้วแสดงผลให้พนักงานเห็น
+7. หน้าใบงานใน Jarvis ดึง `GET /status` ตามข้อ 4 มาแสดงผลรายกลุ่มหรือความคืบหน้า Scrap
 
 ## ทดสอบ
 
