@@ -12,6 +12,7 @@ import {
 import { AutoRefresh } from '@/components/AutoRefresh';
 import { ScrapIntakeCard } from '@/components/scrap/ScrapIntakeCard';
 import { ScrapQueueKick } from '@/components/scrap/ScrapQueueKick';
+import { ScrapRequesterFilter, UNKNOWN_REQUESTER } from '@/components/scrap/ScrapRequesterFilter';
 import { ScrapTaskRow, type ScrapTaskRowData } from '@/components/scrap/ScrapTaskRow';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
@@ -34,7 +35,7 @@ const EMPTY_TEXT: Record<TabKey, string> = {
   all: 'ยังไม่มีงาน Scrap',
 };
 
-export default async function ScrapingPage(props: { searchParams?: Promise<{ notice?: string }> }) {
+export default async function ScrapingPage(props: { searchParams?: Promise<{ notice?: string; by?: string }> }) {
   const searchParams = await props.searchParams;
   const [tasks, requests, connectors] = await Promise.all([
     listTasks(),
@@ -47,7 +48,19 @@ export default async function ScrapingPage(props: { searchParams?: Promise<{ not
   const sortedTasks = [...tasks].sort(
     (a, b) => new Date(scrapTaskUpdatedAt(b)).getTime() - new Date(scrapTaskUpdatedAt(a)).getTime(),
   );
-  const rows = sortedTasks.map(toScrapTaskRow);
+  const allRows = sortedTasks.map(toScrapTaskRow);
+  const by = typeof searchParams?.by === 'string' ? searchParams.by : '';
+  const requesterCounts = new Map<string, number>();
+  for (const r of allRows) if (r.requestedBy) requesterCounts.set(r.requestedBy, (requesterCounts.get(r.requestedBy) ?? 0) + 1);
+  const requesterOptions = [...requesterCounts.entries()]
+    .map(([name, count]) => ({ name, count }))
+    .sort((a, b) => a.name.localeCompare(b.name, 'th'));
+  const unknownCount = allRows.filter((r) => !r.requestedBy).length;
+  const rows = !by
+    ? allRows
+    : by === UNKNOWN_REQUESTER
+      ? allRows.filter((r) => !r.requestedBy)
+      : allRows.filter((r) => r.requestedBy === by);
   const byTab: Record<TabKey, ScrapTaskRowData[]> = {
     working: rows.filter((r) => r.stage.group === 'working'),
     review: rows.filter((r) => r.stage.group === 'review'),
@@ -121,7 +134,8 @@ export default async function ScrapingPage(props: { searchParams?: Promise<{ not
 
       <section className="flex flex-col gap-3" aria-labelledby="scrap-tasks">
         <h2 id="scrap-tasks" className="text-base font-semibold">งานค้นหา</h2>
-        <Tabs defaultValue={defaultTab} className="gap-4">
+        <ScrapRequesterFilter value={by} options={requesterOptions} unknownCount={unknownCount} />
+        <Tabs key={by} defaultValue={defaultTab} className="gap-4">
           <TabsList aria-label="กรองงานตามสถานะ" className="max-w-full justify-start overflow-x-auto">
             {TAB_ORDER.map((key) => (
               <TabsTrigger key={key} value={key} className="flex-none px-3">

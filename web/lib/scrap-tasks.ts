@@ -258,5 +258,6 @@ export function toScrapTaskRow(task: TaskRow): ScrapTaskRowData {
     target: scrapTaskTarget(task),
     updatedLabel: formatBangkokDateTime(scrapTaskUpdatedAt(task)),
     enabled: task.enabled,
+    requestedBy: task.requested_by ?? null,
   };
 }

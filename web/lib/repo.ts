@@ -1458,6 +1458,8 @@ export type TaskRow = {
   assessed_total: number;
   /** Latest real candidate result or queue start. Worker heartbeats do not advance this. */
   last_progress_at: string | null;
+  /** คนสั่ง: คนเปิดคำขอใน Jarvis หรือคนที่สร้างงานเองบนหน้าเว็บ (null = งานเก่าที่ไม่ได้เก็บชื่อ) */
+  requested_by: string | null;
 };
 
 export async function listTasks() {
@@ -1488,7 +1490,8 @@ export async function listTasks() {
             COALESCE(s.needs_review_count,0)::int AS needs_review_count,
             COALESCE(s.rejected_count,0)::int AS rejected_count,
             COALESCE(s.assessed_total,0)::int AS assessed_total,
-            GREATEST(s.last_result_at, w.started_at) AS last_progress_at
+            GREATEST(s.last_result_at, w.started_at) AS last_progress_at,
+            COALESCE(NULLIF(TRIM(jr.requested_by_name), ''), NULLIF(TRIM(t.criteria->>'created_by'), '')) AS requested_by
        FROM scrape_tasks t JOIN connectors c ON c.id = t.connector_id
        LEFT JOIN LATERAL (
          SELECT count(*) FILTER (WHERE qualification_status='qualified') AS qualified_count,
@@ -1503,6 +1506,13 @@ export async function listTasks() {
            FROM work_queue q
           WHERE q.ref_id=t.id::text AND q.type='scrape' AND q.status IN ('queued','running')
        ) w ON true
+       LEFT JOIN LATERAL (
+         SELECT r.requested_by_name
+           FROM "jarvis_rm".job_posting_requests r
+          WHERE t.source_request_no IS NOT NULL AND r.request_no = t.source_request_no
+          ORDER BY r.created_at DESC
+          LIMIT 1
+       ) jr ON true
       ORDER BY t.created_at DESC`,
   );
 }

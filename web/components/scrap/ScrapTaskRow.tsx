@@ -18,6 +18,8 @@ export type ScrapTaskRowData = {
   /** ข้อความเวลาที่จัดรูปแบบแล้ว (เวลาไทย) */
   updatedLabel: string;
   enabled: boolean;
+  /** คนสั่ง (อีเมลหรือชื่อ) null = งานเก่าที่ไม่ได้เก็บชื่อ */
+  requestedBy: string | null;
 };
 
 /** งาน Scrap หนึ่งแถว ทั้งแถวกดเพื่อเปิดหน้ารายละเอียดงาน */
@@ -33,7 +35,9 @@ export function ScrapTaskRow({ task }: { task: ScrapTaskRowData }) {
             {!task.enabled && <Badge variant="outline">ปิดอยู่</Badge>}
           </ItemTitle>
           <ItemDescription>
-            {[task.requestNo ?? 'สร้างเอง', task.source].join(' · ')}
+            {[task.requestNo ?? 'สร้างเอง', task.requestedBy ? `สั่งโดย ${task.requestedBy}` : null, task.source]
+              .filter(Boolean)
+              .join(' · ')}
           </ItemDescription>
           <p className="flex items-center gap-1.5 text-sm text-foreground">
             {stage.running && <Spinner className="size-3.5 text-muted-foreground" />}

@@ -359,7 +359,9 @@ function firstNextRun(cron: string | null): string | null {
 // Tasks
 // ---------------------------------------------------------------------------
 export async function createTaskAction(formData: FormData) {
-  await requireSession();
+  const session = await getServerSession(authOptions);
+  if (!session) throw new Error('unauthorized');
+  const createdBy = String(session.user?.email ?? session.user?.name ?? '').trim();
   const requestedName = String(formData.get('name') ?? '').trim();
   const connectorId = String(formData.get('connectorId') ?? '');
   const mode = (String(formData.get('mode') ?? 'count') === 'date_range' ? 'date_range' : 'count') as
@@ -418,6 +420,8 @@ export async function createTaskAction(formData: FormData) {
   if (salaryMax) criteria.salaryMax = salaryMax;
   if (ageMin) criteria.ageMin = ageMin;
   if (ageMax) criteria.ageMax = ageMax;
+  // เก็บชื่อคนสร้าง ใช้กรอง "ใครสั่ง" ในหน้างาน Scrap
+  if (createdBy) criteria.created_by = createdBy;
 
   let targetCount: number | null = null;
   let updatedSince: string | null = null;
