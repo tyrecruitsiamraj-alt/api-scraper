@@ -4,7 +4,7 @@ import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import { getServerSession } from 'next-auth';
 import { authOptions } from './auth';
-import { encryptSecret } from './crypto';
+import { encryptFacebookPassword, encryptSecret } from './crypto';
 import { kickWorker } from './worker-kick';
 import { postCaptionIssues } from '../../src/core/post-caption-check.js';
 import { dismissCommentLead, jarvisLeadsConfigured, requestAiCall, saveManualReply } from './comment-leads';
@@ -997,7 +997,8 @@ export async function createConnectorAction(formData: FormData) {
     await insertFacebookConnector({
       label,
       username,
-      password,
+      // เก็บแบบ enc:v1 เหมือนบัญชีเดิม worker ถอดเองก่อนกรอก
+      password: encryptFacebookPassword(password),
       posterName: String(formData.get('posterName') ?? '').trim(),
       contactPhone: String(formData.get('contactPhone') ?? '').trim(),
       dailyCap,
@@ -1055,7 +1056,12 @@ export async function editConnectorAction(formData: FormData) {
   const password = String(formData.get('password') ?? '').trim();
   if (!id || !label) throw new Error('กรุณากรอกชื่อที่แสดง');
   if (platform === 'facebook') {
-    await updateFacebookAccount(id, { label, username, password: password || null, skipWarmup: formData.has('skipWarmup') });
+    await updateFacebookAccount(id, {
+      label,
+      username,
+      password: password ? encryptFacebookPassword(password) : null,
+      skipWarmup: formData.has('skipWarmup'),
+    });
   } else {
     await updateScraperConnector(id, { label, username, passwordEnc: password ? encryptSecret(password) : null });
   }

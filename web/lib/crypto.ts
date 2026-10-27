@@ -21,3 +21,19 @@ export function encryptSecret(plain: string): string {
   const tag = cipher.getAuthTag();
   return Buffer.concat([iv, tag, enc]).toString('base64');
 }
+
+/**
+ * เข้ารหัสรหัสผ่าน Facebook แบบ enc:v1 ให้ตรงกับ autopost/server/credential-crypto.js
+ * enc:v1:<iv>:<tag>:<ciphertext> (base64url) key = sha256(AUTOPOST_CREDENTIAL_KEY ถ้ามี ไม่งั้น APP_ENCRYPTION_KEY)
+ * worker ลองกุญแจทั้งสองตัวตอนถอด
+ */
+export function encryptFacebookPassword(plain: string): string {
+  const secret = String(process.env.AUTOPOST_CREDENTIAL_KEY || process.env.APP_ENCRYPTION_KEY || '').trim();
+  if (!secret) throw new Error('ยังไม่ได้ตั้ง APP_ENCRYPTION_KEY จึงเข้ารหัสรหัสผ่าน Facebook ไม่ได้');
+  const k = createHash('sha256').update(secret, 'utf8').digest();
+  const iv = randomBytes(12);
+  const cipher = createCipheriv('aes-256-gcm', k, iv);
+  const enc = Buffer.concat([cipher.update(String(plain), 'utf8'), cipher.final()]);
+  const tag = cipher.getAuthTag();
+  return `enc:v1:${iv.toString('base64url')}:${tag.toString('base64url')}:${enc.toString('base64url')}`;
+}
