@@ -250,7 +250,22 @@ function listFacebookSessionKeys() {
   }
 }
 
+/** ตอนเปิดเครื่อง/เปิดสวิตช์ใหม่: ปิดงานค้างของ process เก่าบนเครื่องนี้ก่อนรับงานใหม่ */
+let startupReleased = false;
+async function releaseOrphansOnce() {
+  try {
+    const out = await callApi('/api/worker/release-orphans', { kind: 'post', worker_id: workerId });
+    const ids = Array.isArray(out?.released) ? out.released : [];
+    if (ids.length) console.warn(`[post-worker] ปิดงานที่ค้างจากรอบก่อนเครื่องเริ่มใหม่ ${ids.length} งาน: ${ids.join(', ')}`);
+  } catch (e) {
+    console.error(`[post-worker] release-orphans: ${e.message || e}`);
+  } finally {
+    startupReleased = true;
+  }
+}
+
 async function tick() {
+  if (!startupReleased) return;
   if (claiming) return;
   if (activeJobs >= CONCURRENCY) return;
   claiming = true;
@@ -368,4 +383,4 @@ if (AUTO_POST_DAILY_ENABLED) {
 }
 
 setInterval(tick, INTERVAL_MS);
-tick();
+releaseOrphansOnce().then(() => tick());

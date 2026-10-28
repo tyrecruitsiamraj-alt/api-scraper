@@ -1380,6 +1380,29 @@ async function getFindLinkHints(groupIds = [], jobIds = []) {
   return { captions, knownLinks };
 }
 
+/**
+ * ปิดงานที่ค้าง "running" ของเครื่องนี้จาก process ก่อนหน้า — เรียกตอน worker เปิดขึ้นมาใหม่
+ * (กด start-workers / ปิดเปิดสวิตช์ระหว่างมีงาน) เดิมงานค้างไว้ 3 ชม. แล้วบังงานอื่นของบัญชีเดียวกัน
+ * worker_id = ชื่อเครื่อง-pid → งานที่ชื่อเครื่องตรงกันแต่ pid ต่าง = ของ process เก่าที่ตายไปแล้ว
+ */
+async function releaseOrphanedJobs(kind, workerId) {
+  const table = kind === 'collect' ? 'collect_run_queue' : 'post_run_queue';
+  const wid = String(workerId || '').trim();
+  const m = /^(.+)-(\d+)$/.exec(wid);
+  if (!m) return [];
+  const reason = 'เครื่องเริ่มใหม่ระหว่างทำงาน งานนี้ถูกหยุดกลางทาง สั่งใหม่ได้เลย';
+  const { rows } = await query(
+    `UPDATE ${table}
+        SET status = 'failed', error = $3, message = $3, finished_at = NOW(), updated_at = NOW()
+      WHERE status = 'running'
+        AND worker_id IS NOT NULL AND worker_id <> $1
+        AND regexp_replace(worker_id, '-[0-9]+$', '') = $2
+      RETURNING id`,
+    [wid, m[1], reason]
+  );
+  return rows.map((r) => String(r.id));
+}
+
 /** ตัวเก็บคอมเมนต์หาลิงก์โพสต์ที่ขาดเจอ — เขียนทับเฉพาะแถวที่ยังไม่มีลิงก์ */
 async function updatePostLogFoundLink(id, postLink, postStatus) {
   const link = String(postLink || '').trim();
@@ -2002,11 +2025,11 @@ async function claimNextPostRunJob(workerId, runId, workerName, capabilities = [
              WHERE r.status = 'running' AND r.user_id IS NOT NULL AND r.user_id = q.user_id
            )
            /** บัญชีที่กำลังเก็บคอมเมนต์อยู่ ให้งานโพสต์รอคิว กัน Chrome สองตัวใช้ session เดียวกัน
-               (รอบที่ค้างเกิน 180 นาทีไม่นับ — ตัวกวาดงานค้างจะปิดให้) */
+               (รอบเก็บคอมเมนต์จบใน 90 นาทีเสมอ — เกินนั้นถือว่าค้าง ไม่บังงานโพสต์) */
            AND NOT EXISTS (
              SELECT 1 FROM collect_run_queue c
              WHERE c.status = 'running' AND c.user_id = q.user_id
-               AND COALESCE(c.started_at, c.created_at) > NOW() - INTERVAL '180 minutes'
+               AND COALESCE(c.started_at, c.created_at) > NOW() - INTERVAL '90 minutes'
            )
          ORDER BY q.created_at ASC
          LIMIT 1
@@ -2773,6 +2796,7 @@ module.exports = {
   getPostLogs,
   getPostLogsForCommentCollect,
   updatePostLogFoundLink,
+  releaseOrphanedJobs,
   getFindLinkHints,
   postLinkUsedElsewhere,
   getPostLogsByIdsForUser,

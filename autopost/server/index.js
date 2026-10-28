@@ -1661,6 +1661,19 @@ app.post('/api/users/:id/resume-posting', async (req, res) => {
 });
 
 /** ล้างงาน running ค้าง (worker เรียกเป็นระยะ — ใช้ได้บน Vercel เพราะถูกเรียกจากเครื่อง worker) */
+/** worker เพิ่งเปิดขึ้นมา: ปิดงานค้างของ process เก่าบนเครื่องเดียวกัน (kind = post | collect) */
+app.post('/api/worker/release-orphans', async (req, res) => {
+  try {
+    if (!requirePostWorkerToken(req, res)) return;
+    const kind = String(req.body?.kind || '') === 'collect' ? 'collect' : 'post';
+    const ids = await db.releaseOrphanedJobs(kind, req.body?.worker_id);
+    if (ids.length) logger.warn('worker.release_orphans', { kind, worker_id: req.body?.worker_id, ids });
+    res.json({ ok: true, released: ids });
+  } catch (e) {
+    res.status(500).json({ error: e.message || String(e) });
+  }
+});
+
 app.post('/api/worker/post/sweep-stale', async (req, res) => {
   try {
     if (!requirePostWorkerToken(req, res)) return;

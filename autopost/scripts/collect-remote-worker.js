@@ -319,7 +319,22 @@ async function processJob(job) {
   }
 }
 
+/** ตอนเปิดเครื่อง/เปิดสวิตช์ใหม่: ปิดงานค้างของ process เก่าบนเครื่องนี้ก่อนรับงานใหม่ */
+let startupReleased = false;
+async function releaseOrphansOnce() {
+  try {
+    const out = await callApi('/api/worker/release-orphans', { kind: 'collect', worker_id: workerId });
+    const ids = Array.isArray(out?.released) ? out.released : [];
+    if (ids.length) console.warn(`[collect-worker] ปิดงานที่ค้างจากรอบก่อนเครื่องเริ่มใหม่ ${ids.length} งาน: ${ids.join(', ')}`);
+  } catch (e) {
+    console.error(`[collect-worker] release-orphans: ${e.message || e}`);
+  } finally {
+    startupReleased = true;
+  }
+}
+
 async function tick() {
+  if (!startupReleased) return;
   if (claiming) return;
   if (activeJobs >= CONCURRENCY) return;
   claiming = true;
@@ -365,6 +380,6 @@ if (AUTO_COLLECT_ENABLED && AUTO_COLLECT_EVERY_MINUTES > 0) {
 setInterval(sweepStale, SWEEP_MS);
 sweepStale();
 setInterval(tick, INTERVAL_MS);
-tick();
+releaseOrphansOnce().then(() => tick());
 setInterval(tickAutoDailySchedule, 60_000);
 tickAutoDailySchedule();
