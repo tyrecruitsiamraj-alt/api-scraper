@@ -64,10 +64,10 @@ export function Topbar() {
     <>
       {/* Desktop: แถบเมนูด้านซ้ายแสดงตลอด */}
       <aside className="fixed inset-y-0 left-0 z-40 hidden w-[190px] flex-col border-r bg-sidebar text-sidebar-foreground lg:flex">
-        <div className="flex items-center gap-2.5 px-4 py-5">
+        <Link href="/orchestrator" aria-label="ไปหน้าศูนย์งาน" className="flex items-center gap-2.5 px-4 py-5">
           <Image src="/logo-SO.webp" alt="SO SIAMRAJATHANEE" width={32} height={32} className="h-8 w-auto shrink-0" priority />
           <span className="text-sm font-semibold">SO PEOPLE</span>
-        </div>
+        </Link>
         <nav className="flex flex-1 flex-col gap-1 px-3 py-1">
           {DESKTOP_NAV.map((item) => {
             const active = isActive(pathname, item);
@@ -148,7 +148,9 @@ export function Topbar() {
                 </SheetFooter>
               </SheetContent>
             </Sheet>
-            <Image src="/logo-SO.webp" alt="SO SIAMRAJATHANEE" width={32} height={32} className="h-8 w-auto shrink-0" priority />
+            <Link href="/orchestrator" aria-label="ไปหน้าศูนย์งาน" className="shrink-0">
+              <Image src="/logo-SO.webp" alt="SO SIAMRAJATHANEE" width={32} height={32} className="h-8 w-auto shrink-0" priority />
+            </Link>
           </div>
 
           <div className="flex items-center gap-2.5">
