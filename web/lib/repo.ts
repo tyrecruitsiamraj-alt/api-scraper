@@ -3330,6 +3330,37 @@ export async function enqueueFacebookPreflight(userId: string, requestedBy: stri
   return id;
 }
 
+/**
+ * ทดสอบแบบไม่โพสต์ให้บัญชีของงานโพสต์ที่รอคิว (กดจากหน้ารอบโพสต์) — ส่งไปเครื่องเดียวกับงานโพสต์
+ * ใช้กับบัญชีที่ไม่มีเครื่องประจำ/กลุ่มประจำได้ เพราะ worker ใช้กลุ่มจากงานโพสต์ตอนทดสอบ
+ */
+export async function enqueuePreflightForPostJob(queueId: string, requestedBy: string | null): Promise<string> {
+  const rows = await q<{ user_id: string | null; status: string; worker: string | null; worker_online: boolean; pending: boolean }>(
+    `SELECT r.user_id, r.status, COALESCE(NULLIF(TRIM(r.target_worker), ''), NULLIF(TRIM(u.preferred_worker), '')) AS worker,
+            EXISTS (SELECT 1 FROM ${AP}.workers w
+                     WHERE lower(w.name) = lower(COALESCE(NULLIF(TRIM(r.target_worker), ''), NULLIF(TRIM(u.preferred_worker), ''), ''))
+                       AND w.last_seen > now() - interval '2 minutes') AS worker_online,
+            EXISTS (SELECT 1 FROM ${AP}.post_run_queue p WHERE p.user_id = r.user_id AND p.mode = 'preflight'
+                       AND p.status IN ('queued', 'running')) AS pending
+       FROM ${AP}.post_run_queue r LEFT JOIN ${AP}.users u ON u.id = r.user_id
+      WHERE r.id = $1 AND COALESCE(r.mode, 'post') = 'post'`,
+    [queueId],
+  );
+  const job = rows[0];
+  if (!job?.user_id) throw new Error('ไม่พบงานโพสต์นี้');
+  if (job.status !== 'queued') throw new Error('งานนี้ไม่ได้รอคิวแล้ว');
+  if (job.pending) throw new Error('กำลังทดสอบบัญชีนี้อยู่แล้ว');
+  if (!job.worker) throw new Error('งานนี้ยังไม่ได้เลือกเครื่อง');
+  if (!job.worker_online) throw new Error(`เครื่อง ${job.worker} ออฟไลน์อยู่ เปิด Autopost บนเครื่องนั้นก่อน`);
+  const id = autopostId();
+  await q(
+    `INSERT INTO ${AP}.post_run_queue (id, assignment_ids, user_id, status, requested_by, message, mode, target_worker)
+     VALUES ($1, '[]'::jsonb, $2, 'queued', $3, 'ตรวจ Facebook แบบไม่โพสต์จริง ก่อนโพสต์งานที่รอคิว', 'preflight', $4)`,
+    [id, job.user_id, requestedBy || 'web-preflight', job.worker],
+  );
+  return id;
+}
+
 function autopostId(): string {
   return Date.now().toString(36) + Math.random().toString(36).slice(2);
 }

@@ -6,6 +6,7 @@ import { listJarvisPostOrders } from '@/lib/repo';
 import { AutoRefresh } from '@/components/AutoRefresh';
 import { GroupDetailDialog } from '@/components/post/GroupDetailDialog';
 import { RepostForm } from '@/components/post/jarvis-forms';
+import { PreflightButton } from '@/components/post/PreflightButton';
 import { GroupStatusBadge, GroupStrip, PostTaskSteps, shortGroupReason, taskStageBadge, thaiTime } from '@/components/post/post-ui';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
@@ -100,6 +101,25 @@ export default async function PostTaskPage(props: { params: Promise<{ id: string
           <GroupStrip groups={task.groups} />
         </CardContent>
       </Card>
+
+      {task.status === 'queued' && task.preflight.state === 'needed' && (
+        <Alert>
+          <AlertTitle>รอทดสอบบัญชีก่อนโพสต์</AlertTitle>
+          <AlertDescription className="flex flex-col gap-3">
+            <p>
+              บัญชี {task.account ?? 'นี้'} ต้องผ่านการทดสอบแบบไม่โพสต์จริงภายใน 24 ชั่วโมงก่อน ระบบถึงจะเริ่มโพสต์ กดทดสอบแล้ว Chrome จะเปิดบนเครื่องที่เลือก ผ่านแล้วโพสต์ต่อเอง
+            </p>
+            {task.preflight.last_error && <p className="text-muted-foreground">ทดสอบครั้งล่าสุดไม่ผ่าน: {task.preflight.last_error}</p>}
+            <PreflightButton queueId={task.id} />
+          </AlertDescription>
+        </Alert>
+      )}
+      {task.status === 'queued' && task.preflight.state === 'running' && (
+        <Alert>
+          <AlertTitle>กำลังทดสอบบัญชี</AlertTitle>
+          <AlertDescription>ทดสอบผ่านแล้วระบบจะเริ่มโพสต์เอง</AlertDescription>
+        </Alert>
+      )}
 
       {task.counts.not_member > 0 && (
         <Alert>

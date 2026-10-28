@@ -64,6 +64,7 @@ import {
   getWorkflowSelfTest,
   getConnectorOption,
   enqueueFacebookPreflight,
+  enqueuePreflightForPostJob,
   enqueueAssignmentPost,
   postJarvisOrder,
   repostJarvisOrder,
@@ -221,6 +222,16 @@ export async function postAssignmentNowAction(formData: FormData) {
   revalidatePath('/autopost');
   revalidatePath('/autopost/jobs');
   redirect(`/autopost/jobs?notice=${encodeURIComponent(notice)}`);
+}
+
+/** ปุ่ม "ทดสอบแบบไม่โพสต์จริง" ในหน้ารอบโพสต์ที่ค้างรอการทดสอบ */
+export async function runPreflightForPostJobAction(formData: FormData) {
+  const session = await getServerSession(authOptions);
+  if (!session) throw new Error('unauthorized');
+  const queueId = String(formData.get('queueId') ?? '').trim();
+  if (!queueId) throw new Error('ไม่พบงานโพสต์');
+  await enqueuePreflightForPostJob(queueId, session.user?.email ?? session.user?.name ?? null);
+  revalidatePath(`/autopost/runs/${queueId}`);
 }
 
 export async function runFacebookPreflightAction(formData: FormData) {
