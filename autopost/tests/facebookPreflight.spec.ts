@@ -42,7 +42,14 @@ test('Facebook preflight: ตรวจบัญชีและกลุ่มโ
     timeout: 90_000,
   });
   const url = activePage.url();
-  if (/login|checkpoint|noLogIn|recover|verification/i.test(url)) {
+  // ดูเฉพาะ path: หน้า Home หลังยืนยันตัวตนมี ?checkpoint_src= ซึ่งไม่ใช่หน้าติด checkpoint
+  let path = url;
+  try {
+    path = new URL(url).pathname;
+  } catch {
+    /* ใช้ทั้งลิงก์ */
+  }
+  if (/login|checkpoint|noLogIn|recover|verification/i.test(path)) {
     throw new Error(`บัญชียังเข้า Facebook Group ไม่ได้ (${url})`);
   }
   console.log(`Facebook preflight ผ่าน: ${user.name || user.id} → ${target.fb_group_id} (ไม่มีการโพสต์)`);

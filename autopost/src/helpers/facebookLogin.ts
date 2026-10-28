@@ -300,10 +300,18 @@ async function hasFacebookLoginErrorVisible(page: Page): Promise<boolean> {
 
 async function getAuthState(page: Page): Promise<AuthState> {
   const url = page.url();
+  // ดูเฉพาะ path ไม่ดู query: ยืนยันตัวตนเสร็จ Facebook พากลับหน้า Home เป็น /?checkpoint_src=any
+  // ถ้าดูทั้งลิงก์จะเข้าใจผิดว่ายังติด checkpoint แล้วรอจนหมดเวลา (เกิด 28 ต.ค. 2569)
+  let path = url;
+  try {
+    path = new URL(url).pathname;
+  } catch {
+    /* ลิงก์แปลก ใช้ทั้งลิงก์ */
+  }
   /** หน้า checkpoint / 2FA / ยืนยันตัวตน — ขยาย pattern กันพลาดแล้วไปถือว่า logged_in หรือ unknown แล้วปิด Chrome */
   if (
     /checkpoint|two_step|two-step|approvals_code|login\/device-based|device-based|recover\/|auth_platform|captcha|submit[_-]?identification|account[_-]?quality|login\/notif|cookie|session[_-]?audit|security\/|privacy\/checkpoint|help\/contact|confirm|verification/i.test(
-      url
+      path
     )
   ) {
     return 'checkpoint';
