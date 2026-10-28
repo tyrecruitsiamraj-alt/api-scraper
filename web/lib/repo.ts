@@ -3756,11 +3756,7 @@ export async function repostJarvisOrder(requestNo: string, groupIds: string[], r
   const client = await pool().connect();
   try {
     await client.query('BEGIN');
-    const busy = await client.query<{ n: number }>(
-      `SELECT count(*)::int AS n FROM ${AP}.post_run_queue WHERE user_id=$1 AND status IN ('queued', 'running')`,
-      [account.id],
-    );
-    if ((busy.rows[0]?.n ?? 0) > 0) throw new Error('บัญชีนี้มีงานโพสต์รอคิวหรือกำลังโพสต์อยู่แล้ว ลองใหม่เมื่อเสร็จ');
+    // บัญชีที่มีงานอยู่แล้ว ไม่ปฏิเสธ — งานใหม่ต่อคิว worker รับทีละงานต่อบัญชีเอง (ล็อกต่อบัญชีใน claim)
     await client.query(
       `INSERT INTO ${AP}.jobs (id, title, owner, company, caption, status)
        VALUES ($1, $2, 'SO Recruitment', 'SO Recruitment', $3, 'pending')
@@ -3809,13 +3805,7 @@ export async function postJarvisOrder(requestNo: string, requestedBy: string | n
   const client = await pool().connect();
   try {
     await client.query('BEGIN');
-    const busy = await client.query<{ n: number }>(
-      // งานทดสอบแบบไม่โพสต์ (preflight) ที่รอคิวอยู่ไม่นับว่าบัญชีไม่ว่าง — มันต้องรันก่อนงานโพสต์อยู่แล้ว
-      `SELECT count(*)::int AS n FROM ${AP}.post_run_queue
-        WHERE user_id=$1 AND status IN ('queued', 'running') AND COALESCE(mode, 'post') = 'post'`,
-      [order.account_id],
-    );
-    if ((busy.rows[0]?.n ?? 0) > 0) throw new Error('บัญชีนี้มีงานโพสต์รอคิวหรือกำลังโพสต์อยู่แล้ว ลองใหม่เมื่อเสร็จ');
+    // บัญชีที่มีงานอยู่แล้ว ไม่ปฏิเสธ — งานใหม่ต่อคิว worker รับทีละงานต่อบัญชีเอง (ล็อกต่อบัญชีใน claim)
     const snapshot = await client.query<{ group_ids: string[] }>(
       `SELECT COALESCE(to_jsonb(r)->'job_snapshot'->'group_ids', '[]'::jsonb) AS group_ids
          FROM "jarvis_rm".job_posting_requests r
