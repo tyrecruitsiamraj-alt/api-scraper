@@ -13,6 +13,7 @@ function silentFor(lastSeen: string): string {
 export async function MachineStatus({ kind }: { kind?: 'autopost' | 'scraper' }) {
   const { machines, retired } = await listMachineStatus();
   const rows = kind ? machines.filter((m) => m.kind === kind) : machines;
+  const hidden = (kind ? retired.filter((r) => r.kind === kind) : retired).length;
   return (
     <Card size="sm">
       <CardContent className="flex flex-col gap-2">
@@ -41,7 +42,7 @@ export async function MachineStatus({ kind }: { kind?: 'autopost' | 'scraper' })
             {!m.online && <span className="text-muted-foreground">เปิดสวิตช์บนเครื่องนั้น</span>}
           </div>
         ))}
-        {retired > 0 && <p className="text-xs text-muted-foreground">ไม่แสดงเครื่องที่เงียบเกิน 7 วัน {retired} เครื่อง</p>}
+        {hidden > 0 && <p className="text-xs text-muted-foreground">ไม่แสดงเครื่องที่เงียบเกิน 7 วัน {hidden} เครื่อง</p>}
       </CardContent>
     </Card>
   );

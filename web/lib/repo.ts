@@ -4623,7 +4623,7 @@ export type MachineStatusRow = {
 };
 
 /** สถานะเครื่องสำหรับแถบบนหน้าเว็บ — ซ่อนเครื่องที่เงียบเกิน 7 วัน (เครื่องเก่าที่เลิกใช้) */
-export async function listMachineStatus(): Promise<{ machines: MachineStatusRow[]; retired: number }> {
+export async function listMachineStatus(): Promise<{ machines: MachineStatusRow[]; retired: { name: string; kind: 'autopost' | 'scraper' }[] }> {
   const beats = await listWorkerHeartbeats();
   const recent = beats.filter((w) => Date.now() - new Date(w.last_seen).getTime() < 7 * 86_400_000);
   const load = await q<{ machine: string; running: number; queued: number }>(
@@ -4655,7 +4655,10 @@ export async function listMachineStatus(): Promise<{ machines: MachineStatusRow[
       } satisfies MachineStatusRow;
     })
     .sort((a, b) => (a.kind === b.kind ? a.name.localeCompare(b.name) : a.kind === 'autopost' ? -1 : 1));
-  return { machines, retired: beats.length - recent.length };
+  const retired = beats
+    .filter((w) => !recent.includes(w))
+    .map((w) => ({ name: w.name, kind: (w.kind === 'autopost' ? 'autopost' : 'scraper') as 'autopost' | 'scraper' }));
+  return { machines, retired };
 }
 
 export type WorkflowReadinessSnapshot = WorkflowReadiness & { workers: WorkerHeartbeat[] };
