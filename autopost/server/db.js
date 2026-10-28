@@ -1966,6 +1966,13 @@ async function claimNextPostRunJob(workerId, runId, workerName, capabilities = [
              SELECT 1 FROM post_run_queue r
              WHERE r.status = 'running' AND r.user_id IS NOT NULL AND r.user_id = q.user_id
            )
+           /** บัญชีที่กำลังเก็บคอมเมนต์อยู่ ให้งานโพสต์รอคิว กัน Chrome สองตัวใช้ session เดียวกัน
+               (รอบที่ค้างเกิน 180 นาทีไม่นับ — ตัวกวาดงานค้างจะปิดให้) */
+           AND NOT EXISTS (
+             SELECT 1 FROM collect_run_queue c
+             WHERE c.status = 'running' AND c.user_id = q.user_id
+               AND COALESCE(c.started_at, c.created_at) > NOW() - INTERVAL '180 minutes'
+           )
          ORDER BY q.created_at ASC
          LIMIT 1
          FOR UPDATE OF q SKIP LOCKED
@@ -2508,12 +2515,19 @@ async function claimNextCollectRunJob(workerId, runId) {
   const rid = String(runId || '').trim() || null;
   const { rows } = await query(
     `WITH next AS (
-       SELECT id
-       FROM collect_run_queue
-       WHERE status = 'queued'
-       ORDER BY created_at ASC
+       SELECT c.id
+       FROM collect_run_queue c
+       WHERE c.status = 'queued'
+         /** บัญชีที่กำลังโพสต์อยู่ ข้ามไปก่อน กัน Chrome สองตัวใช้ session เดียวกัน
+             (งานโพสต์ที่ค้างเกิน 180 นาทีไม่นับ — ตัวกวาดงานค้างจะปิดให้) */
+         AND NOT EXISTS (
+           SELECT 1 FROM post_run_queue p
+           WHERE p.status = 'running' AND p.user_id = c.user_id
+             AND COALESCE(p.started_at, p.created_at) > NOW() - INTERVAL '180 minutes'
+         )
+       ORDER BY c.created_at ASC
        LIMIT 1
-       FOR UPDATE SKIP LOCKED
+       FOR UPDATE OF c SKIP LOCKED
      )
      UPDATE collect_run_queue q
      SET status = 'running',
