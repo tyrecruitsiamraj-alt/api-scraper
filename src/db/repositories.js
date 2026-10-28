@@ -682,9 +682,15 @@ export async function upsertCandidate(client, parsed) {
   const q = client.query.bind(client);
   const { phoneNorm, emailNorm, dedupeKey, text, json } = buildRow(parsed);
 
+  // เบอร์เดียวกันที่เขียนต่างกัน (0812345678 / 66812345678) ให้ถือเป็นคนเดียวกัน: เทียบ 9 หลักท้าย
+  // เรียงให้แถวที่เบอร์ตรงเป๊ะมาก่อน แล้วค่อยเบอร์ 9 หลักท้าย แล้วอีเมล
   const found = await q(
     `SELECT id FROM candidates
-      WHERE ($1 <> '' AND phone_norm = $1) OR ($2 <> '' AND email_norm = $2) OR dedupe_key = $3
+      WHERE ($1 <> '' AND phone_norm = $1)
+         OR (length($1) >= 9 AND length(phone_norm) >= 9 AND right(phone_norm, 9) = right($1, 9))
+         OR ($2 <> '' AND email_norm = $2)
+         OR dedupe_key = $3
+      ORDER BY (phone_norm = $1) DESC, (length($1) >= 9 AND right(COALESCE(phone_norm, ''), 9) = right($1, 9)) DESC
       LIMIT 1`,
     [phoneNorm, emailNorm, dedupeKey],
   );

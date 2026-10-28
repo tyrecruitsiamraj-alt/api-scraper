@@ -1,6 +1,7 @@
 import 'server-only';
 import { randomUUID } from 'node:crypto';
 import { pool, q } from './db';
+import { getCandidateDuplicates } from './candidate-duplicates';
 import { evaluateContentQuality, operatorFacingQuality, qualityFailureMessages } from '../../src/core/content-quality.js';
 import type { ContentQualityResult } from '../../src/core/content-quality.js';
 import { evaluateWorkflowReadiness } from '../../src/core/workflow-readiness.js';
@@ -57,6 +58,8 @@ export type CandidateRow = {
   viewed_by: string | null;
   called_at: string | null;
   called_by: string | null;
+  /** แถวอื่นที่เป็นคนเดียวกัน (เบอร์/อีเมลตรงกัน) ซ่อนไว้ใต้แถวนี้ */
+  duplicate_ids: string[];
 };
 
 export type CandidateFilter = {
@@ -68,6 +71,8 @@ export type CandidateFilter = {
   activity?: 'viewed' | 'unviewed' | 'called' | 'uncalled';
   limit?: number;
   offset?: number;
+  /** ภายใน: ซ่อนแถวที่ซ้ำ (ไม่ใช่แถวหลักของกลุ่ม) */
+  excludeIds?: string[];
 };
 
 /** สร้าง WHERE ร่วมกันระหว่าง list กับ count (params ต่อเนื่องกัน) */
@@ -93,6 +98,11 @@ function buildCandidateWhere(opts: CandidateFilter, params: unknown[]): string {
     params.push(opts.updatedDays);
     where.push(`EXISTS (SELECT 1 FROM candidate_sources su WHERE su.candidate_id=c.id AND su.last_seen_at >= now() - ($${params.length} || ' days')::interval)`);
   }
+  // คนเดียวกันที่ซ้ำ: แสดงเฉพาะแถวหลัก (ตอนค้นหาแสดงทุกแถว จะได้ค้นเจอทุกเบอร์)
+  if (opts.excludeIds?.length && !opts.search) {
+    params.push(opts.excludeIds);
+    where.push(`c.id <> ALL($${params.length}::uuid[])`);
+  }
   if (opts.activity === 'viewed') {
     where.push(`EXISTS (SELECT 1 FROM candidate_activity av WHERE av.candidate_id = c.id AND av.activity_type = 'viewed')`);
   } else if (opts.activity === 'unviewed') {
@@ -108,7 +118,8 @@ function buildCandidateWhere(opts: CandidateFilter, params: unknown[]): string {
 export async function listCandidates(opts: CandidateFilter = {}) {
   const { limit = 40, offset = 0 } = opts;
   const params: unknown[] = [];
-  const whereSql = buildCandidateWhere(opts, params);
+  const dups = await getCandidateDuplicates();
+  const whereSql = buildCandidateWhere({ ...opts, excludeIds: dups.hiddenIds }, params);
   params.push(limit);
   params.push(offset);
   const rows = await q<CandidateRow>(
@@ -148,17 +159,48 @@ export async function listCandidates(opts: CandidateFilter = {}) {
       LIMIT $${params.length - 1} OFFSET $${params.length}`,
     params,
   );
-  return rows;
+  // รวมเว็บที่เจอของทุกแถวในกลุ่มเดียวกัน
+  const otherIds = rows.flatMap((r) => (dups.membersOf.get(r.id) ?? []).filter((id) => id !== r.id));
+  const otherPlatforms = otherIds.length
+    ? await q<{ candidate_id: string; platform: string }>(
+      `SELECT DISTINCT candidate_id, platform FROM candidate_sources WHERE candidate_id = ANY($1::uuid[])`,
+      [otherIds],
+    )
+    : [];
+  return rows.map((r) => {
+    const duplicate_ids = (dups.membersOf.get(r.id) ?? []).filter((id) => id !== r.id);
+    const platforms = [...new Set([
+      ...(r.platforms ?? []),
+      ...otherPlatforms.filter((p) => duplicate_ids.includes(p.candidate_id)).map((p) => p.platform),
+    ])];
+    return { ...r, platforms, duplicate_ids };
+  });
 }
 
 export async function countCandidates(opts: CandidateFilter = {}) {
   const params: unknown[] = [];
-  const whereSql = buildCandidateWhere(opts, params);
+  const dups = await getCandidateDuplicates();
+  const whereSql = buildCandidateWhere({ ...opts, excludeIds: dups.hiddenIds }, params);
   const rows = await q<{ n: number }>(
     `SELECT count(*)::int n FROM candidates c ${whereSql}`,
     params,
   );
   return rows[0]?.n ?? 0;
+}
+
+/** ประวัติอื่นที่เป็นคนเดียวกับผู้สมัครนี้ (เบอร์ 9 หลักท้าย หรืออีเมลตรงกัน) */
+export async function listSamePersonCandidates(candidateId: string) {
+  const dups = await getCandidateDuplicates();
+  const leader = dups.leaderOf.get(candidateId);
+  const ids = leader ? (dups.membersOf.get(leader) ?? []).filter((id) => id !== candidateId) : [];
+  if (!ids.length) return [];
+  return q<{ id: string; full_name: string | null; desired_positions: string | null; last_updated_at: string; platforms: string[] }>(
+    `SELECT c.id, c.full_name, c.desired_positions, c.last_updated_at,
+            ARRAY(SELECT DISTINCT s.platform FROM candidate_sources s WHERE s.candidate_id = c.id) AS platforms
+       FROM candidates c WHERE c.id = ANY($1::uuid[])
+      ORDER BY c.last_updated_at DESC`,
+    [ids],
+  );
 }
 
 /** รายชื่อจังหวัดที่มีในฐานผู้สมัคร (สำหรับ dropdown ฟิลเตอร์) */

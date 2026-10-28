@@ -207,6 +207,9 @@ export default async function CandidatesPage(
                         <Link href={`/candidates/${c.id}`} className="font-medium text-foreground hover:text-primary">
                           {c.full_name || '(ไม่มีชื่อ)'}
                         </Link>
+                        {c.duplicate_ids.length > 0 && (
+                          <Badge variant="outline" title="เบอร์หรืออีเมลตรงกัน รวมเป็นแถวเดียว">รวม {c.duplicate_ids.length + 1} ประวัติ</Badge>
+                        )}
                       </div>
                     </TableCell>
                     <TableCell className="max-w-48 truncate px-4 py-3 text-muted-foreground">{c.desired_positions || '—'}</TableCell>

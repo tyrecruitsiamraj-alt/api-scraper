@@ -1,7 +1,7 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { ArrowLeftIcon, DownloadIcon, ExternalLinkIcon } from 'lucide-react';
-import { getCandidate, recordCandidateActivity } from '@/lib/repo';
+import { getCandidate, listSamePersonCandidates, recordCandidateActivity } from '@/lib/repo';
 import { AttachmentViewer } from '@/components/AttachmentViewer';
 import { markCandidateCalledAction, markCandidateViewedAction } from '@/lib/actions';
 import { getServerSession } from 'next-auth';
@@ -45,6 +45,7 @@ function fmtActivity(s: string | null) {
 export default async function CandidateDetail(props: { params: Promise<{ id: string }> }) {
   const params = await props.params;
   const c = await getCandidate(params.id);
+  const samePerson = c ? await listSamePersonCandidates(c.id) : [];
   if (!c) notFound();
 
   // Opening the profile is itself the meaningful "อ่านแล้ว" event. Keep the
@@ -117,6 +118,27 @@ export default async function CandidateDetail(props: { params: Promise<{ id: str
           </div>
         </CardContent>
       </Card>
+
+      {samePerson.length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle>ประวัติอื่นของคนนี้</CardTitle>
+            <CardDescription>เบอร์หรืออีเมลตรงกัน ระบบเก็บไว้เป็นคนละแถว ในคลังผู้สมัครจะรวมเป็นแถวเดียว</CardDescription>
+          </CardHeader>
+          <CardContent className="flex flex-col gap-2">
+            {samePerson.map((p) => (
+              <div key={p.id} className="flex flex-wrap items-center gap-2 text-sm">
+                <Link href={`/candidates/${p.id}`} className="font-medium hover:text-primary">{p.full_name || '(ไม่มีชื่อ)'}</Link>
+                {(p.platforms ?? []).map((pl) => (
+                  <Badge key={pl} variant="outline">{PLATFORM_LABEL[pl] ?? pl}</Badge>
+                ))}
+                <span className="text-muted-foreground">{p.desired_positions || ''}</span>
+                <span className="text-muted-foreground">อัปเดต {fmtActivity(p.last_updated_at)}</span>
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+      )}
 
       <Card>
         <CardHeader>
