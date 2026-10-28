@@ -10,6 +10,7 @@ import { operatorJobTitle } from '@/lib/operator-copy';
 import { isContentGenerationEnabled, productScopeSummary } from '@/lib/product-scope';
 import { AutoRefresh } from '@/components/AutoRefresh';
 import { WorkerStatus } from '@/components/WorkerStatus';
+import { MachineStatus } from '@/components/MachineStatus';
 import { ScrapStatusBadge } from '@/components/scrap/ScrapStatusBadge';
 import { countsLine, GroupStrip, taskStageBadge } from '@/components/post/post-ui';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
@@ -264,10 +265,12 @@ export default async function OrchestratorPage(props: { searchParams?: Promise<{
         </Alert>
       )}
 
+      <MachineStatus />
+
       <Collapsible className="rounded-lg border bg-card px-4 py-2">
         <CollapsibleTrigger asChild>
           <Button variant="ghost" size="sm" className="-ml-2">
-            สถานะเครื่อง · {productScopeSummary()}
+            ความพร้อมทั้งระบบ · {productScopeSummary()}
             <ChevronDownIcon data-icon="inline-end" />
           </Button>
         </CollapsibleTrigger>

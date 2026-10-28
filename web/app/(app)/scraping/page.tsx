@@ -12,6 +12,7 @@ import {
 import { AutoRefresh } from '@/components/AutoRefresh';
 import { ScrapIntakeCard } from '@/components/scrap/ScrapIntakeCard';
 import { ScrapQueueKick } from '@/components/scrap/ScrapQueueKick';
+import { MachineStatus } from '@/components/MachineStatus';
 import { ScrapRequesterFilter, UNKNOWN_REQUESTER } from '@/components/scrap/ScrapRequesterFilter';
 import { ScrapTaskRow, type ScrapTaskRowData } from '@/components/scrap/ScrapTaskRow';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
@@ -97,6 +98,8 @@ export default async function ScrapingPage(props: { searchParams?: Promise<{ not
           </Link>
         </Button>
       </header>
+
+      <MachineStatus kind="scraper" />
 
       {notice && (
         <Alert role="status">

@@ -6,6 +6,7 @@ import type { ManualJoinGroup, PostTask } from '@/lib/post-tasks';
 import { postAssignmentNowAction, runFacebookPreflightAction } from '@/lib/actions';
 import { AutopostNav } from '@/components/AutopostNav';
 import { AutoRefresh } from '@/components/AutoRefresh';
+import { MachineStatus } from '@/components/MachineStatus';
 import { ConfirmAndSubmit, PendingOrderCard } from '@/components/post/jarvis-forms';
 import { countsLine, GroupStrip, taskStageBadge, thaiTime } from '@/components/post/post-ui';
 import { Alert, AlertDescription } from '@/components/ui/alert';
@@ -91,7 +92,7 @@ export default async function AutopostJobsPage(props: { searchParams?: Promise<{
 
   return (
     <div className="flex flex-col gap-6">
-      {live.length > 0 && <AutoRefresh seconds={10} />}
+      <AutoRefresh seconds={live.length > 0 ? 10 : 30} />
       <div className="flex flex-col gap-1">
         <h1 className="text-2xl font-semibold">งานโพสต์</h1>
         <p className="text-sm text-muted-foreground">
@@ -100,6 +101,8 @@ export default async function AutopostJobsPage(props: { searchParams?: Promise<{
       </div>
 
       <AutopostNav />
+
+      <MachineStatus kind="autopost" />
 
       {notice && (
         <Alert>

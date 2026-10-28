@@ -4610,6 +4610,54 @@ export async function listWorkerHeartbeats(): Promise<WorkerHeartbeat[]> {
   return out;
 }
 
+export type MachineStatusRow = {
+  name: string;
+  kind: 'autopost' | 'scraper';
+  online: boolean;
+  last_seen: string;
+  build_sha: string | null;
+  /** งานโพสต์ที่กำลังรันบนเครื่องนี้ / ที่รอเครื่องนี้ */
+  running: number;
+  queued: number;
+  concurrency: number | null;
+};
+
+/** สถานะเครื่องสำหรับแถบบนหน้าเว็บ — ซ่อนเครื่องที่เงียบเกิน 7 วัน (เครื่องเก่าที่เลิกใช้) */
+export async function listMachineStatus(): Promise<{ machines: MachineStatusRow[]; retired: number }> {
+  const beats = await listWorkerHeartbeats();
+  const recent = beats.filter((w) => Date.now() - new Date(w.last_seen).getTime() < 7 * 86_400_000);
+  const load = await q<{ machine: string; running: number; queued: number }>(
+    `SELECT machine, count(*) FILTER (WHERE status='running')::int AS running, count(*) FILTER (WHERE status='queued')::int AS queued
+       FROM (
+         SELECT r.status,
+                lower(CASE WHEN r.status='running' THEN regexp_replace(COALESCE(r.worker_id, ''), '-[0-9]+$', '')
+                           ELSE COALESCE(NULLIF(TRIM(r.target_worker), ''), NULLIF(TRIM(u.preferred_worker), ''), '') END) AS machine
+           FROM ${AP}.post_run_queue r LEFT JOIN ${AP}.users u ON u.id = r.user_id
+          WHERE r.status IN ('running', 'queued') AND COALESCE(r.mode, 'post') = 'post'
+       ) x
+      GROUP BY machine`,
+  ).catch(() => []);
+  const loadBy = new Map(load.map((l) => [l.machine, l]));
+  const machines: MachineStatusRow[] = recent
+    .map((w) => {
+      const kind = w.kind === 'autopost' ? 'autopost' : 'scraper';
+      const l = kind === 'autopost' ? loadBy.get(w.name.toLowerCase()) : undefined;
+      const meta = w.meta ?? {};
+      return {
+        name: w.name,
+        kind,
+        online: w.online,
+        last_seen: w.last_seen,
+        build_sha: typeof meta.build_sha === 'string' && meta.build_sha ? meta.build_sha : null,
+        running: l?.running ?? 0,
+        queued: l?.queued ?? 0,
+        concurrency: Number(meta.concurrency) || null,
+      } satisfies MachineStatusRow;
+    })
+    .sort((a, b) => (a.kind === b.kind ? a.name.localeCompare(b.name) : a.kind === 'autopost' ? -1 : 1));
+  return { machines, retired: beats.length - recent.length };
+}
+
 export type WorkflowReadinessSnapshot = WorkflowReadiness & { workers: WorkerHeartbeat[] };
 
 /** ตรวจความพร้อมครบเส้นแบบ read-only สำหรับศูนย์งาน. ทุกจุด fail-soft แต่รายงานว่าไม่พร้อมแทนการเงียบ. */
