@@ -1143,8 +1143,29 @@ async function getRunLogs(opts = {}) {
 }
 
 // --- Post Logs (รูปแบบ Log File) ---
+/** ลิงก์โพสต์ที่แถวอื่น (คนละงาน/คนละรอบ) ใช้อยู่แล้ว — 1 โพสต์บน Facebook ต้องมีแถวเดียว */
+async function postLinkUsedElsewhere(link, { jobId = null, assignmentId = null, exceptId = null } = {}) {
+  const url = String(link || '').trim().split('?')[0].replace(/\/$/, '');
+  if (!url) return false;
+  const { rows } = await query(
+    `SELECT 1 FROM post_logs
+      WHERE RTRIM(split_part(TRIM(post_link), '?', 1), '/') = $1
+        AND ($4::varchar IS NULL OR id <> $4)
+        AND NOT (COALESCE(job_id, '') = COALESCE($2, '') AND COALESCE(assignment_id, '') = COALESCE($3, ''))
+      LIMIT 1`,
+    [url, jobId, assignmentId, exceptId]
+  );
+  return rows.length > 0;
+}
+
 async function createPostLog(data) {
   const id = generateId();
+  // บอทหยิบลิงก์โพสต์เก่าของเราในกลุ่มเดียวกันมาได้ (เคยเกิด 27 ต.ค. 2569) — ไม่บันทึกลิงก์ซ้ำ
+  // ให้แถวนี้เป็น "ไม่พบลิงก์หลังโพสต์" แล้วตัวเก็บคอมเมนต์จะไปหาลิงก์ที่ถูกให้ภายหลัง
+  if (data.post_link && (await postLinkUsedElsewhere(data.post_link, { jobId: data.job_id, assignmentId: data.assignment_id }))) {
+    console.warn(`[post_logs] ลิงก์ ${data.post_link} มีโพสต์อื่นใช้แล้ว — บันทึกแบบไม่มีลิงก์ (job=${data.job_id || '-'} group=${data.group_id || '-'})`);
+    data = { ...data, post_link: '', post_status: 'ไม่พบลิงก์หลังโพสต์' };
+  }
   await query(
     `INSERT INTO post_logs (id, run_id, assignment_id, user_id, job_id, group_id, poster_name, owner, job_title, company, group_name, member_count, post_link, post_status, comment_count, customer_phone)
      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)`,
@@ -1335,12 +1356,37 @@ async function updatePostLogCollectResult(id, commentCount, customerPhone, react
   );
 }
 
+/**
+ * ข้อมูลช่วยหาลิงก์โพสต์ที่ขาด: ข้อความประกาศของงาน (ใช้จับคู่กับโพสต์บนหน้า "โพสต์ของฉัน")
+ * และลิงก์ที่มีแถวอื่นใช้แล้วในกลุ่มนั้น (ห้ามหยิบซ้ำ)
+ */
+async function getFindLinkHints(groupIds = [], jobIds = []) {
+  const gids = [...new Set(groupIds.map((x) => String(x || '').trim()).filter(Boolean))];
+  const jids = [...new Set(jobIds.map((x) => String(x || '').trim()).filter(Boolean))];
+  const captions = {};
+  const knownLinks = {};
+  if (jids.length) {
+    const { rows } = await query(`SELECT id, caption FROM jobs WHERE id = ANY($1::varchar[])`, [jids]);
+    for (const r of rows) captions[String(r.id)] = String(r.caption || '');
+  }
+  if (gids.length) {
+    const { rows } = await query(
+      `SELECT group_id, post_link FROM post_logs
+        WHERE group_id = ANY($1::varchar[]) AND post_link IS NOT NULL AND TRIM(post_link) <> ''`,
+      [gids]
+    );
+    for (const r of rows) (knownLinks[String(r.group_id)] ||= []).push(String(r.post_link).trim());
+  }
+  return { captions, knownLinks };
+}
+
 /** ตัวเก็บคอมเมนต์หาลิงก์โพสต์ที่ขาดเจอ — เขียนทับเฉพาะแถวที่ยังไม่มีลิงก์ */
 async function updatePostLogFoundLink(id, postLink, postStatus) {
   const link = String(postLink || '').trim();
   if (!/^https:\/\/www\.facebook\.com\/groups\/[^/]+\/(posts|permalink)\/\d+/.test(link)) {
     throw new Error('post_link ต้องเป็นลิงก์โพสต์ในกลุ่ม Facebook');
   }
+  if (await postLinkUsedElsewhere(link, { exceptId: String(id) })) return false;
   const { rowCount } = await query(
     `UPDATE post_logs SET post_link = $2, post_status = COALESCE(NULLIF($3, ''), post_status)
       WHERE id = $1 AND (post_link IS NULL OR TRIM(post_link) = '')`,
@@ -2738,6 +2784,8 @@ module.exports = {
   getPostLogs,
   getPostLogsForCommentCollect,
   updatePostLogFoundLink,
+  getFindLinkHints,
+  postLinkUsedElsewhere,
   getPostLogsByIdsForUser,
   updatePostLogCollectResult,
   ensurePostLogsEngagementColumns,

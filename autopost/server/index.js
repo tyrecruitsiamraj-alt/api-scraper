@@ -1725,6 +1725,17 @@ app.post('/api/worker/collect/claim', async (req, res) => {
           : '',
         created_at: r.created_at ? new Date(r.created_at).toISOString() : '',
       }));
+    // โพสต์ที่ยังไม่มีลิงก์: แนบข้อความประกาศ + ลิงก์ที่แถวอื่นใช้แล้วในกลุ่มนั้น ให้ worker เลือกโพสต์ให้ถูกตัว
+    const missing = posts.filter((p) => !p.post_link);
+    if (missing.length) {
+      const hints = await db
+        .getFindLinkHints(missing.map((p) => p.group_id), missing.map((p) => p.job_id))
+        .catch(() => ({ captions: {}, knownLinks: {} }));
+      for (const p of missing) {
+        p.caption = hints.captions[p.job_id] || '';
+        p.known_links = hints.knownLinks[p.group_id] || [];
+      }
+    }
     if (posts.length === 0) {
       await db.completeCollectRunJob(job.id, {
         ok: false,

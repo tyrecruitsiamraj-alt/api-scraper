@@ -30,6 +30,10 @@ type CollectPlan = {
     /** ว่าง = ตอนโพสต์หาลิงก์ไม่เจอ ให้หาใหม่จาก group_id */
     post_link: string;
     group_id?: string;
+    /** ข้อความประกาศของงาน (ส่งมาเฉพาะโพสต์ที่ยังไม่มีลิงก์) */
+    caption?: string;
+    /** ลิงก์ที่แถวอื่นใช้แล้วในกลุ่มนี้ ห้ามหยิบซ้ำ */
+    known_links?: string[];
     job_id?: string;
     job_title?: string;
     owner?: string;
@@ -156,8 +160,11 @@ test('collectComments', async ({ page }) => {
       }
       if (!item.post_link) {
         if (!item.group_id) continue;
-        const knownLinks = plan.posts.filter((p) => p.post_link && p.group_id === item.group_id).map((p) => p.post_link);
-        const found = await findMyPostLink(active, item.group_id, { jobTitle: item.job_title, knownLinks });
+        const knownLinks = [
+          ...(item.known_links || []),
+          ...plan.posts.filter((p) => p.post_link && p.group_id === item.group_id).map((p) => p.post_link),
+        ];
+        const found = await findMyPostLink(active, item.group_id, { jobTitle: item.job_title, caption: item.caption, knownLinks });
         if (!found) {
           await runLog({
             level: 'info',

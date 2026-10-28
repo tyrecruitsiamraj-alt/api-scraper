@@ -12,7 +12,7 @@ import {
 } from './humanBehavior';
 import { saveToSheet } from './saveToSheet';
 import { COMPOSER_TRIGGER, ensureGroupMembership, MEMBERSHIP_MESSAGE, readGroupPageHint, type MembershipState } from './groupMembership';
-import { cleanGroupName, readGroupName, rememberGroupName } from './groupName';
+import { readGroupName, rememberGroupName } from './groupName';
 
 /** รวม goto my_posted + pending + สำรองฟีด + POST Sheet + postLog */
 const SAVE_TO_SHEET_MAX_MS = Math.min(240000, Math.max(30000, Number(process.env.SAVE_TO_SHEET_MAX_MS) || 120000));
@@ -316,9 +316,11 @@ export async function postToGroup(
     await dismissCommonFacebookPopups(page);
     await humanBrowsePage(page);
 
-    const groupName = await page.locator('h1').first().innerText({ timeout: 5000 }).catch(() => 'กลุ่มส่วนตัว');
+    // h1 แรกของหน้าอาจเป็น "การแจ้งเตือน"/"แชท" — readGroupName เลือกชื่อจากเนื้อหาหลัก/ชื่อแท็บ
+    const readName = await readGroupName(page);
+    const groupName = readName ?? 'กลุ่มส่วนตัว';
     // เก็บชื่อกลุ่มจริงไว้ให้หน้าเว็บ/Jarvis แสดงแทนเลขกลุ่ม
-    await rememberGroupName(gID, cleanGroupName(groupName) ?? (await readGroupName(page)));
+    await rememberGroupName(gID, readName);
     const memberCount = await page
       .evaluate(() => {
         const m = document.body.innerText.match(/([\d,.]+[MK]?)\s*(สมาชิก|members)/i);

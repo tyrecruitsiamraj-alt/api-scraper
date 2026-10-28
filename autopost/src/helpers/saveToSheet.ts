@@ -90,6 +90,41 @@ function normalizeGroupName(raw: string): string {
     .trim();
 }
 
+function normLink(href: string): string {
+  return normalizeFbHref(href).split('?')[0].replace(/\/$/, '');
+}
+
+function squashText(s: string): string {
+  return String(s || '').replace(/\s+/g, ' ').trim().toLowerCase();
+}
+
+/** ให้คะแนนว่าโพสต์ตรงกับข้อความประกาศแค่ไหน: นับบรรทัดต้น ๆ ของประกาศ (ยาว ≥ 8 ตัว) ที่เจอในโพสต์ */
+export function captionMatchScore(postText: string, caption: string): number {
+  const text = squashText(postText);
+  if (!text) return 0;
+  const lines = String(caption || '')
+    .split(/\n+/)
+    .map((l) => squashText(l).slice(0, 40))
+    .filter((l) => l.length >= 8)
+    .slice(0, 6);
+  return lines.filter((l) => text.includes(l)).length;
+}
+
+/** ลิงก์โพสต์ที่แถวอื่นในระบบใช้แล้วในกลุ่มนี้ (worker มี DATABASE_URL) — ห้ามหยิบซ้ำ */
+async function loadKnownGroupLinks(gID: string): Promise<Set<string>> {
+  const out = new Set<string>();
+  if (!process.env.DATABASE_URL) return out;
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const db = require('../../server/db');
+    const hints = await db.getFindLinkHints([gID], []);
+    for (const l of hints.knownLinks[String(gID)] || []) out.add(normLink(l));
+  } catch (e) {
+    console.warn(`[saveToSheet] อ่านลิงก์เดิมของกลุ่ม ${gID} ไม่ได้: ${(e as Error).message}`);
+  }
+  return out;
+}
+
 export interface SaveToSheetOptions {
   assignmentId?: string;
   userId?: string;
@@ -219,6 +254,25 @@ async function tryExtractLinkFromGroupFeed(page: Page, posterName: string, gID: 
   return null;
 }
 
+/** ลิงก์โพสต์ล่าสุดใน article (ดูจากลิงก์เวลา "x นาที" แล้วค่อยหา permalink ใน article เดียวกัน) */
+async function recentPostLinkInArticle(article: Locator, gID: string): Promise<string | null> {
+  const allLinks = article.locator('a[role="link"]');
+  const linkCount = Math.min(await allLinks.count(), 80);
+  for (let j = 0; j < linkCount; j++) {
+    const link = allLinks.nth(j);
+    const href = await link.getAttribute('href').catch(() => null);
+    if (!href) continue;
+    const label = await link.getAttribute('aria-label').catch(() => null);
+    const recent = (label && ARIA_RECENT_RE.test(label)) || RECENT_LABEL_RE.test(await linkTimeBlob(link));
+    if (!recent) continue;
+    const abs = isValidGroupPostHref(href, gID)
+      ? normalizeFbHref(href).split('?')[0]
+      : await findGroupPostPermalinkInArticle(article, gID);
+    if (abs) return abs;
+  }
+  return null;
+}
+
 async function scanMyContentCurrentPage(
   page: Page,
   request: APIRequestContext,
@@ -229,66 +283,39 @@ async function scanMyContentCurrentPage(
   memberCount: string,
   sheetUrl: string,
   gID: string,
-  postLogOpts?: SaveToSheetOptions
+  postLogOpts?: SaveToSheetOptions,
+  knownLinks: Set<string> = new Set()
 ): Promise<boolean> {
   const articles = page.locator('div[role="article"]').filter({ hasText: posterName });
   const count = Math.min(await articles.count(), 20);
+  const caption = String((postItem as { caption?: string }).caption || '');
 
+  // เก็บทุกโพสต์ของเราที่เพิ่งโพสต์ แล้วเลือกตัวที่ข้อความตรงกับประกาศมากสุด
+  // ลิงก์ที่แถวอื่นใช้แล้ว = โพสต์เก่าของเรา ไม่หยิบ (เคยหยิบผิดจนลิงก์ซ้ำ 4 โพสต์ 27 ต.ค. 2569)
+  const candidates: Array<{ link: string; score: number; order: number }> = [];
   for (let i = 0; i < count; i++) {
-    const currentArticle = articles.nth(i);
-    const allLinks = currentArticle.locator('a[role="link"]');
-    const linkCount = Math.min(await allLinks.count(), 80);
-
-    for (let j = 0; j < linkCount; j++) {
-      const link = allLinks.nth(j);
-      const label = await link.getAttribute('aria-label').catch(() => null);
-      const href = await link.getAttribute('href').catch(() => null);
-      if (!href) continue;
-
-      if (label && ARIA_RECENT_RE.test(label)) {
-        let abs: string | null = null;
-        if (isValidGroupPostHref(href, gID)) {
-          abs = normalizeFbHref(href).split('?')[0];
-        } else {
-          abs = await findGroupPostPermalinkInArticle(currentArticle, gID);
-        }
-        if (abs) {
-          await pushPostRecord(request, sheetUrl, posterName, postItem, groupName, memberCount, abs, status, postLogOpts);
-          return true;
-        }
-        continue;
-      }
-
-      const blob = await linkTimeBlob(link);
-      if (RECENT_LABEL_RE.test(blob)) {
-        let abs: string | null = null;
-        if (isValidGroupPostHref(href, gID)) {
-          abs = normalizeFbHref(href).split('?')[0];
-        } else {
-          abs = await findGroupPostPermalinkInArticle(currentArticle, gID);
-        }
-        if (abs) {
-          await pushPostRecord(request, sheetUrl, posterName, postItem, groupName, memberCount, abs, status, postLogOpts);
-          return true;
-        }
-        continue;
-      }
-    }
+    const article = articles.nth(i);
+    const link = await recentPostLinkInArticle(article, gID);
+    if (!link || knownLinks.has(normLink(link)) || candidates.some((c) => c.link === link)) continue;
+    const score = caption ? captionMatchScore(await article.innerText().catch(() => ''), caption) : 0;
+    candidates.push({ link, score, order: i });
   }
 
-  if (count > 0) {
-    const firstArt = articles.nth(0);
-    const quick = firstArt.locator(`a[href*="/groups/${gID}/posts/"]`).first();
+  if (candidates.length === 0 && count > 0) {
+    const quick = articles.nth(0).locator(`a[href*="/groups/${gID}/posts/"]`).first();
     if (await quick.isVisible({ timeout: 2000 }).catch(() => false)) {
       const h = await quick.getAttribute('href');
-      if (h && hrefIsGroupPostToGroup(h, gID)) {
-        const abs = normalizeFbHref(h).split('?')[0];
-        await pushPostRecord(request, sheetUrl, posterName, postItem, groupName, memberCount, abs, status, postLogOpts);
-        return true;
+      if (h && hrefIsGroupPostToGroup(h, gID) && !knownLinks.has(normLink(h))) {
+        candidates.push({ link: normalizeFbHref(h).split('?')[0], score: 0, order: 0 });
       }
     }
   }
-  return false;
+
+  candidates.sort((a, b) => b.score - a.score || a.order - b.order);
+  const pick = candidates[0];
+  if (!pick) return false;
+  await pushPostRecord(request, sheetUrl, posterName, postItem, groupName, memberCount, pick.link, status, postLogOpts);
+  return true;
 }
 
 /**
@@ -316,6 +343,7 @@ export async function saveToSheet(
       { url: `https://www.facebook.com/groups/${gID}/my_pending_content`, status: 'รออนุมัติ' },
     ];
 
+    const knownLinks = await loadKnownGroupLinks(gID);
     for (const item of checkUrls) {
       await ensureNoDialogBlockingNavigation(page);
       console.log(`[saveToSheet] เปิด ${item.url}`);
@@ -332,7 +360,8 @@ export async function saveToSheet(
         memberCount,
         sheetUrl,
         gID,
-        postLogOpts
+        postLogOpts,
+        knownLinks
       );
       if (ok) {
         console.log(`[saveToSheet] บันทึกลิงก์แล้ว (${item.status})`);
@@ -386,22 +415,20 @@ export async function saveToSheet(
   }
 }
 
-function squash(s: string): string {
-  return String(s || '').replace(/\s+/g, ' ').trim().toLowerCase();
-}
-
 /**
  * หาลิงก์โพสต์ของเราเองในกลุ่ม ภายหลังวันโพสต์ (ใช้ตอนเก็บคอมเมนต์ กับโพสต์ที่ตอนนั้นหาลิงก์ไม่เจอ)
- * เปิด my_posted_content แล้ว my_pending_content เลือกโพสต์ที่มีชื่องานตรงกัน และไม่ใช่ลิงก์ที่รู้อยู่แล้ว
- * ไม่มีชื่องาน จะเลือกให้ก็ต่อเมื่อหน้านั้นมีโพสต์ใหม่ให้เลือกแค่โพสต์เดียว
+ * เปิด my_posted_content แล้ว my_pending_content ข้ามลิงก์ที่แถวอื่นใช้แล้ว
+ * เลือกโพสต์ที่ข้อความตรงกับประกาศมากสุด (อย่างน้อย 1 บรรทัด) ถ้าไม่มีข้อความประกาศใช้ชื่องาน
+ * ไม่มีทั้งสองอย่าง จะเลือกให้ก็ต่อเมื่อหน้านั้นเหลือโพสต์ให้เลือกแค่โพสต์เดียว
  */
 export async function findMyPostLink(
   page: Page,
   gID: string,
-  opts: { jobTitle?: string; knownLinks?: string[] } = {}
+  opts: { jobTitle?: string; caption?: string; knownLinks?: string[] } = {}
 ): Promise<{ link: string; status: 'อนุมัติเเล้ว' | 'รออนุมัติ' } | null> {
-  const known = new Set((opts.knownLinks || []).map((l) => normalizeFbHref(l).split('?')[0].replace(/\/$/, '')));
-  const title = squash(opts.jobTitle || '');
+  const known = new Set((opts.knownLinks || []).map(normLink));
+  const title = squashText(opts.jobTitle || '');
+  const caption = String(opts.caption || '');
   const pages = [
     { url: `https://www.facebook.com/groups/${gID}/my_posted_content`, status: 'อนุมัติเเล้ว' as const },
     { url: `https://www.facebook.com/groups/${gID}/my_pending_content`, status: 'รออนุมัติ' as const },
@@ -412,16 +439,22 @@ export async function findMyPostLink(
     await page.waitForTimeout(MY_CONTENT_WAIT_MS);
     const articles = page.locator('[role="main"] div[role="article"]');
     const count = Math.min(await articles.count(), 20);
-    const candidates: Array<{ link: string; matches: boolean }> = [];
+    const candidates: Array<{ link: string; score: number; titleHit: boolean }> = [];
     for (let i = 0; i < count; i++) {
       const art = articles.nth(i);
       const link = await findGroupPostPermalinkInArticle(art, gID);
-      if (!link || known.has(link.replace(/\/$/, ''))) continue;
-      if (candidates.some((c) => c.link === link)) continue;
-      const text = squash(await art.innerText().catch(() => ''));
-      candidates.push({ link, matches: Boolean(title) && text.includes(title) });
+      if (!link || known.has(normLink(link)) || candidates.some((c) => c.link === link)) continue;
+      const text = await art.innerText().catch(() => '');
+      candidates.push({
+        link,
+        score: caption ? captionMatchScore(text, caption) : 0,
+        titleHit: Boolean(title) && squashText(text).includes(title),
+      });
     }
-    const hit = title ? candidates.find((c) => c.matches) : candidates.length === 1 ? candidates[0] : undefined;
+    let hit: (typeof candidates)[number] | undefined;
+    if (caption) hit = candidates.filter((c) => c.score > 0).sort((a, b) => b.score - a.score)[0];
+    if (!hit && title) hit = candidates.find((c) => c.titleHit);
+    if (!hit && !caption && !title && candidates.length === 1) hit = candidates[0];
     if (hit) return { link: hit.link, status: item.status };
   }
   return null;
