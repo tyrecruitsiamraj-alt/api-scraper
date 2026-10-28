@@ -1661,6 +1661,36 @@ app.post('/api/users/:id/resume-posting', async (req, res) => {
 });
 
 /** ล้างงาน running ค้าง (worker เรียกเป็นระยะ — ใช้ได้บน Vercel เพราะถูกเรียกจากเครื่อง worker) */
+/**
+ * worker ส่งสัญญาณ "ยังอยู่" ตอนช่องรับงานเต็ม (ไม่ได้ถามหางานใหม่) — เดิม last_seen อัปเดตแค่ตอน claim
+ * พอรัน 3 งานพร้อมกันครบ เครื่องจึงดูเหมือนดับหลัง 2 นาที แล้วงานที่ 4 สั่งไม่ได้ (28 ต.ค. 2569)
+ */
+app.post('/api/worker/post/heartbeat', async (req, res) => {
+  try {
+    if (!requirePostWorkerToken(req, res)) return;
+    const workerId = String(req.body?.worker_id || '').trim() || 'worker';
+    const workerName = String(req.body?.worker_name || '').trim() || null;
+    const capabilities = Array.isArray(req.body?.capabilities)
+      ? req.body.capabilities.map((item) => String(item).trim()).filter(Boolean)
+      : [];
+    const fbSessions = Array.isArray(req.body?.fb_sessions)
+      ? req.body.fb_sessions.map((item) => String(item).trim()).filter(Boolean).slice(0, 200)
+      : undefined;
+    await db.touchWorkerHeartbeat(workerName || workerId, {
+      worker_id: workerId,
+      build_sha: String(req.body?.build_sha || '').trim(),
+      source_sha: String(req.body?.source_sha || '').trim(),
+      capabilities,
+      active_jobs: Number(req.body?.active_jobs) || 0,
+      concurrency: Number(req.body?.concurrency) || 0,
+      ...(fbSessions ? { fb_sessions: fbSessions } : {}),
+    });
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message || String(e) });
+  }
+});
+
 /** worker เพิ่งเปิดขึ้นมา: ปิดงานค้างของ process เก่าบนเครื่องเดียวกัน (kind = post | collect) */
 app.post('/api/worker/release-orphans', async (req, res) => {
   try {

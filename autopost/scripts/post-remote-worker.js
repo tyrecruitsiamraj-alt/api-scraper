@@ -329,6 +329,25 @@ setInterval(() => {
 }, HEARTBEAT_MS);
 
 /**
+ * ช่องรับงานเต็ม tick() จะไม่ claim → server ไม่ได้ข่าวจากเครื่อง ส่งสัญญาณแยกทุก 20 วิ
+ * (หน้าเว็บ/Jarvis ถือว่าเครื่องดับถ้าเงียบเกิน 2 นาที แล้วงานใหม่สั่งไม่ได้)
+ */
+const ALIVE_MS = Math.max(10_000, Number(process.env.WORKER_ALIVE_MS) || 20_000);
+setInterval(() => {
+  if (activeJobs < CONCURRENCY) return; // ยังว่าง: tick() claim ทุก 5 วิ เป็นสัญญาณอยู่แล้ว
+  callApi('/api/worker/post/heartbeat', {
+    worker_id: workerId,
+    worker_name: workerName,
+    build_sha: workerBuildSha,
+    source_sha: workerSourceSha,
+    capabilities: WORKER_CAPABILITIES,
+    fb_sessions: listFacebookSessionKeys(),
+    active_jobs: activeJobs,
+    concurrency: CONCURRENCY,
+  }).catch((e) => console.error(`[post-worker] heartbeat: ${e.message || e}`));
+}, ALIVE_MS);
+
+/**
  * รอบโพสต์อัตโนมัติประจำวัน (รวมเสาร์-อาทิตย์) — worker เป็นคนยิงเพราะ server บน Vercel
  * ไม่มี process ค้างไว้ทำตามเวลา. server ฝั่ง enqueue idempotent ต่อวัน (รีสตาร์ท worker ไม่ enqueue ซ้ำ)
  */
