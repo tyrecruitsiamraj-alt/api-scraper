@@ -124,11 +124,12 @@ export function accountStatus(a: {
   if (a.posted_today >= a.daily_cap) {
     return { status: 'full', warning: `บัญชีนี้โพสต์ครบโควต้าวันนี้แล้ว (${a.posted_today}/${a.daily_cap})` };
   }
-  if (!a.worker) return { status: 'no_worker', warning: 'บัญชีนี้ยังไม่ได้ผูกกับเครื่อง' };
-  if (!a.worker_online) return { status: 'worker_offline', warning: `เครื่อง ${a.worker} ออฟไลน์อยู่` };
+  // บัญชีที่ยังไม่มีเครื่องประจำเลือกได้ — Jarvis เลือกเครื่องในขั้นถัดไป (worker)
+  if (a.worker && !a.worker_online) return { status: 'worker_offline', warning: `เครื่อง ${a.worker} ออฟไลน์อยู่` };
   if (a.queue.running + a.queue.queued > 0) {
     return { status: 'busy', warning: 'บัญชีนี้มีงานโพสต์ค้างอยู่ งานใหม่จะต่อคิวหลังงานนั้น' };
   }
+  if (!a.worker) return { status: 'ready', warning: 'บัญชีนี้ยังไม่มีเครื่องประจำ เลือกเครื่องที่จะใช้โพสต์' };
   return { status: 'ready', warning: null };
 }
 

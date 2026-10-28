@@ -3436,9 +3436,7 @@ async function resolvePostAccount(groupIds: string[], requestedAccountId: string
   const account = rows[0];
   if (!account) return { account: null, issue: 'บัญชี Facebook ที่เลือกใน Jarvis ไม่มีในระบบ' };
   if (account.paused) return { account, issue: `บัญชี ${account.label} ถูกพักอยู่` };
-  const owned = new Set((account.group_ids ?? []).map(String));
-  const missing = groupIds.filter((id) => !owned.has(id));
-  if (missing.length) return { account, issue: `บัญชี ${account.label} ยังไม่ได้ผูก ${missing.length} กลุ่มที่เลือก` };
+  // กลุ่มไม่ได้ผูกกับบัญชี: บัญชีที่ Jarvis เลือกโพสต์ได้ทุกกลุ่ม (worker กดเข้าร่วมกลุ่มที่ยังไม่ได้เป็นสมาชิกให้)
   return { account, issue: null };
 }
 
@@ -3724,7 +3722,7 @@ export async function postJarvisOrder(requestNo: string, requestedBy: string | n
     throw new Error(
       order.target_worker
         ? `เครื่อง ${order.target_worker} ที่เลือกใน Jarvis ยังออฟไลน์ เปิด Autopost บนเครื่องนั้นก่อน`
-        : 'เครื่องที่ผูกกับบัญชี Facebook ยังออฟไลน์ เปิด Autopost บนเครื่องนั้นก่อน',
+        : 'ยังไม่ได้เลือกเครื่องใน Jarvis หรือเครื่องประจำของบัญชีออฟไลน์อยู่',
     );
   }
 
