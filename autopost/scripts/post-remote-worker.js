@@ -1,6 +1,17 @@
 /* eslint-disable no-console */
 require('dotenv').config();
 const { execFileSync, spawn } = require('child_process');
+
+/**
+ * ที่อยู่เต็มของ cmd.exe — เรียกแค่ 'cmd.exe' ต้องพึ่ง PATH ถ้า PATH ของหน้าต่างไม่มีโฟลเดอร์ System32 ของ Windows
+ * จะได้ "spawn cmd.exe ENOENT" แล้วงานล้มทันที (เกิดบน RM009 28 ต.ค. 2569)
+ */
+function windowsCmd() {
+  const comspec = String(process.env.ComSpec || process.env.COMSPEC || '').trim();
+  if (comspec) return comspec;
+  return require('path').join(process.env.SystemRoot || process.env.windir || 'C:\\Windows', 'System32', 'cmd.exe');
+}
+
 const os = require('os');
 const path = require('path');
 
@@ -148,7 +159,7 @@ async function runPlaywrightForJob(job) {
         .slice(-12000);
     };
     const child = isWin
-      ? spawn('cmd.exe', ['/d', '/c', 'npx', ...args], {
+      ? spawn(windowsCmd(), ['/d', '/c', 'npx', ...args], {
           cwd: PROJECT_ROOT,
           stdio: ['ignore', 'pipe', 'pipe'],
           env,
