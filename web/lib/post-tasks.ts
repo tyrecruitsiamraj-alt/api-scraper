@@ -22,11 +22,6 @@ export type PostTask = {
   started_at: string | null;
   finished_at: string | null;
   is_repost: boolean;
-  /**
-   * งานที่รอคิว: บัญชีต้องผ่านการทดสอบแบบไม่โพสต์ภายใน 24 ชม. ก่อน worker จะรับงาน
-   * needed = ยังไม่ผ่านและไม่มีการทดสอบรออยู่ (งานจะค้าง) · running = กำลังทดสอบ · ok = ผ่านแล้ว · null = ไม่ใช่งานรอคิว
-   */
-  preflight: { state: 'needed' | 'running' | 'ok' | null; last_error: string | null };
   counts: PostTaskCounts;
   current: PostTaskCurrent;
   stage: { step: number; state: 'active' | 'done' | 'failed'; label: string };
@@ -49,8 +44,6 @@ type RunRow = {
   finished_at: string | null;
   assignment_ids: string[] | null;
   user_group_ids: string[] | null;
-  preflight_state: 'needed' | 'running' | 'ok' | null;
-  preflight_last_error: string | null;
 };
 
 type AttemptRow = { run_id: string; group_id: string | null; level: string; kind: string | null; message: string | null; at: string; meta: Record<string, unknown> | null };
@@ -66,19 +59,7 @@ async function loadTasks(where: string, params: unknown[], limit: number): Promi
     `SELECT r.id, r.run_id, r.status, r.user_id, u.name AS account, r.worker_id, r.requested_by, r.error,
             r.created_at, r.started_at, r.finished_at,
             COALESCE(r.assignment_ids::jsonb, '[]'::jsonb) AS assignment_ids,
-            COALESCE(u.group_ids::jsonb, '[]'::jsonb) AS user_group_ids,
-            CASE WHEN r.status = 'queued' THEN
-              CASE
-                WHEN EXISTS (SELECT 1 FROM ${AP}.post_run_queue p WHERE p.user_id = r.user_id AND p.mode = 'preflight'
-                                AND p.status = 'completed' AND p.finished_at > NOW() - INTERVAL '24 hours') THEN 'ok'
-                WHEN EXISTS (SELECT 1 FROM ${AP}.post_run_queue p WHERE p.user_id = r.user_id AND p.mode = 'preflight'
-                                AND p.status IN ('queued', 'running')) THEN 'running'
-                ELSE 'needed'
-              END
-            END AS preflight_state,
-            (SELECT NULLIF(left(COALESCE(p.error, ''), 300), '') FROM ${AP}.post_run_queue p
-              WHERE p.user_id = r.user_id AND p.mode = 'preflight' AND p.status = 'failed'
-              ORDER BY p.created_at DESC LIMIT 1) AS preflight_last_error
+            COALESCE(u.group_ids::jsonb, '[]'::jsonb) AS user_group_ids
        FROM ${AP}.post_run_queue r
        LEFT JOIN ${AP}.users u ON u.id = r.user_id
       WHERE COALESCE(r.mode, 'post') = 'post' ${where}
@@ -157,7 +138,6 @@ function assemble(data: Awaited<ReturnType<typeof loadTasks>>): PostTask[] {
       started_at: row.started_at,
       finished_at: row.finished_at,
       is_repost: /-r\d+$/i.test(assignmentId),
-      preflight: { state: row.preflight_state ?? null, last_error: row.preflight_last_error ?? null },
       counts,
       current,
       stage: postTaskStage(row.status, counts, current),

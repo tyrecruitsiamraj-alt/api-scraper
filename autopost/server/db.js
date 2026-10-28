@@ -1983,19 +1983,8 @@ async function claimNextPostRunJob(workerId, runId, workerName, capabilities = [
              (COALESCE(q.mode, 'post') = 'preflight' AND $4::jsonb ? 'preflight')
              OR (COALESCE(q.mode, 'post') = 'post' AND $4::jsonb ? 'post')
            )
-           /** A lesson from prior session failures: a real post can only be
-               claimed after the same pinned account passed preflight recently.
-               This is a server-side gate, not a dashboard suggestion. */
-           AND (
-             COALESCE(q.mode, 'post') <> 'post'
-             OR EXISTS (
-               SELECT 1 FROM post_run_queue p
-                WHERE p.user_id = q.user_id
-                  AND p.mode = 'preflight'
-                  AND p.status = 'completed'
-                  AND p.finished_at > NOW() - INTERVAL '24 hours'
-             )
-           )
+           /** งานโพสต์จริงไม่ต้องรอผลทดสอบแบบไม่โพสต์ (preflight) แล้ว — เจ้าของสั่งเอาออก 28 ต.ค. 2569
+               ถ้าบัญชีล็อกอินไม่ได้ จะรู้จากผลรอบโพสต์ */
            /** ข้ามบัญชีที่โดนพัก (circuit breaker) */
            AND (u.paused_until IS NULL OR u.paused_until <= NOW())
            /** pin บัญชี→เครื่อง: บัญชีที่ผูกเครื่องไว้ ให้เครื่องนั้นหยิบเท่านั้น

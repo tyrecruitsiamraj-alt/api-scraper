@@ -194,9 +194,9 @@ Content-Type: application/json
 
 งานโพสต์:
 ```json
-{ "ok": true, "type": "content", "request_no": "LBM6903001", "queue_id": "mvoz...", "worker": "SONB-RM009", "preflight_queued": true }
+{ "ok": true, "type": "content", "request_no": "LBM6903001", "queue_id": "mvoz...", "worker": "SONB-RM009", "preflight_queued": false }
 ```
-- `preflight_queued: true` แปลว่าบัญชียังไม่ได้ทดสอบภายใน 24 ชม. ระบบต่อคิวทดสอบแบบไม่โพสต์ไว้ก่อน งานโพสต์จะเริ่มหลังทดสอบผ่าน (ช้าขึ้นราว 1 นาที)
+- `preflight_queued` เป็น `false` เสมอ ระบบเลิกทดสอบก่อนโพสต์แล้ว สั่งแล้วงานเข้าคิวโพสต์เลย ถ้าบัญชีล็อกอินไม่ได้จะรู้จากผลรอบโพสต์
 
 งาน Scrap:
 ```json

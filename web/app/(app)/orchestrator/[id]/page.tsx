@@ -275,7 +275,7 @@ async function renderCampaignDetail({ params, searchParams }: { params: { id: st
   const hiddenHistoryCount = Math.max(0, contents.length - reviewContents.length);
   const fbAccounts = await listFacebookAccounts();
   const preflightAccounts = fbAccounts.filter((account) => account.group_count > 0 && account.preflight_ready);
-  const publishAccounts = fbAccounts.filter((account) => account.group_count > 0 && account.preflight_verified && account.preflight_ready);
+  const publishAccounts = fbAccounts.filter((account) => account.group_count > 0 && account.preflight_ready);
   const posts = await listCampaignPosts(params.id);
   const postQueue = await getCampaignPostQueueState(params.id);
   const draftQueue = await getCampaignDraftQueueState(params.id);
@@ -603,7 +603,7 @@ async function renderCampaignDetail({ params, searchParams }: { params: { id: st
                 <CircleAlertIcon />
                 <AlertTitle>ยังไม่มีบัญชีที่พร้อม Auto-post</AlertTitle>
                 <AlertDescription>
-                  ต้องผูกเครื่อง เลือกกลุ่ม และผ่านการทดสอบแบบไม่โพสต์จริงก่อน <Link href="/settings/connectors">ไปตั้งค่า Connector</Link>
+                  ต้องผูกเครื่องและเลือกกลุ่มก่อน <Link href="/settings/connectors">ไปตั้งค่า Connector</Link>
                 </AlertDescription>
               </Alert>
             )}

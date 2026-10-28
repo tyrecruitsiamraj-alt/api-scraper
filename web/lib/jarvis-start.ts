@@ -17,10 +17,6 @@ export type JarvisStartResult =
   | { ok: true; type: 'scraping'; request_no: string; task_id: string; queued: boolean; message: string | null }
   | { ok: false; status: number; error: string };
 
-function newId(): string {
-  return Date.now().toString(36) + Math.random().toString(36).slice(2);
-}
-
 async function startContent(requestNo: string, requestedBy: string): Promise<JarvisStartResult> {
   const order = (await listJarvisPostOrders()).find((o) => o.request_no === requestNo);
   if (!order) return { ok: false, status: 404, error: `ไม่พบคำสั่งโพสต์ ${requestNo}` };
@@ -28,25 +24,10 @@ async function startContent(requestNo: string, requestedBy: string): Promise<Jar
   if (order.issues.length) return { ok: false, status: 422, error: `ยังโพสต์ไม่ได้: ${order.issues.join(', ')}` };
   if (!order.account_id) return { ok: false, status: 422, error: 'ไม่มีบัญชี Facebook ที่ผูกกับกลุ่มนี้' };
 
-  // worker หยิบงานโพสต์จริงได้เฉพาะบัญชีที่ผ่านการทดสอบแบบไม่โพสต์ภายใน 24 ชม.
-  // ถ้ายังไม่มี ให้ต่อคิวทดสอบไว้ก่อนงานโพสต์ (เครื่องเดียวกับที่เลือก)
+  // ไม่ต้องทดสอบแบบไม่โพสต์ก่อนแล้ว (เจ้าของสั่งเอาออก 28 ต.ค. 2569) — สั่งแล้วเข้าคิวโพสต์เลย
+  // preflight_queued คงไว้ใน response เป็น false ให้ Jarvis ที่อ่านช่องนี้อยู่ไม่พัง
   await q(`ALTER TABLE ${AP}.post_run_queue ADD COLUMN IF NOT EXISTS target_worker VARCHAR(255)`);
-  const gate = await q<{ passed: boolean; pending: boolean }>(
-    `SELECT
-       EXISTS (SELECT 1 FROM ${AP}.post_run_queue WHERE user_id=$1 AND mode='preflight' AND status='completed'
-                 AND finished_at > now() - interval '23 hours') AS passed,
-       EXISTS (SELECT 1 FROM ${AP}.post_run_queue WHERE user_id=$1 AND mode='preflight' AND status IN ('queued','running')) AS pending`,
-    [order.account_id],
-  );
-  let preflightQueued = false;
-  if (!gate[0]?.passed && !gate[0]?.pending) {
-    await q(
-      `INSERT INTO ${AP}.post_run_queue (id, assignment_ids, user_id, status, requested_by, message, mode, target_worker)
-       VALUES ($1, '[]'::jsonb, $2, 'queued', $3, $4, 'preflight', $5)`,
-      [newId(), order.account_id, requestedBy, `ตรวจ Facebook ก่อนโพสต์ ${requestNo}`, order.target_worker],
-    );
-    preflightQueued = true;
-  }
+  const preflightQueued = false;
 
   try {
     const queueId = await postJarvisOrder(requestNo, requestedBy);
