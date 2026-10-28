@@ -3750,13 +3750,15 @@ export async function postJarvisOrder(requestNo: string, requestedBy: string | n
       [requestNo],
     );
     if (!snapshot.rows[0]) throw new Error('ใบนี้สั่งโพสต์ไปแล้ว');
-    const accountGroups = await client.query<{ group_ids: string[] }>(
-      `SELECT COALESCE(group_ids::jsonb, '[]'::jsonb) AS group_ids FROM ${AP}.users WHERE id=$1`,
-      [order.account_id],
+    // กลุ่มไม่ได้ผูกกับบัญชี: Jarvis เลือกกลุ่มไหนก็ได้ที่มีในระบบ บัญชีที่ยังไม่ได้เป็นสมาชิก worker จะกดเข้าร่วมให้
+    const wanted = snapshot.rows[0].group_ids.map(String);
+    const known = await client.query<{ id: string }>(
+      `SELECT id::text AS id FROM ${AP}.groups WHERE id::text = ANY($1::text[])`,
+      [wanted],
     );
-    const allowed = new Set((accountGroups.rows[0]?.group_ids ?? []).map(String));
-    const groups = snapshot.rows[0].group_ids.map(String).filter((id) => allowed.has(id));
-    if (!groups.length) throw new Error('กลุ่มที่เลือกใน Jarvis ไม่ได้ผูกกับบัญชี Facebook นี้');
+    const allowed = new Set(known.rows.map((r) => r.id));
+    const groups = wanted.filter((id) => allowed.has(id));
+    if (!groups.length) throw new Error('กลุ่มที่เลือกใน Jarvis ไม่มีในระบบ So Scraping');
     const inserted = await client.query(
       `INSERT INTO ${AP}.jobs (id, title, owner, company, caption, status)
        VALUES ($1, $2, 'SO Recruitment', 'SO Recruitment', $3, 'pending')

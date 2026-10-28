@@ -31,7 +31,10 @@ export type JarvisAccountOption = {
   status: AccountStatus;
   /** ข้อความภาษาไทยสำหรับแจ้งพนักงาน (เช่น popup) — null เมื่อพร้อม */
   warning: string | null;
+  /** กลุ่มที่บัญชีนี้เลือกโพสต์ได้ = ทุกกลุ่มในระบบ (กลุ่มไม่ได้ผูกกับบัญชี) */
   group_ids: string[];
+  /** กลุ่มที่ตั้งไว้กับบัญชีนี้ในหน้าตั้งค่า (ใช้กับโพสต์อัตโนมัติรายวัน) */
+  home_group_ids: string[];
   /** เครื่องที่มี session ล็อกอินบัญชีนี้อยู่ (โพสต์จากเครื่องอื่นได้ แต่ต้องล็อกอินใหม่บนเครื่องนั้น) */
   session_workers: string[];
 };
@@ -42,7 +45,10 @@ export type JarvisGroupOption = {
   /** ชื่อกลุ่มบน Facebook — null ถ้าบอทยังไม่เคยเข้าไปอ่าน */
   name: string | null;
   url: string;
+  /** บัญชีที่เลือกกลุ่มนี้ได้ = ทุกบัญชี */
   account_ids: string[];
+  /** บัญชีที่ตั้งกลุ่มนี้ไว้ในหน้าตั้งค่า */
+  home_account_ids: string[];
   last_posted_at: string | null;
   /** ผลย้อนหลัง 30 วัน — comments/phone_leads ขึ้นกับตัวเก็บคอมเมนต์ (ยังอ่านคอมเมนต์รายคนไม่ได้ ตัวเลขอาจต่ำกว่าจริง) */
   stats_30d: { attempts: number; posted: number; comments: number; phone_leads: number };
@@ -237,6 +243,8 @@ export async function getJarvisOptions(): Promise<JarvisOptions> {
     }
   }
 
+  const allGroupIds = groupRows.map((g) => String(g.id));
+  const allAccountIds = accountRows.map((r) => String(r.id));
   const accounts: JarvisAccountOption[] = accountRows.map((r) => {
     const daily_cap = effectiveDailyCap(r.daily_cap, r.age_days, process.env, r.skip_warmup);
     const base = {
@@ -254,7 +262,8 @@ export async function getJarvisOptions(): Promise<JarvisOptions> {
       ...base,
       remaining_today: Math.max(0, daily_cap - base.posted_today),
       ...accountStatus(base),
-      group_ids: (r.group_ids ?? []).map(String),
+      group_ids: allGroupIds,
+      home_group_ids: (r.group_ids ?? []).map(String),
       session_workers: sessionWorkers.get(sessionKey(r)) ?? [],
     };
   });
@@ -264,7 +273,8 @@ export async function getJarvisOptions(): Promise<JarvisOptions> {
     fb_group_id: String(g.fb_group_id),
     name: g.name && !PLACEHOLDER_NAME.test(g.name.trim()) ? g.name.trim() : null,
     url: `https://www.facebook.com/groups/${g.fb_group_id}`,
-    account_ids: (g.account_ids ?? []).map(String),
+    account_ids: allAccountIds,
+    home_account_ids: (g.account_ids ?? []).map(String),
     last_posted_at: g.last_posted_at,
     stats_30d: {
       attempts: Number(g.attempts) || 0,
