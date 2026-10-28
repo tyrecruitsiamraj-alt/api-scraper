@@ -178,3 +178,52 @@ export async function getPostTaskLogs(runId: string): Promise<PostTaskLog[]> {
     return [];
   }
 }
+
+export type ManualJoinGroup = {
+  user_id: string;
+  account: string | null;
+  group_id: string;
+  group_name: string | null;
+  url: string;
+  /** questions = กลุ่มให้ตอบคำถามก่อนเข้า · pending = ส่งคำขอแล้ว รอแอดมินอนุมัติ */
+  state: 'questions' | 'pending';
+  request_no: string | null;
+  seen_at: string;
+};
+
+/**
+ * กลุ่มที่บอทเข้าร่วมเองไม่ได้ ต้องให้คนเข้าไปจัดการ (ตอบคำถาม / ตามแอดมิน) — ล่าสุดต่อบัญชี+กลุ่ม ย้อน 30 วัน
+ * ไม่นับคู่ที่หลังจากนั้นโพสต์สำเร็จแล้ว (แปลว่าเข้ากลุ่มได้แล้ว)
+ */
+export async function listManualJoinGroups(): Promise<ManualJoinGroup[]> {
+  try {
+    const rows = await q<Omit<ManualJoinGroup, 'url' | 'request_no'> & { job_id: string | null }>(
+      `WITH j AS (
+         SELECT DISTINCT ON (l.user_id, l.group_id)
+                l.user_id, l.group_id, l.meta->>'state' AS state, l.created_at AS seen_at, l.job_id
+           FROM ${AP}.run_logs l
+          WHERE l.level = 'warn' AND l.meta->>'kind' = 'join' AND l.meta->>'state' IN ('questions', 'pending')
+            AND l.group_id IS NOT NULL AND l.user_id IS NOT NULL
+            AND l.created_at > now() - interval '30 days'
+          ORDER BY l.user_id, l.group_id, l.created_at DESC
+       )
+       SELECT j.user_id, u.name AS account, j.group_id, g.name AS group_name, j.state, j.seen_at, j.job_id
+         FROM j
+         LEFT JOIN ${AP}.users u ON u.id = j.user_id
+         LEFT JOIN ${AP}.groups g ON g.fb_group_id = j.group_id
+        WHERE NOT EXISTS (
+          SELECT 1 FROM ${AP}.run_logs s
+           WHERE s.user_id = j.user_id AND s.group_id = j.group_id AND s.level = 'success' AND s.created_at > j.seen_at
+        )
+        ORDER BY j.seen_at DESC
+        LIMIT 300`,
+    );
+    return rows.map(({ job_id, ...r }) => ({
+      ...r,
+      url: `https://www.facebook.com/groups/${r.group_id}`,
+      request_no: job_id ? requestNoFromAssignment(job_id) : null,
+    }));
+  } catch {
+    return [];
+  }
+}

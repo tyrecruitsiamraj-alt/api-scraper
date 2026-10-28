@@ -1,8 +1,8 @@
 import Link from 'next/link';
-import { ChevronDownIcon, ChevronRightIcon } from 'lucide-react';
+import { ChevronDownIcon, ChevronRightIcon, ExternalLinkIcon } from 'lucide-react';
 import { listJarvisPostOrders, listPostAssignments } from '@/lib/repo';
-import { listPostTasks } from '@/lib/post-tasks';
-import type { PostTask } from '@/lib/post-tasks';
+import { listManualJoinGroups, listPostTasks } from '@/lib/post-tasks';
+import type { ManualJoinGroup, PostTask } from '@/lib/post-tasks';
 import { postAssignmentNowAction, runFacebookPreflightAction } from '@/lib/actions';
 import { AutopostNav } from '@/components/AutopostNav';
 import { AutoRefresh } from '@/components/AutoRefresh';
@@ -15,6 +15,7 @@ import { Card, CardAction, CardContent, CardDescription, CardFooter, CardHeader,
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from '@/components/ui/empty';
 import { Item, ItemActions, ItemContent, ItemDescription, ItemGroup, ItemTitle } from '@/components/ui/item';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 
 export const dynamic = 'force-dynamic';
@@ -74,7 +75,12 @@ function TaskList({ tasks, empty }: { tasks: PostTask[]; empty: string }) {
 export default async function AutopostJobsPage(props: { searchParams?: Promise<{ notice?: string }> }) {
   const searchParams = await props.searchParams;
   const notice = typeof searchParams?.notice === 'string' ? searchParams.notice : null;
-  const [orders, tasks, assignments] = await Promise.all([listJarvisPostOrders(), listPostTasks(), listPostAssignments()]);
+  const [orders, tasks, assignments, manualJoin] = await Promise.all([
+    listJarvisPostOrders(),
+    listPostTasks(),
+    listPostAssignments(),
+    listManualJoinGroups(),
+  ]);
   const pendingOrders = orders.filter((o) => o.jarvis_status === 'pending');
   const legacy = assignments.filter((row) => !row.id.startsWith('jv-'));
 
@@ -136,6 +142,8 @@ export default async function AutopostJobsPage(props: { searchParams?: Promise<{
           </TabsContent>
         </Tabs>
       </section>
+
+      <ManualJoinSection groups={manualJoin} />
 
       {legacy.length > 0 && (
         <Collapsible>
@@ -205,5 +213,68 @@ export default async function AutopostJobsPage(props: { searchParams?: Promise<{
         </Collapsible>
       )}
     </div>
+  );
+}
+
+const JOIN_STATE_LABEL: Record<ManualJoinGroup['state'], string> = {
+  questions: 'ต้องตอบคำถามก่อนเข้า',
+  pending: 'รอแอดมินอนุมัติ',
+};
+
+/** กลุ่มที่บอทเข้าร่วมเองไม่ได้ — ให้คนกดลิงก์ไปตอบคำถาม/ตามแอดมินด้วยบัญชีนั้น */
+function ManualJoinSection({ groups }: { groups: ManualJoinGroup[] }) {
+  return (
+    <section className="flex flex-col gap-3">
+      <h2 className="flex items-center gap-2 text-base font-semibold">
+        กลุ่มที่ต้องเข้าร่วมเอง
+        <Badge variant="secondary">{groups.length}</Badge>
+      </h2>
+      <Card>
+        <CardHeader>
+          <CardDescription>
+            บอทไม่ตอบคำถามเข้ากลุ่มแทน ล็อกอินบัญชีตามแถว แล้วกดลิงก์ไปตอบคำถามหรือตามแอดมิน เข้ากลุ่มได้แล้ว แถวนั้นจะหายไปหลังโพสต์สำเร็จครั้งถัดไป
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          {groups.length === 0 ? (
+            <Empty className="border py-8">
+              <EmptyHeader>
+                <EmptyDescription>ไม่มีกลุ่มที่ต้องเข้าร่วมเองใน 30 วันล่าสุด</EmptyDescription>
+              </EmptyHeader>
+            </Empty>
+          ) : (
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>กลุ่ม</TableHead>
+                  <TableHead>บัญชี</TableHead>
+                  <TableHead>ต้องทำ</TableHead>
+                  <TableHead className="hidden md:table-cell">ใบ</TableHead>
+                  <TableHead className="hidden md:table-cell">เจอเมื่อ</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {groups.map((g) => (
+                  <TableRow key={`${g.user_id}-${g.group_id}`}>
+                    <TableCell className="max-w-72 whitespace-normal">
+                      <a href={g.url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 font-medium underline-offset-4 hover:underline">
+                        {g.group_name || `กลุ่ม ${g.group_id}`}
+                        <ExternalLinkIcon className="size-3.5" />
+                      </a>
+                    </TableCell>
+                    <TableCell>{g.account ?? 'บัญชีถูกลบแล้ว'}</TableCell>
+                    <TableCell>
+                      <Badge variant="outline">{JOIN_STATE_LABEL[g.state]}</Badge>
+                    </TableCell>
+                    <TableCell className="hidden md:table-cell text-muted-foreground">{g.request_no ?? '-'}</TableCell>
+                    <TableCell className="hidden md:table-cell text-muted-foreground">{thaiTime(g.seen_at)}</TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          )}
+        </CardContent>
+      </Card>
+    </section>
   );
 }
