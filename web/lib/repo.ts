@@ -3398,6 +3398,8 @@ export type JarvisPostOrder = {
   worker_online: boolean;
   /** ทำไมเครื่องไม่พร้อม เป็นภาษาคน — null เมื่อเครื่องพร้อม */
   worker_problem: string | null;
+  /** บัญชีที่ Jarvis เลือกไว้ (อาจถูกลบไปแล้ว ถ้า account_id เป็น null) */
+  requested_account_id: string | null;
   job_id: string | null;
   queue_status: string | null;
   queue_at: string | null;
@@ -3687,6 +3689,7 @@ export async function listJarvisPostOrders(): Promise<JarvisPostOrder[]> {
         targetWorker ? targetOnline : Boolean(account?.worker_online),
         targetWorker ? targetSeen?.last_seen ?? null : account?.worker_last_seen ?? null,
       ),
+      requested_account_id: requestedAccountId,
       job_id: queue[0] ? jobId : null,
       queue_status: queue[0]?.status ?? null,
       queue_at: queue[0]?.created_at ?? null,
@@ -3728,6 +3731,9 @@ export async function repostJarvisOrder(requestNo: string, groupIds: string[], r
   if (order.account_id) {
     account = { id: order.account_id, label: order.account_label ?? order.account_id };
     workerOnline = order.worker_online;
+  } else if (order.requested_account_id) {
+    // Jarvis เลือกบัญชีไว้ แต่บัญชีนั้นไม่มีแล้ว (ถูกลบ) — ห้ามเปลี่ยนไปใช้บัญชีอื่นเอง
+    throw new Error('บัญชีที่เลือกไว้ใน Jarvis ไม่มีในระบบแล้ว ให้ Jarvis สั่งใบนี้ใหม่โดยเลือกบัญชีที่มีอยู่');
   } else {
     const picked = await pickPostAccount(wanted);
     if (!picked) throw new Error('ไม่มีบัญชี Facebook ที่ผูกกับกลุ่มที่เลือก');
