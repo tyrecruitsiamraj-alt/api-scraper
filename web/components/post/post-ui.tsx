@@ -19,7 +19,9 @@ export function thaiTime(value: string | null | undefined, withDate = true): str
 }
 
 export const GROUP_STATUS: Record<PostGroupStatus, { label: string; block: string; badge: string }> = {
-  posted: { label: 'สำเร็จ', block: 'bg-success', badge: 'border-success/30 bg-success/10 text-success' },
+  posted: { label: 'ขึ้นในกลุ่มแล้ว', block: 'bg-success', badge: 'border-success/30 bg-success/10 text-success' },
+  pending_approval: { label: 'รออนุมัติ', block: 'bg-success/40', badge: 'border-success/30 text-success' },
+  unconfirmed: { label: 'ยังไม่เจอในกลุ่ม', block: 'bg-warning/40', badge: 'border-warning/40 text-warning' },
   failed: { label: 'ไม่สำเร็จ', block: 'bg-destructive', badge: 'border-destructive/30 bg-destructive/10 text-destructive' },
   not_member: { label: 'ยังไม่ได้เข้ากลุ่ม', block: 'bg-warning/60', badge: 'border-warning/40 bg-warning/10 text-warning' },
   posting: { label: 'กำลังโพสต์', block: 'bg-warning animate-pulse', badge: 'border-warning/40 bg-warning/10 text-warning' },
@@ -79,10 +81,12 @@ export function taskStageBadge(task: PostTask) {
   return <Badge variant="outline">{label}</Badge>;
 }
 
-/** สรุปตัวเลขสั้น ๆ: สั่ง 15 กลุ่ม · สำเร็จ 4 · ไม่สำเร็จ 2 · กำลังโพสต์กลุ่มที่ 7 */
+/** สรุปตัวเลขสั้น ๆ: สั่ง 15 กลุ่ม · ขึ้นในกลุ่มแล้ว 4 · รออนุมัติ 1 · ไม่สำเร็จ 2 · กำลังโพสต์กลุ่มที่ 7 */
 export function countsLine(task: PostTask): string {
   const c = task.counts;
-  const parts = [`สั่ง ${c.planned} กลุ่ม`, `สำเร็จ ${c.posted}`];
+  const parts = [`สั่ง ${c.planned} กลุ่ม`, `ขึ้นในกลุ่มแล้ว ${c.posted}`];
+  if (c.pending_approval) parts.push(`รออนุมัติ ${c.pending_approval}`);
+  if (c.unconfirmed) parts.push(`ยังไม่เจอในกลุ่ม ${c.unconfirmed}`);
   if (c.failed) parts.push(`ไม่สำเร็จ ${c.failed}`);
   if (c.not_member) parts.push(`ยังไม่ได้เข้ากลุ่ม ${c.not_member}`);
   if (task.current) parts.push(`กำลังโพสต์กลุ่มที่ ${task.current.order}`);

@@ -1,4 +1,14 @@
-export type PostGroupStatus = 'posted' | 'failed' | 'not_member' | 'posting' | 'waiting' | 'skipped';
+export type PostGroupStatus =
+  | 'posted'
+  | 'pending_approval'
+  | 'unconfirmed'
+  | 'failed'
+  | 'not_member'
+  | 'posting'
+  | 'waiting'
+  | 'skipped';
+
+export function postedOutcome(postStatus: unknown, postLink: unknown): 'posted' | 'pending_approval' | 'unconfirmed';
 
 export type PostTaskGroup = {
   group_id: string;
@@ -19,6 +29,8 @@ export type PostTaskGroup = {
 export type PostTaskCounts = {
   planned: number;
   posted: number;
+  pending_approval: number;
+  unconfirmed: number;
   failed: number;
   posting: number;
   not_member: number;

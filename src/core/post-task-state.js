@@ -30,6 +30,18 @@ function num(value) {
  * @param {string} input.runStatus queued | running | completed | failed | cancelled
  * @param {(fbGroupId: string) => string} [input.groupName]
  */
+/**
+ * ผลจริงของกลุ่มที่บอทกดโพสต์สำเร็จ (ดูจาก post_logs ของกลุ่มนั้น) — ใช้ทั้งหน้าเว็บและ API ของ Jarvis
+ *   posted           = ขึ้นในกลุ่มแล้ว (มีลิงก์ และไม่ได้รออนุมัติ)
+ *   pending_approval = โพสต์แล้ว รอแอดมินกลุ่มอนุมัติ
+ *   unconfirmed      = กดโพสต์แล้ว แต่ยังไม่เจอโพสต์ในกลุ่ม (ไม่มีลิงก์) — ห้ามนับเป็นสำเร็จ
+ */
+export function postedOutcome(postStatus, postLink) {
+  if (/รออนุมัติ|pending/i.test(String(postStatus ?? ''))) return 'pending_approval';
+  if (String(postLink ?? '').trim()) return 'posted';
+  return 'unconfirmed';
+}
+
 export function buildPostTaskGroups({ plan = [], attempts = [], postLogs = [], runStatus = 'queued', groupName = (id) => id }) {
   const order = [];
   const seen = new Set();
@@ -70,6 +82,8 @@ export function buildPostTaskGroups({ plan = [], attempts = [], postLogs = [], r
       status = active ? 'waiting' : 'skipped';
     }
 
+    if (status === 'posted') status = postedOutcome(log?.post_status, log?.post_link);
+
     return {
       group_id: groupId,
       name: groupName(groupId),
@@ -94,6 +108,8 @@ export function buildPostTaskGroups({ plan = [], attempts = [], postLogs = [], r
     counts: {
       planned: groups.length,
       posted: count('posted'),
+      pending_approval: count('pending_approval'),
+      unconfirmed: count('unconfirmed'),
       failed: count('failed'),
       posting: count('posting'),
       not_member: count('not_member'),
@@ -117,12 +133,21 @@ export function postTaskStage(runStatus, counts = { planned: 0, posted: 0, faile
     case 'running':
       if (current) return { step: 2, state: 'active', label: `กำลังโพสต์กลุ่มที่ ${current.order}/${counts.planned}` };
       return { step: 2, state: 'active', label: counts.planned ? 'กำลังโพสต์' : 'กำลังเปิด Facebook' };
-    case 'completed':
-      if (counts.planned > 0 && counts.posted === 0) return { step: 3, state: 'failed', label: 'ไม่สำเร็จทุกกลุ่ม' };
-      if (counts.failed > 0) return { step: 3, state: 'done', label: `เสร็จ ไม่สำเร็จ ${counts.failed} กลุ่ม` };
-      return { step: 3, state: 'done', label: 'เสร็จ' };
-    case 'failed':
-      return { step: counts.posted + counts.failed > 0 ? 2 : 1, state: 'failed', label: 'ล้มเหลว' };
+    case 'completed': {
+      // กดโพสต์ได้ = ขึ้นในกลุ่มแล้ว + รออนุมัติ + ยังไม่เจอในกลุ่ม
+      const pressed = (counts.posted ?? 0) + (counts.pending_approval ?? 0) + (counts.unconfirmed ?? 0);
+      if (counts.planned > 0 && pressed === 0) return { step: 3, state: 'failed', label: 'ไม่สำเร็จทุกกลุ่ม' };
+      const notes = [
+        counts.pending_approval ? `รออนุมัติ ${counts.pending_approval}` : null,
+        counts.unconfirmed ? `ยังไม่เจอในกลุ่ม ${counts.unconfirmed}` : null,
+        counts.failed ? `ไม่สำเร็จ ${counts.failed}` : null,
+      ].filter(Boolean);
+      return { step: 3, state: 'done', label: notes.length ? `เสร็จ · ${notes.join(' · ')}` : 'เสร็จ' };
+    }
+    case 'failed': {
+      const pressed = (counts.posted ?? 0) + (counts.pending_approval ?? 0) + (counts.unconfirmed ?? 0);
+      return { step: pressed + counts.failed > 0 ? 2 : 1, state: 'failed', label: 'ล้มเหลว' };
+    }
     case 'cancelled':
       return { step: 1, state: 'failed', label: 'ยกเลิก' };
     default:

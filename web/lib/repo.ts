@@ -2,6 +2,7 @@ import 'server-only';
 import { randomUUID } from 'node:crypto';
 import { pool, q } from './db';
 import { getCandidateDuplicates } from './candidate-duplicates';
+import { postedOutcome } from '../../src/core/post-task-state.js';
 import { evaluateContentQuality, operatorFacingQuality, qualityFailureMessages } from '../../src/core/content-quality.js';
 import type { ContentQualityResult } from '../../src/core/content-quality.js';
 import { evaluateWorkflowReadiness } from '../../src/core/workflow-readiness.js';
@@ -3416,8 +3417,11 @@ export type JarvisPostRecord = { at: string; group_name: string; worker: string 
 export type JarvisGroupResult = {
   fb_group_id: string;
   name: string;
-  /** posted = worker กดโพสต์สำเร็จ, failed = โพสต์ไม่สำเร็จ, waiting = ยังไม่ถึงคิว/ยังไม่สั่ง */
-  status: 'posted' | 'failed' | 'waiting';
+  /**
+   * posted = ขึ้นในกลุ่มแล้ว · pending_approval = โพสต์แล้วรอแอดมินอนุมัติ · unconfirmed = กดโพสต์แล้วแต่ยังไม่เจอในกลุ่ม
+   * failed = โพสต์ไม่สำเร็จ · waiting = ยังไม่ถึงคิว/ยังไม่สั่ง
+   */
+  status: 'posted' | 'pending_approval' | 'unconfirmed' | 'failed' | 'waiting';
   at: string | null;
   worker: string | null;
   error: string | null;
@@ -3628,7 +3632,7 @@ export async function listJarvisPostOrders(): Promise<JarvisPostOrder[]> {
       return {
         fb_group_id: fb,
         name: fbName(fb),
-        status: !latest ? 'waiting' : latest.level === 'success' ? 'posted' : 'failed',
+        status: !latest ? 'waiting' : latest.level === 'success' ? postedOutcome(log?.post_status, log?.post_link) : 'failed',
         at: latest?.at ?? null,
         worker: machine(latest?.worker_id ?? null),
         error: latest && latest.level !== 'success' ? latest.message : null,

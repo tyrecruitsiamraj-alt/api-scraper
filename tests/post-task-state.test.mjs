@@ -18,8 +18,9 @@ test('running run: posted, failed, posting and waiting groups in plan order', ()
     ],
     postLogs: [{ group_id: 'g1', post_link: 'https://fb/p/1', post_status: 'รออนุมัติ', comment_count: 3, reactions: 7, shares: 1, created_at: at(2) }],
   });
-  assert.deepEqual(groups.map((g) => g.status), ['posted', 'failed', 'posting', 'waiting']);
-  assert.deepEqual(counts, { planned: 4, posted: 1, failed: 1, posting: 1, not_member: 0, waiting: 1, skipped: 0 });
+  // g1 กดโพสต์ได้ แต่ในกลุ่มยังรออนุมัติ → ไม่นับเป็นสำเร็จ
+  assert.deepEqual(groups.map((g) => g.status), ['pending_approval', 'failed', 'posting', 'waiting']);
+  assert.deepEqual(counts, { planned: 4, posted: 0, pending_approval: 1, unconfirmed: 0, failed: 1, posting: 1, not_member: 0, waiting: 1, skipped: 0 });
   assert.equal(current.order, 3);
   assert.equal(groups[0].post_link, 'https://fb/p/1');
   assert.equal(groups[0].reactions, 7);
@@ -37,7 +38,8 @@ test('finished run: started-without-result counts as failed, untouched groups as
       { group_id: 'g2', level: 'info', kind: 'group_start', at: at(3) },
     ],
   });
-  assert.deepEqual(groups.map((g) => g.status), ['posted', 'failed', 'skipped', 'skipped']);
+  // กดโพสต์ได้แต่ยังไม่มี post_log (ไม่มีลิงก์) = ยังไม่เจอในกลุ่ม ไม่นับเป็นสำเร็จ
+  assert.deepEqual(groups.map((g) => g.status), ['unconfirmed', 'failed', 'skipped', 'skipped']);
   assert.equal(counts.skipped, 2);
   assert.equal(postTaskStage('completed', counts).state, 'done');
 });
@@ -50,7 +52,7 @@ test('old run without a plan log uses the groups it attempted', () => {
   });
   assert.equal(groups.length, 1);
   assert.equal(groups[0].name, 'Group 873884635154852');
-  assert.equal(groups[0].status, 'posted');
+  assert.equal(groups[0].status, 'unconfirmed');
 });
 
 test('a retry after a failure shows the latest result', () => {
@@ -100,4 +102,33 @@ test('a join warn without "ยังไม่ได้เป็นสมาช�
   assert.match(groups[0].error, /ไม่เจอช่องเขียนโพสต์/);
   assert.equal(counts.not_member, 0);
   assert.equal(counts.failed, 1);
+});
+
+test('posted outcome follows the real state in the group', async () => {
+  const { postedOutcome } = await import('../src/core/post-task-state.js');
+  assert.equal(postedOutcome('อนุมัติเเล้ว', 'https://www.facebook.com/groups/1/posts/2/'), 'posted');
+  assert.equal(postedOutcome('รออนุมัติ', 'https://www.facebook.com/groups/1/posts/2/'), 'pending_approval');
+  assert.equal(postedOutcome('ไม่พบลิงก์หลังโพสต์', ''), 'unconfirmed');
+  assert.equal(postedOutcome(null, null), 'unconfirmed');
+});
+
+test('a finished run reports approval and unconfirmed groups, not just success', () => {
+  const { counts } = buildPostTaskGroups({
+    plan: [{ group_id: 'a' }, { group_id: 'b' }, { group_id: 'c' }],
+    runStatus: 'completed',
+    attempts: [
+      { group_id: 'a', level: 'success', at: at(1) },
+      { group_id: 'b', level: 'success', at: at(2) },
+      { group_id: 'c', level: 'success', at: at(3) },
+    ],
+    postLogs: [
+      { group_id: 'a', post_link: 'https://www.facebook.com/groups/a/posts/1/', post_status: 'อนุมัติเเล้ว', created_at: at(1) },
+      { group_id: 'b', post_link: '', post_status: 'รออนุมัติ', created_at: at(2) },
+      { group_id: 'c', post_link: '', post_status: 'ไม่พบลิงก์หลังโพสต์', created_at: at(3) },
+    ],
+  });
+  assert.equal(counts.posted, 1);
+  assert.equal(counts.pending_approval, 1);
+  assert.equal(counts.unconfirmed, 1);
+  assert.equal(postTaskStage('completed', counts).label, 'เสร็จ · รออนุมัติ 1 · ยังไม่เจอในกลุ่ม 1');
 });

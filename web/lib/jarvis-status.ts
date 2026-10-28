@@ -19,8 +19,11 @@ type RequestRow = { request_no: string; request_type: string; status: string; re
 export type JarvisPostGroupStatus = {
   fb_group_id: string;
   name: string;
-  /** posted = โพสต์สำเร็จ · failed = ไม่สำเร็จ (ดู error) · waiting = ยังไม่ถึงคิว */
-  status: 'posted' | 'failed' | 'waiting';
+  /**
+   * posted = ขึ้นในกลุ่มแล้ว · pending_approval = โพสต์แล้ว รอแอดมินกลุ่มอนุมัติ
+   * unconfirmed = กดโพสต์แล้ว แต่ยังไม่เจอโพสต์ในกลุ่ม · failed = ไม่สำเร็จ (ดู error) · waiting = ยังไม่ถึงคิว
+   */
+  status: 'posted' | 'pending_approval' | 'unconfirmed' | 'failed' | 'waiting';
   at: string | null;
   error: string | null;
   post_link: string | null;
@@ -44,7 +47,18 @@ export type JarvisRequestStatus =
       /** queued = รอเครื่อง · running = กำลังโพสต์ · completed = จบรอบ · failed = รอบนี้ล้ม · null = ยังไม่เริ่ม */
       run_status: string | null;
       run_queued_at: string | null;
-      summary: { groups: number; posted: number; failed: number; waiting: number; reactions: number; comments: number; shares: number; phone_leads: number };
+      summary: {
+        groups: number;
+        posted: number;
+        pending_approval: number;
+        unconfirmed: number;
+        failed: number;
+        waiting: number;
+        reactions: number;
+        comments: number;
+        shares: number;
+        phone_leads: number;
+      };
       groups: JarvisPostGroupStatus[];
       /** เหตุผลที่ยังเริ่มไม่ได้ (ถ้ามี) */
       issues: string[];
@@ -167,6 +181,8 @@ export async function getJarvisStatuses(requestNos: string[]): Promise<JarvisReq
       summary: {
         groups: groups.length,
         posted: groups.filter((g) => g.status === 'posted').length,
+        pending_approval: groups.filter((g) => g.status === 'pending_approval').length,
+        unconfirmed: groups.filter((g) => g.status === 'unconfirmed').length,
         failed: groups.filter((g) => g.status === 'failed').length,
         waiting: groups.filter((g) => g.status === 'waiting').length,
         reactions: sum('reactions'),

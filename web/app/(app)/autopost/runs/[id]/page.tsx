@@ -36,6 +36,8 @@ function Stat({ label, value, tone }: { label: string; value: string | number; t
   );
 }
 
+/** กลุ่มที่กดโพสต์ไปแล้ว (ขึ้นแล้ว / รออนุมัติ / ยังไม่เจอ) — ไม่เลือกให้โพสต์ซ้ำ กันโพสต์ซ้อน */
+const PRESSED = new Set(['posted', 'pending_approval', 'unconfirmed']);
 const num = (n: number | null) => (n === null ? '-' : n.toLocaleString('th-TH'));
 
 export default async function PostTaskPage(props: { params: Promise<{ id: string }> }) {
@@ -89,9 +91,11 @@ export default async function PostTaskPage(props: { params: Promise<{ id: string
       <Card>
         <CardContent className="flex flex-col gap-6">
           <PostTaskSteps task={task} />
-          <dl className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-6">
+          <dl className="grid grid-cols-2 gap-4 sm:grid-cols-4">
             <Stat label="สั่งโพสต์" value={`${task.counts.planned} กลุ่ม`} />
-            <Stat label="สำเร็จ" value={task.counts.posted} tone="success" />
+            <Stat label="ขึ้นในกลุ่มแล้ว" value={task.counts.posted} tone="success" />
+            <Stat label="รออนุมัติ" value={task.counts.pending_approval} />
+            <Stat label="ยังไม่เจอในกลุ่ม" value={task.counts.unconfirmed} />
             <Stat label="ไม่สำเร็จ" value={task.counts.failed} tone={task.counts.failed ? 'destructive' : undefined} />
             <Stat label="กำลังโพสต์" value={task.current ? `กลุ่มที่ ${task.current.order}` : '-'} />
             <Stat label="ไลก์รวม" value={num(sum((g) => g.reactions))} />
@@ -208,8 +212,8 @@ export default async function PostTaskPage(props: { params: Promise<{ id: string
           <CardContent>
             <RepostForm
               order={order}
-              defaultOpen={task.groups.some((g) => g.status !== 'posted')}
-              unfinishedFbIds={task.groups.filter((g) => g.status !== 'posted').map((g) => g.group_id)}
+              defaultOpen={task.groups.some((g) => !PRESSED.has(g.status))}
+              unfinishedFbIds={task.groups.filter((g) => !PRESSED.has(g.status)).map((g) => g.group_id)}
             />
           </CardContent>
         </Card>

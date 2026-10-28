@@ -59,8 +59,12 @@ export function GroupDetailDialog({ group, worker }: { group: PostTaskGroup; wor
             <Count label="คอมเมนต์" value={group.comments} />
             <Count label="แชร์" value={group.shares} />
           </dl>
-          {!group.post_link && group.status === 'posted' && (
-            <p className="text-sm text-muted-foreground">ยังไม่มีลิงก์โพสต์ ระบบจึงยังนับไลก์และคอมเมนต์ไม่ได้</p>
+          {!group.post_link && (group.status === 'unconfirmed' || group.status === 'pending_approval') && (
+            <p className="text-sm text-muted-foreground">
+              {group.status === 'pending_approval'
+                ? 'โพสต์แล้ว รอแอดมินกลุ่มอนุมัติ ยังไม่มีลิงก์ ระบบจะหาลิงก์ให้ในรอบเก็บคอมเมนต์หลังอนุมัติ'
+                : 'กดโพสต์แล้ว แต่ยังไม่เจอโพสต์ในกลุ่ม ระบบจะหาลิงก์ให้อีกครั้งในรอบเก็บคอมเมนต์'}
+            </p>
           )}
           <dl className="grid grid-cols-2 gap-3">
             <Fact label="เริ่มโพสต์" value={thaiTime(group.started_at)} />

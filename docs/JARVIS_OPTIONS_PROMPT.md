@@ -228,7 +228,7 @@ x-api-key: <JARVIS_INTEGRATION_KEY>
       "worker": "SONB-RM009",
       "run_status": "running",
       "run_queued_at": "2026-10-27T01:24:07.458Z",
-      "summary": { "groups": 18, "posted": 4, "failed": 0, "waiting": 14, "reactions": 0, "comments": 0, "shares": 0, "phone_leads": 0 },
+      "summary": { "groups": 18, "posted": 3, "pending_approval": 1, "unconfirmed": 0, "failed": 0, "waiting": 14, "reactions": 0, "comments": 0, "shares": 0, "phone_leads": 0 },
       "groups": [
         {
           "fb_group_id": "226719385068994",
@@ -254,7 +254,8 @@ x-api-key: <JARVIS_INTEGRATION_KEY>
 | ฟิลด์ | ความหมาย |
 |---|---|
 | `run_status` | `queued` รอเครื่อง · `running` กำลังโพสต์ · `completed` จบรอบ · `failed` รอบนี้ล้ม · `null` ยังไม่เริ่ม |
-| `groups[].status` | `posted` สำเร็จ · `failed` ไม่สำเร็จ (เหตุผลใน `error`) · `waiting` ยังไม่ถึงคิว |
+| `groups[].status` | `posted` ขึ้นในกลุ่มแล้ว (มีลิงก์) · `pending_approval` โพสต์แล้ว รอแอดมินกลุ่มอนุมัติ · `unconfirmed` กดโพสต์แล้วแต่ยังไม่เจอโพสต์ในกลุ่ม (ห้ามแสดงว่าสำเร็จ) · `failed` ไม่สำเร็จ (เหตุผลใน `error`) · `waiting` ยังไม่ถึงคิว |
+| `summary.posted` / `pending_approval` / `unconfirmed` | นับตาม `groups[].status` — แสดงแยกกัน อย่ารวมเป็น "สำเร็จ" ก้อนเดียว |
 | `groups[].approval` | สถานะโพสต์ในกลุ่ม เช่น "อนุมัติเเล้ว" / "รออนุมัติ" (แอดมินกลุ่มต้องอนุมัติก่อนคนอื่นเห็น) |
 | `summary.phone_leads` | จำนวนคนที่ทิ้งเบอร์ในคอมเมนต์ของใบนี้ |
 | `issues` | เหตุผลที่ยังเริ่มงานไม่ได้ (ถ้ามี) |
