@@ -3701,14 +3701,30 @@ export async function repostJarvisOrder(requestNo: string, groupIds: string[], r
     throw new Error(`งานนี้เพิ่งโพสต์ลง ${blocked.map((g) => g.name).join(', ')} ต้องเว้น ${REPOST_MIN_GAP_DAYS} วันก่อนโพสต์ซ้ำกลุ่มเดิม`);
   }
 
-  const account = await pickPostAccount(wanted);
-  if (!account) throw new Error('ไม่มีบัญชี Facebook ที่ผูกกับกลุ่มที่เลือก');
-  const accountGroups = new Set((account.group_ids ?? []).map(String));
-  const otherAccount = wanted.filter((id) => !accountGroups.has(id));
-  if (otherAccount.length) {
-    throw new Error(`กลุ่ม ${otherAccount.map((id) => known.get(id)!.name).join(', ')} ใช้คนละบัญชีกับ ${account.label} — สั่งแยกทีละบัญชี`);
+  // ใช้บัญชีกับเครื่องที่เลือกไว้ใน Jarvis (กลุ่มไม่ผูกกับบัญชีแล้ว) — ใบเก่าที่ไม่ได้เลือกบัญชี ค่อยหาบัญชีที่ผูกกลุ่ม
+  let account: { id: string; label: string } | null;
+  let workerOnline: boolean;
+  if (order.account_id) {
+    account = { id: order.account_id, label: order.account_label ?? order.account_id };
+    workerOnline = order.worker_online;
+  } else {
+    const picked = await pickPostAccount(wanted);
+    if (!picked) throw new Error('ไม่มีบัญชี Facebook ที่ผูกกับกลุ่มที่เลือก');
+    const accountGroups = new Set((picked.group_ids ?? []).map(String));
+    const otherAccount = wanted.filter((id) => !accountGroups.has(id));
+    if (otherAccount.length) {
+      throw new Error(`กลุ่ม ${otherAccount.map((id) => known.get(id)!.name).join(', ')} ใช้คนละบัญชีกับ ${picked.label} — สั่งแยกทีละบัญชี`);
+    }
+    account = picked;
+    workerOnline = picked.worker_online;
   }
-  if (!account.worker_online) throw new Error('เครื่องที่ผูกกับบัญชี Facebook ยังออฟไลน์ เปิด Autopost บนเครื่องนั้นก่อน');
+  if (!workerOnline) {
+    throw new Error(
+      order.target_worker
+        ? `เครื่อง ${order.target_worker} ที่เลือกใน Jarvis ยังออฟไลน์ เปิด Autopost บนเครื่องนั้นก่อน`
+        : 'เครื่องที่ผูกกับบัญชี Facebook ยังออฟไลน์ เปิด Autopost บนเครื่องนั้นก่อน',
+    );
+  }
 
   const jobId = jarvisPostJobId(requestNo);
   const queueId = autopostId();
@@ -3736,9 +3752,9 @@ export async function repostJarvisOrder(requestNo: string, groupIds: string[], r
       [assignmentId, JSON.stringify([jobId]), JSON.stringify(wanted), account.id],
     );
     await client.query(
-      `INSERT INTO ${AP}.post_run_queue (id, assignment_ids, user_id, status, requested_by, message)
-       VALUES ($1, $2::jsonb, $3, 'queued', $4, $5)`,
-      [queueId, JSON.stringify([assignmentId]), account.id, requestedBy || 'web', `Jarvis ${requestNo} (โพสต์ซ้ำ)`],
+      `INSERT INTO ${AP}.post_run_queue (id, assignment_ids, user_id, status, requested_by, message, target_worker)
+       VALUES ($1, $2::jsonb, $3, 'queued', $4, $5, $6)`,
+      [queueId, JSON.stringify([assignmentId]), account.id, requestedBy || 'web', `Jarvis ${requestNo} (โพสต์ซ้ำ)`, order.target_worker],
     );
     await client.query('COMMIT');
   } catch (error) {
