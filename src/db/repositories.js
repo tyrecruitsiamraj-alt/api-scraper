@@ -652,6 +652,8 @@ export function stringifyForJsonb(value) {
 
 function validEmail(v) {
   const e = String(v ?? '').trim().toLowerCase();
+  // อีเมลตัวอย่างที่เว็บใส่แทนตอนปิดข้อมูลติดต่อ ไม่ใช่ของผู้สมัคร
+  if (/@example\.(com|org|net)$/.test(e)) return '';
   return /^[^@\s]+@[^@\s]+\.[^@\s]{2,}$/.test(e) ? e : '';
 }
 

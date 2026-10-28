@@ -7,6 +7,15 @@ import { collectAssetsForDb } from './assets.js';
 
 const isReal = (v) => v && !/x{3,}|click|กรุณา|ดูข้อมูล/i.test(v);
 
+/**
+ * ข้อมูลติดต่อยังถูกปิดอยู่: JobThai ตอบข้อความ "เพื่อความปลอดภัย... กรุณาติดต่อเจ้าหน้าที่ โทร 02-…"
+ * พร้อมเบอร์ call center และอีเมลตัวอย่าง (@example.com) แทนข้อมูลจริง — ห้ามเก็บเป็นของผู้สมัคร
+ * (เคยติดไปกับผู้สมัคร 268 คน ตรวจพบ 28 ต.ค. 2569)
+ */
+export function isHiddenContactBlob(blob) {
+  return /เพื่อความปลอดภัย|ติดต่อเจ้าหน้าที่|@example\.(com|org|net)\b/i.test(String(blob || ''));
+}
+
 export const jobthaiProvider = {
   id: 'jobthai',
   label: 'JobThai',
@@ -32,6 +41,7 @@ export const jobthaiProvider = {
   async enrichContacts(request, id, record) {
     const blob = await revealContact(request, id, 'mobile');
     if (!blob) return record;
+    if (isHiddenContactBlob(blob)) return record;
     const segs = blob.split('####').map((s) => s.trim()).filter(isReal);
     const phone = segs.find((s) => /^\+?\d[\d\s-]{7,}$/.test(s));
     const email = segs.find((s) => /^[^@\s]+@[^@\s]+\.[^@\s]{2,}$/.test(s));
