@@ -70,6 +70,8 @@ export type CandidateFilter = {
   province?: string;
   updatedDays?: number; // อัปเดตภายใน N วันล่าสุด
   activity?: 'viewed' | 'unviewed' | 'called' | 'uncalled';
+  /** คนสั่ง Scrap (อีเมลใน Jarvis หรือคนสร้างงานบนเว็บ) — ผู้สมัครที่มาจากงานของคนนี้ */
+  requestedBy?: string;
   limit?: number;
   offset?: number;
   /** ภายใน: ซ่อนแถวที่ซ้ำ (ไม่ใช่แถวหลักของกลุ่ม) */
@@ -99,8 +101,21 @@ function buildCandidateWhere(opts: CandidateFilter, params: unknown[]): string {
     params.push(opts.updatedDays);
     where.push(`EXISTS (SELECT 1 FROM candidate_sources su WHERE su.candidate_id=c.id AND su.last_seen_at >= now() - ($${params.length} || ' days')::interval)`);
   }
-  // คนเดียวกันที่ซ้ำ: แสดงเฉพาะแถวหลัก (ตอนค้นหาแสดงทุกแถว จะได้ค้นเจอทุกเบอร์)
-  if (opts.excludeIds?.length && !opts.search) {
+  if (opts.requestedBy) {
+    params.push(opts.requestedBy.trim().toLowerCase());
+    where.push(`EXISTS (
+      SELECT 1 FROM scrape_task_candidates tc
+        JOIN scrape_tasks t ON t.id = tc.task_id
+        LEFT JOIN LATERAL (
+          SELECT r.requested_by_name FROM "jarvis_rm".job_posting_requests r
+           WHERE t.source_request_no IS NOT NULL AND r.request_no = t.source_request_no
+           ORDER BY r.created_at DESC LIMIT 1
+        ) jr ON true
+       WHERE tc.candidate_id = c.id
+         AND lower(COALESCE(NULLIF(TRIM(jr.requested_by_name), ''), NULLIF(TRIM(t.criteria->>'created_by'), ''))) = $${params.length})`);
+  }
+  // คนเดียวกันที่ซ้ำ: แสดงเฉพาะแถวหลัก (ตอนค้นหา/กรองคนสั่ง แสดงทุกแถว จะได้ไม่หายไปเพราะแถวหลักมาจากงานอื่น)
+  if (opts.excludeIds?.length && !opts.search && !opts.requestedBy) {
     params.push(opts.excludeIds);
     where.push(`c.id <> ALL($${params.length}::uuid[])`);
   }
@@ -202,6 +217,22 @@ export async function listSamePersonCandidates(candidateId: string) {
       ORDER BY c.last_updated_at DESC`,
     [ids],
   );
+}
+
+/** คนสั่ง Scrap ทั้งหมด พร้อมจำนวนผู้สมัครที่ได้ (สำหรับตัวกรอง "ใครสั่ง") */
+export async function listCandidateRequesters(): Promise<{ requester: string; candidates: number }[]> {
+  return q<{ requester: string; candidates: number }>(
+    `SELECT lower(COALESCE(NULLIF(TRIM(jr.requested_by_name), ''), NULLIF(TRIM(t.criteria->>'created_by'), ''))) AS requester, count(DISTINCT tc.candidate_id)::int AS candidates
+       FROM scrape_task_candidates tc
+       JOIN scrape_tasks t ON t.id = tc.task_id
+       LEFT JOIN LATERAL (
+         SELECT r.requested_by_name FROM "jarvis_rm".job_posting_requests r
+          WHERE t.source_request_no IS NOT NULL AND r.request_no = t.source_request_no
+          ORDER BY r.created_at DESC LIMIT 1
+       ) jr ON true
+      WHERE lower(COALESCE(NULLIF(TRIM(jr.requested_by_name), ''), NULLIF(TRIM(t.criteria->>'created_by'), ''))) IS NOT NULL
+      GROUP BY 1 ORDER BY 1`,
+  ).catch(() => []);
 }
 
 /** รายชื่อจังหวัดที่มีในฐานผู้สมัคร (สำหรับ dropdown ฟิลเตอร์) */

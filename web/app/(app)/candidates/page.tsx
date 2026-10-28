@@ -1,6 +1,8 @@
 import Link from 'next/link';
 import { ChevronLeftIcon, ChevronRightIcon, UsersIcon } from 'lucide-react';
-import { countCandidates, listCandidates, listCandidateProvinces } from '@/lib/repo';
+import { getServerSession } from 'next-auth';
+import { authOptions } from '@/lib/auth';
+import { countCandidates, listCandidateRequesters, listCandidates, listCandidateProvinces } from '@/lib/repo';
 import { ScrapingNav } from '@/components/ScrapingNav';
 import { markCandidateCalledAction, markCandidateViewedAction } from '@/lib/actions';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
@@ -62,7 +64,7 @@ function activityTime(s: string | null, by: string | null) {
 
 export default async function CandidatesPage(
   props: {
-    searchParams: Promise<{ q?: string; platform?: string; position?: string; province?: string; updated?: string; activity?: string; page?: string }>;
+    searchParams: Promise<{ q?: string; platform?: string; position?: string; province?: string; updated?: string; activity?: string; by?: string; page?: string }>;
   }
 ) {
   const searchParams = await props.searchParams;
@@ -74,13 +76,19 @@ export default async function CandidatesPage(
   const activity = (['viewed', 'unviewed', 'called', 'uncalled'] as const).includes(searchParams.activity as any)
     ? searchParams.activity as 'viewed' | 'unviewed' | 'called' | 'uncalled'
     : undefined;
+  const session = await getServerSession(authOptions);
+  const myEmail = String(session?.user?.email ?? '').trim().toLowerCase();
+  // ?by=me = ที่ฉันสั่ง · ?by=<อีเมล> = คนอื่น
+  const byParam = searchParams.by?.trim() || '';
+  const requestedBy = byParam === 'me' ? myEmail || undefined : byParam || undefined;
   const pageNo = Math.max(1, Number.parseInt(searchParams.page ?? '1', 10) || 1);
   const limit = 40;
-  const filter = { search, platform, position, province, updatedDays, activity };
-  const [rows, total, provinces] = await Promise.all([
+  const filter = { search, platform, position, province, updatedDays, activity, requestedBy };
+  const [rows, total, provinces, requesters] = await Promise.all([
     listCandidates({ ...filter, limit, offset: (pageNo - 1) * limit }),
     countCandidates(filter),
     listCandidateProvinces(),
+    listCandidateRequesters(),
   ]);
   const pages = Math.max(1, Math.ceil(total / limit));
 
@@ -93,6 +101,7 @@ export default async function CandidatesPage(
     if (updatedDays) p.set('updated', String(updatedDays));
     if (activity) p.set('activity', activity);
     if (platform) p.set('platform', platform);
+    if (byParam) p.set('by', byParam);
     for (const [k, v] of Object.entries(extra)) v ? p.set(k, v) : p.delete(k);
     return p;
   };
@@ -106,7 +115,7 @@ export default async function CandidatesPage(
     );
   };
 
-  const activeFilters = [position, province, updatedDays, activity].filter(Boolean).length;
+  const activeFilters = [position, province, updatedDays, activity, requestedBy].filter(Boolean).length;
 
   return (
     <div>
@@ -123,7 +132,7 @@ export default async function CandidatesPage(
           </p>
         </header>
 
-        <form className="grid items-end gap-2 sm:grid-cols-2 lg:grid-cols-6" action="/candidates" method="get">
+        <form className="grid items-end gap-2 sm:grid-cols-2 lg:grid-cols-7" action="/candidates" method="get">
           {platform && <input type="hidden" name="platform" value={platform} />}
           <Field>
             <FieldLabel htmlFor="cand-q" className="sr-only">ค้นหาชื่อหรือเบอร์</FieldLabel>
@@ -150,6 +159,18 @@ export default async function CandidatesPage(
             <FieldLabel htmlFor="cand-activity" className="sr-only">สถานะการติดตาม</FieldLabel>
             <NativeSelect id="cand-activity" name="activity" defaultValue={searchParams.activity ?? ''} className="w-full">
               {ACTIVITY_OPTS.map((o) => <NativeSelectOption key={o.value} value={o.value}>{o.label}</NativeSelectOption>)}
+            </NativeSelect>
+          </Field>
+          <Field>
+            <FieldLabel htmlFor="cand-by" className="sr-only">ใครสั่ง</FieldLabel>
+            <NativeSelect id="cand-by" name="by" defaultValue={byParam} className="w-full">
+              <NativeSelectOption value="">ทุกคนสั่ง</NativeSelectOption>
+              {myEmail && <NativeSelectOption value="me">ที่ฉันสั่ง</NativeSelectOption>}
+              {requesters
+                .filter((r) => r.requester !== myEmail)
+                .map((r) => (
+                  <NativeSelectOption key={r.requester} value={r.requester}>{`${r.requester} (${r.candidates})`}</NativeSelectOption>
+                ))}
             </NativeSelect>
           </Field>
           <div className="flex gap-2">
