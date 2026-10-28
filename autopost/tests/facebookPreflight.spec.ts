@@ -15,9 +15,17 @@ test('Facebook preflight: ตรวจบัญชีและกลุ่มโ
   if (!user) throw new Error(`ไม่พบบัญชี Facebook ${userId}`);
   if (!user.email || !user.password) throw new Error('บัญชี Facebook ยังไม่มี Email/Password บนเครื่องที่ผูกไว้');
   const groupIds = Array.isArray(user.group_ids) ? user.group_ids.map(String) : [];
-  const userGroups = config.groups.filter((group) => groupIds.includes(String(group.id)) && group.fb_group_id);
+  const homeGroups = config.groups.filter((group) => groupIds.includes(String(group.id)) && group.fb_group_id);
+  // กลุ่มไม่ได้ผูกกับบัญชีแล้ว (Jarvis เลือกกลุ่มต่อใบ) — บัญชีที่ไม่มีกลุ่มประจำ ใช้กลุ่มจากงานโพสต์ของบัญชีนี้แทน
+  const orderGroupIds = new Set(
+    config.assignments
+      .filter((a) => String(a.user_id) === userId)
+      .flatMap((a) => (Array.isArray(a.group_ids) ? a.group_ids.map(String) : [])),
+  );
+  const orderGroups = config.groups.filter((group) => orderGroupIds.has(String(group.id)) && group.fb_group_id);
+  const userGroups = homeGroups.length ? homeGroups : orderGroups;
   const target = userGroups[0];
-  if (!target?.fb_group_id) throw new Error('บัญชี Facebook ยังไม่ได้เลือกกลุ่มปลายทาง');
+  if (!target?.fb_group_id) throw new Error('บัญชีนี้ยังไม่มีกลุ่มให้ทดสอบ: ไม่มีกลุ่มประจำ และไม่มีใบโพสต์ที่เลือกกลุ่มไว้');
   // กลุ่มที่ยังไม่มีชื่อจริง — เข้าไปอ่านชื่อทีละกลุ่มหลังตรวจผ่าน (ไม่โพสต์)
   const unnamed = userGroups
     .filter((group) => !group.name || PLACEHOLDER_GROUP_NAME.test(String(group.name).trim()))
