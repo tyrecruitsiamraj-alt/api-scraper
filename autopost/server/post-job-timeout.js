@@ -3,6 +3,7 @@
  *
  * เดิมตายตัว 25 นาที (WORKER_POST_JOB_MAX_MS) แต่ 1 กลุ่มใช้ราว 4–5 นาที (โพสต์ + หน่วงแบบคน + เก็บลิงก์)
  * รอบ 15 กลุ่มจึงโดนตัดหลังกลุ่มที่ 5. ตอนนี้ = เวลาเปิด/ล็อกอิน + นาทีต่อกลุ่ม × จำนวนกลุ่ม
+ * + เวลาพักหลังโพสต์ครบทุก batch (ค่าสูงสุดของช่วงพัก)
  * โดยไม่ต่ำกว่าค่าเดิม และไม่เกินเวลาที่ sweep-stale จะปิดงานว่าค้าง (POST_RUN_STALE_MINUTES)
  */
 
@@ -22,7 +23,12 @@ function postJobTimeoutMs(groupCount, env = process.env) {
   // ให้งานจบหรือโดนตัดก่อน sweep-stale ของ server จะปิดว่าค้าง
   const ceilingMs = Math.max(floorMs, (staleMin - 5) * MIN);
   const groups = Math.max(0, Math.floor(num(groupCount, 0)));
-  const wanted = setupMs + groups * perGroupMs;
+  // พักตาม batch: โพสต์ครบทุก batch กลุ่ม บอทพัก 5–15 นาที (HUMAN_BATCH_BREAK_*_SEC) — ต้องนับด้วย
+  // ไม่งั้นงานเกิน 5 กลุ่มโดนตัดระหว่างพัก (OPL6906091 11 กลุ่ม โดนตัดที่ 75 นาที หลังโพสต์ได้ 10 กลุ่ม — 28 ต.ค. 2569)
+  const batchSize = Math.max(1, Math.floor(num(env.HUMAN_BATCH_SIZE, 5)));
+  const breakMs = Math.max(0, num(env.HUMAN_BATCH_BREAK_MAX_SEC, 900)) * 1000;
+  const breaks = groups > 0 ? Math.floor((groups - 1) / batchSize) : 0;
+  const wanted = setupMs + groups * perGroupMs + breaks * breakMs;
   return Math.min(ceilingMs, Math.max(floorMs, wanted));
 }
 
