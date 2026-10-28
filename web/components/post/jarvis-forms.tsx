@@ -64,7 +64,7 @@ export function RepostForm({
 export function PendingOrderCard({ order }: { order: JarvisPostOrder }) {
   const blockers = [
     ...order.issues,
-    ...(!order.issues.length && !order.worker_online ? ['เครื่องที่ผูกกับบัญชี Facebook ยังออฟไลน์'] : []),
+    ...(!order.issues.length && !order.worker_online ? [order.worker_problem ?? 'เครื่องยังไม่พร้อมรับงาน'] : []),
   ];
   const meta = [
     order.request_no,

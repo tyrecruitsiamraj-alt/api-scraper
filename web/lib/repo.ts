@@ -3396,6 +3396,8 @@ export type JarvisPostOrder = {
   /** เครื่องที่พนักงานเลือกใน Jarvis (job_snapshot.worker) — null = ใช้เครื่องที่ผูกกับบัญชี */
   target_worker: string | null;
   worker_online: boolean;
+  /** ทำไมเครื่องไม่พร้อม เป็นภาษาคน — null เมื่อเครื่องพร้อม */
+  worker_problem: string | null;
   job_id: string | null;
   queue_status: string | null;
   queue_at: string | null;
@@ -3460,18 +3462,30 @@ type JarvisPostRow = {
   snapshot: Record<string, unknown> | null;
 };
 
+/** บอกเป็นภาษาคนว่าทำไมเครื่องรับงานไม่ได้ — null เมื่อพร้อม */
+function workerProblem(worker: string | null, online: boolean, lastSeen: string | null): string | null {
+  if (online) return null;
+  if (!worker) return 'ยังไม่ได้เลือกเครื่อง เลือกเครื่องใน Jarvis หรือตั้งเครื่องประจำให้บัญชีนี้';
+  if (!lastSeen) return `เครื่อง ${worker} ยังไม่เคยเปิด Autopost`;
+  const min = Math.max(1, Math.round((Date.now() - new Date(lastSeen).getTime()) / 60000));
+  const ago = min < 60 ? `${min} นาที` : min < 1440 ? `${Math.round(min / 60)} ชั่วโมง` : `${Math.round(min / 1440)} วัน`;
+  return `เครื่อง ${worker} ไม่ได้ส่งสัญญาณมา ${ago} เปิดสวิตช์ Autopost บนเครื่องนั้น`;
+}
+
 /**
  * บัญชีที่จะโพสต์ใบนี้: ถ้า Jarvis ส่ง job_snapshot.account_id มา ใช้บัญชีนั้น (ต้องผูกทุกกลุ่มที่เลือก)
  * ไม่งั้นเลือกบัญชีที่ผูกกลุ่มให้เอง
  */
 async function resolvePostAccount(groupIds: string[], requestedAccountId: string | null) {
   if (!requestedAccountId) return { account: await pickPostAccount(groupIds), issue: null as string | null };
-  const rows = await q<{ id: string; label: string; worker_online: boolean; group_ids: string[]; paused: boolean }>(
+  const rows = await q<{ id: string; label: string; worker_online: boolean; group_ids: string[]; paused: boolean; preferred_worker: string | null; worker_last_seen: string | null }>(
     `SELECT u.id, COALESCE(NULLIF(TRIM(u.name), ''), u.env_key, u.id) AS label,
             EXISTS (SELECT 1 FROM ${AP}.workers w
                      WHERE w.name=u.preferred_worker AND w.last_seen > now() - interval '2 minutes') AS worker_online,
             COALESCE(u.group_ids::jsonb, '[]'::jsonb) AS group_ids,
-            (u.paused_until IS NOT NULL AND u.paused_until > now()) AS paused
+            (u.paused_until IS NOT NULL AND u.paused_until > now()) AS paused,
+            NULLIF(TRIM(u.preferred_worker), '') AS preferred_worker,
+            (SELECT w.last_seen FROM ${AP}.workers w WHERE w.name = u.preferred_worker) AS worker_last_seen
        FROM ${AP}.users u WHERE u.id = $1`,
     [requestedAccountId],
   );
@@ -3484,11 +3498,13 @@ async function resolvePostAccount(groupIds: string[], requestedAccountId: string
 
 async function pickPostAccount(groupIds: string[]) {
   if (!groupIds.length) return null;
-  const rows = await q<{ id: string; label: string; worker_online: boolean; group_ids: string[] }>(
+  const rows = await q<{ id: string; label: string; worker_online: boolean; group_ids: string[]; preferred_worker: string | null; worker_last_seen: string | null }>(
     `SELECT u.id, COALESCE(NULLIF(TRIM(u.name), ''), u.env_key, u.id) AS label,
             EXISTS (SELECT 1 FROM ${AP}.workers w
                      WHERE w.name=u.preferred_worker AND w.last_seen > now() - interval '2 minutes') AS worker_online,
-            COALESCE(u.group_ids::jsonb, '[]'::jsonb) AS group_ids
+            COALESCE(u.group_ids::jsonb, '[]'::jsonb) AS group_ids,
+            NULLIF(TRIM(u.preferred_worker), '') AS preferred_worker,
+            (SELECT w.last_seen FROM ${AP}.workers w WHERE w.name = u.preferred_worker) AS worker_last_seen
        FROM ${AP}.users u
       WHERE COALESCE(u.group_ids::jsonb, '[]'::jsonb) ?| $1::text[]
         AND (u.paused_until IS NULL OR u.paused_until <= now())
@@ -3535,16 +3551,16 @@ export async function listJarvisPostOrders(): Promise<JarvisPostOrder[]> {
     if (!groupIds.length) issues.push('ยังไม่ได้เลือกกลุ่มใน Jarvis');
     const requestedAccountId = typeof s.account_id === 'string' && s.account_id.trim() ? s.account_id.trim() : null;
     const targetWorker = typeof s.worker === 'string' && s.worker.trim() ? s.worker.trim() : null;
-    const targetOnline = targetWorker
-      ? Boolean(
-          (
-            await q<{ online: boolean }>(
-              `SELECT EXISTS (SELECT 1 FROM ${AP}.workers WHERE lower(name)=lower($1) AND last_seen > now() - interval '2 minutes') AS online`,
-              [targetWorker],
-            ).catch(() => [{ online: false }])
-          )[0]?.online,
-        )
-      : false;
+    const targetSeen = targetWorker
+      ? (
+          await q<{ online: boolean; last_seen: string | null }>(
+            `SELECT COALESCE(bool_or(last_seen > now() - interval '2 minutes'), false) AS online, max(last_seen) AS last_seen
+               FROM ${AP}.workers WHERE lower(name)=lower($1)`,
+            [targetWorker],
+          ).catch(() => [{ online: false, last_seen: null }])
+        )[0]
+      : null;
+    const targetOnline = Boolean(targetSeen?.online);
     const { account, issue: accountIssue } = await resolvePostAccount(groupIds, requestedAccountId);
     if (accountIssue) issues.push(accountIssue);
     else if (groupIds.length && !account) issues.push('ไม่มีบัญชี Facebook ที่ผูกกับกลุ่มนี้');
@@ -3666,6 +3682,11 @@ export async function listJarvisPostOrders(): Promise<JarvisPostOrder[]> {
       account_label: account?.label ?? null,
       target_worker: targetWorker,
       worker_online: targetWorker ? targetOnline : Boolean(account?.worker_online),
+      worker_problem: workerProblem(
+        targetWorker ?? account?.preferred_worker ?? null,
+        targetWorker ? targetOnline : Boolean(account?.worker_online),
+        targetWorker ? targetSeen?.last_seen ?? null : account?.worker_last_seen ?? null,
+      ),
       job_id: queue[0] ? jobId : null,
       queue_status: queue[0]?.status ?? null,
       queue_at: queue[0]?.created_at ?? null,
@@ -3718,13 +3739,7 @@ export async function repostJarvisOrder(requestNo: string, groupIds: string[], r
     account = picked;
     workerOnline = picked.worker_online;
   }
-  if (!workerOnline) {
-    throw new Error(
-      order.target_worker
-        ? `เครื่อง ${order.target_worker} ที่เลือกใน Jarvis ยังออฟไลน์ เปิด Autopost บนเครื่องนั้นก่อน`
-        : 'เครื่องที่ผูกกับบัญชี Facebook ยังออฟไลน์ เปิด Autopost บนเครื่องนั้นก่อน',
-    );
-  }
+  if (!workerOnline) throw new Error(order.worker_problem ?? 'เครื่องยังไม่พร้อมรับงาน');
 
   const jobId = jarvisPostJobId(requestNo);
   const queueId = autopostId();
@@ -3776,13 +3791,7 @@ export async function postJarvisOrder(requestNo: string, requestedBy: string | n
   if (order.jarvis_status !== 'pending') throw new Error('ใบนี้สั่งโพสต์ไปแล้ว');
   if (order.issues.length) throw new Error(`ยังโพสต์ไม่ได้: ${order.issues.join(', ')}`);
   if (!order.account_id) throw new Error('ไม่มีบัญชี Facebook ที่ผูกกับกลุ่มนี้');
-  if (!order.worker_online) {
-    throw new Error(
-      order.target_worker
-        ? `เครื่อง ${order.target_worker} ที่เลือกใน Jarvis ยังออฟไลน์ เปิด Autopost บนเครื่องนั้นก่อน`
-        : 'ยังไม่ได้เลือกเครื่องใน Jarvis หรือเครื่องประจำของบัญชีออฟไลน์อยู่',
-    );
-  }
+  if (!order.worker_online) throw new Error(order.worker_problem ?? 'เครื่องยังไม่พร้อมรับงาน');
 
   const jobId = jarvisPostJobId(requestNo);
   const queueId = autopostId();
