@@ -164,13 +164,14 @@ test('collectComments', async ({ page }) => {
           ...(item.known_links || []),
           ...plan.posts.filter((p) => p.post_link && p.group_id === item.group_id).map((p) => p.post_link),
         ];
-        const found = await findMyPostLink(active, item.group_id, { jobTitle: item.job_title, caption: item.caption, knownLinks });
+        const diag: Record<string, unknown> = {};
+        const found = await findMyPostLink(active, item.group_id, { jobTitle: item.job_title, caption: item.caption, knownLinks, diag });
         if (!found) {
           await runLog({
             level: 'info',
             message: `[${idx}/${plan.posts.length}] ยังหาลิงก์โพสต์ในกลุ่ม ${item.group_name || item.group_id} ไม่เจอ (อาจยังรออนุมัติหรือถูกลบ) ข้ามไปก่อน`,
             user_id: user.id,
-            meta: { post_log_id: item.post_log_id, group_id: item.group_id },
+            meta: { kind: 'link_diag', stage: 'collect', post_log_id: item.post_log_id, group_id: item.group_id, has_caption: Boolean(item.caption), ...diag },
           });
           continue;
         }
