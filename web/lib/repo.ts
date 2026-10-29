@@ -2114,7 +2114,7 @@ export async function approveScrapeTaskResult(taskId: string, reviewedBy: string
   const rows = await q<{ source_request_no: string | null }>(
     `UPDATE scrape_tasks
         SET review_status = 'approved', reviewed_by = $2, reviewed_at = now(), updated_at = now()
-      WHERE id = $1 AND status = 'done' AND review_status = 'pending'
+      WHERE id = $1 AND status IN ('done', 'partial') AND review_status = 'pending'
       RETURNING source_request_no`,
     [taskId, reviewedBy],
   );
@@ -2124,7 +2124,7 @@ export async function approveScrapeTaskResult(taskId: string, reviewedBy: string
       await q(
         `UPDATE "jarvis_rm".job_posting_requests
             SET status = 'completed', updated_at = now()
-          WHERE request_no = $1 AND to_jsonb(job_posting_requests)->>'request_type' = 'scraping'`,
+          WHERE request_no = $1 AND status = 'in_progress' AND to_jsonb(job_posting_requests)->>'request_type' = 'scraping'`,
         [rows[0].source_request_no],
       );
     } catch (e) {
@@ -3492,6 +3492,7 @@ function jarvisPostJobId(requestNo: string): string {
 }
 
 type JarvisPostRow = {
+  id: string;
   request_no: string;
   created_at: string;
   requested_by_name: string | null;
@@ -3551,11 +3552,53 @@ async function pickPostAccount(groupIds: string[]) {
   return rows[0] ?? null;
 }
 
+/** เปลี่ยนสถานะใบสั่งโพสต์ใน Jarvis ทีละแถว (ใบขอเดียวกันมีได้หลายแถว ห้ามแก้ข้ามใบ) */
+async function setJarvisPostRowStatus(rowId: string, status: 'posted' | 'rejected', note: string | null) {
+  try {
+    await q(
+      `UPDATE "jarvis_rm".job_posting_requests
+          SET status = $2, notes = COALESCE($3, notes), updated_at = now()
+        WHERE id::text = $1 AND status = 'in_progress'`,
+      [rowId, status, note],
+    );
+  } catch (e) {
+    console.warn(`[jarvis] เปลี่ยนสถานะใบสั่งโพสต์ไม่สำเร็จ (${rowId}): ${(e as Error).message}`);
+  }
+}
+
+/** เหตุที่ใบนี้โพสต์ไม่ได้สักกลุ่ม ให้คนสั่งอ่านใน Jarvis */
+function postRoundFailureReason(
+  latestRun: { status: string; error: string | null },
+  attempts: { group_id: string | null; level: string; message: string | null }[],
+  groupName: (fb: string | null) => string,
+): string {
+  if (latestRun.status === 'cancelled') return 'รอบโพสต์ถูกยกเลิก';
+  const parts: string[] = [];
+  if (latestRun.status === 'failed') {
+    const err = String(latestRun.error ?? '').split('\n').map((l) => l.trim()).find(Boolean) ?? '';
+    const why = /WORKER_POST_JOB_MAX_MS|stale_running/i.test(err)
+      ? 'ใช้เวลานานเกินกำหนด เครื่องหยุดงานนี้'
+      : err.slice(0, 200) || 'ไม่ทราบสาเหตุ';
+    parts.push(`รอบโพสต์หยุดก่อนจบ (${why})`);
+  }
+  const failed = new Map<string, string>();
+  for (const a of attempts) {
+    if (a.level === 'success' || !a.group_id || failed.has(a.group_id)) continue;
+    failed.set(a.group_id, (a.message ?? 'โพสต์ไม่สำเร็จ').replace(/\s+/g, ' ').slice(0, 160));
+  }
+  if (failed.size) {
+    const lines = [...failed].slice(0, 3).map(([fb, msg]) => `${groupName(fb)}: ${msg}`);
+    const more = failed.size > 3 ? ` และอีก ${failed.size - 3} กลุ่ม` : '';
+    parts.push(`ไม่สำเร็จ ${failed.size} กลุ่ม · ${lines.join(' · ')}${more}`);
+  }
+  return parts.length ? parts.join(' · ') : 'ไม่มีกลุ่มที่โพสต์ได้ในรอบนี้';
+}
+
 export async function listJarvisPostOrders(): Promise<JarvisPostOrder[]> {
   let rows: JarvisPostRow[];
   try {
     rows = await q<JarvisPostRow>(
-      `SELECT r.request_no, r.created_at, r.requested_by_name, r.status, to_jsonb(r)->'job_snapshot' AS snapshot
+      `SELECT r.id::text AS id, r.request_no, r.created_at, r.requested_by_name, r.status, to_jsonb(r)->'job_snapshot' AS snapshot
          FROM "jarvis_rm".job_posting_requests r
         WHERE COALESCE(NULLIF(to_jsonb(r)->>'request_type', ''), 'content') = 'content'
           AND to_jsonb(r)->'job_snapshot' ? 'caption'
@@ -3609,9 +3652,20 @@ export async function listJarvisPostOrders(): Promise<JarvisPostOrder[]> {
         ORDER BY created_at DESC LIMIT 1`,
       [jobId],
     ).catch(() => []);
+    // รอบโพสต์ที่สั่งหลังใบ Jarvis ใบนี้ — ใบขอเดียวกันสั่งใหม่ได้ ผลของใบเก่าต้องไม่นับรวม
+    const rowRuns = await q<{ run_id: string | null; status: string; error: string | null }>(
+      `SELECT run_id, status, error FROM ${AP}.post_run_queue
+        WHERE created_at >= $2
+          AND EXISTS (SELECT 1 FROM jsonb_array_elements_text(assignment_ids::jsonb) a
+                       WHERE a = $1 OR a LIKE $1 || '-r%')
+        ORDER BY created_at DESC`,
+      [jobId, row.created_at],
+    ).catch(() => []);
     // worker เขียน run_logs ต่อกลุ่ม: success = กดโพสต์สำเร็จ, warn = โพสต์ไม่สำเร็จ
-    const attemptRows = await q<{ at: string; group_id: string | null; worker_id: string | null; level: string; message: string | null }>(
-      `SELECT l.created_at AS at, l.group_id, pq.worker_id, l.level, l.message
+    const attemptRows = await q<{
+      at: string; run_id: string | null; group_id: string | null; worker_id: string | null; level: string; message: string | null;
+    }>(
+      `SELECT l.created_at AS at, l.run_id, l.group_id, pq.worker_id, l.level, l.message
          FROM ${AP}.run_logs l
          LEFT JOIN ${AP}.post_run_queue pq ON pq.run_id = l.run_id
         WHERE l.job_id = $1 AND l.group_id IS NOT NULL AND l.level IN ('success', 'warn', 'error')
@@ -3686,24 +3740,40 @@ export async function listJarvisPostOrders(): Promise<JarvisPostOrder[]> {
         blocked_until: until > Date.now() ? new Date(until).toISOString() : null,
       };
     });
+    // สั่งใบใหม่ด้วยเลขใบขอเดิม: กลุ่มที่งานนี้เพิ่งโพสต์ไม่ถึง 2 วัน worker จะข้ามเงียบ ๆ — บอกก่อนสั่ง
+    if (row.status === 'pending') {
+      const recent = groupIds
+        .map((id) => ({ name: groupNames.get(id) ?? id, last: lastPostByFb.get(fbByRowId.get(id) ?? id) }))
+        .filter((g) => g.last && g.last + REPOST_MIN_GAP_DAYS * 86_400_000 > Date.now());
+      if (recent.length) {
+        issues.push(`งานนี้เพิ่งโพสต์ลง ${recent.map((g) => g.name).join(', ')} ต้องเว้น ${REPOST_MIN_GAP_DAYS} วันก่อนโพสต์ซ้ำกลุ่มเดิม`);
+      }
+    }
     const posted = await q<{ post_link: string | null }>(
       `SELECT post_link FROM ${AP}.post_logs
         WHERE job_id = $1 AND COALESCE(post_link, '') <> '' ORDER BY created_at DESC LIMIT 1`,
       [jobId],
     ).catch(() => []);
-    // post_logs (มีลิงก์) ส่งผ่าน API ของ Auto-Post ซึ่งตอนนี้บันทึกไม่เข้า — run_logs ระดับ success
-    // ของงานนี้ (worker เขียนตรง) ก็นับเป็นหลักฐานว่าโพสต์สำเร็จแล้ว
-    const succeeded = posted[0]
-      ? true
-      : (await q<{ n: number }>(
-        `SELECT count(*)::int AS n FROM ${AP}.run_logs WHERE job_id = $1 AND level = 'success'`,
-        [jobId],
-      ).catch(() => [{ n: 0 }]))[0].n > 0;
+    // หลักฐานว่าใบนี้โพสต์แล้ว: run_logs success (worker เขียนตรง) หรือ post_logs ที่มีลิงก์ ของรอบที่สั่งหลังใบนี้
+    const rowRunIds = rowRuns.map((r) => r.run_id).filter((id): id is string => Boolean(id));
+    const succeeded = rowRunIds.length
+      ? (await q<{ n: number }>(
+        `SELECT (SELECT count(*) FROM ${AP}.run_logs WHERE run_id = ANY($1::text[]) AND level = 'success')
+              + (SELECT count(*) FROM ${AP}.post_logs WHERE run_id = ANY($1::text[]) AND COALESCE(post_link, '') <> '') AS n`,
+        [rowRunIds],
+      ).catch(() => [{ n: 0 }]))[0].n > 0
+      : false;
+    const runsFinished = rowRuns.length > 0 && rowRuns.every((r) => !['queued', 'running'].includes(r.status));
     let jarvisStatus = row.status;
-    // เขียนกลับ Jarvis เมื่อมีหลักฐานว่าโพสต์แล้ว (ทำตอนเปิดหน้า ไม่ต้องมี job เบื้องหลัง)
-    if (succeeded && jarvisStatus === 'in_progress') {
-      await setSoRecruitRequestStatus(row.request_no, 'posted', 'content');
+    // เขียนกลับ Jarvis ตอนเปิดหน้า/Jarvis ถามสถานะ (ไม่ต้องมี job เบื้องหลัง) — แก้เฉพาะแถวของใบนี้
+    if (jarvisStatus === 'in_progress' && succeeded) {
+      await setJarvisPostRowStatus(row.id, 'posted', null);
       jarvisStatus = 'posted';
+    } else if (jarvisStatus === 'in_progress' && runsFinished) {
+      // จบทุกรอบแล้วไม่มีกลุ่มไหนโพสต์ได้ — ตีกลับพร้อมเหตุ ให้คนสั่งแก้แล้วสั่งใหม่ใน Jarvis
+      const runIds = new Set(rowRunIds);
+      await setJarvisPostRowStatus(row.id, 'rejected', `ตีกลับ: ${postRoundFailureReason(rowRuns[0], attemptRows.filter((a) => a.run_id && runIds.has(a.run_id)), fbName)}`);
+      jarvisStatus = 'rejected';
     }
     out.push({
       request_no: row.request_no,
@@ -3855,22 +3925,27 @@ export async function postJarvisOrder(requestNo: string, requestedBy: string | n
     const allowed = new Set(known.rows.map((r) => r.id));
     const groups = wanted.filter((id) => allowed.has(id));
     if (!groups.length) throw new Error('กลุ่มที่เลือกใน Jarvis ไม่มีในระบบ So Scraping');
-    const inserted = await client.query(
+    // ใบขอเดิมสั่งใหม่ใน Jarvis (เช่น หลังถูกตีกลับ): ใช้ job เดิม อัปเดตข้อความ แล้วเปิดรอบใหม่ jv-…-rN
+    await client.query(
       `INSERT INTO ${AP}.jobs (id, title, owner, company, caption, status)
        VALUES ($1, $2, 'SO Recruitment', 'SO Recruitment', $3, 'pending')
-       ON CONFLICT (id) DO NOTHING`,
+       ON CONFLICT (id) DO UPDATE SET caption = EXCLUDED.caption, title = EXCLUDED.title`,
       [jobId, `${order.position} · ${requestNo}`, order.caption],
     );
-    if (inserted.rowCount === 0) throw new Error('ใบนี้มีงานโพสต์อยู่แล้ว');
+    const prior = await client.query<{ n: number }>(
+      `SELECT count(*)::int AS n FROM ${AP}.assignments WHERE id = $1 OR id LIKE $1 || '-r%'`,
+      [jobId],
+    );
+    const assignmentId = prior.rows[0]?.n ? `${jobId}-r${prior.rows[0].n + 1}` : jobId;
     await client.query(
       `INSERT INTO ${AP}.assignments (id, job_ids, group_ids, user_id) VALUES ($1, $2::jsonb, $3::jsonb, $4)`,
-      [jobId, JSON.stringify([jobId]), JSON.stringify(groups), order.account_id],
+      [assignmentId, JSON.stringify([jobId]), JSON.stringify(groups), order.account_id],
     );
     // requested_by ≠ 'auto-daily' → worker ข้ามเพดานรายวันได้ เพราะคนสั่งเอง
     await client.query(
       `INSERT INTO ${AP}.post_run_queue (id, assignment_ids, user_id, status, requested_by, message, target_worker)
        VALUES ($1, $2::jsonb, $3, 'queued', $4, $5, $6)`,
-      [queueId, JSON.stringify([jobId]), order.account_id, requestedBy || 'web', `Jarvis ${requestNo}`, order.target_worker],
+      [queueId, JSON.stringify([assignmentId]), order.account_id, requestedBy || 'web', `Jarvis ${requestNo}`, order.target_worker],
     );
     await client.query(
       `UPDATE "jarvis_rm".job_posting_requests SET status='in_progress', updated_at=now() WHERE request_no=$1 AND status='pending'
