@@ -54,6 +54,50 @@ async function acquireFacebookStateLock(statePath: string): Promise<() => Promis
  * Login Facebook (กรณียังไม่ได้ login)
  * รองรับทั้ง royal_email และ input#email
  */
+/**
+ * หน้า "เลือกโปรไฟล์ที่จำไว้" (รูปโปรไฟล์ + ปุ่ม ดำเนินการต่อ / ใช้โปรไฟล์อื่น) — ขึ้นตอน session หมดอายุ
+ * เดิมบอทไม่รู้จักหน้านี้ ถือว่าติดยืนยันตัวตนแล้วรอคน 5 นาที (28–29 ต.ค. 2569)
+ * กด "ดำเนินการต่อ" แล้วถ้าถามรหัสผ่านก็กรอกให้ — ถ้าหลังจากนั้นขอ OTP/ยืนยันตัวตน ยังรอคนเหมือนเดิม
+ * @returns true ถ้าเจอหน้านี้และกดไปแล้ว
+ */
+async function passSavedProfilePicker(page: Page, password: string, label: string): Promise<boolean> {
+  const other = page.getByRole('button', { name: /ใช้โปรไฟล์อื่น|use another profile|log into another account/i }).first();
+  const otherText = page.getByText(/ใช้โปรไฟล์อื่น|use another profile/i).first();
+  const isPicker =
+    (await other.isVisible({ timeout: 1500 }).catch(() => false)) ||
+    (await otherText.isVisible({ timeout: 500 }).catch(() => false));
+  if (!isPicker) return false;
+  const cont = page.getByRole('button', { name: /^\s*(ดำเนินการต่อ|continue)\s*$/i }).first();
+  const contText = page.getByText(/^\s*(ดำเนินการต่อ|continue)\s*$/i).first();
+  const target = (await cont.isVisible({ timeout: 1000 }).catch(() => false)) ? cont : contText;
+  if (!(await target.isVisible({ timeout: 1000 }).catch(() => false))) return false;
+  console.log(`🔁${label} เจอหน้าเลือกโปรไฟล์ที่จำไว้ — กด "ดำเนินการต่อ"`);
+  await Promise.all([
+    page.waitForLoadState('domcontentloaded', { timeout: 60_000 }).catch(() => {}),
+    humanClick(page, target),
+  ]);
+  await page.waitForTimeout(3000);
+
+  // บางครั้งถามรหัสผ่านต่อ (มีแค่ช่องรหัส ไม่มีช่องอีเมล)
+  const pass = page.locator('input[name="pass"], input[id="pass"], input[type="password"]').first();
+  if (password && (await pass.isVisible({ timeout: 8000 }).catch(() => false))) {
+    console.log(`🔑${label} หน้าเลือกโปรไฟล์ถามรหัสผ่าน — กรอกให้`);
+    await humanClick(page, pass);
+    await humanType(page, password);
+    await humanPause(page, 400, 1000);
+    const btn = page
+      .locator('button[name="login"], button[type="submit"], [data-testid="royal-login-button"], [data-testid="royal_login_button"]')
+      .first();
+    await Promise.all([
+      page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 120_000 }).catch(() => {}),
+      (await btn.isVisible().catch(() => false)) ? humanClick(page, btn) : pass.press('Enter'),
+    ]);
+    await page.waitForTimeout(5000);
+  }
+  await dismissCommonFacebookPopups(page);
+  return true;
+}
+
 export async function facebookLogin(
   page: Page,
   email: string,
@@ -96,6 +140,8 @@ export async function facebookLogin(
     }
   }
   await dismissCommonFacebookPopups(workingPage);
+  const pickerLabel = options?.userLabel ? ` [${options.userLabel}]` : '';
+  await passSavedProfilePicker(workingPage, password, pickerLabel);
 
   const emailInput = workingPage.locator(
     'input[data-testid="royal-email"], input[id="email"], input[name="email"]'
@@ -174,6 +220,7 @@ export async function facebookLogin(
       await workingPage.goto('https://www.facebook.com/', { waitUntil: 'domcontentloaded' });
       await dismissCommonFacebookPopups(workingPage);
       await workingPage.waitForTimeout(3000);
+      await passSavedProfilePicker(workingPage, password, label);
       authState = await waitForAuthState(workingPage, 45_000);
       if (authState === 'logged_in') {
         /* ok */
