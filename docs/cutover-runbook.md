@@ -21,7 +21,7 @@
 
 ## STEP 1 — Migration (ทำครั้งเดียว, ปลอดภัย idempotent)
 
-DB เดียวกันทั้งหมด (`94.74.115.204/ocr_service`) — รันที่เครื่องไหนก็ได้ที่ต่อ DB ได้:
+DB เดียวกันทั้งหมด (`<DB_HOST>/ocr_service`) — รันที่เครื่องไหนก็ได้ที่ต่อ DB ได้:
 
 ```bash
 npm run migrate       # (root) ลง schema-009 ให้ so-candidate-data

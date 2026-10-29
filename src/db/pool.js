@@ -9,8 +9,11 @@ function buildConfig() {
   const options = `-c search_path="${DB_SCHEMA}",public`;
   const url = envString('DATABASE_URL');
   if (url) return { connectionString: url, options };
+  // ที่อยู่ฐานข้อมูลอยู่ใน .env เท่านั้น ห้ามฝังในโค้ด (repo นี้เคยเป็น public)
+  const host = envString('PGHOST');
+  if (!host) throw new Error('ยังไม่ได้ตั้ง DATABASE_URL หรือ PGHOST ใน .env');
   return {
-    host: envString('PGHOST', '94.74.115.204'),
+    host,
     port: Number.parseInt(envString('PGPORT', '5432'), 10),
     user: envString('PGUSER', 'root'),
     password: envString('PGPASSWORD'),

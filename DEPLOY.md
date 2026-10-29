@@ -9,7 +9,7 @@ Three pieces, one shared Postgres. The web is serverless; the browser bots are N
 │  Azure AD login      │─┐   │ autopost server + its post/collect workers    │
 │  choose Scraping /   │ │   │ (Chromium headful; FB posting engine)         │
 │  Auto-Post (iframe)  │ │   └───────────────────────────────────────────────┘
-└──────────────────────┘ └──── shared Postgres (94.74.115.204, ocr_service) ───┘
+└──────────────────────┘ └──── shared Postgres (<DB_HOST>, ocr_service) ───┘
 ```
 
 Why split: Vercel is serverless (function timeouts, no persistent process, no headful
@@ -17,7 +17,7 @@ browser) — it can host the console but **cannot run the bots**. The bots run o
 worker host.
 
 ## 1) Postgres (already exists)
-External at `94.74.115.204/ocr_service`. Two schemas: `so-candidate-data` (scraper),
+External at `<DB_HOST>/ocr_service`. Two schemas: `so-candidate-data` (scraper),
 `so_autopost_jobs` (autopost). Apply scraper migrations once:
 ```
 docker compose run --rm migrate      # runs src/db/migrate.js (schema…005)

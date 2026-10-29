@@ -7,7 +7,8 @@ import { envInt, envString } from '../config.js';
 
 const execFileP = promisify(execFile);
 
-const HOST = () => envString('OLLAMA_HOST', 'http://110.49.94.180:11434').replace(/\/$/, '');
+// ที่อยู่ Ollama อยู่ใน .env เท่านั้น (OLLAMA_HOST หรือ OLLAMA_BASE_URL ตัวเดียวกับที่ระบบคิดคอนเทนต์ใช้)
+const HOST = () => (envString('OLLAMA_HOST') || envString('OLLAMA_BASE_URL')).replace(/\/$/, '');
 const MODEL = () => envString('OCR_MODEL', 'scb10x/typhoon-ocr1.5-3b:latest');
 // typhoon-ocr (Qwen2.5-VL) responds best to the documented plain OCR prompt.
 const OCR_PROMPT =
@@ -53,6 +54,7 @@ async function pdfToPngs(pdf, maxPages) {
 export async function extractAttachment(buffer, fileType) {
   const t = String(fileType ?? '').toLowerCase();
   const maxPages = envInt('OCR_MAX_PAGES', 6);
+  if (!HOST()) return { text: '', status: 'skipped:no_ocr_host' };
   try {
     if (/^(jpg|jpeg|png|gif|webp)$/.test(t)) {
       const text = await ocrImage(buffer);

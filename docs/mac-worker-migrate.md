@@ -9,8 +9,8 @@
 เปิด Terminal:
 
 ```bash
-curl -sS http://110.49.94.180:11434/api/tags | head   # Ollama (ถ้าใช้ draft) — ต้องได้ JSON
-nc -vz 94.74.115.204 5432                              # Postgres กลาง — ต้อง succeeded
+curl -sS http://<OLLAMA_HOST>:11434/api/tags | head   # Ollama (ถ้าใช้ draft) — ต้องได้ JSON
+nc -vz <DB_HOST> 5432                              # Postgres กลาง — ต้อง succeeded
 curl -sS https://api.ipify.org; echo                   # เทียบ Public IP กับเครื่องเดิม (ถ้าจะ pin FB)
 ```
 

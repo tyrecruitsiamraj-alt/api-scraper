@@ -1,4 +1,4 @@
-# Postgres is EXTERNAL (94.74.115.204) — not run here.
+# Postgres is EXTERNAL (<DB_HOST>) — not run here.
 # Two services share one image: the control API (always on) and the worker
 # (run on demand or via the host scheduler / cron).
 services:

@@ -9,8 +9,8 @@
 
 1. **อยู่วงเน็ตที่ถึงระบบภายใน?** เปิด PowerShell รัน:
    ```
-   curl http://110.49.94.180:11434/api/tags     # Ollama (AI คิด content) — ต้องได้ JSON
-   Test-NetConnection 94.74.115.204 -Port 5432  # Postgres กลาง — ต้อง TcpTestSucceeded: True
+   curl http://<OLLAMA_HOST>:11434/api/tags     # Ollama (AI คิด content) — ต้องได้ JSON
+   Test-NetConnection <DB_HOST> -Port 5432  # Postgres กลาง — ต้อง TcpTestSucceeded: True
    ```
    ❌ ถึงไม่ครบ = เครื่องนี้ทำได้แค่บทบาทโพสต์ FB (ถ้าถึง DB) หรือใช้ไม่ได้เลย
 2. **Public IP ต่างจากเครื่องเดิม (RM017)?** เปิด `https://api.ipify.org` บนทั้ง 2 เครื่องเทียบกัน

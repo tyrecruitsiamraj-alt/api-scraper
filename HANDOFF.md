@@ -36,7 +36,7 @@ Branch บน remote ที่มี commit ยังไม่เข้า main
 
 ## ระบบทำอะไร
 
-ข้อมูลอยู่ใน PostgreSQL กลาง (`94.74.115.204:5432`) แยก 2 schema
+ข้อมูลอยู่ใน PostgreSQL กลาง (`<DB_HOST>:5432`) แยก 2 schema
 
 - `so-candidate-data` เก็บผู้สมัคร, connector, scrape task, คิวงาน, ใบขอจาก ERP
 - `so_autopost_apiscraper` เก็บบัญชี/กลุ่ม Facebook, งานโพสต์, คอมเมนต์
@@ -50,7 +50,7 @@ Branch บน remote ที่มี commit ยังไม่เข้า main
 | Scraper (Playwright login ครั้งเดียว แล้วดึงผ่าน HTTP) | `src/pipeline.js`, `src/tasks-worker.js`, `src/providers/jobbkk`, `src/providers/jobthai` | เครื่อง Worker |
 | Autopost Facebook (Express + Playwright) | `autopost/` | เครื่อง Worker |
 | ซิงก์ใบขอจาก ERP (SQL Server) | `src/erp/sync.js` | เครื่อง Worker |
-| OCR / AI | `src/core/ollama.js` ชี้ไป Ollama ภายใน `110.49.94.180:11434` | เครื่องภายใน |
+| OCR / AI | `src/core/ollama.js` ชี้ไป Ollama ภายใน `<OLLAMA_HOST>:11434` | เครื่องภายใน |
 
 เส้นทาง Scrap: ใบขอ → ศูนย์งานบน Web กด "เริ่มค้นหา" → ลง `work_queue` → Worker หยิบงาน ล็อกทีละบัญชี (`connector_key`) → login แพลตฟอร์ม → ค้น → เปิด Resume → dedupe ด้วยเบอร์โทร/อีเมล/ชื่อ → เก็บรูปและไฟล์แนบเป็น bytea → ให้คะแนนความเหมาะสมต่อใบงาน (`candidate-fit-v1` ใน `scrape_task_candidates`)
 
@@ -90,7 +90,7 @@ node --test tests/*.test.js tests/*.test.mjs
 
 ## ความเสี่ยงด้านข้อมูล
 
-Repo `tyrecruitsiamraj-alt/api-scraper` เป็น **public** และมี IP ของ Postgres กลาง (`94.74.115.204`) กับ Ollama ภายในอยู่ใน `.env.example`, `docker-compose.yml`, `DEPLOY.md`, `docs/*.md`, `src/db/pool.js`, `src/core/ollama.js` ฐานนี้เก็บข้อมูลส่วนบุคคลของผู้สมัคร (ชื่อ เบอร์ อีเมล รูป Resume) ซึ่งอยู่ใต้ PDPA ผมไม่พบรหัสผ่านหรือ API key จริงใน main แต่ควรตัดสินใจว่าจะทำ repo เป็น private หรือย้าย host ออกจากโค้ด และตรวจว่าพอร์ต 5432 เปิดรับจากอินเทอร์เน็ตแค่ไหน
+Repo `tyrecruitsiamraj-alt/api-scraper` เป็น **public** · IP ของ Postgres กลางกับ Ollama ถูกเอาออกจากโค้ดและเอกสารแล้ว (29 ต.ค. 2569 อ่านจาก .env อย่างเดียว) แต่ยังค้างอยู่ในประวัติ git และ PROJECT_PLAN.md ฐานนี้เก็บข้อมูลส่วนบุคคลของผู้สมัคร (PDPA) ที่เหลือต้องทำ: ทำ repo เป็น private · เปลี่ยนรหัสผ่านฐาน · จำกัดพอร์ต 5432 ให้รับเฉพาะเครื่องที่ใช้
 
 ## ขั้นต่อไปที่แนะนำ
 
