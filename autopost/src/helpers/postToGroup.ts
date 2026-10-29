@@ -37,6 +37,8 @@ export interface PostToGroupOptions {
   joinBudget?: { used: number; max: number };
   /** ผลตรวจสมาชิกกลุ่มของการโพสต์ครั้งนี้ — postAll ใช้เขียน log */
   membership?: { state: MembershipState; message: string | null };
+  /** Facebook ไม่รับโพสต์หลังกดปุ่ม — ข้อความที่ Facebook แสดง (postAll ใช้เขียน log) */
+  postError?: string;
 }
 
 /** ทำให้ชื่อกลุ่มที่อ่านจากหน้าเว็บเป็นข้อความเดียวสม่ำเสมอ (ใช้วิเคราะห์ย้อนหลังได้) */
@@ -216,6 +218,83 @@ async function closeComposerDialogAfterPost(page: Page, dialog: Locator, userLab
     await page.waitForTimeout(350);
   }
   await page.waitForTimeout(400);
+}
+
+/** ข้อความที่ Facebook ใช้บอกว่าไม่รับโพสต์ */
+const POST_REJECTED_RE =
+  /ไม่สามารถโพสต์|โพสต์ไม่ได้|ถูกจำกัด|ถูกบล็อก|บล็อกชั่วคราว|มาตรฐานชุมชน|สแปม|ลองอีกครั้งในภายหลัง|เกิดข้อผิดพลาด|can['’]t post|couldn['’]t post|unable to post|restricted|temporarily blocked|community standards|spam|try again later|something went wrong/i;
+
+/** ปุ่มโพสต์ยังขึ้นว่ากำลังส่ง (อัปโหลดรูปช้า) — รอต่อได้ */
+const POSTING_IN_PROGRESS_RE = /กำลังโพสต์|Posting/i;
+
+/** ข้อความใน dialog / แถบแจ้งเตือนที่เห็นอยู่ ไม่รวมข้อความที่พิมพ์ในช่องโพสต์ */
+async function readVisibleFacebookNotices(page: Page): Promise<string[]> {
+  return page
+    .evaluate(() => {
+      const out: string[] = [];
+      const nodes = document.querySelectorAll('[role="dialog"], [role="alertdialog"], [role="alert"]');
+      nodes.forEach((el) => {
+        const box = (el as HTMLElement).getBoundingClientRect();
+        if (box.width === 0 || box.height === 0) return;
+        const clone = el.cloneNode(true) as HTMLElement;
+        clone.querySelectorAll('[contenteditable="true"]').forEach((n) => n.remove());
+        const text = (clone.textContent || '').replace(/\s+/g, ' ').trim();
+        if (text) out.push(text.slice(0, 400));
+      });
+      return out;
+    })
+    .catch(() => [] as string[]);
+}
+
+/**
+ * หลังกดโพสต์: รอให้ Facebook ปิดหน้าต่างโพสต์เอง และไม่มีข้อความปฏิเสธ
+ * คืน null = Facebook รับโพสต์ · คืนข้อความ = Facebook ไม่รับ (ข้อความที่ Facebook แสดง)
+ */
+async function waitForPostAccepted(
+  page: Page,
+  dialog: Locator,
+  userLabel: string,
+  beforeClick: string[]
+): Promise<string | null> {
+  // ข้อความที่ขึ้นค้างอยู่ก่อนกดโพสต์ไม่นับ — นับเฉพาะที่ Facebook ตอบหลังกด
+  const findNewRejection = (notices: string[]): string | undefined =>
+    notices.find((t) => {
+      const hit = t.match(POST_REJECTED_RE)?.[0];
+      return Boolean(hit) && !beforeClick.some((b) => b.includes(hit!));
+    });
+  const startedAt = Date.now();
+  const baseDeadline = startedAt + 30000;
+  const hardDeadline = startedAt + 90000;
+  while (true) {
+    const rejected = findNewRejection(await readVisibleFacebookNotices(page));
+    if (rejected) {
+      console.log(`❌ [${userLabel}] Facebook ไม่รับโพสต์: ${rejected}`);
+      return rejected;
+    }
+    const open = await dialog.isVisible().catch(() => false);
+    if (!open) {
+      // ข้อความปฏิเสธบางแบบขึ้นหลังหน้าต่างโพสต์ปิด
+      await page.waitForTimeout(2500);
+      const after = findNewRejection(await readVisibleFacebookNotices(page));
+      if (after) {
+        console.log(`❌ [${userLabel}] Facebook ไม่รับโพสต์: ${after}`);
+        return after;
+      }
+      return null;
+    }
+    const now = Date.now();
+    if (now >= hardDeadline) break;
+    if (now >= baseDeadline) {
+      const btnText = await dialog.locator(POST_BTN_IN_DIALOG_SEL).last().innerText().catch(() => '');
+      if (!POSTING_IN_PROGRESS_RE.test(btnText)) break;
+    }
+    await page.waitForTimeout(700);
+  }
+  const notices = await readVisibleFacebookNotices(page);
+  const waitedSec = Math.round((Date.now() - startedAt) / 1000);
+  const detail = notices.length ? ` หน้าจอเขียนว่า: ${notices.join(' | ').slice(0, 300)}` : '';
+  console.log(`❌ [${userLabel}] หน้าต่างโพสต์ไม่ปิดภายใน ${waitedSec}s`);
+  return `หน้าต่างโพสต์ไม่ปิดหลังกดโพสต์ ${waitedSec} วินาที${detail}`;
 }
 
 /**
@@ -539,8 +618,25 @@ export async function postToGroup(
 
     if (postReady) {
       await humanPause(page, 400, 1100);
+      const noticesBeforeClick = await readVisibleFacebookNotices(page);
       await humanClick(page, postBtn);
-      console.log(`✅ [${userLabel}] กดโพสต์แล้ว: ${postItem.title}`);
+      console.log(`📨 [${userLabel}] กดโพสต์แล้ว รอ Facebook รับ: ${postItem.title}`);
+      const rejection = await waitForPostAccepted(page, composerDialog, userLabel, noticesBeforeClick);
+      if (rejection) {
+        options.postError = rejection;
+        await capturePostFailureArtifacts({
+          page,
+          userLabel,
+          groupId: gID,
+          reason: `post_rejected:${rejection.slice(0, 120)}`,
+          jobId: options.jobId,
+          assignmentId: options.assignmentId,
+        });
+        await closeComposerDialogAfterPost(page, composerDialog, userLabel);
+        await dismissPostComposerOverlays(page, userLabel);
+        return false;
+      }
+      console.log(`✅ [${userLabel}] Facebook รับโพสต์แล้ว: ${postItem.title}`);
       await closeComposerDialogAfterPost(page, composerDialog, userLabel);
       await dismissCommonFacebookPopups(page);
       await dismissPostComposerOverlays(page, userLabel);

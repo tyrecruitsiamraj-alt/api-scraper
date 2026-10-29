@@ -297,6 +297,7 @@ test('Dynamic Post: รันโพสต์ตาม Assignments', async ({ pag
 
       let posted = false;
       let membership: { state: string; message: string | null } | undefined;
+      let postError: string | undefined;
       const maxAttempts = 2;
       for (let attempt = 1; attempt <= maxAttempts; attempt++) {
         const pageReady = await ensureActivePageForUser(user);
@@ -317,6 +318,7 @@ test('Dynamic Post: รันโพสต์ตาม Assignments', async ({ pag
         };
         posted = await postToGroup(activePage, request, postItem, gID, postOpts);
         membership = postOpts.membership ?? membership;
+        postError = postOpts.postError;
         if (membership?.state === 'joined') {
           await runLog({
             level: 'info',
@@ -329,6 +331,8 @@ test('Dynamic Post: รันโพสต์ตาม Assignments', async ({ pag
           });
         }
         if (posted) break;
+        // Facebook ตอบกลับมาแล้วว่าไม่รับ — โพสต์ซ้ำทันทีมีแต่จะโดนหนักขึ้น
+        if (postError) break;
         // ยังไม่ได้เป็นสมาชิก (รออนุมัติ/ต้องตอบคำถาม/ครบโควต้า) — ลองซ้ำไม่ช่วย
         if (membership && membership.state !== 'member' && membership.state !== 'joined') break;
         if (!activePage.isClosed()) break;
@@ -355,8 +359,14 @@ test('Dynamic Post: รันโพสต์ตาม Assignments', async ({ pag
           level: 'warn',
           message: membershipSkip
             ? `${membership!.message} (กลุ่ม ${gID})`
-            : `โพสต์ไม่สำเร็จ: ${job.title} → กลุ่ม ${gID} (ถ้ามีจะบันทึก screenshot/HTML ไว้ที่โฟลเดอร์ artifacts/)`,
-          ...(membershipSkip ? { meta: { kind: 'join', state: membership!.state } } : {}),
+            : postError
+              ? `Facebook ไม่รับโพสต์: ${job.title} → กลุ่ม ${gID} — ${postError}`
+              : `โพสต์ไม่สำเร็จ: ${job.title} → กลุ่ม ${gID} (ถ้ามีจะบันทึก screenshot/HTML ไว้ที่โฟลเดอร์ artifacts/)`,
+          ...(membershipSkip
+            ? { meta: { kind: 'join', state: membership!.state } }
+            : postError
+              ? { meta: { kind: 'post_rejected', facebook_message: postError } }
+              : {}),
           assignment_id: item.assignment_id,
           user_id: user.id,
           job_id: item.job_id,
