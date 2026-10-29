@@ -378,7 +378,12 @@ test('Dynamic Post: รันโพสต์ตาม Assignments', async ({ pag
           const reason = `โพสต์ไม่สำเร็จติดกัน ${failStreak} กลุ่ม — circuit breaker พัก ${pauseHours} ชม. (อาจโดน Facebook จำกัดการโพสต์)`;
           console.log(`🛑 [${userLabel}] ${reason}`);
           await runLog({ level: 'error', message: reason, user_id: user.id });
-          await pauseUserPosting(user.id, pauseHours, reason).catch(() => {});
+          try {
+            await pauseUserPosting(user.id, pauseHours, reason);
+          } catch (e) {
+            // พักไม่สำเร็จต้องเห็นในบันทึกรอบ ไม่เงียบ — บัญชีจะยังถูกสั่งโพสต์ต่อได้
+            await runLog({ level: 'error', message: `พักบัญชีอัตโนมัติไม่สำเร็จ: ${(e as Error).message}`, user_id: user.id });
+          }
           break;
         }
         // ไม่ได้โพสต์อะไรลงกลุ่มนี้ — ไปกลุ่มถัดไปเลยไม่ต้องหน่วงเวลา

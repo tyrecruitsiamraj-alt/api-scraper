@@ -50,16 +50,31 @@ export async function buildDailyPostPlanForUser(
   });
 }
 
-/** circuit breaker: พักบัญชีเมื่อโพสต์ fail ติดกัน */
+/**
+ * circuit breaker: พักบัญชีเมื่อโพสต์ fail ติดกัน
+ * เครื่อง worker ที่ไม่มี DATABASE_URL ต้องพักผ่าน API ของเซิร์ฟเวอร์ (เดิมเงียบหายไม่พักจริง)
+ */
 export async function pauseUserPosting(
   userId: string,
   hours: number,
   reason: string
 ): Promise<void> {
-  if (!process.env.DATABASE_URL) return;
-  // eslint-disable-next-line @typescript-eslint/no-var-requires
-  const db = require('../../server/db');
-  await db.pauseUser(userId, hours, reason);
+  if (process.env.DATABASE_URL) {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const db = require('../../server/db');
+    const row = await db.pauseUser(userId, hours, reason);
+    if (!row) throw new Error(`ไม่พบบัญชี ${userId}`);
+    return;
+  }
+  const base = String(process.env.RUN_LOG_API_URL || '').replace(/\/$/, '');
+  const token = String(process.env.POST_WORKER_TOKEN || '').trim();
+  if (!base) throw new Error('ไม่มี RUN_LOG_API_URL และ DATABASE_URL — พักบัญชีไม่ได้');
+  const res = await fetch(`${base}/api/worker/post/pause-user`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'x-worker-token': token },
+    body: JSON.stringify({ user_id: userId, hours, reason }),
+  });
+  if (!res.ok) throw new Error(`พักบัญชีไม่สำเร็จ (HTTP ${res.status})`);
 }
 
 export function getFailStreakLimit(): number {
