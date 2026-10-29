@@ -18,7 +18,8 @@ import { closeSync, existsSync, mkdirSync, openSync, statSync, unlinkSync, utime
 import { dirname, resolve } from 'node:path';
 import { sleep } from '../src/config.js';
 import { loadRuntime } from '../src/config.js';
-import { query, closePool } from '../src/db/pool.js';
+import { query, closePool, withTransaction } from '../src/db/pool.js';
+import { syncJarvisPostOrders } from '../src/core/jarvis-post-sync.js';
 import { getConnector, getTaskById, recoverStaleRunningTasks } from '../src/db/repositories.js';
 import { runConnector } from '../src/pipeline.js';
 import { runTask } from '../src/tasks-worker.js';
@@ -356,9 +357,33 @@ async function reschedulePendingMeasurement(job) {
   return true;
 }
 
+// Jarvis ไม่ถามสถานะเอง — เครื่องนี้เปลี่ยนสถานะใบสั่งโพสต์ที่จบรอบแล้วให้ทุก 5 นาที
+// (หลาย runner ในเครื่อง/หลายเครื่อง ใช้ advisory lock ให้ทำทีละตัว)
+const JARVIS_SYNC_MS = 5 * 60 * 1000;
+let lastJarvisSync = 0;
+async function syncJarvisIfDue() {
+  if (Date.now() - lastJarvisSync < JARVIS_SYNC_MS) return;
+  lastJarvisSync = Date.now();
+  try {
+    await withTransaction(async (client) => {
+      const lock = await client.query(`SELECT pg_try_advisory_xact_lock(hashtext('jarvis-post-sync')) AS ok`);
+      if (!lock.rows[0]?.ok) return;
+      const r = await syncJarvisPostOrders((sql, params) => client.query(sql, params).then((x) => x.rows), {
+        autopostSchema: process.env.AUTOPOST_SCHEMA || 'so_autopost_apiscraper',
+      });
+      if (r.posted.length || r.rejected.length) {
+        console.log(`  Jarvis: โพสต์แล้ว ${r.posted.join(', ') || '-'} · ตีกลับ ${r.rejected.join(', ') || '-'}`);
+      }
+    });
+  } catch (e) {
+    console.warn(`  Jarvis: อัปเดตสถานะใบสั่งโพสต์ไม่สำเร็จ — ${e?.message ?? e}`);
+  }
+}
+
 async function runOne() {
   await heartbeat();
   await recoverStale();
+  if (!process.argv.includes('--selftest')) await syncJarvisIfDue();
   const job = await claimNext();
   if (!job) return false;
   console.log(`▶ [${WORKER_ID}] ${job.type} ${job.connector_key} (job ${job.id})`);

@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { pool, q } from './db';
 import { getCandidateDuplicates } from './candidate-duplicates';
 import { postedOutcome } from '../../src/core/post-task-state.js';
+import { syncJarvisPostOrders } from '../../src/core/jarvis-post-sync.js';
 import { evaluateContentQuality, operatorFacingQuality, qualityFailureMessages } from '../../src/core/content-quality.js';
 import type { ContentQualityResult } from '../../src/core/content-quality.js';
 import { evaluateWorkflowReadiness } from '../../src/core/workflow-readiness.js';
@@ -3567,49 +3568,11 @@ async function pickPostAccount(groupIds: string[]) {
   return rows[0] ?? null;
 }
 
-/** เปลี่ยนสถานะใบสั่งโพสต์ใน Jarvis ทีละแถว (ใบขอเดียวกันมีได้หลายแถว ห้ามแก้ข้ามใบ) */
-async function setJarvisPostRowStatus(rowId: string, status: 'posted' | 'rejected', note: string | null) {
-  try {
-    await q(
-      `UPDATE "jarvis_rm".job_posting_requests
-          SET status = $2, notes = COALESCE($3, notes), updated_at = now()
-        WHERE id::text = $1 AND status = 'in_progress'`,
-      [rowId, status, note],
-    );
-  } catch (e) {
-    console.warn(`[jarvis] เปลี่ยนสถานะใบสั่งโพสต์ไม่สำเร็จ (${rowId}): ${(e as Error).message}`);
-  }
-}
-
-/** เหตุที่ใบนี้โพสต์ไม่ได้สักกลุ่ม ให้คนสั่งอ่านใน Jarvis */
-function postRoundFailureReason(
-  latestRun: { status: string; error: string | null },
-  attempts: { group_id: string | null; level: string; message: string | null }[],
-  groupName: (fb: string | null) => string,
-): string {
-  if (latestRun.status === 'cancelled') return 'รอบโพสต์ถูกยกเลิก';
-  const parts: string[] = [];
-  if (latestRun.status === 'failed') {
-    const err = String(latestRun.error ?? '').split('\n').map((l) => l.trim()).find(Boolean) ?? '';
-    const why = /WORKER_POST_JOB_MAX_MS|stale_running/i.test(err)
-      ? 'ใช้เวลานานเกินกำหนด เครื่องหยุดงานนี้'
-      : err.slice(0, 200) || 'ไม่ทราบสาเหตุ';
-    parts.push(`รอบโพสต์หยุดก่อนจบ (${why})`);
-  }
-  const failed = new Map<string, string>();
-  for (const a of attempts) {
-    if (a.level === 'success' || !a.group_id || failed.has(a.group_id)) continue;
-    failed.set(a.group_id, (a.message ?? 'โพสต์ไม่สำเร็จ').replace(/\s+/g, ' ').slice(0, 160));
-  }
-  if (failed.size) {
-    const lines = [...failed].slice(0, 3).map(([fb, msg]) => `${groupName(fb)}: ${msg}`);
-    const more = failed.size > 3 ? ` และอีก ${failed.size - 3} กลุ่ม` : '';
-    parts.push(`ไม่สำเร็จ ${failed.size} กลุ่ม · ${lines.join(' · ')}${more}`);
-  }
-  return parts.length ? parts.join(' · ') : 'ไม่มีกลุ่มที่โพสต์ได้ในรอบนี้';
-}
-
 export async function listJarvisPostOrders(): Promise<JarvisPostOrder[]> {
+  // ใบที่จบรอบแล้ว: เปลี่ยนเป็นโพสต์แล้ว/ตีกลับก่อนแสดง (เครื่อง worker ก็เรียกทุก 5 นาที)
+  await syncJarvisPostOrders(q, { autopostSchema: AP_SCHEMA }).catch((e) =>
+    console.warn(`[jarvis] อัปเดตสถานะใบสั่งโพสต์ไม่สำเร็จ: ${(e as Error).message}`),
+  );
   let rows: JarvisPostRow[];
   try {
     rows = await q<JarvisPostRow>(
@@ -3667,20 +3630,9 @@ export async function listJarvisPostOrders(): Promise<JarvisPostOrder[]> {
         ORDER BY created_at DESC LIMIT 1`,
       [jobId],
     ).catch(() => []);
-    // รอบโพสต์ที่สั่งหลังใบ Jarvis ใบนี้ — ใบขอเดียวกันสั่งใหม่ได้ ผลของใบเก่าต้องไม่นับรวม
-    const rowRuns = await q<{ run_id: string | null; status: string; error: string | null }>(
-      `SELECT run_id, status, error FROM ${AP}.post_run_queue
-        WHERE created_at >= $2
-          AND EXISTS (SELECT 1 FROM jsonb_array_elements_text(assignment_ids::jsonb) a
-                       WHERE a = $1 OR a LIKE $1 || '-r%')
-        ORDER BY created_at DESC`,
-      [jobId, row.created_at],
-    ).catch(() => []);
     // worker เขียน run_logs ต่อกลุ่ม: success = กดโพสต์สำเร็จ, warn = โพสต์ไม่สำเร็จ
-    const attemptRows = await q<{
-      at: string; run_id: string | null; group_id: string | null; worker_id: string | null; level: string; message: string | null;
-    }>(
-      `SELECT l.created_at AS at, l.run_id, l.group_id, pq.worker_id, l.level, l.message
+    const attemptRows = await q<{ at: string; group_id: string | null; worker_id: string | null; level: string; message: string | null }>(
+      `SELECT l.created_at AS at, l.group_id, pq.worker_id, l.level, l.message
          FROM ${AP}.run_logs l
          LEFT JOIN ${AP}.post_run_queue pq ON pq.run_id = l.run_id
         WHERE l.job_id = $1 AND l.group_id IS NOT NULL AND l.level IN ('success', 'warn', 'error')
@@ -3769,27 +3721,7 @@ export async function listJarvisPostOrders(): Promise<JarvisPostOrder[]> {
         WHERE job_id = $1 AND COALESCE(post_link, '') <> '' ORDER BY created_at DESC LIMIT 1`,
       [jobId],
     ).catch(() => []);
-    // หลักฐานว่าใบนี้โพสต์แล้ว: run_logs success (worker เขียนตรง) หรือ post_logs ที่มีลิงก์ ของรอบที่สั่งหลังใบนี้
-    const rowRunIds = rowRuns.map((r) => r.run_id).filter((id): id is string => Boolean(id));
-    const succeeded = rowRunIds.length
-      ? (await q<{ n: number }>(
-        `SELECT (SELECT count(*) FROM ${AP}.run_logs WHERE run_id = ANY($1::text[]) AND level = 'success')
-              + (SELECT count(*) FROM ${AP}.post_logs WHERE run_id = ANY($1::text[]) AND COALESCE(post_link, '') <> '') AS n`,
-        [rowRunIds],
-      ).catch(() => [{ n: 0 }]))[0].n > 0
-      : false;
-    const runsFinished = rowRuns.length > 0 && rowRuns.every((r) => !['queued', 'running'].includes(r.status));
-    let jarvisStatus = row.status;
-    // เขียนกลับ Jarvis ตอนเปิดหน้า/Jarvis ถามสถานะ (ไม่ต้องมี job เบื้องหลัง) — แก้เฉพาะแถวของใบนี้
-    if (jarvisStatus === 'in_progress' && succeeded) {
-      await setJarvisPostRowStatus(row.id, 'posted', null);
-      jarvisStatus = 'posted';
-    } else if (jarvisStatus === 'in_progress' && runsFinished) {
-      // จบทุกรอบแล้วไม่มีกลุ่มไหนโพสต์ได้ — ตีกลับพร้อมเหตุ ให้คนสั่งแก้แล้วสั่งใหม่ใน Jarvis
-      const runIds = new Set(rowRunIds);
-      await setJarvisPostRowStatus(row.id, 'rejected', `ตีกลับ: ${postRoundFailureReason(rowRuns[0], attemptRows.filter((a) => a.run_id && runIds.has(a.run_id)), fbName)}`);
-      jarvisStatus = 'rejected';
-    }
+    const jarvisStatus = row.status;
     out.push({
       request_no: row.request_no,
       created_at: row.created_at,
