@@ -185,8 +185,11 @@ export type ManualJoinGroup = {
   group_id: string;
   group_name: string | null;
   url: string;
-  /** questions = กลุ่มให้ตอบคำถามก่อนเข้า · pending = ส่งคำขอแล้ว รอแอดมินอนุมัติ */
-  state: 'questions' | 'pending';
+  /**
+   * questions = กลุ่มให้ตอบคำถามก่อนเข้า · pending = ส่งคำขอแล้ว รอแอดมินอนุมัติ
+   * unconfirmed = กดโพสต์แล้วแต่ไม่เจอโพสต์ในกลุ่ม (กลุ่มสาธารณะให้คนนอกพิมพ์ได้ โพสต์จึงไปค้างรอแอดมิน) — เช็กว่าเป็นสมาชิกหรือยัง
+   */
+  state: 'questions' | 'pending' | 'unconfirmed';
   request_no: string | null;
   seen_at: string;
 };
@@ -218,7 +221,32 @@ export async function listManualJoinGroups(): Promise<ManualJoinGroup[]> {
         ORDER BY j.seen_at DESC
         LIMIT 300`,
     );
-    return rows.map(({ job_id, ...r }) => ({
+    // กลุ่มที่กดโพสต์แล้วแต่ไม่เจอโพสต์ (ไม่มีลิงก์) — ล่าสุดต่อบัญชี+กลุ่ม ไม่นับคู่ที่หลังจากนั้นได้ลิงก์แล้ว
+    const unconfirmed = await q<Omit<ManualJoinGroup, 'url' | 'request_no'> & { job_id: string | null }>(
+      `WITH m AS (
+         SELECT DISTINCT ON (pl.user_id, pl.group_id)
+                pl.user_id, pl.group_id, pl.created_at AS seen_at, pl.job_id
+           FROM ${AP}.post_logs pl
+          WHERE (pl.post_link IS NULL OR TRIM(pl.post_link) = '')
+            AND pl.post_status = 'ไม่พบลิงก์หลังโพสต์'
+            AND pl.user_id IS NOT NULL AND pl.group_id IS NOT NULL
+            AND pl.created_at > now() - interval '30 days'
+          ORDER BY pl.user_id, pl.group_id, pl.created_at DESC
+       )
+       SELECT m.user_id, u.name AS account, m.group_id, g.name AS group_name, 'unconfirmed' AS state, m.seen_at, m.job_id
+         FROM m
+         LEFT JOIN ${AP}.users u ON u.id = m.user_id
+         LEFT JOIN ${AP}.groups g ON g.fb_group_id = m.group_id
+        WHERE NOT EXISTS (
+          SELECT 1 FROM ${AP}.post_logs ok
+           WHERE ok.user_id = m.user_id AND ok.group_id = m.group_id
+             AND ok.post_link IS NOT NULL AND TRIM(ok.post_link) <> '' AND ok.created_at >= m.seen_at
+        )
+        ORDER BY m.seen_at DESC
+        LIMIT 300`,
+    ).catch(() => []);
+    const seen = new Set(rows.map((r) => `${r.user_id}|${r.group_id}`));
+    return [...rows, ...unconfirmed.filter((r) => !seen.has(`${r.user_id}|${r.group_id}`))].map(({ job_id, ...r }) => ({
       ...r,
       url: `https://www.facebook.com/groups/${r.group_id}`,
       request_no: job_id ? requestNoFromAssignment(job_id) : null,

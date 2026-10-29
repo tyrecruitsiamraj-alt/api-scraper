@@ -222,6 +222,7 @@ export default async function AutopostJobsPage(props: { searchParams?: Promise<{
 const JOIN_STATE_LABEL: Record<ManualJoinGroup['state'], string> = {
   questions: 'ต้องตอบคำถามก่อนเข้า',
   pending: 'รอแอดมินอนุมัติ',
+  unconfirmed: 'โพสต์แล้วไม่เจอในกลุ่ม เช็กว่าเข้ากลุ่มหรือยัง',
 };
 
 /** กลุ่มที่บอทเข้าร่วมเองไม่ได้ — ให้คนกดลิงก์ไปตอบคำถาม/ตามแอดมินด้วยบัญชีนั้น */
@@ -235,7 +236,7 @@ function ManualJoinSection({ groups }: { groups: ManualJoinGroup[] }) {
       <Card>
         <CardHeader>
           <CardDescription>
-            บอทไม่ตอบคำถามเข้ากลุ่มแทน ล็อกอินบัญชีตามแถว แล้วกดลิงก์ไปตอบคำถามหรือตามแอดมิน เข้ากลุ่มได้แล้ว แถวนั้นจะหายไปหลังโพสต์สำเร็จครั้งถัดไป
+            บอทไม่ตอบคำถามเข้ากลุ่มแทน ล็อกอินบัญชีตามแถว แล้วกดลิงก์ไปเข้าร่วมกลุ่ม ตอบคำถาม หรือตามแอดมิน เข้ากลุ่มได้แล้ว แถวนั้นจะหายไปหลังโพสต์ขึ้นในกลุ่มครั้งถัดไป
           </CardDescription>
         </CardHeader>
         <CardContent>
