@@ -2025,11 +2025,11 @@ async function claimNextPostRunJob(workerId, runId, workerName, capabilities = [
              WHERE r.status = 'running' AND r.user_id IS NOT NULL AND r.user_id = q.user_id
            )
            /** บัญชีที่กำลังเก็บคอมเมนต์อยู่ ให้งานโพสต์รอคิว กัน Chrome สองตัวใช้ session เดียวกัน
-               (รอบเก็บคอมเมนต์จบใน 90 นาทีเสมอ — เกินนั้นถือว่าค้าง ไม่บังงานโพสต์) */
+               (รอบปกติไม่เกิน 40 นาที — นานกว่า 45 นาทีไม่บังงานโพสต์อีก กันงานโพสต์รอนานเพราะรอบที่ช้า/ค้าง) */
            AND NOT EXISTS (
              SELECT 1 FROM collect_run_queue c
              WHERE c.status = 'running' AND c.user_id = q.user_id
-               AND COALESCE(c.started_at, c.created_at) > NOW() - INTERVAL '90 minutes'
+               AND COALESCE(c.started_at, c.created_at) > NOW() - INTERVAL '45 minutes'
            )
          ORDER BY q.created_at ASC
          LIMIT 1
@@ -2582,6 +2582,13 @@ async function claimNextCollectRunJob(workerId, runId) {
            SELECT 1 FROM post_run_queue p
            WHERE p.status = 'running' AND p.user_id = c.user_id
              AND COALESCE(p.started_at, p.created_at) > NOW() - INTERVAL '180 minutes'
+         )
+         /** บัญชีเดียวกันเก็บคอมเมนต์ได้ทีละรอบ — เคยรัน 2 รอบของ Tyni Aiit พร้อมกัน (Chrome 2 หน้าต่างบัญชีเดียว) 29 ต.ค. 2569
+             (รอบที่ค้างเกิน 90 นาทีไม่นับ — ตัวกวาดงานค้างจะปิดให้) */
+         AND NOT EXISTS (
+           SELECT 1 FROM collect_run_queue o
+           WHERE o.status = 'running' AND o.user_id = c.user_id AND o.id <> c.id
+             AND COALESCE(o.started_at, o.created_at) > NOW() - INTERVAL '90 minutes'
          )
        ORDER BY c.created_at ASC
        LIMIT 1

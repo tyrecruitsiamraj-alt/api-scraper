@@ -261,6 +261,8 @@ function Start-WorkerWindow([string]$Title, [string]$WorkDir, [string]$NpmScript
     'set AUTO_COLLECT_EVERY_MINUTES=120'
     # ตัวโพสต์: รันพร้อมกันได้ 5 บัญชี (Chrome 5 หน้าต่าง ใช้ RAM ราว 1–1.5 GB ต่อบัญชี) — ตัวเก็บคอมเมนต์ใช้ WORKER_COLLECT_CONCURRENCY แยก
     $(if ($NpmScript -eq 'worker:post') { 'set WORKER_CONCURRENCY=5' } else { 'rem' })
+    # ตัวเก็บคอมเมนต์: รันพร้อมกันได้ 2 บัญชี (รวมกับตัวโพสต์ 5 = Chrome ไม่เกิน 7 หน้าต่าง — เดิม 4 ทำเครื่องค้าง 29 ต.ค. 2569)
+    $(if ($NpmScript -eq 'worker:collect') { 'set WORKER_COLLECT_CONCURRENCY=2' } else { 'rem' })
     "title $Title"
     # worker ปิดตัวเอง (crash / เน็ตหลุด) = เปิดใหม่เองใน 10 วินาที ปิดจริงได้ด้วยสวิตช์ (taskkill ทั้งหน้าต่าง)
     # output ทั้งหมดของ worker เก็บไว้ที่ <script>.out.log ไว้ไล่สาเหตุ
