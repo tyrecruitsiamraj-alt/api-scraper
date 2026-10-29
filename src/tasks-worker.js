@@ -4,6 +4,7 @@ import { existsSync, mkdirSync, statSync, unlinkSync, writeFileSync } from 'node
 import { closePool } from './db/pool.js';
 import { PROJECT_ROOT } from './config.js';
 import {
+  isTaskEnabled,
   bumpTaskProgress,
   countTaskCandidates,
   candidatesForRuns,
@@ -55,6 +56,22 @@ function nextRunFrom(cron) {
   else if (cron === '@daily') sec = 86400;
   if (!sec) return null;
   return new Date(Date.now() + sec * 1000).toISOString();
+}
+
+/** งานถูกปิดระหว่างรัน: กลับเป็น "ยังไม่เริ่ม" พร้อมเหตุ — กดรันใหม่ได้เมื่อเปิดงานอีกครั้ง */
+async function finishStopped(t, runId) {
+  const matchedTotal = await countTaskCandidates(t.id).catch(() => 0);
+  await bumpTaskProgress(t.id, matchedTotal);
+  await finishTask(t.id, { status: 'idle', phase: 'idle', runId, error: 'หยุดแล้ว คนกดปิดงานนี้', nextRunAt: null });
+  console.log(`  ${t.name}: หยุดแล้ว (ปิดงาน) ได้ ${matchedTotal} คน`);
+  return { status: 'stopped', taskId: t.id, matchedTotal };
+}
+
+/** เวลาไทยแบบสั้น เช่น 29 ต.ค. 15:30 */
+function bangkokTime(iso) {
+  return new Date(iso).toLocaleString('th-TH', {
+    timeZone: 'Asia/Bangkok', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit',
+  });
 }
 
 export async function runTask(t, runtime) {
@@ -200,19 +217,25 @@ export async function runTask(t, runtime) {
     onPhase: (phase) => setTaskPhase(t.id, phase, 0),
   });
 
+  if (r.status === 'stopped') return finishStopped(t, r.runId);
   if (r.status === 'failed' || r.status === 'cooldown') {
+    const until = r.status === 'cooldown' && r.cooldownUntil ? bangkokTime(r.cooldownUntil) : null;
+    const error = until
+      ? `${r.error ?? 'บัญชีถูกพัก'} · บัญชีพักถึง ${until} ระบบจะค้นต่อเองหลังเวลานั้น`
+      : r.error ?? 'run failed';
     await finishTask(t.id, {
       status: 'error',
       phase: 'error',
       runId: r.runId,
-      error: r.error ?? 'run failed',
+      error,
       nextRunAt: nextRunFrom(t.schedule_cron),
     });
-    console.log(`  ${t.name}: ${r.status} (${r.error ?? ''})`);
+    console.log(`  ${t.name}: ${r.status} (${error})`);
     return {
       status: 'error',
       runStatus: r.status,
-      error: r.error ?? 'run failed',
+      cooldownUntil: r.cooldownUntil ?? null,
+      error,
       runId: r.runId,
       taskId: t.id,
     };
@@ -244,6 +267,9 @@ export async function runTask(t, runtime) {
       console.warn(`  ${t.name}: adjacent expansion skipped — ${e.message}`);
     }
   }
+
+  // คนกดปิดงานระหว่างค้นตำแหน่งใกล้เคียง — จบตรงนี้ ไม่ทำ OCR/เติมข้อมูลต่อ
+  if (!(await isTaskEnabled(t.id).catch(() => true))) return finishStopped(t, runIds[runIds.length - 1]);
 
   // ---- phase 2: OCR attachments scraped by all runs ----
   const pending = await pendingExtractionsForRuns(runIds);

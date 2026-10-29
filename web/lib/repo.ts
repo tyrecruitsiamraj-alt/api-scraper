@@ -1826,6 +1826,21 @@ export async function updateScrapeTaskCriteria(
 
 export async function setTaskEnabled(id: string, enabled: boolean) {
   await q('UPDATE scrape_tasks SET enabled=$2, updated_at=now() WHERE id=$1', [id, enabled]);
+  if (enabled) return;
+  // ปิดงาน = หยุดด้วย: ยกเลิกคิวที่ยังไม่เริ่ม งานที่กำลังรัน เครื่องจะหยุดก่อนเปิดเรซูเม่ถัดไปเอง
+  const cancelled = await q<{ id: string }>(
+    `UPDATE work_queue SET status='error', finished_at=now(), last_error='หยุดแล้ว คนกดปิดงานนี้'
+      WHERE ref_id=$1 AND type='scrape' AND status='queued'
+      RETURNING id`,
+    [id],
+  );
+  if (cancelled.length) {
+    await q(
+      `UPDATE scrape_tasks SET status='idle', phase='idle', last_error='หยุดแล้ว คนกดปิดงานนี้', updated_at=now()
+        WHERE id=$1 AND status='queued'`,
+      [id],
+    );
+  }
 }
 
 export async function deleteTask(id: string) {

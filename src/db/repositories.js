@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { query, withTransaction } from './pool.js';
 import { decryptSecret, encryptSecret } from './crypto.js';
 import { POSTER_TEMPLATE_ID, normalizePosterStandard } from '../core/poster-template.js';
@@ -35,6 +36,12 @@ function decorateConnector(row) {
 
 export async function saveConnectorSession(id, sessionState) {
   await query('UPDATE connectors SET session_state = $2, last_login_at = now(), updated_at = now() WHERE id = $1', [id, sessionState]);
+}
+
+/** เวลาที่บัญชีนี้พ้นการพัก (อ่านสดจากฐาน) — null = ไม่ได้พัก */
+export async function getConnectorCooldownUntil(id) {
+  const { rows } = await query('SELECT cooldown_until FROM connectors WHERE id = $1 AND cooldown_until > now()', [id]);
+  return rows[0]?.cooldown_until ? new Date(rows[0].cooldown_until) : null;
 }
 
 export async function setConnectorCooldown(id, until) {
@@ -116,6 +123,12 @@ export async function dueTasks() {
       ORDER BY t.created_at`,
   );
   return rows;
+}
+
+/** งานยังเปิดอยู่ไหม — คนกด "ปิดงานนี้" ระหว่างรัน เครื่องต้องหยุดก่อนเปิดเรซูเม่ถัดไป */
+export async function isTaskEnabled(id) {
+  const { rows } = await query('SELECT enabled FROM scrape_tasks WHERE id = $1', [id]);
+  return rows[0]?.enabled !== false;
 }
 
 /** Fetch a single scrape task by id (used by the work_queue runner via ref_id). */
@@ -657,14 +670,27 @@ function validEmail(v) {
   return /^[^@\s]+@[^@\s]+\.[^@\s]{2,}$/.test(e) ? e : '';
 }
 
-function buildRow(parsed) {
+/** เบอร์ที่มีผู้สมัครคนละคนใช้ตั้งแต่จำนวนนี้ขึ้นไป = เบอร์กลาง (call center) ไม่ใช่ของผู้สมัคร */
+export const SHARED_PHONE_MIN = 5;
+
+/**
+ * คีย์บอกว่าเป็นคนเดียวกัน: เบอร์ → อีเมล → ชื่อ+วันเกิด (ต้องมีทั้งคู่)
+ * ไม่มีอะไรเลย = คีย์ของเรซูเม่นั้นเอง ห้ามใช้ "name::" ร่วมกัน (เคยรวมเรซูเม่คนละคน 686 ใบเป็นแถวเดียว)
+ */
+export function candidateDedupeKey({ phoneNorm, emailNorm, name, birthDate, source }) {
+  if (phoneNorm) return `phone:${phoneNorm}`;
+  if (emailNorm) return `email:${emailNorm}`;
+  const n = String(name ?? '').trim();
+  const b = String(birthDate ?? '').trim();
+  if (n && b) return `name:${n}:${b}`;
+  if (source?.platform && source?.externalId) return `src:${source.platform}:${source.externalId}`;
+  return `none:${randomUUID()}`;
+}
+
+function buildRow(parsed, source) {
   const phoneNorm = String(parsed.phone ?? '').replace(/\D/g, '');
   const emailNorm = validEmail(parsed.email);
-  const dedupeKey = phoneNorm
-    ? `phone:${phoneNorm}`
-    : emailNorm
-      ? `email:${emailNorm}`
-      : `name:${parsed.name ?? ''}:${parsed.birth_date ?? ''}`;
+  const dedupeKey = candidateDedupeKey({ phoneNorm, emailNorm, name: parsed.name, birthDate: parsed.birth_date, source });
   const text = {};
   for (const c of TEXT_COLS) text[c] = c === 'full_name' ? (parsed.name ?? '') : (parsed[c] ?? '');
   const json = {};
@@ -678,9 +704,18 @@ function buildRow(parsed) {
  * On match: fills blank text fields and refreshes non-empty arrays.
  * Returns { id, isNew }.
  */
-export async function upsertCandidate(client, parsed) {
+export async function upsertCandidate(client, parsed, source = null) {
   const q = client.query.bind(client);
-  const { phoneNorm, emailNorm, dedupeKey, text, json } = buildRow(parsed);
+  let row = buildRow(parsed, source);
+  // เบอร์กลางที่หลายคนใช้ (เช่น call center ของเว็บ) ไม่ใช่ของผู้สมัคร — ไม่เก็บ และไม่ใช้รวมคน
+  if (row.phoneNorm.length >= 9) {
+    const shared = await q(
+      `SELECT count(*)::int AS n FROM candidates WHERE length(phone_norm) >= 9 AND right(phone_norm, 9) = right($1, 9)`,
+      [row.phoneNorm],
+    );
+    if ((shared.rows[0]?.n ?? 0) >= SHARED_PHONE_MIN) row = buildRow({ ...parsed, phone: '' }, source);
+  }
+  const { phoneNorm, emailNorm, dedupeKey, text, json } = row;
 
   // เบอร์เดียวกันที่เขียนต่างกัน (0812345678 / 66812345678) ให้ถือเป็นคนเดียวกัน: เทียบ 9 หลักท้าย
   // เรียงให้แถวที่เบอร์ตรงเป๊ะมาก่อน แล้วค่อยเบอร์ 9 หลักท้าย แล้วอีเมล

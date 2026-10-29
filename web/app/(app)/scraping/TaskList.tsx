@@ -182,7 +182,9 @@ export function TaskManageActions({ task }: { task: TaskRow }) {
       <form action={toggleTaskAction}>
         <input type="hidden" name="id" value={task.id} />
         <input type="hidden" name="enabled" value={(!task.enabled).toString()} />
-        <Button variant="outline">{task.enabled ? 'ปิดงานนี้' : 'เปิดงานนี้'}</Button>
+        <Button variant="outline">
+          {!task.enabled ? 'เปิดงานนี้' : task.status === 'running' || task.status === 'queued' ? 'หยุดและปิดงานนี้' : 'ปิดงานนี้'}
+        </Button>
       </form>
       <AlertDialog>
         <AlertDialogTrigger asChild>

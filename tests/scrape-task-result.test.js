@@ -28,3 +28,19 @@ test('queue rejects a scrape task that never acquired execution ownership', () =
     /task_already_running/,
   );
 });
+
+test('บัญชีถูกพัก: คิวรอจนพ้นเวลาพัก ไม่ลองใหม่ทันที', () => {
+  const until = '2026-10-29T10:00:00.000Z';
+  try {
+    requireSuccessfulScrapeTaskResult({ status: 'error', runStatus: 'cooldown', cooldownUntil: until, error: 'บัญชีถูกพัก' });
+    assert.fail('ต้อง throw');
+  } catch (e) {
+    assert.equal(e.retryAt.toISOString(), until);
+  }
+});
+
+test('คนกดปิดงานระหว่างรัน = หยุด ไม่ใช่ระบบขัดข้อง', () => {
+  const stopped = { status: 'stopped', matchedTotal: 3 };
+  assert.equal(requireSuccessfulScrapeTaskResult(stopped), stopped);
+  assert.equal(classifyScrapeTaskResult(stopped), 'stopped');
+});

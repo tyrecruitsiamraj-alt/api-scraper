@@ -25,7 +25,7 @@ import { runTask } from '../src/tasks-worker.js';
 import { generateDraftForCampaign, regenerateImageForContent } from '../src/core/orchestrator-draft.js';
 import { measureCampaign } from '../src/core/orchestrator-measure.js';
 import { sendAlert } from '../src/core/alert.js';
-import { classifyScrapeTaskResult, requireSuccessfulScrapeTaskResult } from '../src/core/scrape-task-result.js';
+import { classifyScrapeTaskResult, cooldownError, requireSuccessfulScrapeTaskResult } from '../src/core/scrape-task-result.js';
 import { imageGenerationCapability } from '../src/core/ai-image.js';
 
 // ชื่อ Worker ต้องตรงกับ preferred_worker ใน Queue. เดิม heartbeat ใช้ hostname
@@ -155,6 +155,7 @@ const HANDLERS = {
     const connector = await getConnector(connectorId);
     if (!connector) throw new Error(`connector not found: ${job.connector_key}`);
     const r = await runConnector(connector, { ...(job.payload || {}) }, runtime, {});
+    if (r.status === 'cooldown' && r.cooldownUntil) throw cooldownError(r.error || 'connector cooling down', r.cooldownUntil);
     if (r.status === 'failed' || r.status === 'cooldown') throw new Error(r.error || `run ${r.status}`);
     return r;
   },
@@ -246,6 +247,10 @@ async function claimNext() {
            AND NOT EXISTS (
              SELECT 1 FROM work_queue r
               WHERE r.connector_key = q.connector_key AND r.status='running')
+           -- งานที่คนกดปิดแล้ว ห้ามเริ่ม
+           AND NOT EXISTS (
+             SELECT 1 FROM scrape_tasks st
+              WHERE q.type = 'scrape' AND st.id::text = q.ref_id AND st.enabled = false)
          ORDER BY q.priority DESC, q.created_at
          FOR UPDATE SKIP LOCKED
          LIMIT 1)
@@ -290,7 +295,7 @@ async function runWithLease(job, handler) {
   }
 }
 
-async function retryOrFail(job, error) {
+async function retryOrFail(job, error, retryAt = null) {
   const attempts = Number(job.attempts || 0) + 1;
   const maxAttempts = Math.max(1, Number(job.max_attempts || 3));
   if (attempts >= maxAttempts) {
@@ -313,7 +318,10 @@ async function retryOrFail(job, error) {
     }
     return false;
   }
-  const delaySeconds = RETRY_BASE_SECONDS * (2 ** (attempts - 1));
+  // บัญชีถูกพัก: รอจนพ้นเวลาพัก (+1 นาที) แทน backoff ปกติ — ล็อกอินระหว่างพักเสี่ยงโดนแบน
+  const delaySeconds = retryAt
+    ? Math.max(60, Math.ceil((retryAt.getTime() - Date.now()) / 1000) + 60)
+    : RETRY_BASE_SECONDS * (2 ** (attempts - 1));
   await query(
     `UPDATE work_queue
         SET status='queued', attempts=$3, worker_id=NULL, locked_at=NULL,
@@ -369,13 +377,17 @@ async function runOne() {
     // Draft ที่หยุดตาม Fact/Research Gate ไม่ใช่งานสำเร็จ: ผู้ใช้ต้องเห็นว่า
     // "ต้องให้ช่วย" และสามารถกดแก้/ลองใหม่ได้จาก Web โดยไม่เข้าใจว่า Queue done.
     const needsInput = job.type === 'draft' && r?.status === 'needs_input';
-    const status = needsInput ? 'needs_input' : outcome === 'market_insufficient' ? 'partial' : 'done';
-    const detail = needsInput ? (r?.issues ?? []).join(' · ') || 'ต้องยืนยันข้อมูลก่อนสร้างสื่อ' : null;
+    // คนกดปิดงานระหว่างรัน: จบคิวโดยไม่ลองใหม่
+    const status = needsInput ? 'needs_input' : outcome === 'stopped' ? 'error' : outcome === 'market_insufficient' ? 'partial' : 'done';
+    const detail = needsInput
+      ? (r?.issues ?? []).join(' · ') || 'ต้องยืนยันข้อมูลก่อนสร้างสื่อ'
+      : outcome === 'stopped' ? 'หยุดแล้ว คนกดปิดงานนี้' : null;
     await finish(job.id, status, detail);
     console.log(`  ✓ done: ${JSON.stringify(r).slice(0, 200)}`);
   } catch (e) {
     const errMsg = String(e?.message ?? e).slice(0, 500);
-    const retrying = await retryOrFail(job, errMsg);
+    const retryAt = e?.retryAt instanceof Date && !Number.isNaN(e.retryAt.getTime()) ? e.retryAt : null;
+    const retrying = await retryOrFail(job, errMsg, retryAt);
     console.error(`  ✗ ${retrying ? 'retry scheduled' : 'error'}: ${e?.message ?? e}`);
     // แจ้งเตือนทันทีที่งานพัง (fail-soft — ไม่มี ALERT_WEBHOOK_URL = เงียบ)
     if (!retrying) {

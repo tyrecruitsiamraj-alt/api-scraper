@@ -15,7 +15,9 @@ import { envInt, sleep } from './config.js';
 import {
   countScrapedToday,
   finishRun,
+  getConnectorCooldownUntil,
   getProviderCap,
+  isTaskEnabled,
   platformScrapedToday,
   saveAsset,
   saveConnectorSession,
@@ -112,6 +114,7 @@ export async function runConnector(connector, criteria, runtime, opts = {}) {
   let duplicate = 0;
   const reasonCounts = {};
   let status = 'success';
+  let cooldownUntil = null; // ISO — บัญชีถูกพักถึงเมื่อไร (ให้คิวรอจนพ้นแทนการลองใหม่ทันที)
   let error = null;
   let browser = null;
   let activeContext = null; // tracked so the finally can log out to free the session
@@ -140,6 +143,20 @@ export async function runConnector(connector, criteria, runtime, opts = {}) {
   if (opts.onTarget) await opts.onTarget(target);
 
   try {
+    if (opts.taskId && !(await isTaskEnabled(opts.taskId))) {
+      status = 'stopped';
+      error = 'หยุดแล้ว คนกดปิดงานนี้';
+      return finalize();
+    }
+    // บัญชีที่เว็บเพิ่งจำกัด ห้ามล็อกอินซ้ำจนพ้นเวลาพัก — ล็อกอินระหว่างพักเสี่ยงโดนแบนถาวร
+    const pausedUntil = await getConnectorCooldownUntil(connector.id);
+    if (pausedUntil) {
+      status = 'cooldown';
+      cooldownUntil = pausedUntil.toISOString();
+      error = `บัญชี ${connector.label} ถูกพักอยู่ เว็บเพิ่งจำกัดการใช้งาน`;
+      console.warn(`  [${connector.label}] ${error} — ไม่ล็อกอินจนถึง ${cooldownUntil}`);
+      return finalize();
+    }
     if (target <= 0) {
       status = 'cooldown';
       error =
@@ -265,6 +282,13 @@ export async function runConnector(connector, criteria, runtime, opts = {}) {
       // this search result set is exhausted. Rejected/needs-review resumes must
       // not consume the requested delivery count.
       if (saved >= target) break;
+      // คนกดปิดงานระหว่างรัน — หยุดก่อนเปิดเรซูเม่ถัดไป (ไม่เปลืองโควต้า/เครดิตดูเบอร์)
+      if (opts.taskId && !(await isTaskEnabled(opts.taskId).catch(() => true))) {
+        status = 'stopped';
+        error = 'หยุดแล้ว คนกดปิดงานนี้';
+        console.log(`  [${connector.label}] ${error}`);
+        break;
+      }
       if (priorExternalIds.has(String(id))) {
         duplicate += 1;
         reasonCounts.duplicate = (reasonCounts.duplicate || 0) + 1;
@@ -377,7 +401,7 @@ export async function runConnector(connector, criteria, runtime, opts = {}) {
         }
 
         const { isNew, taskLink } = await withTransaction(async (client) => {
-          const cand = await upsertCandidate(client, parsed);
+          const cand = await upsertCandidate(client, parsed, { platform: connector.platform, externalId: provider.externalId(url) });
           const sourceId = await upsertSource(client, cand.id, {
             platform: connector.platform,
             connectorId: connector.id,
@@ -420,7 +444,8 @@ export async function runConnector(connector, criteria, runtime, opts = {}) {
         if (e.fatal) {
           status = 'cooldown';
           error = e.message;
-          await setConnectorCooldown(connector.id, new Date(Date.now() + COOLDOWN_MS).toISOString());
+          cooldownUntil = new Date(Date.now() + COOLDOWN_MS).toISOString();
+          await setConnectorCooldown(connector.id, cooldownUntil);
           console.error(`  ⛔ soft-ban detected (${e.message}) — cooldown ${COOLDOWN_MS / 3600000}h`);
           break;
         }
@@ -452,7 +477,8 @@ export async function runConnector(connector, criteria, runtime, opts = {}) {
     error = e.message;
     if (e.fatal) {
       status = 'cooldown';
-      await setConnectorCooldown(connector.id, new Date(Date.now() + COOLDOWN_MS).toISOString());
+      cooldownUntil = new Date(Date.now() + COOLDOWN_MS).toISOString();
+      await setConnectorCooldown(connector.id, cooldownUntil);
     } else {
       status = 'failed';
     }
@@ -487,6 +513,6 @@ export async function runConnector(connector, criteria, runtime, opts = {}) {
       }).catch((e) => console.warn(`  [lesson] บันทึกบทเรียนความล้มเหลวไม่สำเร็จ: ${e.message}`));
       console.log(`  [lesson] จำแล้ว ${hit.key}: ${hit.prevention}`);
     }
-    return { runId, status, found, newCount, updatedCount, failed, error, opened, qualified, needsReview, rejected, duplicate, reasonCounts };
+    return { runId, status, found, newCount, updatedCount, failed, error, opened, qualified, needsReview, rejected, duplicate, reasonCounts, cooldownUntil };
   }
 }

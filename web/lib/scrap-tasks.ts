@@ -158,6 +158,7 @@ export const RUN_STATUS_LABEL: Record<string, string> = {
   partial: 'ได้บางส่วน',
   failed: 'ไม่สำเร็จ',
   cooldown: 'บัญชีพักชั่วคราว',
+  stopped: 'หยุดแล้ว',
 };
 
 /** รอบที่เครื่องค้นหาทำให้งานนี้ ล่าสุดก่อน (อ่านอย่างเดียว) */

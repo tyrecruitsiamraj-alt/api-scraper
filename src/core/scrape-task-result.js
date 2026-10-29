@@ -7,10 +7,20 @@ export function requireSuccessfulScrapeTaskResult(result) {
   if (result?.skipped) {
     throw new Error(`scrape task was not executed: ${result.reason || 'already running'}`);
   }
+  if (result?.runStatus === 'cooldown' && result.cooldownUntil) {
+    throw cooldownError(result.error || 'connector cooling down', result.cooldownUntil);
+  }
   if (!result || result.status === 'error') {
     throw new Error(result?.error || 'scrape task failed without a terminal result');
   }
   return result;
+}
+
+/** บัญชีถูกพัก: คิวต้องรอจนพ้นเวลาพัก (retryAt) ไม่ลองใหม่ใน 30 วินาที */
+export function cooldownError(message, cooldownUntil) {
+  const err = new Error(message);
+  err.retryAt = new Date(cooldownUntil);
+  return err;
 }
 
 /**
@@ -21,6 +31,7 @@ export function requireSuccessfulScrapeTaskResult(result) {
  */
 export function classifyScrapeTaskResult(result) {
   if (!result || result?.skipped || result.status === 'error') return 'infrastructure_error';
+  if (result.status === 'stopped') return 'stopped';
   if (result.status === 'partial') return 'market_insufficient';
   return 'completed';
 }
