@@ -221,29 +221,40 @@ export default async function AutopostJobsPage(props: { searchParams?: Promise<{
 
 const JOIN_STATE_LABEL: Record<ManualJoinGroup['state'], string> = {
   questions: 'ต้องตอบคำถามก่อนเข้า',
-  pending: 'รอแอดมินอนุมัติ',
-  unconfirmed: 'โพสต์แล้วไม่เจอในกลุ่ม เช็กว่าเข้ากลุ่มหรือยัง',
+  pending: 'ขอเข้ากลุ่มแล้ว รอแอดมินรับ',
+  limit: 'ยังไม่ได้เข้ากลุ่ม',
+  unknown: 'ไม่เจอช่องโพสต์',
+  rejected: 'Facebook ไม่รับโพสต์',
+  failed: 'โพสต์ไม่สำเร็จ',
+  post_pending: 'โพสต์รอแอดมินอนุมัติ',
+  unconfirmed: 'โพสต์แล้วไม่เจอในกลุ่ม',
 };
 
-/** กลุ่มที่บอทเข้าร่วมเองไม่ได้ — ให้คนกดลิงก์ไปตอบคำถาม/ตามแอดมินด้วยบัญชีนั้น */
+/** ปุ่มลิงก์เมื่อที่ต้องไปไม่ใช่หน้ากลุ่ม */
+const FIX_LINK_LABEL: Partial<Record<ManualJoinGroup['state'], string>> = {
+  post_pending: 'เปิดโพสต์',
+  unconfirmed: 'เปิดเนื้อหาของคุณ',
+};
+
+/** ทุกกลุ่มที่ยังไม่ขึ้นในกลุ่ม — ให้คนล็อกอินบัญชีนั้นแล้วกดลิงก์ไปแก้เอง */
 function ManualJoinSection({ groups }: { groups: ManualJoinGroup[] }) {
   return (
     <section className="flex flex-col gap-3">
       <h2 className="flex items-center gap-2 text-base font-semibold">
-        กลุ่มที่ต้องเข้าร่วมเอง
+        กลุ่มที่ต้องจัดการเอง
         <Badge variant="secondary">{groups.length}</Badge>
       </h2>
       <Card>
         <CardHeader>
           <CardDescription>
-            บอทไม่ตอบคำถามเข้ากลุ่มแทน ล็อกอินบัญชีตามแถว แล้วกดลิงก์ไปเข้าร่วมกลุ่ม ตอบคำถาม หรือตามแอดมิน เข้ากลุ่มได้แล้ว แถวนั้นจะหายไปหลังโพสต์ขึ้นในกลุ่มครั้งถัดไป
+            ล็อกอินบัญชีตามแถว แล้วกดลิงก์ไปแก้ แถวหายเองเมื่อโพสต์ครั้งถัดไปขึ้นในกลุ่ม
           </CardDescription>
         </CardHeader>
         <CardContent>
           {groups.length === 0 ? (
             <Empty className="border py-8">
               <EmptyHeader>
-                <EmptyDescription>ไม่มีกลุ่มที่ต้องเข้าร่วมเองใน 30 วันล่าสุด</EmptyDescription>
+                <EmptyDescription>ไม่มีกลุ่มที่ต้องจัดการเองใน 30 วันล่าสุด</EmptyDescription>
               </EmptyHeader>
             </Empty>
           ) : (
@@ -252,7 +263,7 @@ function ManualJoinSection({ groups }: { groups: ManualJoinGroup[] }) {
                 <TableRow>
                   <TableHead>กลุ่ม</TableHead>
                   <TableHead>บัญชี</TableHead>
-                  <TableHead>ต้องทำ</TableHead>
+                  <TableHead>เกิดอะไรขึ้น</TableHead>
                   <TableHead className="hidden md:table-cell">ใบ</TableHead>
                   <TableHead className="hidden md:table-cell">เจอเมื่อ</TableHead>
                 </TableRow>
@@ -261,14 +272,30 @@ function ManualJoinSection({ groups }: { groups: ManualJoinGroup[] }) {
                 {groups.map((g) => (
                   <TableRow key={`${g.user_id}-${g.group_id}`}>
                     <TableCell className="max-w-72 whitespace-normal">
-                      <a href={g.url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 font-medium underline-offset-4 hover:underline">
+                      <a
+                        href={`https://www.facebook.com/groups/${g.group_id}`}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="inline-flex items-center gap-1 font-medium underline-offset-4 hover:underline"
+                      >
                         {g.group_name || `กลุ่ม ${g.group_id}`}
                         <ExternalLinkIcon className="size-3.5" />
                       </a>
                     </TableCell>
                     <TableCell>{g.account ?? 'บัญชีถูกลบแล้ว'}</TableCell>
-                    <TableCell>
-                      <Badge variant="outline">{JOIN_STATE_LABEL[g.state]}</Badge>
+                    <TableCell className="max-w-96 whitespace-normal">
+                      <div className="flex flex-col items-start gap-1.5">
+                        <Badge variant="outline">{JOIN_STATE_LABEL[g.state]}</Badge>
+                        {g.detail && <span className="text-xs text-muted-foreground">{g.detail}</span>}
+                        {FIX_LINK_LABEL[g.state] && (
+                          <Button variant="outline" size="sm" asChild>
+                            <a href={g.url} target="_blank" rel="noreferrer">
+                              {FIX_LINK_LABEL[g.state]}
+                              <ExternalLinkIcon data-icon="inline-end" />
+                            </a>
+                          </Button>
+                        )}
+                      </div>
                     </TableCell>
                     <TableCell className="hidden md:table-cell text-muted-foreground">{g.request_no ?? '-'}</TableCell>
                     <TableCell className="hidden md:table-cell text-muted-foreground">{thaiTime(g.seen_at)}</TableCell>

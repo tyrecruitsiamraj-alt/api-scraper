@@ -184,73 +184,106 @@ export type ManualJoinGroup = {
   account: string | null;
   group_id: string;
   group_name: string | null;
+  /** ลิงก์ให้คนกดไปแก้เอง: หน้ากลุ่ม · โพสต์ที่รออนุมัติ · หน้าเนื้อหาของคุณในกลุ่ม */
   url: string;
   /**
-   * questions = กลุ่มให้ตอบคำถามก่อนเข้า · pending = ส่งคำขอแล้ว รอแอดมินอนุมัติ
-   * unconfirmed = กดโพสต์แล้วแต่ไม่เจอโพสต์ในกลุ่ม (กลุ่มสาธารณะให้คนนอกพิมพ์ได้ โพสต์จึงไปค้างรอแอดมิน) — เช็กว่าเป็นสมาชิกหรือยัง
+   * ผลล่าสุดของบัญชีนี้ในกลุ่มนี้ที่ยังไม่ขึ้นในกลุ่ม
+   * questions = กลุ่มให้ตอบคำถามก่อนเข้า · pending = ส่งคำขอเข้ากลุ่มแล้ว รอแอดมิน
+   * limit = บอทกดเข้าร่วมครบโควต้ารอบนั้น · unknown = ไม่เจอช่องโพสต์และปุ่มเข้าร่วม
+   * rejected = Facebook ไม่รับโพสต์ · failed = โพสต์ไม่สำเร็จ
+   * post_pending = โพสต์แล้ว รอแอดมินอนุมัติโพสต์ · unconfirmed = โพสต์แล้วไม่เจอในกลุ่ม
    */
-  state: 'questions' | 'pending' | 'unconfirmed';
+  state: 'questions' | 'pending' | 'limit' | 'unknown' | 'rejected' | 'failed' | 'post_pending' | 'unconfirmed';
+  /** ข้อความที่ Facebook หรือหน้ากลุ่มแสดง (ถ้ามี) */
+  detail: string | null;
   request_no: string | null;
   seen_at: string;
 };
 
+const JOIN_STATES = new Set(['questions', 'pending', 'limit', 'unknown']);
+
 /**
- * กลุ่มที่บอทเข้าร่วมเองไม่ได้ ต้องให้คนเข้าไปจัดการ (ตอบคำถาม / ตามแอดมิน) — ล่าสุดต่อบัญชี+กลุ่ม ย้อน 30 วัน
- * ไม่นับคู่ที่หลังจากนั้นโพสต์สำเร็จแล้ว (แปลว่าเข้ากลุ่มได้แล้ว)
+ * ทุกกลุ่มที่ยังไม่ขึ้นในกลุ่ม พร้อมลิงก์ให้คนไปแก้เอง — ดูผลล่าสุดต่อบัญชี+กลุ่ม ย้อน 30 วัน
+ * ผลล่าสุดสำเร็จและได้ลิงก์ = หายจากรายการเอง
  */
 export async function listManualJoinGroups(): Promise<ManualJoinGroup[]> {
   try {
-    const rows = await q<Omit<ManualJoinGroup, 'url' | 'request_no'> & { job_id: string | null }>(
-      `WITH j AS (
+    const rows = await q<{
+      user_id: string; account: string | null; group_id: string; group_name: string | null;
+      level: string; message: string | null; kind: string | null; join_state: string | null; fb_message: string | null;
+      seen_at: string; job_id: string | null; post_link: string | null; post_status: string | null;
+    }>(
+      `WITH latest AS (
          SELECT DISTINCT ON (l.user_id, l.group_id)
-                l.user_id, l.group_id, l.meta->>'state' AS state, l.created_at AS seen_at, l.job_id
+                l.user_id, l.group_id, l.level, l.message, l.meta->>'kind' AS kind, l.meta->>'state' AS join_state,
+                l.meta->>'facebook_message' AS fb_message, l.created_at AS seen_at, l.job_id
            FROM ${AP}.run_logs l
-          WHERE l.level = 'warn' AND l.meta->>'kind' = 'join' AND l.meta->>'state' IN ('questions', 'pending')
-            AND l.group_id IS NOT NULL AND l.user_id IS NOT NULL
+          WHERE l.level IN ('success', 'warn') AND l.group_id IS NOT NULL AND l.user_id IS NOT NULL
             AND l.created_at > now() - interval '30 days'
           ORDER BY l.user_id, l.group_id, l.created_at DESC
        )
-       SELECT j.user_id, u.name AS account, j.group_id, g.name AS group_name, j.state, j.seen_at, j.job_id
-         FROM j
-         LEFT JOIN ${AP}.users u ON u.id = j.user_id
-         LEFT JOIN ${AP}.groups g ON g.fb_group_id = j.group_id
-        WHERE NOT EXISTS (
-          SELECT 1 FROM ${AP}.run_logs s
-           WHERE s.user_id = j.user_id AND s.group_id = j.group_id AND s.level = 'success' AND s.created_at > j.seen_at
-        )
-        ORDER BY j.seen_at DESC
-        LIMIT 300`,
+       SELECT latest.*, u.name AS account, g.name AS group_name, pl.post_link, pl.post_status
+         FROM latest
+         LEFT JOIN ${AP}.users u ON u.id = latest.user_id
+         LEFT JOIN ${AP}.groups g ON g.fb_group_id = latest.group_id
+         LEFT JOIN LATERAL (
+           -- ลิงก์ที่เก็บตอนโพสต์ครั้งนั้น (บันทึกก่อน log สำเร็จไม่กี่นาที) หรือที่รอบเก็บคอมเมนต์หาเจอทีหลัง
+           SELECT p.post_link, p.post_status FROM ${AP}.post_logs p
+            WHERE p.user_id = latest.user_id AND p.group_id = latest.group_id
+              AND p.created_at >= latest.seen_at - interval '15 minutes'
+            ORDER BY p.created_at DESC LIMIT 1
+         ) pl ON latest.level = 'success'
+        ORDER BY latest.seen_at DESC
+        LIMIT 500`,
     );
-    // กลุ่มที่กดโพสต์แล้วแต่ไม่เจอโพสต์ (ไม่มีลิงก์) — ล่าสุดต่อบัญชี+กลุ่ม ไม่นับคู่ที่หลังจากนั้นได้ลิงก์แล้ว
-    const unconfirmed = await q<Omit<ManualJoinGroup, 'url' | 'request_no'> & { job_id: string | null }>(
-      `WITH m AS (
-         SELECT DISTINCT ON (pl.user_id, pl.group_id)
-                pl.user_id, pl.group_id, pl.created_at AS seen_at, pl.job_id
-           FROM ${AP}.post_logs pl
-          WHERE (pl.post_link IS NULL OR TRIM(pl.post_link) = '')
-            AND pl.post_status = 'ไม่พบลิงก์หลังโพสต์'
-            AND pl.user_id IS NOT NULL AND pl.group_id IS NOT NULL
-            AND pl.created_at > now() - interval '30 days'
-          ORDER BY pl.user_id, pl.group_id, pl.created_at DESC
-       )
-       SELECT m.user_id, u.name AS account, m.group_id, g.name AS group_name, 'unconfirmed' AS state, m.seen_at, m.job_id
-         FROM m
-         LEFT JOIN ${AP}.users u ON u.id = m.user_id
-         LEFT JOIN ${AP}.groups g ON g.fb_group_id = m.group_id
-        WHERE NOT EXISTS (
-          SELECT 1 FROM ${AP}.post_logs ok
-           WHERE ok.user_id = m.user_id AND ok.group_id = m.group_id
-             AND ok.post_link IS NOT NULL AND TRIM(ok.post_link) <> '' AND ok.created_at >= m.seen_at
-        )
-        ORDER BY m.seen_at DESC
-        LIMIT 300`,
-    ).catch(() => []);
-    const seen = new Set(rows.map((r) => `${r.user_id}|${r.group_id}`));
-    return [...rows, ...unconfirmed.filter((r) => !seen.has(`${r.user_id}|${r.group_id}`))].map(({ job_id, ...r }) => ({
-      ...r,
-      url: `https://www.facebook.com/groups/${r.group_id}`,
-      request_no: job_id ? requestNoFromAssignment(job_id) : null,
-    }));
+    const out: ManualJoinGroup[] = [];
+    for (const r of rows) {
+      const groupUrl = `https://www.facebook.com/groups/${r.group_id}`;
+      const link = String(r.post_link ?? '').trim();
+      let state: ManualJoinGroup['state'];
+      let url = groupUrl;
+      let detail: string | null = null;
+      if (r.level === 'success') {
+        if (r.post_status === 'รออนุมัติ') {
+          state = 'post_pending';
+          if (link) url = link;
+        } else if (link) {
+          continue; // ขึ้นในกลุ่มแล้ว
+        } else {
+          state = 'unconfirmed';
+          url = `${groupUrl}/my_posted_content`;
+        }
+      } else if (r.kind === 'join' && r.join_state && JOIN_STATES.has(r.join_state)) {
+        state = r.join_state as ManualJoinGroup['state'];
+        if (state === 'unknown') {
+          // ข้อความที่อ่านจากหน้ากลุ่มบางทีเป็นแค่คำอธิบายความเป็นส่วนตัวของกลุ่ม — เก็บเฉพาะที่บอกเหตุจริง
+          const hint = r.message?.split('หน้ากลุ่มเขียนว่า:')[1]?.replace(/\(กลุ่ม \d+\)\s*$/, '').trim() ?? '';
+          detail = /พัก|ปิด|ลบ|ไม่พร้อมใช้งาน|ไม่มีเนื้อหา|paused|archived|unavailable/i.test(hint) ? hint : null;
+        }
+      } else if (r.kind === 'post_rejected') {
+        state = 'rejected';
+        detail = r.fb_message;
+      } else {
+        state = 'failed';
+      }
+      out.push({
+        user_id: r.user_id,
+        account: r.account,
+        group_id: r.group_id,
+        group_name: r.group_name,
+        url,
+        state,
+        detail,
+        request_no: r.job_id ? requestNoFromAssignment(r.job_id) : null,
+        seen_at: r.seen_at,
+      });
+    }
+    // ไล่ทีละบัญชี: ล็อกอินบัญชีเดียวแล้วแก้ทุกกลุ่มของบัญชีนั้น
+    return out.sort(
+      (a, b) =>
+        (a.account ?? '').localeCompare(b.account ?? '', 'th') ||
+        new Date(b.seen_at).getTime() - new Date(a.seen_at).getTime(),
+    );
   } catch {
     return [];
   }
