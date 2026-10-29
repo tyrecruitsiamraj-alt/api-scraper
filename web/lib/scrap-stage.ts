@@ -175,6 +175,20 @@ export function deriveScrapStage(input: ScrapStageInput): ScrapStageResult {
       statusLabel = 'เสร็จแล้ว';
       note = review === 'approved' ? 'ตรวจรับแล้ว' : null;
     }
+  } else if (status === 'partial' && review === 'pending') {
+    // งานจาก Jarvis ได้ไม่ครบเป้า: คนเลือกได้ว่าจะยืนยันเท่าที่ได้ หรือรันค้นเพิ่ม
+    currentIdx = reviewIdx;
+    steps = buildSteps(currentIdx, 'current');
+    group = 'review';
+    statusLabel = 'ได้ไม่ครบเป้า';
+    note = 'ยืนยันเท่าที่ได้ หรือรันค้นเพิ่ม';
+  } else if (status === 'partial' && review === 'approved') {
+    currentIdx = reviewIdx;
+    steps = buildSteps(total, 'done');
+    complete = true;
+    group = 'done';
+    statusLabel = 'เสร็จแล้ว';
+    note = 'ตรวจรับแล้ว ได้ไม่ครบเป้า';
   } else if (status === 'partial') {
     // ค้นครบทุกคำค้นแล้วแต่ไม่ถึงเป้า ขั้น OCR/เติมข้อมูลยังทำกับคนที่ได้มา
     currentIdx = indexOfStage('search');

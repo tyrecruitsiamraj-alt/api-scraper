@@ -65,7 +65,7 @@ export function TaskRunForm({
   );
 }
 
-/** ปุ่มตรวจรับผล (งานจาก Jarvis ที่เสร็จแล้ว) */
+/** ปุ่มตรวจรับผล (งานจาก Jarvis ที่ค้นจบแล้ว ครบเป้าหรือไม่ครบก็ได้) */
 export function TaskApproveForm({ taskId }: { taskId: string }) {
   return (
     <form action={approveScrapeResultAction}>
