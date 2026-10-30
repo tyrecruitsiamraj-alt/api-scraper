@@ -179,11 +179,18 @@ export async function runTask(t, runtime) {
           from_description: jobDesc, positions: descPositions, target, sourcing_spec: qualificationSpec,
         });
       } catch { /* non-fatal */ }
+    } else if (searchIdentity.searchTitle || searchIdentity.keyword) {
+      // AI ปิด/ล้ม → ค้นด้วยชื่อตำแหน่ง/คำค้นที่คนใส่ในใบขอ (เนื้องานทั้งก้อนใช้เป็นคำค้นไม่ได้ เว็บไม่รับ)
+      if (searchIdentity.searchTitle) criteria.position = searchIdentity.searchTitle;
+      else criteria.keyword = searchIdentity.keyword;
+      console.warn(`  ⚠️ แปลงเนื้องานไม่ได้ (AI ปิด/ล้ม) — ค้นด้วยตำแหน่งในใบขอ "${searchIdentity.searchTitle || searchIdentity.keyword}"`);
     } else {
-      criteria.position = jobDesc; // AI ปิด/ล้ม → ใช้เนื้องานเป็นคำค้นตรง ๆ กันงานล้มเปล่า
-      console.warn('  ⚠️ แปลงเนื้องานไม่ได้ (AI ปิด/ล้ม) — ใช้เนื้องานเป็นคำค้นตรง ๆ');
+      const error = 'AI แปลงเนื้องานเป็นชื่อตำแหน่งไม่ได้ และใบขอไม่มีชื่อตำแหน่ง ใส่ชื่อตำแหน่งแล้วกดรันใหม่';
+      await finishTask(t.id, { status: 'error', phase: 'error', runId: t.last_run_id, error, nextRunAt: nextRunFrom(t.schedule_cron) });
+      console.warn(`  ${t.name}: ${error}`);
+      return { status: 'error', error, taskId: t.id };
     }
-    if (!searchIdentity.grounded && criteria.keyword) {
+    if (descPositions && !searchIdentity.grounded && criteria.keyword) {
       console.log(`  🧠 ไม่ใช้คำค้น "${searchIdentity.keyword}" เพราะไม่ตรงเนื้องาน`);
       delete criteria.keyword;
     }
