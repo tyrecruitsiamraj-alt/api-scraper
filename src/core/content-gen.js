@@ -1,4 +1,5 @@
 import Anthropic from '@anthropic-ai/sdk';
+import { textModelCandidates } from './ai-models.js';
 import { envString } from '../config.js';
 import { buildVisualBrief, composeVisualPrompt } from './visual-brief.js';
 import { extractCampaignFacts, normalizedGenderRequirement } from './campaign-facts.js';
@@ -503,7 +504,21 @@ export async function callOpenAI({ apiKey, userMsg, system = SYSTEM, tool = TOOL
  * โมเดล default = qwen3.5:9b (ตัวที่ jarvis ใช้อยู่ อุ่นเครื่องแล้วบน server).
  */
 export async function callOllama({ base, userMsg, system = SYSTEM, tool = TOOL }) {
-  const model = envString('OLLAMA_MODEL', 'qwen3.5:9b');
+  // ลองโมเดลที่เซิร์ฟเวอร์มีจริงตามลำดับ (ในบริษัทก่อน แล้ว cloud) — คอนเทนต์ประกาศงานไม่มีข้อมูลผู้สมัคร
+  const models = await textModelCandidates();
+  if (!models.length) throw new Error('เซิร์ฟเวอร์ AI ไม่มีโมเดลที่ใช้ได้');
+  const errors = [];
+  for (const model of models) {
+    try {
+      return await callOllamaModel({ base, model, userMsg, system, tool });
+    } catch (e) {
+      errors.push(`${model}: ${e.message}`);
+    }
+  }
+  throw new Error(errors.join(' · '));
+}
+
+async function callOllamaModel({ base, model, userMsg, system, tool }) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 180_000); // โมเดลใหญ่/โหลดครั้งแรกช้าได้
   try {

@@ -23,8 +23,8 @@ async function main() {
       continue;
     }
     const t0 = Date.now();
-    const { text, status } = await extractAttachment(row.content, row.file_type);
-    await saveExtraction(a.id, { text, structured: text ? { chars: text.length, model: 'typhoon-ocr' } : null, status });
+    const { text, status, model } = await extractAttachment(row.content, row.file_type);
+    await saveExtraction(a.id, { text, structured: text ? { chars: text.length, model } : null, status });
     const sec = Math.round((Date.now() - t0) / 1000);
     console.log(`  ${a.file_type.padEnd(4)} ${a.id} -> ${status} (${text.length} chars, ${sec}s)`);
     status === 'success' ? (ok += 1) : (fail += 1);

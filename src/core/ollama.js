@@ -3,24 +3,24 @@ import { mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
-import { envInt, envString } from '../config.js';
+import { envInt } from '../config.js';
+import { hasPdfTool, ocrModel, ollamaBase } from './ai-models.js';
 
 const execFileP = promisify(execFile);
 
-// ที่อยู่ Ollama อยู่ใน .env เท่านั้น (OLLAMA_HOST หรือ OLLAMA_BASE_URL ตัวเดียวกับที่ระบบคิดคอนเทนต์ใช้)
-const HOST = () => (envString('OLLAMA_HOST') || envString('OLLAMA_BASE_URL')).replace(/\/$/, '');
-const MODEL = () => envString('OCR_MODEL', 'scb10x/typhoon-ocr1.5-3b:latest');
+/** ยังอ่านไม่ได้ตอนนี้ (ไม่มีโมเดล OCR ในบริษัท / ไม่มีตัวแปลง PDF) — คงไว้เป็น pending ให้อ่านย้อนทีหลัง */
+export const OCR_WAITING = 'pending';
 // typhoon-ocr (Qwen2.5-VL) responds best to the documented plain OCR prompt.
 const OCR_PROMPT =
   'Below is an image of a document page. Just return the plain text representation of this document as if you were reading it naturally. Do not hallucinate.';
 
 /** OCR a single image buffer via the Ollama vision model. */
-async function ocrImage(png) {
-  const res = await fetch(`${HOST()}/api/generate`, {
+async function ocrImage(png, model) {
+  const res = await fetch(`${ollamaBase()}/api/generate`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      model: MODEL(),
+      model,
       prompt: OCR_PROMPT,
       images: [png.toString('base64')],
       stream: false,
@@ -54,24 +54,33 @@ async function pdfToPngs(pdf, maxPages) {
 export async function extractAttachment(buffer, fileType) {
   const t = String(fileType ?? '').toLowerCase();
   const maxPages = envInt('OCR_MAX_PAGES', 6);
-  if (!HOST()) return { text: '', status: 'skipped:no_ocr_host' };
+  const isImage = /^(jpg|jpeg|png|gif|webp)$/.test(t);
+  if (!isImage && t !== 'pdf') return { text: '', status: 'skipped:unsupported_type' };
+  // เรซูเม่มีข้อมูลส่วนบุคคล: อ่านด้วยโมเดลในบริษัทเท่านั้น ยังไม่มี = รออ่าน (ไม่ตีว่าล้ม)
+  const model = ollamaBase() ? await ocrModel() : null;
+  if (!model) return { text: '', status: OCR_WAITING, waiting: 'no_ocr_model' };
+  if (t === 'pdf' && !(await hasPdfTool())) return { text: '', status: OCR_WAITING, waiting: 'no_pdf_tool' };
   try {
-    if (/^(jpg|jpeg|png|gif|webp)$/.test(t)) {
-      const text = await ocrImage(buffer);
-      return { text, status: text ? 'success' : 'error:empty' };
+    if (isImage) {
+      const text = await ocrImage(buffer, model);
+      return { text, status: text ? 'success' : 'error:empty', model };
     }
     if (t === 'pdf') {
       const pages = await pdfToPngs(buffer, maxPages);
       if (!pages.length) return { text: '', status: 'error:no_pages' };
       const parts = [];
       for (let i = 0; i < pages.length; i += 1) {
-        parts.push(await ocrImage(pages[i]));
+        parts.push(await ocrImage(pages[i], model));
       }
       const text = parts.filter(Boolean).join('\n\n').trim();
-      return { text, status: text ? 'success' : 'error:empty' };
+      return { text, status: text ? 'success' : 'error:empty', model };
     }
     return { text: '', status: 'skipped:unsupported_type' };
   } catch (e) {
+    // เซิร์ฟเวอร์/โมเดลหายชั่วคราว ไม่ใช่ไฟล์เสีย — รออ่านใหม่ ไม่ตีว่าล้ม
+    if (/ollama HTTP (404|5\d\d)|fetch failed|ECONNREFUSED|ETIMEDOUT|ENOENT|aborted/i.test(String(e.message))) {
+      return { text: '', status: OCR_WAITING, waiting: String(e.message).slice(0, 80) };
+    }
     return { text: '', status: `error:${String(e.message).slice(0, 80)}` };
   }
 }

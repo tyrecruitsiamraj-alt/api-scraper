@@ -4642,7 +4642,19 @@ export type MachineStatusRow = {
   running: number;
   queued: number;
   concurrency: number | null;
+  /** เครื่อง Scrap: AI ที่ใช้ได้ตอนนี้ (null = เครื่องรุ่นเก่ายังไม่ส่งข้อมูลนี้) */
+  ai: { text_model: string | null; ocr_model: string | null; pdf_tool: boolean } | null;
 };
+
+function machineAi(raw: unknown): MachineStatusRow['ai'] {
+  if (!raw || typeof raw !== 'object') return null;
+  const ai = raw as Record<string, unknown>;
+  return {
+    text_model: typeof ai.text_model === 'string' ? ai.text_model : null,
+    ocr_model: typeof ai.ocr_model === 'string' ? ai.ocr_model : null,
+    pdf_tool: ai.pdf_tool === true,
+  };
+}
 
 /** สถานะเครื่องสำหรับแถบบนหน้าเว็บ — ซ่อนเครื่องที่เงียบเกิน 7 วัน (เครื่องเก่าที่เลิกใช้) */
 export async function listMachineStatus(): Promise<{ machines: MachineStatusRow[]; retired: { name: string; kind: 'autopost' | 'scraper' }[] }> {
@@ -4674,6 +4686,7 @@ export async function listMachineStatus(): Promise<{ machines: MachineStatusRow[
         running: l?.running ?? 0,
         queued: l?.queued ?? 0,
         concurrency: Number(meta.concurrency) || null,
+        ai: machineAi(meta.ai),
       } satisfies MachineStatusRow;
     })
     .sort((a, b) => (a.kind === b.kind ? a.name.localeCompare(b.name) : a.kind === 'autopost' ? -1 : 1));

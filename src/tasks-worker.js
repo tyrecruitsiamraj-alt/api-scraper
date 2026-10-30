@@ -4,6 +4,8 @@ import { existsSync, mkdirSync, statSync, unlinkSync, writeFileSync } from 'node
 import { closePool } from './db/pool.js';
 import { PROJECT_ROOT } from './config.js';
 import {
+  candidatesByIds,
+  listOcrBacklog,
   isTaskEnabled,
   bumpTaskProgress,
   countTaskCandidates,
@@ -33,6 +35,7 @@ import {
 import { envInt, loadRuntime } from './config.js';
 import { runConnector } from './pipeline.js';
 import { extractAttachment } from './core/ollama.js';
+import { hasPdfTool, ocrModel } from './core/ai-models.js';
 import { contactsFromText } from './core/contacts.js';
 import { finalizeCandidateRecord, hasUsefulEducation, hasUsefulWorkExperience } from './providers/jobbkk/parser.js';
 import { acceptedPositionsForTitle, suggestAdjacentPositions, positionsFromDescription } from './core/job-family.js';
@@ -56,6 +59,96 @@ function nextRunFrom(cron) {
   else if (cron === '@daily') sec = 86400;
   if (!sec) return null;
   return new Date(Date.now() + sec * 1000).toISOString();
+}
+
+/** เติมช่องที่ว่างของผู้สมัครจากข้อความเรซูเม่ + ข้อความที่ OCR อ่านได้ — คืน true ถ้าเติมอะไรได้ */
+async function enrichCandidate(c) {
+  let filled = false;
+  const ocrText = await extractedTextForCandidate(c.id);
+  const raw = [c.raw_text || '', ocrText || ''].filter(Boolean).join('\n');
+  const eduEmpty = !hasUsefulEducation(c.education);
+  const workEmpty = !hasUsefulWorkExperience(c.work_experience);
+  const needsBody = !c.phone || !c.email || !c.gender || !c.age || !c.address || !c.province
+    || !c.desired_positions || !c.expected_salary || eduEmpty || workEmpty;
+  if (raw && needsBody) {
+    const repaired = finalizeCandidateRecord({
+      name: c.full_name || '',
+      prefix: c.prefix || '',
+      first_name: c.first_name || '',
+      last_name: c.last_name || '',
+      phone: c.phone || '',
+      email: c.email || '',
+      line_id: c.line_id || '',
+      gender: c.gender || '',
+      age: c.age || '',
+      birth_date: c.birth_date || '',
+      nationality: c.nationality || '',
+      religion: c.religion || '',
+      height: c.height || '',
+      weight: c.weight || '',
+      marital_status: c.marital_status || '',
+      military_status: c.military_status || '',
+      vehicle: c.vehicle || '',
+      driving_license: c.driving_license || '',
+      driving_ability: c.driving_ability || '',
+      address: c.address || '',
+      province: c.province || '',
+      intro: c.intro || '',
+      desired_positions: c.desired_positions || '',
+      desired_work_area: c.desired_work_area || '',
+      job_type: c.job_type || '',
+      expected_salary: c.expected_salary || '',
+      available_start: c.available_start || '',
+      education: Array.isArray(c.education) ? c.education : [],
+      work_experience: Array.isArray(c.work_experience) ? c.work_experience : [],
+      hard_skills: Array.isArray(c.hard_skills) ? c.hard_skills : [],
+      soft_skills: Array.isArray(c.soft_skills) ? c.soft_skills : [],
+      language_skills: Array.isArray(c.language_skills) ? c.language_skills : [],
+      raw_text: raw,
+    });
+    await patchCandidateFromParsed(c.id, repaired);
+    filled = true;
+    c.phone = repaired.phone || c.phone;
+    c.email = repaired.email || c.email;
+    c.line_id = repaired.line_id || c.line_id;
+  }
+  if (!c.email || !c.phone || !c.line_id) {
+    if (ocrText) {
+      const found = contactsFromText(ocrText);
+      const patch = {};
+      if (!c.email && found.email) patch.email = found.email;
+      if (!c.phone && found.phone) patch.phone = found.phone;
+      if (!c.line_id && found.line_id) patch.line_id = found.line_id;
+      if (Object.keys(patch).length && (await fillCandidateContacts(c.id, patch))) filled = true;
+    }
+  }
+  return filled;
+}
+
+/**
+ * อ่านไฟล์แนบที่ค้าง "รออ่าน" (ตอนเซิร์ฟเวอร์ AI ไม่มีโมเดล OCR / เครื่องไม่มีตัวแปลง PDF) ย้อนหลังทีละชุด
+ * แล้วเติมข้อมูลผู้สมัครจากข้อความที่อ่านได้ — เรียกจาก runner เป็นระยะ
+ */
+export async function ocrBacklog({ limit = 20 } = {}) {
+  if (!(await ocrModel())) return { read: 0, waiting: 'no_ocr_model' };
+  const rows = await listOcrBacklog(limit, { includePdf: await hasPdfTool() });
+  let read = 0;
+  const touched = new Set();
+  for (const a of rows) {
+    const row = await getAssetContent(a.id);
+    if (!row?.content) {
+      await saveExtraction(a.id, { status: 'skipped:no_content' });
+      continue;
+    }
+    const r = await extractAttachment(row.content, row.file_type);
+    await saveExtraction(a.id, { text: r.text, structured: r.text ? { chars: r.text.length, model: r.model } : null, status: r.status });
+    if (r.status === 'success') {
+      read += 1;
+      touched.add(a.candidate_id);
+    }
+  }
+  for (const c of await candidatesByIds([...touched])) await enrichCandidate(c);
+  return { read, tried: rows.length };
 }
 
 /** งานถูกปิดระหว่างรัน: กลับเป็น "ยังไม่เริ่ม" พร้อมเหตุ — กดรันใหม่ได้เมื่อเปิดงานอีกครั้ง */
@@ -286,8 +379,8 @@ export async function runTask(t, runtime) {
   for (const a of pending) {
     const row = await getAssetContent(a.id);
     if (row?.content) {
-      const { text, status } = await extractAttachment(row.content, row.file_type);
-      await saveExtraction(a.id, { text, structured: text ? { chars: text.length, model: 'typhoon-ocr' } : null, status });
+      const { text, status, model } = await extractAttachment(row.content, row.file_type);
+      await saveExtraction(a.id, { text, structured: text ? { chars: text.length, model } : null, status });
     } else {
       await saveExtraction(a.id, { status: 'skipped:no_content' });
     }
@@ -301,64 +394,7 @@ export async function runTask(t, runtime) {
   let i = 0;
   let filled = 0;
   for (const c of cands) {
-    const ocrText = await extractedTextForCandidate(c.id);
-    const raw = [c.raw_text || '', ocrText || ''].filter(Boolean).join('\n');
-    const eduEmpty = !hasUsefulEducation(c.education);
-    const workEmpty = !hasUsefulWorkExperience(c.work_experience);
-    const needsBody = !c.phone || !c.email || !c.gender || !c.age || !c.address || !c.province
-      || !c.desired_positions || !c.expected_salary || eduEmpty || workEmpty;
-    if (raw && needsBody) {
-      const repaired = finalizeCandidateRecord({
-        name: c.full_name || '',
-        prefix: c.prefix || '',
-        first_name: c.first_name || '',
-        last_name: c.last_name || '',
-        phone: c.phone || '',
-        email: c.email || '',
-        line_id: c.line_id || '',
-        gender: c.gender || '',
-        age: c.age || '',
-        birth_date: c.birth_date || '',
-        nationality: c.nationality || '',
-        religion: c.religion || '',
-        height: c.height || '',
-        weight: c.weight || '',
-        marital_status: c.marital_status || '',
-        military_status: c.military_status || '',
-        vehicle: c.vehicle || '',
-        driving_license: c.driving_license || '',
-        driving_ability: c.driving_ability || '',
-        address: c.address || '',
-        province: c.province || '',
-        intro: c.intro || '',
-        desired_positions: c.desired_positions || '',
-        desired_work_area: c.desired_work_area || '',
-        job_type: c.job_type || '',
-        expected_salary: c.expected_salary || '',
-        available_start: c.available_start || '',
-        education: Array.isArray(c.education) ? c.education : [],
-        work_experience: Array.isArray(c.work_experience) ? c.work_experience : [],
-        hard_skills: Array.isArray(c.hard_skills) ? c.hard_skills : [],
-        soft_skills: Array.isArray(c.soft_skills) ? c.soft_skills : [],
-        language_skills: Array.isArray(c.language_skills) ? c.language_skills : [],
-        raw_text: raw,
-      });
-      await patchCandidateFromParsed(c.id, repaired);
-      filled += 1;
-      c.phone = repaired.phone || c.phone;
-      c.email = repaired.email || c.email;
-      c.line_id = repaired.line_id || c.line_id;
-    }
-    if (!c.email || !c.phone || !c.line_id) {
-      if (ocrText) {
-        const found = contactsFromText(ocrText);
-        const patch = {};
-        if (!c.email && found.email) patch.email = found.email;
-        if (!c.phone && found.phone) patch.phone = found.phone;
-        if (!c.line_id && found.line_id) patch.line_id = found.line_id;
-        if (Object.keys(patch).length && (await fillCandidateContacts(c.id, patch))) filled += 1;
-      }
-    }
+    if (await enrichCandidate(c)) filled += 1;
     await bumpTaskProgress(t.id, (i += 1));
   }
 

@@ -474,8 +474,36 @@ export async function candidatesForRun(runId) {
 }
 
 /** Same as candidatesForRun but across many runs (adjacent-position expansion). */
+/**
+ * ไฟล์แนบที่ยังรออ่าน (pending) รวมที่เคยล้มเพราะเซิร์ฟเวอร์ AI/ตัวแปลง PDF ใช้ไม่ได้ (ไม่ใช่ไฟล์เสีย)
+ * เว้นไฟล์ที่เพิ่งเก็บใน 1 ชม. — งาน Scrap รอบนั้นอ่านเองอยู่แล้ว
+ */
+export const OCR_RETRYABLE_ERRORS = ['error:ollama HTTP 404', 'error:spawn pdftoppm ENOENT'];
+export async function listOcrBacklog(limit, { includePdf = true } = {}) {
+  const { rows } = await query(
+    `SELECT a.id, a.file_type, a.candidate_id FROM candidate_assets a
+      WHERE a.kind = 'attachment' AND a.content IS NOT NULL
+        AND (a.extract_status = 'pending' OR a.extract_status = ANY($2::text[]))
+        AND ($3::boolean OR lower(COALESCE(a.file_type, '')) <> 'pdf')
+        AND a.created_at < now() - interval '1 hour'
+      ORDER BY a.extracted_at NULLS FIRST, a.id
+      LIMIT $1`,
+    [limit, OCR_RETRYABLE_ERRORS, includePdf],
+  );
+  return rows;
+}
+
+export async function candidatesByIds(ids) {
+  if (!ids?.length) return [];
+  return candidatesWhere('c.id = ANY($1::uuid[])', [ids]);
+}
+
 export async function candidatesForRuns(runIds) {
   if (!runIds?.length) return [];
+  return candidatesWhere('s.run_id = ANY($1::uuid[])', [runIds]);
+}
+
+async function candidatesWhere(where, params) {
   const { rows } = await query(
     `SELECT DISTINCT ON (c.id)
             c.id, c.email, c.phone, c.line_id, c.gender, c.age, c.address, c.province,
@@ -488,9 +516,9 @@ export async function candidatesForRuns(runIds) {
             s.raw_text
        FROM candidates c
        JOIN candidate_sources s ON s.candidate_id = c.id
-      WHERE s.run_id = ANY($1::uuid[])
+      WHERE ${where}
       ORDER BY c.id, s.last_seen_at DESC NULLS LAST`,
-    [runIds],
+    params,
   );
   return rows;
 }

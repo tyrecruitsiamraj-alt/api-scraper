@@ -22,7 +22,8 @@ import { query, closePool, withTransaction } from '../src/db/pool.js';
 import { syncJarvisPostOrders } from '../src/core/jarvis-post-sync.js';
 import { getConnector, getTaskById, recoverStaleRunningTasks } from '../src/db/repositories.js';
 import { runConnector } from '../src/pipeline.js';
-import { runTask } from '../src/tasks-worker.js';
+import { ocrBacklog, runTask } from '../src/tasks-worker.js';
+import { aiStatus } from '../src/core/ai-models.js';
 import { generateDraftForCampaign, regenerateImageForContent } from '../src/core/orchestrator-draft.js';
 import { measureCampaign } from '../src/core/orchestrator-measure.js';
 import { sendAlert } from '../src/core/alert.js';
@@ -114,6 +115,7 @@ async function heartbeat() {
       content_pipeline: CONTENT_PIPELINE_RELEASE,
       types: SUPPORTED,
       image_generation: imageGenerationCapability(),
+      ai: await aiStatus().catch(() => null), // หน้าเว็บบอกได้ว่าแปลงเนื้องาน/อ่านไฟล์แนบใช้ได้ไหม
     };
     await query(
       `INSERT INTO workers (name, kind, last_seen, meta)
@@ -380,10 +382,36 @@ async function syncJarvisIfDue() {
   }
 }
 
+// ไฟล์แนบที่ค้าง "รออ่าน" (เซิร์ฟเวอร์ AI ไม่มีโมเดล OCR / เครื่องไม่มีตัวแปลง PDF) — อ่านย้อนทุก 10 นาทีเมื่อพร้อม
+const OCR_BACKLOG_MS = 10 * 60 * 1000;
+let lastOcrBacklog = 0;
+let ocrBacklogRunning = false;
+async function readOcrBacklogIfDue() {
+  if (ocrBacklogRunning || Date.now() - lastOcrBacklog < OCR_BACKLOG_MS) return;
+  lastOcrBacklog = Date.now();
+  ocrBacklogRunning = true;
+  try {
+    await withTransaction(async (client) => {
+      const lock = await client.query(`SELECT pg_try_advisory_xact_lock(hashtext('ocr-backlog')) AS ok`);
+      if (!lock.rows[0]?.ok) return;
+      const r = await ocrBacklog({ limit: 20 });
+      if (r.read || r.tried) console.log(`  OCR ย้อนหลัง: อ่านได้ ${r.read}/${r.tried} ไฟล์`);
+    });
+  } catch (e) {
+    console.warn(`  OCR ย้อนหลังไม่สำเร็จ — ${e?.message ?? e}`);
+  } finally {
+    ocrBacklogRunning = false;
+  }
+}
+
 async function runOne() {
   await heartbeat();
   await recoverStale();
-  if (!process.argv.includes('--selftest')) await syncJarvisIfDue();
+  if (!process.argv.includes('--selftest')) {
+    await syncJarvisIfDue();
+    // ทำเบื้องหลัง ไม่ให้การอ่านไฟล์ย้อนหลังหน่วงการรับงาน Scrap
+    readOcrBacklogIfDue();
+  }
   const job = await claimNext();
   if (!job) return false;
   console.log(`▶ [${WORKER_ID}] ${job.type} ${job.connector_key} (job ${job.id})`);

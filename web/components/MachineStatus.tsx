@@ -1,6 +1,21 @@
 import { listMachineStatus } from '@/lib/repo';
+import type { MachineStatusRow } from '@/lib/repo';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent } from '@/components/ui/card';
+
+/** เครื่อง Scrap: แปลงเนื้องาน/อ่านไฟล์แนบใช้ได้ไหม บอกเป็นคำ */
+function AiStatus({ ai }: { ai: NonNullable<MachineStatusRow['ai']> }) {
+  const ocr = !ai.ocr_model
+    ? 'ใช้ไม่ได้ ไม่มีโมเดลในบริษัท (ไฟล์รออ่าน)'
+    : ai.pdf_tool
+      ? 'ใช้ได้'
+      : 'อ่านได้แค่รูป เครื่องไม่มีตัวแปลง PDF';
+  return (
+    <span className="text-muted-foreground">
+      แปลงเนื้องาน {ai.text_model ? `ใช้ได้ (${ai.text_model})` : 'ใช้ไม่ได้ ค้นด้วยชื่อตำแหน่งในใบขอแทน'} · อ่านไฟล์แนบ {ocr}
+    </span>
+  );
+}
 
 function silentFor(lastSeen: string): string {
   const min = Math.max(1, Math.round((Date.now() - new Date(lastSeen).getTime()) / 60000));
@@ -39,6 +54,7 @@ export async function MachineStatus({ kind }: { kind?: 'autopost' | 'scraper' })
               </span>
             )}
             {m.build_sha && <span className="font-mono text-xs text-muted-foreground">โค้ด {m.build_sha.slice(0, 7)}</span>}
+            {m.online && m.kind === 'scraper' && m.ai && <AiStatus ai={m.ai} />}
             {!m.online && <span className="text-muted-foreground">เปิดสวิตช์บนเครื่องนั้น</span>}
           </div>
         ))}
