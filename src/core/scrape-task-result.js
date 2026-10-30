@@ -4,6 +4,8 @@
  * and reached a non-error terminal state.
  */
 export function requireSuccessfulScrapeTaskResult(result) {
+  // คิวซ้ำของงานที่อีกช่องรันอยู่แล้ว: ปิดคิวนี้เงียบ ๆ ไม่ลองใหม่ (ลองใหม่มีแต่แจ้งเตือนหลอก)
+  if (result?.skipped && result.reason === 'task_already_running') return result;
   if (result?.skipped) {
     throw new Error(`scrape task was not executed: ${result.reason || 'already running'}`);
   }
@@ -30,6 +32,7 @@ export function cooldownError(message, cooldownUntil) {
  * - infrastructure_error = login/browser/connector/ฐานข้อมูลล้มเหลว
  */
 export function classifyScrapeTaskResult(result) {
+  if (result?.skipped && result.reason === 'task_already_running') return 'already_running';
   if (!result || result?.skipped || result.status === 'error') return 'infrastructure_error';
   if (result.status === 'stopped') return 'stopped';
   if (result.status === 'partial') return 'market_insufficient';

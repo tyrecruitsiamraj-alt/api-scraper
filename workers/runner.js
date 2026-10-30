@@ -250,6 +250,15 @@ async function claimNext() {
            AND NOT EXISTS (
              SELECT 1 FROM work_queue r
               WHERE r.connector_key = q.connector_key AND r.status='running')
+           -- บัญชีเว็บหางานเดียวกันห้ามรันซ้อน (JobBKK ให้ล็อกอินที่เดียว) — ดูจากงาน Scrap ที่รันอยู่จริงด้วย
+           -- เพราะคิวอาจหลุดล็อกระหว่างงานยังวิ่ง (เจอ 30 ต.ค. 2569: 2 งานรันบัญชีเดียวกันพร้อมกัน)
+           AND NOT EXISTS (
+             SELECT 1 FROM scrape_tasks rt
+              WHERE q.type = 'scrape'
+                AND rt.connector_id::text = split_part(q.connector_key, ':', 2)
+                AND rt.status = 'running'
+                AND rt.updated_at > now() - interval '10 minutes'
+                AND rt.id::text <> COALESCE(q.ref_id, ''))
            -- งานที่คนกดปิดแล้ว ห้ามเริ่ม
            AND NOT EXISTS (
              SELECT 1 FROM scrape_tasks st
@@ -434,7 +443,8 @@ async function runOne() {
     const status = needsInput ? 'needs_input' : outcome === 'stopped' ? 'error' : outcome === 'market_insufficient' ? 'partial' : 'done';
     const detail = needsInput
       ? (r?.issues ?? []).join(' · ') || 'ต้องยืนยันข้อมูลก่อนสร้างสื่อ'
-      : outcome === 'stopped' ? 'หยุดแล้ว คนกดปิดงานนี้' : null;
+      : outcome === 'stopped' ? 'หยุดแล้ว คนกดปิดงานนี้'
+      : outcome === 'already_running' ? 'งานนี้กำลังรันอยู่แล้วในอีกช่อง ไม่รันซ้ำ' : null;
     await finish(job.id, status, detail);
     console.log(`  ✓ done: ${JSON.stringify(r).slice(0, 200)}`);
   } catch (e) {

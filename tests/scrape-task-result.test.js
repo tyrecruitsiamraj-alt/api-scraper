@@ -22,11 +22,14 @@ test('queue rejects a scrape task that failed internally', () => {
   );
 });
 
-test('queue rejects a scrape task that never acquired execution ownership', () => {
-  assert.throws(
-    () => requireSuccessfulScrapeTaskResult({ skipped: true, reason: 'task_already_running' }),
-    /task_already_running/,
-  );
+test('คิวซ้ำของงานที่อีกช่องรันอยู่แล้ว: ปิดเงียบ ไม่ลองใหม่', () => {
+  const dup = { skipped: true, reason: 'task_already_running' };
+  assert.equal(requireSuccessfulScrapeTaskResult(dup), dup);
+  assert.equal(classifyScrapeTaskResult(dup), 'already_running');
+});
+
+test('งานที่ข้ามด้วยเหตุอื่นยังนับว่าล้ม', () => {
+  assert.throws(() => requireSuccessfulScrapeTaskResult({ skipped: true, reason: 'something_else' }), /something_else/);
 });
 
 test('บัญชีถูกพัก: คิวรอจนพ้นเวลาพัก ไม่ลองใหม่ทันที', () => {
