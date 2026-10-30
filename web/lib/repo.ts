@@ -2023,11 +2023,11 @@ export async function createScrapeTaskFromSoRecruit(
   connectorId: string,
   overrides?: ScrapeTaskOverrides,
 ): Promise<string> {
-  const existing = await q<{ id: string }>(
-    `SELECT id FROM scrape_tasks WHERE source_request_no = $1 LIMIT 1`,
+  // งานเดิมของใบขอนี้ (เคยสั่งแล้ว) — Jarvis สั่งใหม่ได้ เช่น หลังถูกตีกลับ
+  const existing = await q<{ id: string; status: string }>(
+    `SELECT id, status FROM scrape_tasks WHERE source_request_no = $1 LIMIT 1`,
     [requestNo],
   );
-  if (existing[0]) return existing[0].id;
 
   const req = await q<{
     request_type: string;
@@ -2058,6 +2058,8 @@ export async function createScrapeTaskFromSoRecruit(
       LIMIT 1`,
     [requestNo],
   );
+  // เรียกซ้ำหลังเริ่มไปแล้ว (ไม่มีแถวรอดำเนินการ) = คืนงานเดิม
+  if (!req[0] && existing[0]) return existing[0].id;
   if (!req[0]) throw new Error(`ไม่พบคำขอ Scraping ที่รอดำเนินการ: ${requestNo}`);
   if (req[0].request_type !== 'scraping') throw new Error(`คำขอ ${requestNo} ไม่ใช่ประเภท Scraping`);
 
@@ -2095,7 +2097,21 @@ export async function createScrapeTaskFromSoRecruit(
   const position = criteria.position || req[0].erp_title || '';
   const target = Math.max(1, overrides?.target || req[0].erp_remaining || req[0].erp_qty || 20);
 
-  const inserted = await q<{ id: string }>(
+  let taskId: string | undefined;
+  if (existing[0]) {
+    // สั่งใหม่: ใช้เกณฑ์/เป้า/บัญชีจากคำสั่งล่าสุด และเริ่มตรวจรับใหม่ — งานที่ยังรันอยู่ไม่แก้กลางทาง
+    taskId = existing[0].id;
+    if (!['running', 'queued'].includes(existing[0].status)) {
+      await q(
+        `UPDATE scrape_tasks
+            SET name = $2, connector_id = $3, target_count = $4, criteria = $5::jsonb, enabled = true,
+                review_status = 'pending', reviewed_by = NULL, reviewed_at = NULL, last_error = NULL, updated_at = now()
+          WHERE id = $1 AND status NOT IN ('running', 'queued')`,
+        [taskId, `${requestNo} · ${position || 'Scraping งาน'}`, connectorId, target, JSON.stringify(criteria)],
+      );
+    }
+  }
+  const inserted = existing[0] ? [] : await q<{ id: string }>(
     `INSERT INTO scrape_tasks
        (name, connector_id, mode, target_count, criteria, status, enabled,
         expand_adjacent, source_request_no, review_status)
@@ -2104,7 +2120,7 @@ export async function createScrapeTaskFromSoRecruit(
      RETURNING id`,
     [`${requestNo} · ${position || 'Scraping งาน'}`, connectorId, target, JSON.stringify(criteria), requestNo],
   );
-  let taskId = inserted[0]?.id;
+  taskId = taskId ?? inserted[0]?.id;
   if (!taskId) {
     const raced = await q<{ id: string }>(`SELECT id FROM scrape_tasks WHERE source_request_no = $1`, [requestNo]);
     taskId = raced[0]?.id;
