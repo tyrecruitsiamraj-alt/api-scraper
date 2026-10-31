@@ -53,7 +53,7 @@ function candidateAge(parsed) {
  * แยก criteria เป็น 2 ชั้น: ที่ส่งไปเว็บ (กว้าง) กับที่กรองในระบบ (แม่น)
  * @returns {{ siteCriteria: object, localFilters: object, active: boolean }}
  */
-export function splitCriteria(criteria = {}) {
+export function splitCriteria(criteria = {}, { siteGender = false } = {}) {
   // งานเก่าจาก ERP/So Recruit ใช้ snake_case แต่ provider ใช้ camelCase.
   // แปลงที่ shared gate นี้เพื่อไม่ให้ช่วงอายุหลุดเงียบ ๆ ใน Connector ใด Connector หนึ่ง.
   const normalized = {
@@ -70,6 +70,9 @@ export function splitCriteria(criteria = {}) {
   // ค่าเริ่มต้น: จังหวัด + อายุ ส่งไปกรองที่เว็บ (เป๊ะ — เลือกกรุงเทพได้กรุงเทพ, อายุ 25-35 ได้ในช่วง)
   // เหลือแค่ วุฒิ + เพศ กรองในระบบ (เว็บ map วุฒิหยาบ/เพศบางเรซูเม่ไม่ระบุ — กรองเองแม่นกว่า)
   const { education, gender, ...siteCriteria } = normalized;
+  // JobBKK กรองเพศที่เว็บได้ และผ่อนออกเองเมื่อได้ 0 — ส่งไปด้วย ไม่งั้นเปิดเรซูเม่เพศอื่นเปลืองโควต้า
+  // (30 ต.ค. 2569: งานรับชาย เปิด 59 ใบ ตกเพราะเพศ 22 ใบ) · ยังกรองซ้ำในระบบเหมือนเดิม
+  if (siteGender && String(gender ?? '').trim()) siteCriteria.gender = String(gender).trim();
   const localFilters = {};
   if (String(education ?? '').trim()) localFilters.education = String(education).trim();
   if (String(gender ?? '').trim()) localFilters.gender = String(gender).trim();

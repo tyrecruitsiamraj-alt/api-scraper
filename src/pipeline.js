@@ -121,7 +121,7 @@ export async function runConnector(connector, criteria, runtime, opts = {}) {
 
   // "ค้นกว้าง กรองแม่น": ส่งแค่ตำแหน่ง/คำค้นไปเว็บ (กัน AND ซ้อนแล้วเหลือ 0)
   // แล้วกรอง อายุ/วุฒิ/จังหวัด/เพศ จากเรซูเม่ที่ parse ได้ในระบบเราแทน
-  const { siteCriteria, localFilters, active: localFilterActive } = splitCriteria(criteria);
+  const { siteCriteria, localFilters, active: localFilterActive } = splitCriteria(criteria, { siteGender: connector.platform === 'jobbkk' });
   if (localFilterActive) {
     console.log(`  [${connector.label}] กรองในระบบ: ${Object.entries(localFilters).map(([k, v]) => `${k}=${v}`).join(' ')} (เว็บค้นด้วยตำแหน่ง/คำค้นอย่างเดียว)`);
   }
