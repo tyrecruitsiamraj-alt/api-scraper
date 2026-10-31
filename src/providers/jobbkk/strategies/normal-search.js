@@ -245,32 +245,56 @@ async function applyProvinceTree(page, aliases, report) {
       await search.fill(name);
       await sleep(400);
     }
-    const node = await firstVisibleLocator([
+    const findNode = () => firstVisibleLocator([
       layer.locator('[role="treeitem"]').filter({
-        has: page.locator('.ant-tree-title', { hasText: new RegExp(`^\\s*${escapeRegExp(name)}\\s*$`, 'u') }),
+        has: page.locator('.ant-tree-title', { hasText: provinceTitlePattern(name) }),
       }),
     ]);
+    let node = await findNode();
+    if (!node) {
+      // จังหวัดนอกกรุงเทพอาจซ่อนอยู่ใต้ภาค (กิ่งปิด) — กางกิ่งที่ปิดอยู่แล้วหาใหม่
+      for (let i = 0; i < 12; i += 1) {
+        const closed = layer.locator('.ant-tree-switcher_close').first();
+        if (!(await closed.isVisible().catch(() => false))) break;
+        await clickWithoutNavigationWait(closed).catch(() => {});
+        await sleep(200);
+      }
+      node = await findNode();
+    }
     debug('tree node:', Boolean(node));
+    let checked = false;
     if (node) {
       const box = node.locator('.ant-tree-checkbox').first();
       if ((await box.getAttribute('aria-checked').catch(() => null)) !== 'true') {
         await clickWithoutNavigationWait(box);
         await sleep(250);
       }
-      debug('checked:', await box.getAttribute('aria-checked').catch(() => null));
+      checked = (await box.getAttribute('aria-checked').catch(() => null)) === 'true'
+        || /ant-tree-checkbox-checked/.test((await box.getAttribute('class').catch(() => '')) || '');
+      debug('checked:', checked);
     }
+    // จดสิ่งที่เห็นในรายการไว้ในข้อความ error ถ้าเลือกไม่ติด — ครั้งหน้าดูจากบันทึกรอบได้เลยว่าหน้าเว็บเปลี่ยนตรงไหน
+    const seenTitles = (await layer.locator('.ant-tree-title').allTextContents().catch(() => []))
+      .map((t) => t.replace(/\s+/g, ' ').trim()).filter(Boolean).slice(0, 8);
     await closeOpenLayer(page);
     await page.keyboard.press('Escape').catch(() => {});
     await layer.waitFor({ state: 'hidden', timeout: 2_000 }).catch(() => {});
     const shown = await opener.inputValue().catch(() => '');
     debug('input value:', JSON.stringify(shown));
-    if (shown.includes(name)) {
+    // ช่องจังหวัดบางแบบโชว์จำนวนแทนชื่อ ("1 จังหวัด") — ติ๊กติดแล้วช่องไม่ว่าง ถือว่าเลือกแล้ว
+    if (shown.includes(name) || (checked && shown.trim())) {
       report.applied.push('province');
       return true;
     }
+    report.provinceSeen = `ค้น "${name}" · เจอในรายการ: ${seenTitles.join(', ') || 'ไม่มี'} · ช่องจังหวัดขึ้นว่า "${shown}"`;
   }
   report.skipped.push('province');
   return false;
+}
+
+/** ชื่อจังหวัดในต้นไม้ของ JobBKK อาจมี "จ." / "จังหวัด" นำหน้า หรือจำนวนต่อท้าย เช่น "สมุทรปราการ (12)" */
+function provinceTitlePattern(name) {
+  return new RegExp(`^\\s*(?:จ\\.\\s*|จังหวัด\\s*)?${escapeRegExp(name)}(?:\\s*\\(.*\\))?\\s*(?:ทั้งหมด)?\\s*$`, 'u');
 }
 
 async function openFilterRow(page, labelPattern) {
@@ -434,7 +458,7 @@ export async function runNormalSearch(page, criteria, { need = 15 } = {}) {
     throw new Error('JOBBKK_FILTER_NOT_APPLIED: Normal Search ไม่ยืนยันตำแหน่งหรือ Keyword จึงไม่รับผลค้นหาแบบกว้าง');
   }
   if (missing.includes('province')) {
-    throw new Error('JOBBKK_FILTER_NOT_APPLIED: Normal Search ไม่ยืนยันจังหวัดตามใบขอ จึงไม่รับผลค้นหาทั้งประเทศ');
+    throw new Error(`JOBBKK_FILTER_NOT_APPLIED: Normal Search ไม่ยืนยันจังหวัดตามใบขอ จึงไม่รับผลค้นหาทั้งประเทศ${report.provinceSeen ? ` (${report.provinceSeen})` : ''}`);
   }
 
   const before = await readResumeResultPool(page);
