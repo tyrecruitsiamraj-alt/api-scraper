@@ -2367,6 +2367,38 @@ async function buildDailyPostPlan(userId, opts = {}) {
   };
 }
 
+/** Facebook ขอยืนยันตัวตน — ข้อความ error ของรอบที่ล็อกอินไม่ผ่านเพราะ checkpoint */
+const CHECKPOINT_ERROR_RE = /ยืนยันตัวตน|checkpoint|verify/i;
+let verificationColumnsReady = false;
+async function ensureVerificationColumns() {
+  if (verificationColumnsReady) return;
+  await query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS needs_verification_since TIMESTAMPTZ`);
+  await query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS needs_verification_note TEXT`);
+  verificationColumnsReady = true;
+}
+
+/**
+ * จำว่าบัญชีไหนติดยืนยันตัวตน: รอบล้มเพราะ checkpoint = ติด · รอบไหนผ่าน (ล็อกอินได้) = หาย
+ * ระหว่างติด ระบบไม่ส่งรอบเก็บคอมเมนต์อัตโนมัติให้บัญชีนั้น (เคยล้มซ้ำ 13 ครั้งต่อบัญชีใน 2 วัน · 31 ต.ค. 2569)
+ */
+async function rememberLoginState(userId, ok, error) {
+  if (!userId) return;
+  await ensureVerificationColumns();
+  if (ok) {
+    await query(
+      `UPDATE users SET needs_verification_since = NULL, needs_verification_note = NULL
+        WHERE id = $1 AND needs_verification_since IS NOT NULL`,
+      [String(userId)]
+    );
+  } else if (CHECKPOINT_ERROR_RE.test(String(error || ''))) {
+    await query(
+      `UPDATE users SET needs_verification_since = COALESCE(needs_verification_since, NOW()), needs_verification_note = $2
+        WHERE id = $1`,
+      [String(userId), String(error).split('\n')[0].slice(0, 200)]
+    );
+  }
+}
+
 async function completePostRunJob(id, data = {}) {
   await ensurePostRunQueueTable();
   const ok = !!data.ok;
@@ -2384,6 +2416,11 @@ async function completePostRunJob(id, data = {}) {
     [String(id || ''), status, data.run_id || null, data.message || null, data.error || null]
   );
   const completed = rows[0] || null;
+  if (completed && String(completed.mode || 'post') === 'post') {
+    await rememberLoginState(completed.user_id, ok, data.error).catch((e) => {
+      console.warn('[verify] จำสถานะยืนยันตัวตนไม่สำเร็จ:', e.message);
+    });
+  }
   if (!ok && completed) {
     await recordPostFailureLesson(completed).catch((e) => {
       console.warn('[learning] record post failure lesson failed:', e.message);
@@ -2531,6 +2568,9 @@ async function enqueueRecentCollectJobs({ start_date, end_date, requested_by = '
     `SELECT DISTINCT user_id FROM collect_run_queue WHERE status IN ('queued', 'running')`
   );
   const busy = new Set(busyRows.map((r) => String(r.user_id)));
+  await ensureVerificationColumns();
+  const { rows: blockedRows } = await query(`SELECT id FROM users WHERE needs_verification_since IS NOT NULL`);
+  const needsVerification = new Set(blockedRows.map((r) => String(r.id)));
   const queued = [];
   const skipped = [];
   for (const u of users) {
@@ -2538,6 +2578,10 @@ async function enqueueRecentCollectJobs({ start_date, end_date, requested_by = '
     if (!uid) continue;
     if (busy.has(uid)) {
       skipped.push({ user_id: uid, reason: 'busy' });
+      continue;
+    }
+    if (needsVerification.has(uid)) {
+      skipped.push({ user_id: uid, reason: 'needs_verification' });
       continue;
     }
     try {
@@ -2569,6 +2613,7 @@ async function enqueueRecentCollectJobs({ start_date, end_date, requested_by = '
 
 async function claimNextCollectRunJob(workerId, runId) {
   await ensureCollectRunQueueTable();
+  await ensureVerificationColumns();
   const wid = String(workerId || '').trim() || 'worker';
   const rid = String(runId || '').trim() || null;
   const { rows } = await query(
@@ -2589,6 +2634,10 @@ async function claimNextCollectRunJob(workerId, runId) {
            SELECT 1 FROM collect_run_queue o
            WHERE o.status = 'running' AND o.user_id = c.user_id AND o.id <> c.id
              AND COALESCE(o.started_at, o.created_at) > NOW() - INTERVAL '90 minutes'
+         )
+         /** บัญชีที่ติดยืนยันตัวตน ข้ามไปจนกว่าจะมีคนยืนยันแล้วมีรอบผ่าน (ล็อกอินซ้ำตอนติดเสี่ยงโดนล็อก) */
+         AND NOT EXISTS (
+           SELECT 1 FROM users u WHERE u.id = c.user_id AND u.needs_verification_since IS NOT NULL
          )
        ORDER BY c.created_at ASC
        LIMIT 1
@@ -2626,6 +2675,11 @@ async function completeCollectRunJob(id, data = {}) {
      RETURNING *`,
     [String(id || ''), status, data.run_id || null, data.message || null, data.error || null]
   );
+  if (rows[0]) {
+    await rememberLoginState(rows[0].user_id, ok, data.error).catch((e) => {
+      console.warn('[verify] จำสถานะยืนยันตัวตนไม่สำเร็จ:', e.message);
+    });
+  }
   return rows[0] || null;
 }
 

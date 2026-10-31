@@ -288,3 +288,22 @@ export async function listManualJoinGroups(): Promise<ManualJoinGroup[]> {
     return [];
   }
 }
+
+export type AccountNeedingVerification = { id: string; name: string | null; since: string; note: string | null };
+
+/**
+ * บัญชี Facebook ที่ Facebook ขอยืนยันตัวตนแล้วยังไม่ผ่าน (เซิร์ฟเวอร์ Auto-Post จดไว้ตอนรอบล้มเพราะ checkpoint
+ * และลบเองเมื่อมีรอบผ่าน) — ระหว่างนี้ระบบไม่ส่งรอบเก็บคอมเมนต์อัตโนมัติให้บัญชีนั้น
+ */
+export async function listAccountsNeedingVerification(): Promise<AccountNeedingVerification[]> {
+  return q<AccountNeedingVerification>(
+    `SELECT id, name, needs_verification_since AS since, needs_verification_note AS note
+       FROM ${AP}.users WHERE needs_verification_since IS NOT NULL
+      ORDER BY needs_verification_since`,
+  ).catch(() => []);
+}
+
+/** คนยืนยันตัวตนที่เครื่องแล้ว — เอาออกจากรายการ ให้ระบบกลับมาเก็บคอมเมนต์บัญชีนี้ */
+export async function clearAccountVerification(userId: string) {
+  await q(`UPDATE ${AP}.users SET needs_verification_since = NULL, needs_verification_note = NULL WHERE id = $1`, [userId]);
+}

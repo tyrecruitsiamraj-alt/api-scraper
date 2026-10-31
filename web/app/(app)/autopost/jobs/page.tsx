@@ -1,9 +1,9 @@
 import Link from 'next/link';
 import { ChevronDownIcon, ChevronRightIcon, ExternalLinkIcon } from 'lucide-react';
 import { listJarvisPostOrders, listPostAssignments } from '@/lib/repo';
-import { listManualJoinGroups, listPostTasks } from '@/lib/post-tasks';
-import type { ManualJoinGroup, PostTask } from '@/lib/post-tasks';
-import { postAssignmentNowAction, runFacebookPreflightAction } from '@/lib/actions';
+import { listAccountsNeedingVerification, listManualJoinGroups, listPostTasks } from '@/lib/post-tasks';
+import type { AccountNeedingVerification, ManualJoinGroup, PostTask } from '@/lib/post-tasks';
+import { clearAccountVerificationAction, postAssignmentNowAction, runFacebookPreflightAction } from '@/lib/actions';
 import { AutopostNav } from '@/components/AutopostNav';
 import { AutoRefresh } from '@/components/AutoRefresh';
 import { MachineStatus } from '@/components/MachineStatus';
@@ -76,11 +76,12 @@ function TaskList({ tasks, empty }: { tasks: PostTask[]; empty: string }) {
 export default async function AutopostJobsPage(props: { searchParams?: Promise<{ notice?: string }> }) {
   const searchParams = await props.searchParams;
   const notice = typeof searchParams?.notice === 'string' ? searchParams.notice : null;
-  const [orders, tasks, assignments, manualJoin] = await Promise.all([
+  const [orders, tasks, assignments, manualJoin, needVerify] = await Promise.all([
     listJarvisPostOrders(),
     listPostTasks(),
     listPostAssignments(),
     listManualJoinGroups(),
+    listAccountsNeedingVerification(),
   ]);
   const pendingOrders = orders.filter((o) => o.jarvis_status === 'pending');
   const legacy = assignments.filter((row) => !row.id.startsWith('jv-'));
@@ -103,6 +104,8 @@ export default async function AutopostJobsPage(props: { searchParams?: Promise<{
       <AutopostNav />
 
       <MachineStatus kind="autopost" />
+
+      {needVerify.length > 0 && <VerificationSection accounts={needVerify} />}
 
       {notice && (
         <Alert>
@@ -216,6 +219,35 @@ export default async function AutopostJobsPage(props: { searchParams?: Promise<{
         </Collapsible>
       )}
     </div>
+  );
+}
+
+/** บัญชีที่ Facebook ขอยืนยันตัวตน — ระบบหยุดเก็บคอมเมนต์ให้จนกว่าจะยืนยันผ่าน */
+function VerificationSection({ accounts }: { accounts: AccountNeedingVerification[] }) {
+  return (
+    <Alert>
+      <AlertDescription className="flex flex-col gap-3">
+        <span>
+          Facebook ขอยืนยันตัวตน {accounts.length} บัญชี ระบบหยุดเก็บคอมเมนต์ของบัญชีเหล่านี้ไว้ก่อน ยืนยันได้โดยสั่งโพสต์บัญชีนั้น 1 ใบ แล้วยืนยันในหน้าต่าง Chrome ที่เครื่องภายใน 5 นาที
+        </span>
+        <ItemGroup className="gap-2">
+          {accounts.map((a) => (
+            <Item key={a.id} variant="outline" size="sm">
+              <ItemContent>
+                <ItemTitle>{a.name ?? a.id}</ItemTitle>
+                <ItemDescription>ติดตั้งแต่ {thaiTime(a.since)}</ItemDescription>
+              </ItemContent>
+              <ItemActions>
+                <form action={clearAccountVerificationAction}>
+                  <input type="hidden" name="userId" value={a.id} />
+                  <Button variant="outline" size="sm">ยืนยันแล้ว</Button>
+                </form>
+              </ItemActions>
+            </Item>
+          ))}
+        </ItemGroup>
+      </AlertDescription>
+    </Alert>
   );
 }
 

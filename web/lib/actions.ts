@@ -9,6 +9,7 @@ import { kickWorker } from './worker-kick';
 import { postCaptionIssues } from '../../src/core/post-caption-check.js';
 import { dismissCommentLead, jarvisLeadsConfigured, requestAiCall, saveManualReply } from './comment-leads';
 import { q } from './db';
+import { clearAccountVerification } from './post-tasks';
 import { CONTENT_DISABLED_OPERATOR_MESSAGE, isContentGenerationEnabled } from './product-scope';
 import { normalizePosterExtras, normalizePosterLayout } from '../../src/core/poster-template.js';
 import type { PosterExtra, PosterLayout } from '../../src/core/poster-template.js';
@@ -1096,4 +1097,12 @@ export async function setFacebookDailyCapAction(formData: FormData) {
   revalidatePath('/connectors');
   revalidatePath('/settings');
   revalidatePath('/settings/connectors');
+}
+
+/** ยืนยันตัวตนบัญชี Facebook ที่เครื่องแล้ว — ให้ระบบกลับมาเก็บคอมเมนต์บัญชีนี้ */
+export async function clearAccountVerificationAction(formData: FormData) {
+  await requireSession();
+  const userId = String(formData.get('userId') ?? '').trim();
+  if (userId) await clearAccountVerification(userId);
+  revalidatePath('/autopost/jobs');
 }
