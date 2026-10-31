@@ -260,13 +260,16 @@ async function runPlaywrightForJob(job) {
     child.stdout?.on('data', (chunk) => rememberOutput(chunk, 'stdout'));
     child.stderr?.on('data', (chunk) => rememberOutput(chunk, 'stderr'));
     let settled = false;
+    // เวลาจำกัดตามจำนวนโพสต์ (ดู server/collect-job-timeout.js) — รอบค้างไม่กินช่อง 6 ชม.
+    const { collectJobTimeoutMs } = require('../server/collect-job-timeout');
+    const jobMaxMs = collectJobTimeoutMs((job.post_log_ids || []).length);
     const timer = setTimeout(() => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
       killProcessTree(child);
-      reject(new Error(`WORKER_COLLECT_JOB_MAX_MS exceeded (${JOB_MAX_MS}ms)`));
-    }, JOB_MAX_MS);
+      reject(new Error(`เก็บคอมเมนต์เกินเวลา ${Math.round(jobMaxMs / 60000)} นาที (${(job.post_log_ids || []).length} โพสต์) — ปิดรอบนี้ให้ช่องว่าง`));
+    }, jobMaxMs);
 
     const finish = (err) => {
       if (settled) return;
