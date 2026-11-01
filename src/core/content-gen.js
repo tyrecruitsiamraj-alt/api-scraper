@@ -1,5 +1,5 @@
 import Anthropic from '@anthropic-ai/sdk';
-import { textModelCandidates } from './ai-models.js';
+import { withTextModel } from './ai-models.js';
 import { envString } from '../config.js';
 import { buildVisualBrief, composeVisualPrompt } from './visual-brief.js';
 import { extractCampaignFacts, normalizedGenderRequirement } from './campaign-facts.js';
@@ -505,17 +505,7 @@ export async function callOpenAI({ apiKey, userMsg, system = SYSTEM, tool = TOOL
  */
 export async function callOllama({ base, userMsg, system = SYSTEM, tool = TOOL }) {
   // ลองโมเดลที่เซิร์ฟเวอร์มีจริงตามลำดับ (ในบริษัทก่อน แล้ว cloud) — คอนเทนต์ประกาศงานไม่มีข้อมูลผู้สมัคร
-  const models = await textModelCandidates();
-  if (!models.length) throw new Error('เซิร์ฟเวอร์ AI ไม่มีโมเดลที่ใช้ได้');
-  const errors = [];
-  for (const model of models) {
-    try {
-      return await callOllamaModel({ base, model, userMsg, system, tool });
-    } catch (e) {
-      errors.push(`${model}: ${e.message}`);
-    }
-  }
-  throw new Error(errors.join(' · '));
+  return withTextModel((model) => callOllamaModel({ base, model, userMsg, system, tool }));
 }
 
 async function callOllamaModel({ base, model, userMsg, system, tool }) {

@@ -1,5 +1,5 @@
 import Anthropic from '@anthropic-ai/sdk';
-import { textModelCandidates } from './ai-models.js';
+import { withTextModel } from './ai-models.js';
 import { envString } from '../config.js';
 import { fetchGoogleTrendsSuggestions } from './google-trends-suggest.js';
 
@@ -297,17 +297,7 @@ async function callAnthropic({ apiKey, system, tool, userMsg }) {
 
 /** Ollama: ลองโมเดลที่เซิร์ฟเวอร์มีจริงตามลำดับ (ในบริษัทก่อน แล้ว cloud) — ตัวแรกที่ตอบ JSON ได้ชนะ */
 async function callOllama({ base, system, tool, userMsg }) {
-  const models = await textModelCandidates();
-  if (!models.length) throw new Error('เซิร์ฟเวอร์ AI ไม่มีโมเดลที่ใช้ได้');
-  const errors = [];
-  for (const model of models) {
-    try {
-      return await callOllamaModel({ base, model, system, tool, userMsg });
-    } catch (e) {
-      errors.push(`${model}: ${e.message}`);
-    }
-  }
-  throw new Error(errors.join(' · '));
+  return withTextModel((model) => callOllamaModel({ base, model, system, tool, userMsg }));
 }
 
 /** Ollama (server บริษัท ฟรี) — บังคับ JSON ตาม schema ผ่าน `format` (เหมือน content-gen) */

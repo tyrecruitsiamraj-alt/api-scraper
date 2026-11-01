@@ -30,3 +30,44 @@ test('OCR: ที่ตั้งไว้ก่อน แล้วโมเด�
   const available = ['glm-5.3:cloud', 'other-ocr:2b', 'scb10x/typhoon-ocr1.5-3b:latest', 'llama3:8b'];
   assert.deepEqual(orderOcrModels(available, ['scb10x/typhoon-ocr1.5-3b:latest']), ['scb10x/typhoon-ocr1.5-3b:latest', 'other-ocr:2b']);
 });
+
+test('แปลงเนื้องาน: โมเดลที่ตอบ 402 ข้ามไปตัวถัดไปโดยไม่นับรอบ จนเจอตัวที่ใช้ได้', async () => {
+  const { withTextModel } = await import('../src/core/ai-models.js');
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async () => ({ ok: true, json: async () => ({ models: SERVER_NOW.map((name) => ({ name })) }) });
+  process.env.OLLAMA_HOST = 'http://ai.test';
+  try {
+    const tried = [];
+    const out = await withTextModel(async (model) => {
+      tried.push(model);
+      if (model !== 'beam:cloud') throw new Error('ollama HTTP 402');
+      return model;
+    });
+    assert.equal(out, 'beam:cloud');
+    assert.deepEqual(tried, ['deepseek-v4.1-flash:cloud', 'muse-spark-open:cloud', 'beam:cloud']);
+    // รอบถัดไปไม่ลองตัวที่ตอบ 402 แล้ว
+    const again = [];
+    await withTextModel(async (model) => { again.push(model); return model; });
+    assert.deepEqual(again, ['beam:cloud']);
+  } finally {
+    globalThis.fetch = realFetch;
+    delete process.env.OLLAMA_HOST;
+  }
+});
+
+test('แปลงเนื้องาน: ล้มแบบช้า/ตอบผิดรูป ลองไม่เกิน 3 ตัว', async () => {
+  const { orderTextModels } = await import('../src/core/ai-models.js');
+  const { withTextModel } = await import('../src/core/ai-models.js?slow');
+  const realFetch = globalThis.fetch;
+  const five = ['a:cloud', 'b:cloud', 'c:cloud', 'd:cloud', 'e:cloud'];
+  globalThis.fetch = async () => ({ ok: true, json: async () => ({ models: five.map((name) => ({ name })) }) });
+  process.env.OLLAMA_HOST = 'http://ai2.test';
+  try {
+    const tried = [];
+    await assert.rejects(withTextModel(async (model) => { tried.push(model); throw new Error('ollama ตอบไม่ใช่ JSON'); }));
+    assert.deepEqual(tried, orderTextModels(five, []).slice(0, 3));
+  } finally {
+    globalThis.fetch = realFetch;
+    delete process.env.OLLAMA_HOST;
+  }
+});
