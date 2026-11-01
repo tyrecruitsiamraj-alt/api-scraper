@@ -15,6 +15,7 @@ import {
   getBatchBreakSec,
   buildDailyPostPlanForUser,
   pauseUserPosting,
+  isAccountLimitedMessage,
   getFailStreakLimit,
   getPauseHours,
 } from '../src/helpers';
@@ -373,9 +374,13 @@ test('Dynamic Post: รันโพสต์ตาม Assignments', async ({ pag
           group_id: gID,
         });
         const streakLimit = getFailStreakLimit();
-        if (failStreak >= streakLimit) {
+        // Facebook บอกตรง ๆ ว่าจำกัดบัญชี = หยุดทันที ไม่ลองกลุ่มที่เหลือให้บัญชีแย่ลง
+        const accountLimited = !membershipSkip && isAccountLimitedMessage(postError);
+        if (failStreak >= streakLimit || accountLimited) {
           const pauseHours = getPauseHours();
-          const reason = `โพสต์ไม่สำเร็จติดกัน ${failStreak} กลุ่ม — circuit breaker พัก ${pauseHours} ชม. (อาจโดน Facebook จำกัดการโพสต์)`;
+          const reason = accountLimited
+            ? `Facebook จำกัดการโพสต์ของบัญชีนี้ — พัก ${pauseHours} ชม. ไม่โพสต์กลุ่มที่เหลือ`
+            : `โพสต์ไม่สำเร็จติดกัน ${failStreak} กลุ่ม — circuit breaker พัก ${pauseHours} ชม. (อาจโดน Facebook จำกัดการโพสต์)`;
           console.log(`🛑 [${userLabel}] ${reason}`);
           await runLog({ level: 'error', message: reason, user_id: user.id });
           try {

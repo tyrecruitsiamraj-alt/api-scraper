@@ -51,6 +51,14 @@ export async function buildDailyPostPlanForUser(
 }
 
 /**
+ * Facebook บอกว่าบัญชีนี้ถูกจำกัด (ไม่ใช่แค่กลุ่มนี้) — โพสต์กลุ่มถัดไปก็โดนเหมือนกันและยิ่งทำให้บัญชีแย่ลง
+ * ข้อความจริง 1 พ.ย. 2569: "เราได้จำกัดจำนวนการโพสต์ แสดงความเห็น หรือทำสิ่งอื่นๆ ของคุณเป็นระยะเวลานึงเพื่อป้องกันการสแปม"
+ */
+export function isAccountLimitedMessage(message: string | undefined): boolean {
+  return /จำกัดจำนวนการโพสต์|บล็อกชั่วคราว|limit how often|temporarily blocked|temporarily restricted/i.test(String(message || ''));
+}
+
+/**
  * circuit breaker: พักบัญชีเมื่อโพสต์ fail ติดกัน
  * เครื่อง worker ที่ไม่มี DATABASE_URL ต้องพักผ่าน API ของเซิร์ฟเวอร์ (เดิมเงียบหายไม่พักจริง)
  */

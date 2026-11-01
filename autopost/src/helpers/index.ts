@@ -23,6 +23,7 @@ export { runLog } from './runLog';
 export {
   buildDailyPostPlanForUser,
   pauseUserPosting,
+  isAccountLimitedMessage,
   getFailStreakLimit,
   getPauseHours,
 } from './postPlan';
