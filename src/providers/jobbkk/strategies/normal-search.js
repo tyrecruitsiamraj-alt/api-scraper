@@ -237,7 +237,10 @@ async function applyProvinceTree(page, aliases, report) {
       layerOpen = await layer.isVisible().catch(() => false);
     }
     debug(name, 'dropdown open:', layerOpen);
-    if (!layerOpen) break;
+    if (!layerOpen) {
+      report.provinceSeen = `กดช่องจังหวัดแล้วรายการไม่เปิด · ช่องขึ้นว่า "${await opener.inputValue().catch(() => '')}"`;
+      break;
+    }
     const search = await firstEditableLocator([layer.locator('input[placeholder]'), layer.locator('input.ant-input')]);
     debug('search box:', Boolean(search));
     if (search) {
@@ -261,6 +264,20 @@ async function applyProvinceTree(page, aliases, report) {
       }
       node = await findNode();
     }
+    if (!node) {
+      // ต้นไม้ของ JobBKK วาดเฉพาะแถวที่อยู่ในกรอบ — จังหวัดใต้ภาคที่กางแล้วอาจยังไม่ถูกวาดจนกว่าจะเลื่อนลง
+      const holder = layer.locator('.ant-tree-list-holder, .ant-tree-list, .ant-tree').first();
+      for (let i = 0; i < 30 && !node; i += 1) {
+        const moved = await holder.evaluate((el) => {
+          const before = el.scrollTop;
+          el.scrollTop = before + Math.max(80, el.clientHeight - 40);
+          return el.scrollTop > before;
+        }).catch(() => false);
+        if (!moved) break;
+        await sleep(150);
+        node = await findNode();
+      }
+    }
     debug('tree node:', Boolean(node));
     let checked = false;
     if (node) {
@@ -274,8 +291,10 @@ async function applyProvinceTree(page, aliases, report) {
       debug('checked:', checked);
     }
     // จดสิ่งที่เห็นในรายการไว้ในข้อความ error ถ้าเลือกไม่ติด — ครั้งหน้าดูจากบันทึกรอบได้เลยว่าหน้าเว็บเปลี่ยนตรงไหน
-    const seenTitles = (await layer.locator('.ant-tree-title').allTextContents().catch(() => []))
-      .map((t) => t.replace(/\s+/g, ' ').trim()).filter(Boolean).slice(0, 8);
+    const allTitles = (await layer.locator('.ant-tree-title').allTextContents().catch(() => []))
+      .map((t) => t.replace(/\s+/g, ' ').trim()).filter(Boolean);
+    const near = allTitles.filter((t) => t.includes(name) || name.includes(t.replace(/^(?:จ\.|จังหวัด)\s*/u, '').replace(/\s*\(.*$/u, '')));
+    const seenTitles = [...new Set([...near, ...allTitles.slice(-6)])].slice(0, 10);
     await closeOpenLayer(page);
     await page.keyboard.press('Escape').catch(() => {});
     await layer.waitFor({ state: 'hidden', timeout: 2_000 }).catch(() => {});
@@ -286,10 +305,26 @@ async function applyProvinceTree(page, aliases, report) {
       report.applied.push('province');
       return true;
     }
-    report.provinceSeen = `ค้น "${name}" · เจอในรายการ: ${seenTitles.join(', ') || 'ไม่มี'} · ช่องจังหวัดขึ้นว่า "${shown}"`;
+    report.provinceSeen = `ค้น "${name}" · ช่องค้น${search ? 'มี' : 'ไม่มี'} · ในรายการ ${allTitles.length} แถว เช่น ${seenTitles.join(', ') || 'ไม่มี'} · ชื่อตรง${node ? 'เจอ' : 'ไม่เจอ'} ติ๊ก${checked ? 'ติด' : 'ไม่ติด'} · ช่องจังหวัดขึ้นว่า "${shown}"`;
   }
   report.skipped.push('province');
   return false;
+}
+
+/** ช่องกรอก/ป้ายที่เกี่ยวกับสถานที่ที่เห็นบนหน้า (ข้อความหน้าเว็บ ไม่มีข้อมูลผู้สมัคร) ไว้แก้ตัวเลือกเมื่อ JobBKK เปลี่ยนหน้า */
+async function describeLocationControls(page) {
+  const seen = await page.evaluate(() => {
+    const visible = (el) => Boolean(el.offsetWidth || el.offsetHeight || el.getClientRects().length);
+    const inputs = [...document.querySelectorAll('input')].filter(visible)
+      .map((el) => [el.name && `name=${el.name}`, el.id && `id=${el.id}`, el.placeholder && `"${el.placeholder}"`].filter(Boolean).join(' '))
+      .filter((text) => /province|location|area|จังหวัด|สถานที่|พื้นที่/i.test(text));
+    const labels = [...document.querySelectorAll('label, span, div')].filter(visible)
+      .filter((el) => el.children.length === 0)
+      .map((el) => el.textContent.replace(/\s+/g, ' ').trim())
+      .filter((text) => text.length <= 40 && /จังหวัด|สถานที่|พื้นที่/.test(text));
+    return { inputs: [...new Set(inputs)].slice(0, 5), labels: [...new Set(labels)].slice(0, 6) };
+  }).catch(() => ({ inputs: [], labels: [] }));
+  return `ช่องที่เห็น: ${seen.inputs.join(', ') || 'ไม่มี'} · ป้ายที่เห็น: ${seen.labels.join(', ') || 'ไม่มี'}`;
 }
 
 /** ชื่อจังหวัดในต้นไม้ของ JobBKK อาจมี "จ." / "จังหวัด" นำหน้า หรือจำนวนต่อท้าย เช่น "สมุทรปราการ (12)" */
@@ -375,6 +410,9 @@ async function applyPlannedFilter(page, step, report) {
       }
       if (!report.applied.includes('province') && !report.skipped.includes('province')) {
         report.skipped.push('province');
+      }
+      if (!report.applied.includes('province') && !report.provinceSeen) {
+        report.provinceSeen = `ไม่เจอช่องจังหวัดแบบเดิม · ${await describeLocationControls(page)}`;
       }
       return;
     }
