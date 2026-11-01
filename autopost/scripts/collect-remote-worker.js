@@ -83,7 +83,19 @@ async function callApi(pathname, body) {
   });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.error || `${pathname} ${res.status}`);
+  markAlive();
   return data;
+}
+
+/** ตัวเฝ้าบนแผงสวิตช์ดูเวลาไฟล์นี้ — คุยกับเซิร์ฟเวอร์ไม่ได้เกิน 10 นาที = ปิดเปิดใหม่ (ตั้ง WORKER_ALIVE_DIR ใน launcher) */
+function markAlive() {
+  const dir = process.env.WORKER_ALIVE_DIR;
+  if (!dir) return;
+  try {
+    require('fs').writeFileSync(require('path').join(dir, 'alive-collect.txt'), new Date().toISOString());
+  } catch {
+    // ตัวเฝ้าเห็นว่าเงียบเอง
+  }
 }
 
 function formatDateByTz(d, timeZone) {

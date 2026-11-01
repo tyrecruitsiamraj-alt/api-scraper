@@ -51,6 +51,8 @@ $Patterns = @{
   Autopost = @('post-remote-worker-supervisor\.js', 'post-remote-worker\.js', 'npm.*worker:post', 'start-autopost\.cmd', 'collect-remote-worker\.js', 'npm.*worker:collect', 'start-collect\.cmd')
   # ตัวเก็บ/ตอบคอมเมนต์ เปิด-ปิดพร้อมสวิตช์ Autopost (ปิดอยู่ในกลุ่ม Autopost ด้านบน)
   Collect  = @('collect-remote-worker\.js', 'npm.*worker:collect', 'start-collect\.cmd')
+  # ตัวโพสต์อย่างเดียว ให้ตัวเฝ้าเปิดใหม่ได้โดยไม่ตัดงานเก็บคอมเมนต์
+  Post     = @('post-remote-worker-supervisor\.js', 'post-remote-worker\.js', 'npm.*worker:post', 'start-autopost\.cmd')
 }
 
 function Get-MatchingProcesses([string[]]$Patterns) {
@@ -85,6 +87,10 @@ function Stop-WorkerGroup([string]$Group) {
   if ($Group -eq 'Scrape') {
     & taskkill.exe /F /T /FI "WINDOWTITLE eq SO Scraper Pool*" 2>$null | Out-Null
     & taskkill.exe /F /T /FI "WINDOWTITLE eq SO Hidden Scrape*" 2>$null | Out-Null
+  } elseif ($Group -eq 'Post') {
+    & taskkill.exe /F /T /FI "WINDOWTITLE eq SO AutoPost Worker (worker:post)*" 2>$null | Out-Null
+  } elseif ($Group -eq 'Collect') {
+    & taskkill.exe /F /T /FI "WINDOWTITLE eq SO AutoPost Worker (worker:collect)*" 2>$null | Out-Null
   } else {
     & taskkill.exe /F /T /FI "WINDOWTITLE eq SO AutoPost Worker*" 2>$null | Out-Null
     & taskkill.exe /F /T /FI "WINDOWTITLE eq SO Hidden Autopost*" 2>$null | Out-Null
@@ -229,7 +235,7 @@ function Wait-WorkerStarted([string]$Group, [int]$TimeoutSec = 20) {
 
 # เปิดแบบเดียวกับ start-workers-legacy.bat ที่เคยใช้ได้จริง
 # ใช้หน้าต่าง cmd ย่อ (Minimized) + npm run - ไม่ซ่อนแบบ CreateNoWindow ที่พังบนเครื่องนี้
-function Start-WorkerWindow([string]$Title, [string]$WorkDir, [string]$NpmScript, [string]$Group) {
+function Start-WorkerWindow([string]$Title, [string]$WorkDir, [string]$NpmScript, [string]$Group, [string]$WaitGroup = $Group) {
   if (-not (Test-Path -LiteralPath $WorkDir)) {
     throw "ไม่พบโฟลเดอร์งาน: $WorkDir"
   }
@@ -255,6 +261,8 @@ function Start-WorkerWindow([string]$Title, [string]$WorkDir, [string]$NpmScript
     "cd /d `"$WorkDir`""
     "set `"PATH=$nodeDir;$npmDir;%PATH%`""
     "set WORKER_BUILD_SHA=$sha"
+    # worker เขียน alive-*.txt ที่นี่ทุกครั้งที่คุยกับเซิร์ฟเวอร์ได้ ให้ตัวเฝ้าดู
+    "set `"WORKER_ALIVE_DIR=$LogDir`""
     'set WORKER_CAPABILITIES=post,preflight'
     'set AUTO_POST_DAILY_ENABLED=0'
     'set AUTO_COLLECT_ENABLED=1'
@@ -288,7 +296,7 @@ function Start-WorkerWindow([string]$Title, [string]$WorkDir, [string]$NpmScript
     throw "สั่งเปิดหน้าต่าง $Title ไม่สำเร็จ"
   }
 
-  if (-not (Wait-WorkerStarted -Group $Group -TimeoutSec 20)) {
+  if (-not (Wait-WorkerStarted -Group $WaitGroup -TimeoutSec 20)) {
     throw @"
 เปิด $Title ไม่สำเร็จภายใน 20 วินาที
 npm: $npm
@@ -315,16 +323,89 @@ function Start-ScrapeWorker {
     try { $footer.Text = "ดึงโค้ดไม่สำเร็จ เปิดด้วยของเดิม: $($_.Exception.Message)" } catch { }
   }
   Start-WorkerWindow -Title 'SO Scraper Pool (auto-scale)' -WorkDir $Root -NpmScript 'scraper:pool' -Group 'Scrape'
+  $script:WatchSince['scrape'] = Get-Date
+}
+
+function Start-PostWorker {
+  Start-WorkerWindow -Title 'SO AutoPost Worker (worker:post)' -WorkDir (Join-Path $Root 'autopost') -NpmScript 'worker:post' -Group 'Autopost' -WaitGroup 'Post'
+  $script:WatchSince['post'] = Get-Date
+}
+
+function Start-CollectWorker {
+  # เก็บคอมเมนต์ทุก 2 ชม. + ตอบตามแม่แบบ (ชื่อหน้าต่างขึ้นต้น SO AutoPost Worker ให้ปิดพร้อมกัน)
+  Start-WorkerWindow -Title 'SO AutoPost Worker (worker:collect)' -WorkDir (Join-Path $Root 'autopost') -NpmScript 'worker:collect' -Group 'Collect'
+  $script:WatchSince['collect'] = Get-Date
 }
 
 function Start-AutopostWorker {
-  $autopost = Join-Path $Root 'autopost'
-  Start-WorkerWindow -Title 'SO AutoPost Worker (worker:post)' -WorkDir $autopost -NpmScript 'worker:post' -Group 'Autopost'
-  # เก็บคอมเมนต์ทุก 2 ชม. + ตอบตามแม่แบบ (ชื่อหน้าต่างขึ้นต้น SO AutoPost Worker ให้ปิดพร้อมกัน)
+  Start-PostWorker
   try {
-    Start-WorkerWindow -Title 'SO AutoPost Worker (worker:collect)' -WorkDir $autopost -NpmScript 'worker:collect' -Group 'Collect'
+    Start-CollectWorker
   } catch {
     try { $footer.Text = "เปิดตัวเก็บคอมเมนต์ไม่สำเร็จ: $($_.Exception.Message)" } catch { }
+  }
+}
+
+# ตัวเฝ้า: worker เขียน alive-*.txt ทุกครั้งที่คุยกับเซิร์ฟเวอร์ได้
+# สวิตช์เปิดอยู่แต่ไฟล์ไม่ขยับเกิน 10 นาที = ค้างเงียบ (เคยเกิดหลังอัปเดตโค้ด 30 ต.ค. 2569) → ปิดแล้วเปิดใหม่เอง
+$WatchStaleMinutes = 10
+$WatchSince = @{ scrape = Get-Date; post = Get-Date; collect = Get-Date }
+$WatchNote = ''
+$LastWatch = Get-Date
+$WatchUnits = @(
+  @{ Unit = 'scrape'; Group = 'Scrape'; Label = 'Scrap' }
+  @{ Unit = 'post'; Group = 'Post'; Label = 'Autopost' }
+  @{ Unit = 'collect'; Group = 'Collect'; Label = 'ตัวเก็บคอมเมนต์' }
+)
+
+function Get-SilentMinutes([string]$Unit) {
+  $since = $script:WatchSince[$Unit]
+  $alive = Join-Path $LogDir "alive-$Unit.txt"
+  if (Test-Path -LiteralPath $alive) {
+    $seen = (Get-Item -LiteralPath $alive).LastWriteTime
+    if ($seen -gt $since) { $since = $seen }
+  }
+  return [int][Math]::Floor(((Get-Date) - $since).TotalMinutes)
+}
+
+function Restart-SilentWorker($Item, [int]$Minutes) {
+  $watchLog = Join-Path $LogDir 'watchdog.log'
+  $stamp = Get-Date -Format 'yyyy-MM-dd HH:mm:ss'
+  Add-Content -Path $watchLog -Value "$stamp $($Item.Label) เงียบ $Minutes นาที - ปิดแล้วเปิดใหม่" -Encoding UTF8
+  Set-Busy $true
+  try {
+    $footer.Text = "$($Item.Label) เงียบ $Minutes นาที - กำลังเปิดใหม่..."
+    [System.Windows.Forms.Application]::DoEvents()
+    Stop-WorkerGroup $Item.Group | Out-Null
+    Start-Sleep -Milliseconds 800
+    switch ($Item.Unit) {
+      'scrape' { Start-ScrapeWorker }
+      'post' { Start-PostWorker }
+      'collect' { Start-CollectWorker }
+    }
+    $script:WatchNote = "$(Get-Date -Format 'HH:mm') เปิด $($Item.Label) ใหม่เอง (เงียบ $Minutes นาที)"
+  } catch {
+    # เปิดไม่ขึ้นก็นับเวลาใหม่ ไม่ปิดเปิดรัวทุกนาที
+    $script:WatchSince[$Item.Unit] = Get-Date
+    $script:WatchNote = "$(Get-Date -Format 'HH:mm') เปิด $($Item.Label) ใหม่ไม่สำเร็จ ดู watchdog.log"
+    Add-Content -Path $watchLog -Value "$stamp $($Item.Label) เปิดใหม่ไม่สำเร็จ: $($_.Exception.Message)" -Encoding UTF8
+  } finally {
+    Set-Busy $false
+  }
+}
+
+function Invoke-Watchdog {
+  if ($busy) { return }
+  if (((Get-Date) - $script:LastWatch).TotalSeconds -lt 60) { return }
+  $script:LastWatch = Get-Date
+  foreach ($item in $WatchUnits) {
+    if (-not (Test-WorkerRunning $item.Group)) {
+      # สวิตช์ปิดอยู่: เริ่มนับใหม่ตอนเปิด
+      $script:WatchSince[$item.Unit] = Get-Date
+      continue
+    }
+    $minutes = Get-SilentMinutes $item.Unit
+    if ($minutes -ge $WatchStaleMinutes) { Restart-SilentWorker $item $minutes }
   }
 }
 
@@ -548,6 +629,7 @@ function Refresh-Status {
     Update-ToggleVisual $scrapeRow (Test-WorkerRunning 'Scrape')
     Update-ToggleVisual $autoRow (Test-WorkerRunning 'Autopost')
     $footer.Text = "โค้ด: $(Get-WorkerBuildSha)  |  log: output\worker-logs"
+    if ($WatchNote) { $footer.Text += "`n$WatchNote" }
   } catch {
     $footer.Text = "ตรวจสถานะไม่ได้: $($_.Exception.Message)"
   }
@@ -660,7 +742,10 @@ $refreshBtn.Add_Click({ Refresh-Status })
 
 $timer = New-Object System.Windows.Forms.Timer
 $timer.Interval = 4000
-$timer.Add_Tick({ Refresh-Status })
+$timer.Add_Tick({
+  Refresh-Status
+  try { Invoke-Watchdog } catch { }
+})
 $timer.Start()
 
 $form.Add_Shown({

@@ -70,6 +70,13 @@ function touchProcessLock() {
   } catch { /* the DB lease remains the source of truth for individual jobs */ }
 }
 
+// ตัวเฝ้าบนแผงสวิตช์ดูเวลาไฟล์นี้ — คุยกับฐานไม่ได้เกิน 10 นาที = ปิดเปิด Scrap ใหม่ (ตั้ง WORKER_ALIVE_DIR ใน launcher)
+function markAlive() {
+  const dir = process.env.WORKER_ALIVE_DIR;
+  if (!dir) return;
+  try { writeFileSync(resolve(dir, 'alive-scrape.txt'), new Date().toISOString()); } catch { /* ตัวเฝ้าเห็นว่าเงียบเอง */ }
+}
+
 function acquireProcessLock() {
   mkdirSync(dirname(PROCESS_LOCK_PATH), { recursive: true });
   if (existsSync(PROCESS_LOCK_PATH)) {
@@ -129,6 +136,7 @@ async function heartbeat() {
          )`,
       [WORKER_NAME, JSON.stringify(meta), String(process.pid), WORKER_ID],
     );
+    markAlive();
   } catch (e) {
     console.warn(`  [heartbeat] เขียนไม่ได้: ${e.message}`);
   }
@@ -290,6 +298,7 @@ async function renewLease(id) {
     [id, WORKER_ID],
   );
   if (!rowCount) throw new Error(`queue lease lost: ${id}`);
+  markAlive();
 }
 
 async function runWithLease(job, handler) {
