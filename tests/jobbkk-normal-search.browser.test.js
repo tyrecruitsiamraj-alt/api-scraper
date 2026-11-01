@@ -127,3 +127,64 @@ test('Talent Normal Search fills every requested filter then reads a Resume ID',
   assert.equal(result.latest.method, 'talent_sort_label');
   assert.equal(result.strategy, 'normal');
 });
+
+// Live JobBKK (1 Nov 2026): the province tree draws only the ~10 rows in view.
+// Provinces outside Bangkok sit under a closed region; after expanding it the
+// wanted province is still below the fold until the inner list scrolls.
+const VIRTUAL_TREE = `<div class="ant-dropdown" id="province-dropdown" style="display:none">
+    <input placeholder="สถานที่ทำงานทั้งหมด" class="ant-input" />
+    <div class="ant-tree"><div class="ant-tree-list">
+      <div class="ant-tree-list-holder" id="holder" style="height:240px;overflow-y:auto">
+        <div id="spacer" style="position:relative"><div id="rows" style="position:absolute;left:0;right:0"></div></div>
+      </div>
+    </div></div>
+  </div>`;
+const VIRTUAL_TREE_SCRIPT = `
+    const ROW = 24;
+    const nearBangkok = ['กรุงเทพและปริมณฑล', 'กรุงเทพมหานคร', 'นครปฐม', 'นนทบุรี', 'ปทุมธานี', 'สมุทรปราการ', 'สมุทรสาคร'];
+    const central = ['กำแพงเพชร', 'ชัยนาท', 'นครนายก', 'นครสวรรค์', 'ลพบุรี', 'สระบุรี', 'สิงห์บุรี', 'อ่างทอง',
+      'อุทัยธานี', 'เพชรบูรณ์', 'พิจิตร', 'พิษณุโลก', 'สุโขทัย', 'อุตรดิตถ์', 'พระนครศรีอยุธยา'];
+    let expanded = false;
+    const holder = document.getElementById('holder');
+    function render() {
+      const names = expanded ? [...nearBangkok, 'ภาคกลาง', ...central] : [...nearBangkok, 'ภาคกลาง'];
+      document.getElementById('spacer').style.height = names.length * ROW + 'px';
+      const start = Math.floor(holder.scrollTop / ROW);
+      const rows = document.getElementById('rows');
+      rows.style.top = start * ROW + 'px';
+      rows.innerHTML = names.slice(start, start + 10).map((name) => {
+        const switcher = name === 'ภาคกลาง'
+          ? '<span class="ant-tree-switcher ant-tree-switcher_' + (expanded ? 'open' : 'close') + '" style="display:inline-block;width:12px;height:12px">▸</span>'
+          : '';
+        return '<div role="treeitem" class="ant-tree-treenode" style="height:' + ROW + 'px">' + switcher
+          + '<span class="ant-tree-checkbox" role="checkbox" aria-checked="false" style="display:inline-block;width:16px;height:16px;border:1px solid"></span>'
+          + '<span class="ant-tree-title">' + name + '</span></div>';
+      }).join('');
+    }
+    holder.addEventListener('scroll', render);
+    document.getElementById('rows').addEventListener('click', (event) => {
+      if (event.target.classList.contains('ant-tree-switcher_close')) { expanded = true; render(); return; }
+      if (!event.target.classList.contains('ant-tree-checkbox')) return;
+      event.target.setAttribute('aria-checked', 'true');
+      const name = event.target.parentElement.querySelector('.ant-tree-title').textContent;
+      document.getElementById('province').value = name + ' ทั้งหมด';
+    });
+    render();`;
+
+test('Province under a closed region is found by scrolling the drawn-in-view tree', async (t) => {
+  const fixture = FIXTURE
+    .replace(/<div class="ant-dropdown" id="province-dropdown"[\s\S]*?<\/div>\n  <\/div>/, VIRTUAL_TREE)
+    .replace(/document\.querySelector\('#province-dropdown \.ant-tree-checkbox'\)[\s\S]*?\}\);\n/, VIRTUAL_TREE_SCRIPT + '\n');
+  assert.ok(fixture.includes('id="holder"') && fixture.includes('const central'), 'fixture rewrite applied');
+  const browser = await chromium.launch({ headless: true });
+  t.after(async () => {
+    await browser.close().catch(() => {});
+  });
+  const page = await browser.newPage();
+  await page.setContent(fixture, { waitUntil: 'domcontentloaded' });
+
+  const result = await runNormalSearch(page, { position: 'เจ้าหน้าที่ IT', province: 'พระนครศรีอยุธยา', maxCandidates: 5 }, { need: 5 });
+
+  assert.ok(result.report.applied.includes('province'), result.report.provinceSeen);
+  assert.equal(await page.inputValue('#province'), 'พระนครศรีอยุธยา ทั้งหมด');
+});

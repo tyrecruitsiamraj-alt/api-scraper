@@ -266,12 +266,17 @@ async function applyProvinceTree(page, aliases, report) {
     }
     if (!node) {
       // ต้นไม้ของ JobBKK วาดเฉพาะแถวที่อยู่ในกรอบ — จังหวัดใต้ภาคที่กางแล้วอาจยังไม่ถูกวาดจนกว่าจะเลื่อนลง
-      const holder = layer.locator('.ant-tree-list-holder, .ant-tree-list, .ant-tree').first();
+      // เลื่อนกล่องที่เลื่อนได้จริง (ไม่ใช่กล่องนอกสุดที่เจอก่อน) — เลือกตัวที่เนื้อหายาวกว่ากรอบ
       for (let i = 0; i < 30 && !node; i += 1) {
-        const moved = await holder.evaluate((el) => {
-          const before = el.scrollTop;
-          el.scrollTop = before + Math.max(80, el.clientHeight - 40);
-          return el.scrollTop > before;
+        const moved = await layer.evaluate((root) => {
+          const boxes = [root, ...root.querySelectorAll('*')]
+            .filter((el) => el.scrollHeight > el.clientHeight + 5 && /auto|scroll/.test(getComputedStyle(el).overflowY));
+          const box = boxes.find((el) => el.querySelector('.ant-tree-treenode, [role="treeitem"]')) || boxes[0];
+          if (!box) return false;
+          const before = box.scrollTop;
+          box.scrollTop = before + Math.max(80, box.clientHeight - 40);
+          box.dispatchEvent(new Event('scroll', { bubbles: true }));
+          return box.scrollTop > before;
         }).catch(() => false);
         if (!moved) break;
         await sleep(150);
