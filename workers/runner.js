@@ -457,7 +457,7 @@ async function runOne() {
     await finish(job.id, status, detail);
     console.log(`  ✓ done: ${JSON.stringify(r).slice(0, 200)}`);
   } catch (e) {
-    const errMsg = String(e?.message ?? e).slice(0, 500);
+    const errMsg = String(e?.message ?? e).slice(0, 1500);
     const retryAt = e?.retryAt instanceof Date && !Number.isNaN(e.retryAt.getTime()) ? e.retryAt : null;
     const retrying = await retryOrFail(job, errMsg, retryAt);
     console.error(`  ✗ ${retrying ? 'retry scheduled' : 'error'}: ${e?.message ?? e}`);

@@ -425,7 +425,7 @@ export async function runTask(t, runtime) {
     // An unexpected provider/browser/network exception used to leave the task
     // permanently "running". The queue would retry, fail to claim the task,
     // and eventually surface task_already_running even though no work remained.
-    const message = String(error?.message ?? error).slice(0, 500);
+    const message = String(error?.message ?? error).slice(0, 1500);
     await finishTask(t.id, {
       status: 'error',
       phase: 'error',

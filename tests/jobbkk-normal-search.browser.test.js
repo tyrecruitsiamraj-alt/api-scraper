@@ -134,7 +134,7 @@ test('Talent Normal Search fills every requested filter then reads a Resume ID',
 const VIRTUAL_TREE = `<div class="ant-dropdown" id="province-dropdown" style="display:none">
     <input placeholder="สถานที่ทำงานทั้งหมด" class="ant-input" />
     <div class="ant-tree"><div class="ant-tree-list">
-      <div class="ant-tree-list-holder" id="holder" style="height:240px;overflow-y:auto">
+      <div class="ant-tree-list-holder" id="holder" style="height:240px;overflow-y:hidden">
         <div id="spacer" style="position:relative"><div id="rows" style="position:absolute;left:0;right:0"></div></div>
       </div>
     </div></div>
@@ -187,4 +187,24 @@ test('Province under a closed region is found by scrolling the drawn-in-view tre
 
   assert.ok(result.report.applied.includes('province'), result.report.provinceSeen);
   assert.equal(await page.inputValue('#province'), 'พระนครศรีอยุธยา ทั้งหมด');
+});
+
+test('Province not in the tree records how the dropdown is built', async (t) => {
+  const fixture = FIXTURE
+    .replace(/<div class="ant-dropdown" id="province-dropdown"[\s\S]*?<\/div>\n  <\/div>/, VIRTUAL_TREE)
+    .replace(/document\.querySelector\('#province-dropdown \.ant-tree-checkbox'\)[\s\S]*?\}\);\n/, VIRTUAL_TREE_SCRIPT + '\n');
+  const browser = await chromium.launch({ headless: true });
+  t.after(async () => {
+    await browser.close().catch(() => {});
+  });
+  const page = await browser.newPage();
+  await page.setContent(fixture, { waitUntil: 'domcontentloaded' });
+
+  await assert.rejects(
+    runNormalSearch(page, { position: 'เจ้าหน้าที่ IT', province: 'บึงกาฬ', maxCandidates: 5 }, { need: 5 }),
+    (error) => {
+      assert.match(error.message, /เลื่อน \d+\/\d+ ครั้ง · โครงรายการ: ช่องค้น .* · แถว 10 .*virtual มี.*กล่อง div\.ant-tree-list-holder hidden \d+\/\d+/);
+      return true;
+    },
+  );
 });

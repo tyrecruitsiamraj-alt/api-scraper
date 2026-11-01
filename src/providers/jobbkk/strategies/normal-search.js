@@ -254,6 +254,8 @@ async function applyProvinceTree(page, aliases, report) {
       }),
     ]);
     let node = await findNode();
+    let scrollTries = 0;
+    let scrollMoves = 0;
     if (!node) {
       // จังหวัดนอกกรุงเทพอาจซ่อนอยู่ใต้ภาค (กิ่งปิด) — กางกิ่งที่ปิดอยู่แล้วหาใหม่
       for (let i = 0; i < 12; i += 1) {
@@ -266,12 +268,14 @@ async function applyProvinceTree(page, aliases, report) {
     }
     if (!node) {
       // ต้นไม้ของ JobBKK วาดเฉพาะแถวที่อยู่ในกรอบ — จังหวัดใต้ภาคที่กางแล้วอาจยังไม่ถูกวาดจนกว่าจะเลื่อนลง
-      // เลื่อนกล่องที่เลื่อนได้จริง (ไม่ใช่กล่องนอกสุดที่เจอก่อน) — เลือกตัวที่เนื้อหายาวกว่ากรอบ
+      // หน้าจริง (1 พ.ย. 2569): กล่องที่เลื่อนคือ .ant-tree-list-holder ตั้ง overflow hidden (ใช้แถบเลื่อนของตัวเอง)
+      // ห้ามกรองด้วย overflow auto/scroll — ตั้ง scrollTop ตรงแล้วส่ง scroll event ต้นไม้วาดแถวถัดไปให้เอง
       for (let i = 0; i < 30 && !node; i += 1) {
+        scrollTries += 1;
         const moved = await layer.evaluate((root) => {
-          const boxes = [root, ...root.querySelectorAll('*')]
-            .filter((el) => el.scrollHeight > el.clientHeight + 5 && /auto|scroll/.test(getComputedStyle(el).overflowY));
-          const box = boxes.find((el) => el.querySelector('.ant-tree-treenode, [role="treeitem"]')) || boxes[0];
+          const boxes = [root, ...root.querySelectorAll('*')].filter((el) => el.scrollHeight > el.clientHeight + 5);
+          const box = root.querySelector('.ant-tree-list-holder')
+            || boxes.find((el) => el.querySelector('.ant-tree-treenode, [role="treeitem"]')) || boxes[0];
           if (!box) return false;
           const before = box.scrollTop;
           box.scrollTop = before + Math.max(80, box.clientHeight - 40);
@@ -279,6 +283,7 @@ async function applyProvinceTree(page, aliases, report) {
           return box.scrollTop > before;
         }).catch(() => false);
         if (!moved) break;
+        scrollMoves += 1;
         await sleep(150);
         node = await findNode();
       }
@@ -300,6 +305,7 @@ async function applyProvinceTree(page, aliases, report) {
       .map((t) => t.replace(/\s+/g, ' ').trim()).filter(Boolean);
     const near = allTitles.filter((t) => t.includes(name) || name.includes(t.replace(/^(?:จ\.|จังหวัด)\s*/u, '').replace(/\s*\(.*$/u, '')));
     const seenTitles = [...new Set([...near, ...allTitles.slice(-6)])].slice(0, 10);
+    const layout = node ? '' : await describeProvinceLayer(layer, search);
     await closeOpenLayer(page);
     await page.keyboard.press('Escape').catch(() => {});
     await layer.waitFor({ state: 'hidden', timeout: 2_000 }).catch(() => {});
@@ -310,10 +316,48 @@ async function applyProvinceTree(page, aliases, report) {
       report.applied.push('province');
       return true;
     }
-    report.provinceSeen = `ค้น "${name}" · ช่องค้น${search ? 'มี' : 'ไม่มี'} · ในรายการ ${allTitles.length} แถว เช่น ${seenTitles.join(', ') || 'ไม่มี'} · ชื่อตรง${node ? 'เจอ' : 'ไม่เจอ'} ติ๊ก${checked ? 'ติด' : 'ไม่ติด'} · ช่องจังหวัดขึ้นว่า "${shown}"`;
+    report.provinceSeen = `ค้น "${name}" · ช่องค้น${search ? 'มี' : 'ไม่มี'} · ในรายการ ${allTitles.length} แถว เช่น ${seenTitles.join(', ') || 'ไม่มี'} · ชื่อตรง${node ? 'เจอ' : 'ไม่เจอ'} ติ๊ก${checked ? 'ติด' : 'ไม่ติด'} · ช่องจังหวัดขึ้นว่า "${shown}"${node ? '' : ` · เลื่อน ${scrollMoves}/${scrollTries} ครั้ง · โครงรายการ: ${layout}`}`;
   }
   report.skipped.push('province');
   return false;
+}
+
+/**
+ * โครงของกล่องรายการจังหวัดตอนหาไม่เจอ (คลาส ขนาดที่เลื่อนได้ ตัวกางกิ่ง) — มีแต่ชื่อจังหวัด/ภาค ไม่มีข้อมูลผู้สมัคร
+ * ไว้ดูจากบันทึกรอบว่าต้นไม้ของ JobBKK เลื่อนด้วยกล่องไหน โดยไม่ต้องเปิดหน้าเว็บเอง
+ */
+async function describeProvinceLayer(layer, search) {
+  const seen = await layer.evaluate((root) => {
+    const name = (el) => `${el.tagName.toLowerCase()}${[...el.classList].slice(0, 3).map((c) => `.${c}`).join('')}`;
+    const boxes = [root, ...root.querySelectorAll('*')]
+      .filter((el) => el.scrollHeight > el.clientHeight + 5 || /auto|scroll/.test(getComputedStyle(el).overflowY))
+      .slice(0, 5)
+      .map((el) => `${name(el)} ${getComputedStyle(el).overflowY} ${el.scrollHeight}/${el.clientHeight} บน=${Math.round(el.scrollTop)}`);
+    const rows = [...root.querySelectorAll('.ant-tree-treenode')];
+    const rowText = (el) => (el.querySelector('.ant-tree-title')?.textContent || '').replace(/\s+/g, ' ').trim();
+    return {
+      boxes,
+      rows: rows.length,
+      first: rows[0] ? rowText(rows[0]) : '',
+      last: rows.length ? rowText(rows[rows.length - 1]) : '',
+      closed: root.querySelectorAll('.ant-tree-switcher_close').length,
+      open: [...root.querySelectorAll('.ant-tree-switcher_open')]
+        .map((sw) => rowText(sw.closest('.ant-tree-treenode') || sw)).filter(Boolean).slice(0, 6),
+      virtual: Boolean(root.querySelector('.rc-virtual-list, .ant-tree-list-holder')),
+      scrollbar: Boolean(root.querySelector('.rc-virtual-list-scrollbar, .ant-tree-list-scrollbar')),
+    };
+  }).catch((error) => ({ error: String(error?.message || error).slice(0, 80) }));
+  if (seen.error) return `อ่านไม่ได้ (${seen.error})`;
+  const typed = search
+    ? `ช่องค้น "${await search.getAttribute('placeholder').catch(() => '')}" ค่า "${await search.inputValue().catch(() => '')}"`
+    : 'ไม่มีช่องค้น';
+  return [
+    typed,
+    `แถว ${seen.rows} (${seen.first} → ${seen.last})`,
+    `กิ่งปิด ${seen.closed} กิ่งเปิด ${seen.open.join('/') || 'ไม่มี'}`,
+    `virtual ${seen.virtual ? 'มี' : 'ไม่มี'} แถบเลื่อน ${seen.scrollbar ? 'มี' : 'ไม่มี'}`,
+    `กล่อง ${seen.boxes.join(' | ') || 'ไม่มี'}`,
+  ].join(' · ');
 }
 
 /** ช่องกรอก/ป้ายที่เกี่ยวกับสถานที่ที่เห็นบนหน้า (ข้อความหน้าเว็บ ไม่มีข้อมูลผู้สมัคร) ไว้แก้ตัวเลือกเมื่อ JobBKK เปลี่ยนหน้า */
