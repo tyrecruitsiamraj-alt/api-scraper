@@ -1,7 +1,9 @@
 import Link from 'next/link';
 import { ExternalLinkIcon } from 'lucide-react';
-import { createGroupAction, deleteGroupAction, setAccountGroupsAction } from '@/lib/actions';
+import { createGroupAction, deleteGroupAction, setAccountGroupsAction, setGroupDepartmentAction } from '@/lib/actions';
 import { listPostingGroups, listFbAccountsWithGroups } from '@/lib/repo';
+import { businessUnitLabel } from '@/lib/business-units';
+import { GroupBusinessSelect } from '@/components/GroupBusinessSelect';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -109,7 +111,7 @@ export async function PostingGroupsManager() {
           <CardContent>
             <form action={createGroupAction}>
               <FieldGroup>
-                <div className="grid gap-4 sm:grid-cols-[2fr_1.5fr_1fr_auto] sm:items-end">
+                <div className="grid gap-4 sm:grid-cols-[2fr_1.5fr_1fr_1fr_auto] sm:items-end">
                   <Field>
                     <FieldLabel htmlFor="new-group-id">ลิงก์กลุ่ม หรือ ID กลุ่ม</FieldLabel>
                     <Input
@@ -127,6 +129,10 @@ export async function PostingGroupsManager() {
                     <FieldLabel htmlFor="new-group-province">จังหวัด (ไม่บังคับ)</FieldLabel>
                     <Input id="new-group-province" name="province" placeholder="กรุงเทพ" />
                   </Field>
+                  <Field>
+                    <FieldLabel htmlFor="new-group-department">ธุรกิจ</FieldLabel>
+                    <GroupBusinessSelect id="new-group-department" name="department" defaultValue={null} />
+                  </Field>
                   <Button>เพิ่มกลุ่ม</Button>
                 </div>
               </FieldGroup>
@@ -143,10 +149,19 @@ export async function PostingGroupsManager() {
                   <ItemDescription>
                     <span className="font-mono">{group.fb_group_id}</span>
                     {group.province ? ` · ${group.province}` : ''}
-                    {group.department ? ` · ${group.department}` : ''}
+                    {` · ${businessUnitLabel(group.department) ?? 'ไม่ระบุธุรกิจ'}`}
                   </ItemDescription>
                 </ItemContent>
                 <ItemActions>
+                  <form action={setGroupDepartmentAction} className="w-36">
+                    <input type="hidden" name="id" value={group.id} />
+                    <GroupBusinessSelect
+                      name="department"
+                      defaultValue={group.department}
+                      ariaLabel={`ธุรกิจของกลุ่ม ${group.name}`}
+                      submitOnChange
+                    />
+                  </form>
                   <Button asChild variant="ghost" size="sm">
                     <a href={`https://www.facebook.com/groups/${group.fb_group_id}`} target="_blank" rel="noreferrer">
                       เปิด

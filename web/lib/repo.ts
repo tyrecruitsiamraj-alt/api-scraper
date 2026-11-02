@@ -4067,6 +4067,11 @@ export async function createPostingGroup(input: {
   return id;
 }
 
+/** ติดป้ายว่ากลุ่มนี้เป็นของธุรกิจไหน (LBD/LBA/LM…) — null = ไม่ระบุ */
+export async function setPostingGroupDepartment(id: string, department: string | null): Promise<void> {
+  await q(`UPDATE ${AP}.groups SET department = $2 WHERE id = $1`, [id, department]);
+}
+
 /** ลบกลุ่ม + ถอดกลุ่มนั้นออกจากทุกบัญชีที่ผูกไว้ (กัน group_ids ชี้กลุ่มที่หายไป). */
 export async function deletePostingGroup(id: string): Promise<void> {
   const client = await pool().connect();

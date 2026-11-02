@@ -11,6 +11,7 @@ import { dismissCommentLead, jarvisLeadsConfigured, requestAiCall, saveManualRep
 import { q } from './db';
 import { clearAccountVerification } from './post-tasks';
 import { CONTENT_DISABLED_OPERATOR_MESSAGE, isContentGenerationEnabled } from './product-scope';
+import { isBusinessUnit } from './business-units';
 import { normalizePosterExtras, normalizePosterLayout } from '../../src/core/poster-template.js';
 import type { PosterExtra, PosterLayout } from '../../src/core/poster-template.js';
 import {
@@ -56,6 +57,7 @@ import {
   rejectSoRecruitRequest,
   createPostingGroup,
   deletePostingGroup,
+  setPostingGroupDepartment,
   setAccountGroups,
   updateScrapeTaskCriteria,
   createContentTrend,
@@ -318,9 +320,27 @@ export async function createGroupAction(formData: FormData) {
   if (!/^\d{6,}$/.test(fbGroupId)) throw new Error('ใส่ ID กลุ่ม (ตัวเลข) หรือลิงก์กลุ่ม Facebook ที่ถูกต้อง');
   const name = String(formData.get('name') ?? '').trim();
   const province = String(formData.get('province') ?? '').trim();
-  await createPostingGroup({ fbGroupId, name: name || null, province: province || null });
+  const department = readBusinessUnit(formData.get('department'));
+  await createPostingGroup({ fbGroupId, name: name || null, province: province || null, department });
   revalidatePath('/settings/posting');
   revalidatePath('/orchestrator');
+}
+
+/** รหัสธุรกิจจากฟอร์ม — ว่าง = ไม่ระบุ, ค่าที่ไม่อยู่ในรายการถือว่าพิมพ์มั่ว */
+function readBusinessUnit(value: FormDataEntryValue | null): string | null {
+  const code = String(value ?? '').trim().toUpperCase();
+  if (!code) return null;
+  if (!isBusinessUnit(code)) throw new Error(`ไม่รู้จักรหัสธุรกิจ ${code}`);
+  return code;
+}
+
+/** เปลี่ยนว่ากลุ่มนี้เป็นของธุรกิจไหน (เลือกจากรายการกลุ่ม). */
+export async function setGroupDepartmentAction(formData: FormData) {
+  await requireSession();
+  const id = String(formData.get('id') ?? '').trim();
+  if (!id) throw new Error('ไม่พบกลุ่ม');
+  await setPostingGroupDepartment(id, readBusinessUnit(formData.get('department')));
+  revalidatePath('/settings/posting');
 }
 
 /** ลบกลุ่ม. */
