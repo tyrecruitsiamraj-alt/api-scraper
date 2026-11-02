@@ -89,15 +89,13 @@ export function parseSalaryBounds(snapshot = {}) {
     return { salaryMin: digits(range[1]), salaryMax: digits(range[2]) };
   }
 
-  // รายได้ในใบขอคือเงินที่จ่าย จึงเป็นเพดานของเงินเดือนที่ผู้สมัครขอ ไม่ใช่ขั้นต่ำ
-  // (เดิม "19500" กลายเป็นขั้นต่ำ 19,500 → เว็บตัดคนที่ขอน้อยกว่านั้นทิ้งหมด · LAM6909001, 2 พ.ย. 2569)
-  // "25,000+" = จ่ายได้มากกว่านี้ ไม่มีเพดานให้ตั้ง
+  // กติกาเจ้าของ 2 พ.ย. 2569: ใส่ตามคำในใบขอ — "ไม่เกิน 15,000" = ช่องสูงสุด · "15,000 ขึ้นไป" / "15,000+" = ช่องต่ำสุด
+  // เลขเดียวเฉย ๆ คือเงินที่จ่าย จึงเป็นเพดานของเงินเดือนที่ผู้สมัครขอ (เดิมใส่เป็นขั้นต่ำ เว็บตัดคนที่ขอน้อยกว่าทิ้งหมด · LAM6909001)
   const compact = income.replace(/\s+/g, '');
-  if (/\+/.test(compact)) return { salaryMin: '', salaryMax: '' };
-  if (/^[\d,]+(?:บาท|\/เดือน)*$/u.test(compact)) {
-    return { salaryMin: '', salaryMax: digits(income) };
-  }
-  return { salaryMin: '', salaryMax: '' };
+  const lone = compact.match(/^(?:ไม่เกิน|ไม่ถึง|สูงสุด)?([\d,]+)(?:\+|ขึ้นไป|บาท|\/เดือน)*$/u);
+  if (!lone) return { salaryMin: '', salaryMax: '' };
+  if (/ขึ้นไป|\+/.test(compact)) return { salaryMin: digits(lone[1]), salaryMax: '' };
+  return { salaryMin: '', salaryMax: digits(lone[1]) };
 }
 
 function pickOverrideOrSnapshot(overrides, key, snapshot, ...snapKeys) {

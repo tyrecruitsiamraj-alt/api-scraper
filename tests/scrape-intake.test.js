@@ -45,8 +45,16 @@ test('salary comes from explicit bounds or a simple income figure, not mixed pro
     salaryMin: '',
     salaryMax: '15000',
   });
-  assert.deepEqual(parseSalaryBounds({ income: '25,000+' }), {
+  assert.deepEqual(parseSalaryBounds({ income: 'ไม่เกิน 15,000 บาท' }), {
     salaryMin: '',
+    salaryMax: '15000',
+  });
+  assert.deepEqual(parseSalaryBounds({ income: '15,000 ขึ้นไป' }), {
+    salaryMin: '15000',
+    salaryMax: '',
+  });
+  assert.deepEqual(parseSalaryBounds({ income: '25,000+' }), {
+    salaryMin: '25000',
     salaryMax: '',
   });
   assert.deepEqual(parseSalaryBounds({ income: '20000-25000' }), {
