@@ -2,7 +2,7 @@ import { resolveProvider } from './connectors/registry.js';
 import { RateLimiter } from './core/anti-ban.js';
 import { splitCriteria } from './core/candidate-match.js';
 import { classifyScrapeOutcome, lessonRowsToLogHits, rememberedPreventionLog } from './core/scrape-failure-learning.js';
-import { evaluateResumeQualification } from './core/resume-qualification.js';
+import { evaluateResumeQualification, summarizeRejections } from './core/resume-qualification.js';
 import {
   isResumeAttachmentsComplete,
   isResumeBodyComplete,
@@ -470,7 +470,7 @@ export async function runConnector(connector, criteria, runtime, opts = {}) {
       console.log(`  [${connector.label}] สรุปกรอง: ผ่าน ${qualified} · ตรวจเพิ่ม ${needsReview} · ไม่ผ่าน ${rejected} · ซ้ำ ${duplicate}`);
       // บันทึกไว้ใน error field (ว่างอยู่) เมื่อได้ 0 — ให้หน้าเว็บอธิบายเหตุถูก
       if (saved - resumeFrom === 0 && filteredOut > 0 && !error) {
-        error = `เว็บให้มา ${found} คน แต่ถูกคัดออกทั้งหมดด้วยเงื่อนไข (${Object.entries(localFilters).map(([k, v]) => `${k}=${v}`).join(', ')}) — ลองผ่อนเงื่อนไข`;
+        error = summarizeRejections(found, opened, reasonCounts);
       }
     }
   } catch (e) {

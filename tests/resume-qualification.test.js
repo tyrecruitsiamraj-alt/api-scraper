@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { evaluateResumeQualification } from '../src/core/resume-qualification.js';
+import { evaluateResumeQualification, summarizeRejections } from '../src/core/resume-qualification.js';
 import { splitCriteria } from '../src/core/candidate-match.js';
 
 test('ผ่านเมื่อหลักฐาน Hard Filter ครบ', () => {
@@ -164,4 +164,12 @@ test('ช่วงอายุ snake_case จากใบงานเก่า�
   );
   assert.equal(result.status, 'rejected');
   assert.deepEqual(result.reasons, ['age_out_of_range']);
+});
+
+test('summarizeRejections names the reasons people actually failed on, biggest first', () => {
+  const text = summarizeRejections(105, 60, {
+    gender_mismatch: 9, age_out_of_range: 23, wrong_job_family: 21, 'incomplete:gender': 3,
+    incomplete_profile: 37, incomplete_attachments: 19, 'incomplete:work_experience': 35,
+  });
+  assert.equal(text, 'เว็บให้มา 105 คน เปิดดู 60 คน แต่ถูกคัดออกทั้งหมดด้วยเงื่อนไข · โปรไฟล์กรอกไม่ครบ 37 · อายุนอกช่วง 23 · ประสบการณ์ไม่ตรงสายงาน 21 · ไฟล์แนบไม่ครบ 19 · เพศไม่ตรง 9 (คนเดียวตกได้หลายข้อ)');
 });

@@ -229,3 +229,24 @@ export function evaluateResumeQualification(candidate = {}, { criteria = {}, sou
     hardFilterCount: filters.length,
   };
 }
+
+// เหตุที่คนตก เรียงตามจำนวนจริง — ข้อความ error เดิมโทษแต่เงื่อนไขที่กรองในระบบ (เช่น เพศ) ทั้งที่ตกเพราะอย่างอื่นมากกว่า
+const REJECTION_LABEL = {
+  incomplete_profile: 'โปรไฟล์กรอกไม่ครบ',
+  incomplete_attachments: 'ไฟล์แนบไม่ครบ',
+  age_out_of_range: 'อายุนอกช่วง',
+  wrong_job_family: 'ประสบการณ์ไม่ตรงสายงาน',
+  gender_mismatch: 'เพศไม่ตรง',
+  location_mismatch: 'พื้นที่ไม่ตรง',
+  education_below_minimum: 'วุฒิต่ำกว่าเกณฑ์',
+  compensation_mismatch: 'เงินเดือนเกินกรอบ',
+};
+
+export function summarizeRejections(found, opened, reasonCounts = {}) {
+  const parts = Object.entries(reasonCounts)
+    .filter(([key, count]) => count > 0 && key !== 'duplicate' && !key.includes(':'))
+    .sort((a, b) => b[1] - a[1])
+    .map(([key, count]) => `${REJECTION_LABEL[key] || key} ${count}`);
+  const why = parts.length ? ` · ${parts.join(' · ')} (คนเดียวตกได้หลายข้อ)` : '';
+  return `เว็บให้มา ${found} คน เปิดดู ${opened} คน แต่ถูกคัดออกทั้งหมดด้วยเงื่อนไข${why}`;
+}
