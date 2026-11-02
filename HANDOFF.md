@@ -1,116 +1,117 @@
-# Handoff: SO Recruitment Platform (api-scraper)
+# Handoff: พา So Scraping จาก 5/10 ไป 10/10
 
-ตรวจเมื่อ 20 ต.ค. 2026 จาก `origin/main` ที่ `0e05080` (19 ต.ค. 2026)
+เขียน 2 พ.ย. 2569 · `main` อยู่ที่ `7876f56` · เครื่อง RM009 (scraper-1, scraper-2) ยังรัน `625c1cb` · handoff ฉบับก่อนอยู่ `docs/archive/HANDOFF-2026-10-20.md`
 
-## สรุปสั้น
+## 10/10 แปลว่าอะไร
 
-- ระบบตอนนี้ใช้งานจริงแค่ 2 ส่วน คือ **ค้นหาผู้สมัคร (Scrap)** จาก JobBKK/JobThai และ **โพสต์ Facebook (Autopost)** ส่วนสร้างประกาศด้วย AI (Content) ถูกปิดตั้งแต่ 30 ก.ย. ใน `src/core/product-scope.js` (`contentGeneration: false`)
-- งานหลังวันที่ 1 ก.ย. ทั้งหมด 109 commit ทำโดย Cursor Agent 96 commit ที่เหลือเป็น merge PR และ commit จากบัญชี `tyrecruitsiamraj-alt` เน้นซ่อมข้อมูลผู้สมัครที่ scrape มาไม่ครบ, ทำแผงสวิตช์เปิด-ปิด Worker บน Windows/Mac และทำหน้าศูนย์งานให้เรียบขึ้น
-- `PROJECT_PLAN.md` ไม่ได้อัปเดตตั้งแต่ 1 ก.ย. ตัวเลข Readiness 77% และ Blocker ในไฟล์นั้นจึงเก่ากว่าโค้ดจริงประมาณ 7 สัปดาห์
-- Node test บน main ผ่าน 263/264 ตัวที่ตกคือเทสต์ตัวกรองจังหวัดของ JobBKK Normal Search (รายละเอียดด้านล่าง)
+HR สั่งจาก Jarvis แล้วได้ของ โดยไม่มีใครต้องแตะเครื่องหรือฐานข้อมูล
 
-## สถานะ Git ในเครื่องนี้
+1. Scrap: ทุกใบขอได้ผู้สมัครผ่านเกณฑ์อย่างน้อย 1 คนภายใน 1 ชั่วโมง ทั้ง JobBKK และ JobThai ถ้าเว็บไม่มีคนจริง จอต้องบอกว่าเว็บไม่มี ไม่ใช่ระบบพัง
+2. Autopost: สั่ง 15 กลุ่ม โพสต์ติดอย่างน้อย 12 และบัญชีไม่โดน Facebook จำกัดเพิ่ม
+3. เครื่องดับหรืออัปเดตโค้ด งานกลับมาเองใน 15 นาที ไม่มีงานค้าง "กำลังทำ" ข้ามคืน
+4. ทุกตัวเลขบนจอและในรายงานกดลงไปดูรายการได้ และบอกได้ว่าเป็นของแผนกไหน
+5. ปุ่มทุกปุ่มบนเว็บทำงานแทนการแก้ฐานข้อมูลด้วยมือ
 
-| Branch | สถานะ |
-|---|---|
-| `main` (local) | fast-forward แล้วถึง `0e05080` ตรงกับ `origin/main` |
-| `codex/fix-content-position-feedback` (branch ที่เปิดอยู่) | pull แล้ว 2 commit ถึง `e927e93` (10 ส.ค.) แต่แยกจาก main ตั้งแต่ `c9cf2ea` (26 ก.ค.) และตามหลัง main 178 commit |
+## คะแนนวันนี้ (หลักฐาน 1–2 พ.ย.)
 
-Branch ที่เปิดอยู่ควรถือว่า **ล้าสมัย** ด้วยเหตุผลนี้
-
-1. เนื้อหาเป็นงาน Content AI ทั้งหมด ซึ่ง main ปิดไปแล้ว
-2. Commit `e927e93` (ground content visuals and keywords) เข้า main แล้วในชื่อ `ec518ce`
-3. Commit `2485bbd` ยังไม่เข้า main มีไฟล์ที่ main ไม่มี: `content-factual-validator.js`, `content-job-spec.js`, `content-quality-score.js`, `content-supervisor.js` และ `encryptAutopostCredential()` ใน `web/lib/crypto.ts`
-4. **เลข migration ชนกัน** `schema-019.sql` ของ branch นี้สร้างตาราง Content AI Team (`content_agent_contracts`, `campaign_stage_runs`, `campaign_handoffs` ฯลฯ) แต่ `schema-019.sql` ของ main เป็น heartbeat ของ scrape run ถ้าจะหยิบงานจาก branch นี้กลับมา ต้องเปลี่ยนเป็น `schema-029.sql` ขึ้นไป
-5. Commit `26f1e1b` (แก้ JobBKK login ค้าง) main แก้ `src/providers/jobbkk/session.js` ไปไกลกว่าแล้ว (Ant Design login, session takeover) ไม่ควร merge ทับ
-
-Branch บน remote ที่มี commit ยังไม่เข้า main
-
-| Branch | วันที่ | หมายเหตุ |
+| ส่วน | คะแนน | หลักฐาน |
 |---|---|---|
-| `cursor/responsive-all-devices-b333` | 14 ต.ค. | PR #19 ยังเป็น Draft ทำหน้าศูนย์งานและหน้าแก้ Content ให้ใช้บนมือถือได้ ต้องเช็กว่ายังชนกับ `0e05080` ที่รื้อ WorkCenter ไปหรือไม่ |
-| `cursor/cloud-agent-env-697e` | 30 ก.ย. | 1 commit |
-| `cursor/remember-scrape-reds-b333` | 15 ก.ย. | 1 commit |
-| `cursor/dev-environment-setup-8bea` | 10 ก.ย. | 1 commit |
-| `agent/fix-autopost-patch-script` | 29 ก.ค. | 1 commit |
+| Scrap JobThai | 7 | ต.ค. รัน 112 รอบ ล้ม 3 · ผ่านเกณฑ์ 65 คน · แต่ LMM6704005 คนสวน 8 คำค้นได้ 0 ยังไม่รู้ว่าเว็บมี 0 จริงไหม |
+| Scrap JobBKK | 4 | ต.ค. ล้ม 27/34 รอบ · แก้เลือกจังหวัดแล้ว (`625c1cb`) · รอบ 09:03 วันนี้เจอ 117 เปิด 60 ผ่าน 0 |
+| Autopost ชุดใหม่ | 2 | OPL6910069 สั่ง 15 ติด 0 · เช้านี้บัญชีโดน Facebook จำกัดเพิ่ม 5 ตัวใน 1.5 ชม. รวมพักอยู่ 6/7 ตัว อีก 1 ต้องยืนยันตัวตน |
+| Worker RM009 | 5 | ใส่ตัวเฝ้าแล้วแต่ยังไม่เห็น `watchdog.log` · งาน 16:29 เมื่อวานเครื่องดับ 17:20 ระบบเพิ่งรู้ 07:56 |
+| AI | 5 | โมเดลใช้ได้ตัวเดียว (`beam:cloud`) · OCR ไม่มีโมเดลในบริษัท |
+| คำบนจอ | 7 | เหตุคัดออกบอกตัวเลขจริงแล้ว (`7876f56`) แต่ยังไม่ขึ้น RM009 |
 
-## ระบบทำอะไร
+## ลำดับงาน
 
-ข้อมูลอยู่ใน PostgreSQL กลาง (`<DB_HOST>:5432`) แยก 2 schema
+ทำทีละข้อ ทดสอบผ่านหน้าเว็บ so-scraping.vercel.app ก่อนขยับข้อถัดไป เรียงจาก "ถ้าไม่ทำ วันนี้มีคนทำงานไม่ได้"
 
-- `so-candidate-data` เก็บผู้สมัคร, connector, scrape task, คิวงาน, ใบขอจาก ERP
-- `so_autopost_apiscraper` เก็บบัญชี/กลุ่ม Facebook, งานโพสต์, คอมเมนต์
+### A. JobBKK ต้องส่งคนผ่านเกณฑ์ได้ (ตอนนี้ 0) · ประมาณ +2
 
-ส่วนประกอบ
+**A1 หยุดงานที่วนรันเองเผาโควตา** · LAM6909001 วันนี้รันเอง 3 รอบ (07:56, 09:03, 10:12) โดยไม่มีใครกด แต่ละรอบเปิด Resume 60 ใบแล้วได้ 0 เพราะเงื่อนไขเดิม
+→ เมื่อรอบจบด้วย "คัดออกทั้งหมด" ห้ามรันซ้ำด้วยเงื่อนไขเดิม ให้หยุดเป็น `needs_input` และขึ้นจอว่ารออะไร
+→ ดู `nextRunFrom` ใน `src/tasks-worker.js` และจุดตั้ง status ใน `src/pipeline.js`
+→ เสร็จเมื่อ: งานที่ได้ 0 หยุดนิ่ง หน้าใบงานบอก "รอแก้เงื่อนไข" และไม่มีรอบใหม่เกิดเองภายใน 2 ชม.
 
-| ส่วน | ที่อยู่ | รันที่ไหน |
-|---|---|---|
-| Web Console (Next.js 14, login ด้วย Entra ID) | `web/` | Vercel |
-| คิวงานกลาง `work_queue` + runner | `workers/runner.js`, `workers/scraper-pool.mjs` | เครื่อง Worker (เดิม Windows `SONB-RM009`, มีคู่มือย้ายไป Mac) |
-| Scraper (Playwright login ครั้งเดียว แล้วดึงผ่าน HTTP) | `src/pipeline.js`, `src/tasks-worker.js`, `src/providers/jobbkk`, `src/providers/jobthai` | เครื่อง Worker |
-| Autopost Facebook (Express + Playwright) | `autopost/` | เครื่อง Worker |
-| ซิงก์ใบขอจาก ERP (SQL Server) | `src/erp/sync.js` | เครื่อง Worker |
-| OCR / AI | `src/core/ollama.js` ชี้ไป Ollama ภายใน `<OLLAMA_HOST>:11434` | เครื่องภายใน |
+**A2 ตรวจเงื่อนไขตอนรับใบจาก Jarvis** · LAM6909001 มาพร้อมอายุ 20–20 ตก 21 คนจากข้อนี้ข้อเดียว
+→ ถ้า age_min = age_max หรือช่วงแคบกว่า 5 ปี หรือเพศ/จังหวัดว่าง ให้ตีกลับถามคนสั่งก่อนรัน ไม่รันเงียบ
+→ หาจุดที่แปลง `job_posting_requests` เป็น `scrape_tasks` (grep `source_request_no` ใน `src/` และ `web/lib/scrap-tasks.ts`)
+→ เสร็จเมื่อ: สั่งใบที่อายุ 20–20 จาก Jarvis แล้วหน้า /scraping ขึ้น "ต้องตรวจเงื่อนไข" พร้อมบอกว่าข้อไหน
 
-เส้นทาง Scrap: ใบขอ → ศูนย์งานบน Web กด "เริ่มค้นหา" → ลง `work_queue` → Worker หยิบงาน ล็อกทีละบัญชี (`connector_key`) → login แพลตฟอร์ม → ค้น → เปิด Resume → dedupe ด้วยเบอร์โทร/อีเมล/ชื่อ → เก็บรูปและไฟล์แนบเป็น bytea → ให้คะแนนความเหมาะสมต่อใบงาน (`candidate-fit-v1` ใน `scrape_task_candidates`)
+**A3 โปรไฟล์ไม่ครบ 39 จาก 60** · ตก `incomplete:work_experience` 37 คน สูงผิดปกติ สงสัยว่า JobBKK เปลี่ยนหน้า Resume หรือ parser อ่านช่องประสบการณ์ไม่ออก ไม่ใช่คนกรอกไม่ครบจริง
+→ ให้เจ้าของเปิด Resume 2–3 ใบจากรอบนี้บนเว็บ JobBKK แล้วบอกว่ามีประสบการณ์ไหม (Claude ห้ามเปิด Resume เอง)
+→ ถ้ามี = แก้ `src/providers/jobbkk/parser.js` ทำ fixture จาก HTML จริงที่ลบชื่อ เบอร์ อีเมลออกแล้ว
+→ เสร็จเมื่อ: รอบใหม่ incomplete_profile ต่ำกว่า 20%
 
-Migration ไม่มีตารางจดเวอร์ชัน `src/db/migrate.js` รันทุกไฟล์ `schema.sql` ถึง `schema-028.sql` ซ้ำทุกครั้ง ทุกไฟล์ต้องเขียนแบบ `IF NOT EXISTS`
+**A4 อัปเดต RM009** ให้ได้ `7876f56` แล้วปิด-เปิดสวิตช์ worker ทั้งสองตัว ไม่งั้นข้อความเหตุคัดออกยังเป็นแบบเก่า
 
-## เกิดอะไรขึ้นตั้งแต่ 1 ก.ย. 2026
+### B. JobThai ยืนยันว่า 0 จริง · +0.5
 
-| ช่วง | งาน |
-|---|---|
-| 10-11 ก.ย. | JobBKK เปลี่ยนไปใช้ Talent Normal Search และกรอกตัวกรองตามใบขอ, login ฟอร์ม Ant Design ใหม่, ยืนยัน session takeover, `start-workers.bat` กดครั้งเดียว |
-| 14-16 ก.ย. | Poster Editor ลากเลเยอร์และเพิ่มรูป/ข้อความได้, ประกอบโปสเตอร์บน Vercel, Scrape จำบทเรียนจาก error ที่เคยเจอ, fail-closed ทั้ง Content และ Scrap |
-| 30 ก.ย. | **ปิด Content AI** เหลือ Scrap + Autopost, บังคับ Resume ที่บันทึกต้องครบ (ไฟล์แนบ, การศึกษา, งาน, ติดต่อ), API ซ่อมแถวผู้สมัครที่ไม่ครบจาก OCR, Worker reset โค้ดเป็น `origin/main` ตอนเริ่ม |
-| 1-2 ต.ค. | แผงสวิตช์ `SO-Workers.bat` / `SO-Workers.command` แทนหน้าต่าง terminal หลายบาน, ปุ่ม Update Code สั่งจากระยะไกล (`POST /api/update-workers`), JobThai อ่านช่วงเวลาทำงานและหน้าที่ได้ครบ |
-| 14-15 ต.ค. | แก้คำนำหน้าชื่อหายทั้ง JobBKK/JobThai, ปุ่มซ่อมทั้งฐาน `REPAIR-CANDIDATES` และ `REPAIR-PHOTOS` (ตัดรูปหน้าผิด/รูป placeholder แล้วโหลดใหม่) |
-| 19 ต.ค. | ศูนย์งานแบ่งเป็น 2 ห้อง: กล่องรับงาน Scrap ที่มีปุ่ม "เริ่มค้นหา" ปุ่มเดียว และห้อง Autopost แยกออกไป ใบขอ Content ที่ปิดแล้วแสดงเป็นแถบปฏิเสธ |
+LMM6704005 (คนสวน สมุทรปราการ) ค้น 8 คำได้ 0 ทุกคำ ไม่มีหลักฐานว่าเว็บมี 0 จริง
+→ ให้เจ้าของค้น "คนสวน" จังหวัดสมุทรปราการบน JobThai เองแล้วบอกจำนวน
+→ ถ้าเว็บมี = ตัวกรองหรือ parser ของ JobThai พัง ไล่จาก `src/providers/jobthai/`
+→ ถ้าเว็บไม่มี = จอต้องบอก "JobThai ไม่มีคนตำแหน่งนี้ในจังหวัดนี้" แทนคำว่าไม่สำเร็จ
 
-## ผลทดสอบ (รันบน main วันนี้)
+### C. Autopost บัญชีโดน Facebook จำกัด 6/7 · +2
 
-```bash
-node --test tests/*.test.js tests/*.test.mjs
-```
+ระบบเก่า (`so_autopost_jobs`) ยังโพสต์ได้ต่อเนื่อง (LBA 1,633 โพสต์ใน 3 เดือน) ยังไม่ได้เทียบว่าบัญชีชุดเก่าโดนจำกัดบ่อยแค่ไหน ต้องเทียบก่อนสรุปว่าเป็นที่ worker ชุดใหม่
 
-ผล 264 เทสต์ ผ่าน 263 ตก 1 ตัว
+**C1 หาความต่างด้วยตัวเลข** · ดึงจาก `so_autopost_jobs.post_logs` ว่าระบบเก่าโพสต์กี่กลุ่มต่อบัญชีต่อวัน เว้นช่วงกี่นาที แล้วเทียบกับ `daily_cap=15` และจังหวะใน `autopost/src/helpers/postPlan.ts`
+**C2 ปรับให้เท่าของที่รอด** · ลด cap ต่อวัน เพิ่มช่วงพักระหว่างกลุ่ม และ warm-up (เลื่อนฟีด เปิดกลุ่ม) ก่อนโพสต์แรก
+**C3 จอ /autopost ต้องบอก** "บัญชีถูกพัก 6 ตัว ถึง 3 พ.ย. 09:49 เพราะ Facebook จำกัด" เป็นคำ ไม่ซ่อนในรายละเอียด
+→ เสร็จเมื่อ: สั่ง OPL6910069 ใหม่หลังบัญชีพ้นพัก โพสต์ติด ≥12/15 และ 24 ชม.ถัดมาไม่มีบัญชีโดนพักเพิ่ม
 
-- `tests/jobbkk-normal-search.browser.test.js` "Talent Normal Search fills every requested filter then reads a Resume ID" ตกด้วย `JOBBKK_FILTER_NOT_APPLIED: Normal Search ไม่ยืนยันจังหวัดตามใบขอ` เทสต์นี้เปิด browser กับหน้า fixture ในเครื่อง น่าจะเกี่ยวกับ commit `fix(jobbkk): stop province filter from leaving a quote tag` (30 ก.ย.) ที่เปลี่ยนวิธีเลือกจังหวัด ยังไม่ได้ไล่หาสาเหตุ
-- `node --test tests/` (ส่งแค่ชื่อโฟลเดอร์) ใช้ไม่ได้บน Node 25 ต้องใช้ glob ตามคำสั่งด้านบน
-- ยังไม่ได้รัน `web npm run build` และยังไม่ได้ทดสอบกับ JobBKK/JobThai/Facebook ของจริง
+### D. Worker ไม่ตายเงียบ · +1
 
-## ของที่ยังค้างหรือยังไม่มีหลักฐาน
+**D1 พิสูจน์ตัวเฝ้าบน Windows** · ขอให้เจ้าของเปิด `output\worker-logs\watchdog.log` และ `alive-*.txt` บน RM009 ถ่ายจอมา ถ้าไม่มีไฟล์ = ตัวเฝ้าไม่เคยทำงาน แก้ `scripts/so-worker-control.ps1` (เก็บ BOM)
+**D2 งานค้างต้องหลุดใน 15 นาที** · ตอนนี้งาน heartbeat เงียบถูกปล่อยตอน 07:56 ของวันถัดไป (14.5 ชม.) หาตัวที่เขียน "worker stopped responding; task recovered automatically" แล้วให้ทำงานทุก 5 นาที เกณฑ์เงียบ 15 นาที
+**D3 ศูนย์งานบอกเครื่องเงียบ** · "RM009 เงียบตั้งแต่ 17:20" เป็นคำบนหน้าแรก
+→ เสร็จเมื่อ: ปิดเครื่อง 20 นาทีแล้วเปิด งานที่ค้างกลับเป็น queued เอง หน้าเว็บบอกช่วงที่เครื่องหาย
 
-1. **Facebook ยังไม่มีหลักฐานโพสต์จริง** แผนล่าสุด (31 ส.ค.) บอกว่า Worker เปิดแค่ `preflight` และรอผู้ใช้อนุญาต Controlled Real Post หลังจากนั้นไม่มี commit หรือเอกสารบันทึกว่าโพสต์จริงแล้ว
-2. **JobBKK Live Search** เดิมติดที่ Premium Resume Search ถูก redirect ออก main เปลี่ยนไปใช้ Normal Search แล้ว แต่ไม่มีบันทึกผลทดสอบสดใน `PROJECT_PLAN.md`
-3. **Phase 8 Candidate Fit Score** ยังไม่มี Hard Gate Editor และ Weight Editor ต่อใบงาน
-4. **Phase 9 Release Gate A-G** ยังไม่ปิด
-5. `PROJECT_PLAN.md` และ `HANDBOOK.md` ยังพูดถึง Content Orchestrator เป็นส่วนที่ใช้งาน ต้องอัปเดตให้ตรงกับขอบเขตใหม่
-6. ข้อเสี่ยงที่ `HANDBOOK.md` หัวข้อ 17 บันทึกไว้และยังไม่เห็นว่าแก้: Control API (`src/api/server.js`) ไม่มี authentication, migration ของ Autopost กระจายอยู่ทั้งไฟล์ SQL และ `ALTER` ตอนรัน, `autopost/server/index.js` ใหญ่และรวมหลายหน้าที่
+### E. AI และ OCR · +0.5
 
-## ความเสี่ยงด้านข้อมูล
+ใช้ได้แค่ `beam:cloud` อีก 3 ตัวต้องจ่ายเงิน OCR ไม่มีโมเดล RM009 ไม่มี Poppler
+→ ตรวจว่าหน้า /workers ขึ้นชื่อโมเดลและสถานะ OCR ตามจริง (`aiStatus` ใน `src/core/ai-models.js`)
+→ ที่เหลือเป็นการตัดสินใจของเจ้าของ (ดูหัวข้อถัดไป) ถ้าเลือกปิด OCR ให้ซ่อนทุกปุ่มที่พึ่ง OCR และบอกเหตุ
 
-Repo `tyrecruitsiamraj-alt/api-scraper` เป็น **public** · IP ของ Postgres กลางกับ Ollama ถูกเอาออกจากโค้ดและเอกสารแล้ว (29 ต.ค. 2569 อ่านจาก .env อย่างเดียว) แต่ยังค้างอยู่ในประวัติ git และ PROJECT_PLAN.md ฐานนี้เก็บข้อมูลส่วนบุคคลของผู้สมัคร (PDPA) ที่เหลือต้องทำ: ทำ repo เป็น private · เปลี่ยนรหัสผ่านฐาน · จำกัดพอร์ต 5432 ให้รับเฉพาะเครื่องที่ใช้
+### F. รายงานนับต่อแผนกได้ · +0.5
 
-## ขั้นต่อไปที่แนะนำ
+วันนี้นับไม่ได้เพราะ `so_autopost_apiscraper.jobs.department` ว่างทุกแถว (27) · `scrape_tasks` ที่สร้างเองก่อน 30 ต.ค. ไม่มีชื่อคนสร้าง (25 งาน) · `post_run_queue.requested_by` ปนสามแบบ (อีเมล, `jarvis:อีเมล`, IP)
+→ ทุกทางเข้า (Jarvis ส่งมา, สร้างเองใน /scraping, กดโพสต์ใน /autopost) ต้องเขียนแผนกและอีเมลคนสั่งลงแถวตั้งแต่สร้าง โดยอ่านจาก `jarvis_rm.users.department_code`
+→ ของเก่าห้ามเดาย้อนหลัง ให้แสดง "ไม่ระบุแผนก"
+→ เสร็จเมื่อ: query เดียวนับ Scrap/Autopost ต่อแผนกต่อเดือนได้ โดยไม่ต้อง join ชื่อคน
 
-1. ตัดสินใจเรื่อง branch `codex/fix-content-position-feedback` ถ้า Content AI จะไม่กลับมา ให้เก็บไว้เป็นหลักฐานแล้วสลับไปทำงานบน main ถ้าจะกลับมา ให้ cherry-pick เฉพาะไฟล์ validator/job-spec/quality-score และเปลี่ยนเลข schema
-2. ไล่สาเหตุเทสต์ JobBKK province filter ที่ตก
-3. ตัดสิน PR #19 (responsive) ว่าจะ rebase บน `0e05080` หรือปิด
-4. อัปเดต `PROJECT_PLAN.md` ให้ตรงกับขอบเขต Scrap + Autopost และบันทึกผลทดสอบสดของ JobBKK กับสถานะ Facebook ล่าสุด
-5. จัดการเรื่อง repo public กับ IP ฐานข้อมูล
+### G. ความปลอดภัย · ไม่ขึ้นคะแนนใช้งาน แต่ 10/10 ต้องมี
 
-## คำสั่งที่ใช้บ่อย
+repo ยัง public · IP ฐานกลางยังอยู่ในประวัติ git และ PROJECT_PLAN.md · รหัสฐานยังไม่เปลี่ยน · `src/api/server.js` ไม่มี auth
+→ เจ้าของกดทำ private · เปลี่ยนรหัสฐานแล้วอัปเดต .env ทุกเครื่อง · ใส่ key ให้ Control API
 
-```bash
-npm run migrate                      # รัน schema ทุกไฟล์ (idempotent)
-npm run worker:pool                  # runner ของ work_queue
-npm run scraper:pool                 # scraper pool ตามจำนวนบัญชี
-npm run smoke:workflow               # self-test คิว → worker
-node --test tests/*.test.js tests/*.test.mjs
-cd web && npm run build
-```
+ถ้าทำ A ถึง D ครบและพิสูจน์ผ่านจอได้ ระบบอยู่ราว 8 · E ถึง G พาไป 10
 
-เครื่อง Worker ใช้แผงสวิตช์ `SO-Workers.bat` (Windows) หรือ `SO-Workers.command` (Mac) ซ่อมข้อมูลเก่าด้วย `REPAIR-CANDIDATES.*` และ `REPAIR-PHOTOS.*`
+## สิ่งที่ต้องถามเจ้าของก่อน ตัดสินเองไม่ได้
 
-เอกสารอ้างอิง: `HANDBOOK.md` (ภาพรวมระบบ), `PROJECT_PLAN.md` (แผนและ Release Gate, ข้อมูลถึง 1 ก.ย.), `docs/new-worker-setup.md`, `docs/mac-worker-migrate.md`, `docs/cutover-runbook.md`
+1. A3 / B: Resume บน JobBKK มีประสบการณ์จริงไหม และ JobThai มีคนสวนสมุทรปราการกี่คน
+2. C: จะรอบัญชีพ้นพัก 3 พ.ย. 09:49 หรือใช้บัญชีชุดอื่น และยอมลด cap ต่อวันเหลือเท่าไร
+3. E: จะขอ IT ลงโมเดล OCR ในบริษัท หรือปิด OCR ถาวร
+4. G: ทำ repo private วันไหน
+
+## กติกาจาก session ที่ผ่านมา
+
+- ทดสอบผ่านหน้าเว็บเท่านั้น ห้ามยิง API ตรง · ห้ามเปิดเว็บ JobThai/JobBKK กดดูเบอร์หรือเปิด Resume · ห้ามแตะบัญชี Facebook หรือตอบคำถามเข้ากลุ่มแทนคน
+- หลังกด "อัปเดตโค้ด" บน RM009 ต้องปิด-เปิดสวิตช์ worker ใหม่ ไม่งั้นค้างทั้งที่แผงขึ้นว่าเปิด
+- ฐานข้อมูลเป็นของจริงที่ Jarvis กับ commoncar ใช้ร่วม อ่านได้ เขียนต้องถามและโชว์แถวก่อน ห้ามรัน worker ในเครื่องตัวเอง
+- ห้าม commit PROJECT_PLAN.md · `git add` เฉพาะไฟล์ที่แก้ · commit/push เมื่อเจ้าของสั่ง · ด่านเทสต์ต่อด้วย `&&` เท่านั้น
+- เทสต์: `node --test 'tests/**/*.test.js'` (296 ผ่านที่ `7876f56`) · `scripts/so-worker-control.ps1` ต้องเก็บ BOM
+- เมื่อไม่รู้โครงหน้าเว็บจริง อย่าเดา DOM แล้วแก้ (เสียไป 3 รอบกับช่องจังหวัด) ให้จดโครงลงข้อความ error ก่อน (ทำแล้วใน `625c1cb`) แล้วอ่านจากบันทึกรอบ
+- ตอบเจ้าของเป็นไทย สั้น ตัวเลขจริง แยก "commit แล้ว" กับ "ขึ้น RM009 แล้ว" · ให้เลือกเป็นปุ่ม ไม่ถามปลายเปิด
+
+## ตัวเลขอ้างอิง 2 พ.ย.
+
+- LAM6909001 รอบ 09:03: เจอ 117 เปิด 60 ผ่าน 0 · เหตุตก: โปรไฟล์ไม่ครบ 39 · อายุ 21 · สายงาน 19 · ไฟล์แนบ 20 · เพศ 9 (คนเดียวตกได้หลายข้อ)
+- OPL6910069 (1 พ.ย. 13:13–13:26): สั่ง 15 ติด 0 ล้ม 5 ไม่ได้ลอง 10
+- Scrap ส.ค.–ต.ค.: 365 รอบ (JobThai 213 · JobBKK 152) ส่วนใหญ่ไม่มีชื่อผู้สั่ง
+- LBA: Autopost ระบบเก่า 130 ครั้ง 1,633 โพสต์ · Scrap 3 ใบ ผ่านเกณฑ์ 1 คน
+- งานค้างในคิว: scrape_tasks partial 12 · idle 12 · Autopost jobs pending 30
+
+เอกสารอื่น: `HANDBOOK.md` ภาพรวมระบบ · `PROJECT_PLAN.md` แผนเก่า (ข้อมูลถึง 1 ก.ย. ห้าม commit) · `~/brain/projects/scrap.md`
