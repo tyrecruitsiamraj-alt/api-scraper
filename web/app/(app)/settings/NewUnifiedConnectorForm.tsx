@@ -18,6 +18,8 @@ import {
 import { Input } from '@/components/ui/input';
 import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select';
 import { Spinner } from '@/components/ui/spinner';
+import { GroupPicker } from '@/components/GroupPicker';
+import type { PostingGroup } from '@/lib/repo';
 
 const PLATFORMS = [
   { value: 'jobbkk', label: 'JobBKK', detail: 'ดึง Resume' },
@@ -25,7 +27,7 @@ const PLATFORMS = [
   { value: 'facebook', label: 'Facebook', detail: 'ใช้โพสต์ประกาศ' },
 ];
 
-export function NewUnifiedConnectorForm({ workers = [] }: { workers?: string[] }) {
+export function NewUnifiedConnectorForm({ workers = [], groups = [] }: { workers?: string[]; groups?: PostingGroup[] }) {
   const [open, setOpen] = useState(false);
   // ยังไม่เลือก = '' — ต้องเลือกประเภทก่อน ช่องอื่นถึงจะขึ้น
   const [platform, setPlatform] = useState('');
@@ -166,6 +168,12 @@ export function NewUnifiedConnectorForm({ workers = [] }: { workers?: string[] }
                   </FieldDescription>
                 </FieldContent>
               </Field>
+            )}
+            {facebook && (
+              <>
+                <FieldSeparator />
+                <GroupPicker groups={groups} idPrefix="new-connector" />
+              </>
             )}
             {facebook && (
               <Alert>

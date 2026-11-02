@@ -14,8 +14,10 @@ import {
   DialogTitle,
   DialogTrigger,
 } from '@/components/ui/dialog';
-import { Field, FieldContent, FieldDescription, FieldGroup, FieldLabel } from '@/components/ui/field';
+import { Field, FieldContent, FieldDescription, FieldGroup, FieldLabel, FieldSeparator } from '@/components/ui/field';
 import { Input } from '@/components/ui/input';
+import { GroupPicker } from '@/components/GroupPicker';
+import type { PostingGroup } from '@/lib/repo';
 
 /**
  * ปุ่ม "แก้ไข" + modal ฟอร์มแก้ข้อมูล connector (Scraper หรือ Facebook).
@@ -28,6 +30,8 @@ export function ConnectorEditButton({
   username,
   skipWarmup = false,
   hasPassword = false,
+  groups = [],
+  groupIds = [],
 }: {
   id: string;
   platform: string;
@@ -37,6 +41,10 @@ export function ConnectorEditButton({
   skipWarmup?: boolean;
   /** มีรหัสผ่านบันทึกไว้แล้ว */
   hasPassword?: boolean;
+  /** Facebook: คลังกลุ่มทั้งหมด ให้เลือกว่าบัญชีนี้โพสต์กลุ่มไหน */
+  groups?: PostingGroup[];
+  /** Facebook: กลุ่มที่เลือกไว้ตอนนี้ */
+  groupIds?: string[];
 }) {
   const [open, setOpen] = useState(false);
   const isFb = platform === 'facebook';
@@ -47,7 +55,7 @@ export function ConnectorEditButton({
       <DialogTrigger asChild>
         <Button type="button" variant="ghost" size="sm">แก้ไข</Button>
       </DialogTrigger>
-      <DialogContent className="sm:max-w-sm">
+      <DialogContent className={isFb ? 'max-h-[90vh] overflow-y-auto sm:max-w-lg' : 'sm:max-w-sm'}>
         <form action={editConnectorAction} onSubmit={() => setOpen(false)} className="flex flex-col gap-6">
           <DialogHeader>
             <DialogTitle>แก้ไขบัญชี{isFb ? ' Facebook' : 'ค้นหาผู้สมัคร'}</DialogTitle>
@@ -85,6 +93,12 @@ export function ConnectorEditButton({
                   <FieldDescription>ติ๊กแล้วจะไม่จำกัดโพสต์ช่วงวอร์มบัญชีใหม่ (5–12 กลุ่มต่อวันใน 3 สัปดาห์แรก)</FieldDescription>
                 </FieldContent>
               </Field>
+            )}
+            {isFb && (
+              <>
+                <FieldSeparator />
+                <GroupPicker groups={groups} defaultSelected={groupIds} idPrefix={fieldId} />
+              </>
             )}
           </FieldGroup>
           <DialogFooter>

@@ -34,7 +34,7 @@ export default async function SettingsPostingPage() {
     <div className="flex flex-col gap-8">
       <div className="flex flex-col gap-1">
         <h2 className="text-lg font-semibold">ตั้งค่าการโพสต์</h2>
-        <p className="text-sm text-muted-foreground">เลือกกลุ่มให้แต่ละบัญชี และจัดการคลังกลุ่ม Facebook</p>
+        <p className="text-sm text-muted-foreground">คลังกลุ่ม Facebook ที่ใช้โพสต์ · เลือกว่าบัญชีไหนโพสต์กลุ่มไหนได้ที่ บัญชีที่ใช้งาน → แก้ไข</p>
       </div>
 
       <PostingGroupsManager />

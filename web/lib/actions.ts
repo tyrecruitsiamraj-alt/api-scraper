@@ -354,16 +354,6 @@ export async function deleteGroupAction(formData: FormData) {
 }
 
 /** บันทึกกลุ่มที่บัญชีหนึ่งจะโพสต์ (ติ๊ก checkbox แล้วบันทึกทั้งชุด). */
-export async function setAccountGroupsAction(formData: FormData) {
-  await requireSession();
-  const userId = String(formData.get('userId') ?? '').trim();
-  if (!userId) throw new Error('ไม่พบบัญชี');
-  const groupIds = formData.getAll('groupIds').map((v) => String(v)).filter(Boolean);
-  await setAccountGroups(userId, groupIds);
-  revalidatePath('/settings/posting');
-  revalidatePath('/orchestrator');
-}
-
 /** Mirror api-scraper tasks-worker nextRunFrom() for the first scheduled fire. */
 function firstNextRun(cron: string | null): string | null {
   if (!cron) return null;
@@ -1025,9 +1015,11 @@ export async function createConnectorAction(formData: FormData) {
       dailyCap,
       preferredWorker: String(formData.get('preferredWorker') ?? '').trim(),
       skipWarmup: formData.has('skipWarmup'),
+      groupIds: formData.getAll('groupIds').map((v) => String(v)).filter(Boolean),
     });
     revalidatePath('/settings');
     revalidatePath('/settings/connectors');
+    revalidatePath('/settings/posting');
     revalidatePath('/autopost/accounts');
     return;
   }
@@ -1083,6 +1075,9 @@ export async function editConnectorAction(formData: FormData) {
       password: password ? encryptFacebookPassword(password) : null,
       skipWarmup: formData.has('skipWarmup'),
     });
+    // กลุ่มที่บัญชีโพสต์แก้จากฟอร์มเดียวกัน — ไม่ติ๊กเลย = ไม่มีกลุ่ม
+    await setAccountGroups(id, formData.getAll('groupIds').map((v) => String(v)).filter(Boolean));
+    revalidatePath('/settings/posting');
   } else {
     await updateScraperConnector(id, { label, username, passwordEnc: password ? encryptSecret(password) : null });
   }

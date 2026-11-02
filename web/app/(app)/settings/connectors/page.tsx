@@ -1,6 +1,6 @@
 import { Fragment } from 'react';
 import { deleteConnectorAction, deleteFacebookAccountAction, setAccountWorkerAction, toggleConnectorAction } from '@/lib/actions';
-import { facebookQuotaSummary, knownWorkerNames, listAllConnectors, listProviderLimits } from '@/lib/repo';
+import { facebookQuotaSummary, knownWorkerNames, listAllConnectors, listPostingGroups, listProviderLimits } from '@/lib/repo';
 import { ProviderLimitsPanel } from '@/components/ProviderLimitsPanel';
 import { FacebookQuotaPanel } from '@/components/FacebookQuotaPanel';
 import { ConnectorEditButton } from '@/components/ConnectorEditButton';
@@ -28,11 +28,12 @@ function fmtDate(s: string | null) {
 }
 
 export default async function SettingsConnectorsPage() {
-  const [connectors, limits, fbQuota, workers] = await Promise.all([
+  const [connectors, limits, fbQuota, workers, groups] = await Promise.all([
     listAllConnectors(),
     listProviderLimits(),
     facebookQuotaSummary(),
     knownWorkerNames(),
+    listPostingGroups(),
   ]);
   const scraperCount = connectors.filter((c) => c.platform !== 'facebook').length;
   const facebookCount = connectors.filter((c) => c.platform === 'facebook').length;
@@ -86,6 +87,7 @@ export default async function SettingsConnectorsPage() {
                           {c.platform !== 'facebook' && ` · ล็อกอินล่าสุด ${fmtDate(c.last_login_at)}`}
                           {paused && c.pause_reason ? ` · ${c.pause_reason}` : ''}
                           {c.platform === 'facebook' && ` · เครื่องประจำ: ${c.preferred_worker || 'ยังไม่ได้เลือก'}`}
+                          {c.platform === 'facebook' && ` · โพสต์ ${c.group_ids.length} กลุ่ม`}
                         </ItemDescription>
                       </ItemContent>
 
@@ -128,7 +130,7 @@ export default async function SettingsConnectorsPage() {
                               />
                               <Button variant="secondary" size="sm" type="submit">บันทึกเครื่อง</Button>
                             </form>
-                            <ConnectorEditButton id={id} platform="facebook" label={c.label} username={c.username ?? ''} skipWarmup={Boolean(c.skip_warmup)} hasPassword={Boolean(c.has_password)} />
+                            <ConnectorEditButton id={id} platform="facebook" label={c.label} username={c.username ?? ''} skipWarmup={Boolean(c.skip_warmup)} hasPassword={Boolean(c.has_password)} groups={groups} groupIds={c.group_ids} />
                             <form action={deleteFacebookAccountAction}>
                               <input type="hidden" name="id" value={id} />
                               <Button variant="destructive" size="sm" type="submit" aria-label={`ลบ ${c.label}`}>ลบ</Button>
@@ -168,7 +170,7 @@ export default async function SettingsConnectorsPage() {
         <datalist id="known-facebook-workers">
           {workers.map((worker) => <option key={worker} value={worker} />)}
         </datalist>
-        <NewUnifiedConnectorForm workers={workers} />
+        <NewUnifiedConnectorForm workers={workers} groups={groups} />
       </section>
 
       <section className="flex flex-col gap-4">

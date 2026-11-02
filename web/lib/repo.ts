@@ -611,6 +611,8 @@ export type UnifiedConnectorRow = {
   skip_warmup: boolean | null;
   /** มีรหัสผ่านบันทึกไว้แล้ว (ไม่ส่งตัวรหัสออกไป) */
   has_password: boolean;
+  /** Facebook: id กลุ่มในคลังที่บัญชีนี้โพสต์ — scraper เป็น [] */
+  group_ids: string[];
 };
 
 export async function listAllConnectors() {
@@ -621,7 +623,8 @@ export async function listAllConnectors() {
             scrape_limit, daily_cap, enabled, cooldown_until, last_login_at, created_at,
             NULL::timestamptz AS paused_until, NULL::text AS pause_reason,
             NULL::integer AS used_today, NULL::text AS preferred_worker, NULL::boolean AS skip_warmup,
-            (NULLIF(password_enc, '') IS NOT NULL) AS has_password
+            (NULLIF(password_enc, '') IS NOT NULL) AS has_password,
+            '[]'::jsonb AS group_ids
        FROM connectors`,
   );
 
@@ -643,7 +646,8 @@ export async function listAllConnectors() {
               ), 0) AS used_today,
               NULLIF(to_jsonb(u)->>'preferred_worker', '') AS preferred_worker,
               COALESCE((to_jsonb(u)->>'skip_warmup')::boolean, false) AS skip_warmup,
-              (NULLIF(u.password, '') IS NOT NULL) AS has_password
+              (NULLIF(u.password, '') IS NOT NULL) AS has_password,
+              CASE WHEN jsonb_typeof(u.group_ids::jsonb) = 'array' THEN u.group_ids::jsonb ELSE '[]'::jsonb END AS group_ids
          FROM ${AP}.users u`,
     );
   } catch {
@@ -661,7 +665,8 @@ export async function listAllConnectors() {
                 0::integer AS used_today,
                 NULLIF(to_jsonb(u)->>'preferred_worker', '') AS preferred_worker,
                 false AS skip_warmup,
-                (NULLIF(u.password, '') IS NOT NULL) AS has_password
+                (NULLIF(u.password, '') IS NOT NULL) AS has_password,
+                '[]'::jsonb AS group_ids
            FROM ${AP}.users u`,
       );
     } catch {
@@ -753,6 +758,8 @@ export async function insertFacebookConnector(c: {
   dailyCap: number;
   preferredWorker?: string;
   skipWarmup?: boolean;
+  /** กลุ่ม Facebook ที่บัญชีนี้โพสต์ (id ในคลังกลุ่ม) — เลือกตั้งแต่ตอนเพิ่มบัญชี */
+  groupIds?: string[];
 }) {
   // These control columns are runtime migrations in the legacy Auto-Post server.
   // Ensure the one needed by this native Settings form before inserting.
@@ -764,7 +771,7 @@ export async function insertFacebookConnector(c: {
     `INSERT INTO ${AP}.users
        (id, env_key, name, poster_name, email, password, group_ids, blacklist_groups,
         post_settings, contact_phone, daily_cap, preferred_worker, skip_warmup)
-     VALUES ($1,$1,$2,$3,$4,$5,'[]'::jsonb,'[]'::jsonb,'{}'::jsonb,$6,$7,$8,$9)`,
+     VALUES ($1,$1,$2,$3,$4,$5,$10::jsonb,'[]'::jsonb,'{}'::jsonb,$6,$7,$8,$9)`,
     [
       id,
       c.label,
@@ -775,6 +782,7 @@ export async function insertFacebookConnector(c: {
       c.dailyCap,
       c.preferredWorker?.trim() || null,
       Boolean(c.skipWarmup),
+      JSON.stringify((c.groupIds ?? []).map(String)),
     ],
   );
   return id;
@@ -4024,27 +4032,6 @@ export async function listPostingGroups(): Promise<PostingGroup[]> {
          FROM ${AP}.groups
         ORDER BY created_at DESC`,
     );
-  } catch {
-    return [];
-  }
-}
-
-export type FbAccountGroups = { id: string; label: string; groupIds: string[] };
-
-/** บัญชี FB พร้อม id กลุ่มที่ผูกไว้ (สำหรับหน้าเลือกกลุ่ม). */
-export async function listFbAccountsWithGroups(): Promise<FbAccountGroups[]> {
-  try {
-    const rows = await q<{ id: string; label: string; group_ids: unknown }>(
-      `SELECT id, COALESCE(NULLIF(TRIM(name), ''), env_key, id) AS label,
-              CASE WHEN jsonb_typeof(group_ids::jsonb) = 'array' THEN group_ids::jsonb ELSE '[]'::jsonb END AS group_ids
-         FROM ${AP}.users
-        ORDER BY label`,
-    );
-    return rows.map((r) => ({
-      id: r.id,
-      label: r.label,
-      groupIds: Array.isArray(r.group_ids) ? r.group_ids.map(String) : [],
-    }));
   } catch {
     return [];
   }

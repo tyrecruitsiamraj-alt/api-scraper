@@ -1,185 +1,104 @@
-import Link from 'next/link';
 import { ExternalLinkIcon } from 'lucide-react';
-import { createGroupAction, deleteGroupAction, setAccountGroupsAction, setGroupDepartmentAction } from '@/lib/actions';
-import { listPostingGroups, listFbAccountsWithGroups } from '@/lib/repo';
+import { createGroupAction, deleteGroupAction, setGroupDepartmentAction } from '@/lib/actions';
+import { listPostingGroups } from '@/lib/repo';
 import { businessUnitLabel } from '@/lib/business-units';
 import { GroupBusinessSelect } from '@/components/GroupBusinessSelect';
-import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Checkbox } from '@/components/ui/checkbox';
-import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from '@/components/ui/empty';
-import { Field, FieldGroup, FieldLabel, FieldLegend, FieldSet } from '@/components/ui/field';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Field, FieldGroup, FieldLabel } from '@/components/ui/field';
 import { Input } from '@/components/ui/input';
 import { Item, ItemActions, ItemContent, ItemDescription, ItemGroup, ItemTitle } from '@/components/ui/item';
 
 /**
- * จัดการกลุ่มโพสต์ + ผูกกลุ่มเข้าบัญชี แบบ native (แทน iframe เดิมที่ทำยาก).
- * server component — ใช้ server action ตรง ๆ ไม่ต้องมี client state.
+ * คลังกลุ่ม Facebook — เพิ่ม/ลบ และติดป้ายธุรกิจ
+ * การเลือกว่าบัญชีไหนโพสต์กลุ่มไหน อยู่ในฟอร์มเพิ่ม/แก้ไขบัญชี (ตั้งค่า → บัญชีที่ใช้งาน)
+ * ไม่ใช่ตารางบัญชี × กลุ่มที่นี่ (เคยเป็นช่องติ๊ก 34 × 37 บนหน้าเดียว)
  */
 export async function PostingGroupsManager() {
-  const [groups, accounts] = await Promise.all([listPostingGroups(), listFbAccountsWithGroups()]);
+  const groups = await listPostingGroups();
 
   return (
-    <div className="flex flex-col gap-8">
-      {/* บัญชี × กลุ่ม — ติ๊กเลือกกลุ่มที่แต่ละบัญชีจะโพสต์ */}
-      <section className="flex flex-col gap-3">
-        <div className="flex flex-col gap-1">
-          <h2 className="text-base font-semibold">บัญชีโพสต์และกลุ่มที่จะลง</h2>
-          <p className="text-sm leading-relaxed text-muted-foreground">
-            ติ๊กกลุ่มที่ให้บัญชีนั้นโพสต์ แล้วกดบันทึก บัญชีที่ยังไม่มีกลุ่มจะโพสต์ไม่ได้
-          </p>
-        </div>
+    <section className="flex flex-col gap-3">
+      <div className="flex items-baseline justify-between gap-2">
+        <h2 className="text-base font-semibold">คลังกลุ่ม Facebook</h2>
+        <span className="text-xs text-muted-foreground">{groups.length} กลุ่ม</span>
+      </div>
 
-        {accounts.length === 0 ? (
-          <Empty className="border">
-            <EmptyHeader>
-              <EmptyTitle>ยังไม่มีบัญชี Facebook</EmptyTitle>
-              <EmptyDescription>
-                <Link href="/settings/connectors">เพิ่มบัญชีก่อน</Link>
-              </EmptyDescription>
-            </EmptyHeader>
-          </Empty>
-        ) : groups.length === 0 ? (
-          <Empty className="border">
-            <EmptyHeader>
-              <EmptyTitle>ยังไม่มีกลุ่มในระบบ</EmptyTitle>
-              <EmptyDescription>เพิ่มกลุ่มในคลังด้านล่างก่อน แล้วค่อยผูกเข้าบัญชี</EmptyDescription>
-            </EmptyHeader>
-          </Empty>
-        ) : (
-          <div className="flex flex-col gap-3">
-            {accounts.map((account) => {
-              const linked = new Set(account.groupIds);
-              const noGroup = linked.size === 0;
-              return (
-                <form key={account.id} action={setAccountGroupsAction}>
-                  <input type="hidden" name="userId" value={account.id} />
-                  <Card size="sm">
-                    <CardHeader>
-                      <CardTitle>{account.label}</CardTitle>
-                      <CardDescription>
-                        {noGroup ? <Badge variant="outline">ยังไม่ได้เลือกกลุ่ม</Badge> : `เลือกไว้ ${linked.size} กลุ่ม`}
-                      </CardDescription>
-                      <CardAction>
-                        <Button size="sm">บันทึกกลุ่มของบัญชีนี้</Button>
-                      </CardAction>
-                    </CardHeader>
-                    <CardContent>
-                      <FieldSet>
-                        <FieldLegend className="sr-only">กลุ่มที่บัญชี {account.label} จะโพสต์</FieldLegend>
-                        <div className="grid gap-x-4 gap-y-3 sm:grid-cols-2">
-                          {groups.map((group) => {
-                            const id = `acc-${account.id}-grp-${group.id}`;
-                            return (
-                              <Field key={group.id} orientation="horizontal">
-                                <Checkbox
-                                  id={id}
-                                  name="groupIds"
-                                  value={group.id}
-                                  defaultChecked={linked.has(group.id)}
-                                />
-                                <FieldLabel htmlFor={id} className="min-w-0 font-normal">
-                                  <span className="truncate">{group.name}</span>
-                                  <span className="shrink-0 font-mono text-xs text-muted-foreground">{group.fb_group_id}</span>
-                                </FieldLabel>
-                              </Field>
-                            );
-                          })}
-                        </div>
-                      </FieldSet>
-                    </CardContent>
-                  </Card>
+      <Card size="sm">
+        <CardHeader>
+          <CardTitle>เพิ่มกลุ่ม</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <form action={createGroupAction}>
+            <FieldGroup>
+              <div className="grid gap-4 sm:grid-cols-[2fr_1.5fr_1fr_1fr_auto] sm:items-end">
+                <Field>
+                  <FieldLabel htmlFor="new-group-id">ลิงก์กลุ่ม หรือ ID กลุ่ม</FieldLabel>
+                  <Input
+                    id="new-group-id"
+                    name="fbGroupId"
+                    required
+                    placeholder="https://facebook.com/groups/123… หรือ 123456789"
+                  />
+                </Field>
+                <Field>
+                  <FieldLabel htmlFor="new-group-name">ชื่อกลุ่ม (ไม่บังคับ)</FieldLabel>
+                  <Input id="new-group-name" name="name" placeholder="เช่น หางานขับรถ กทม." />
+                </Field>
+                <Field>
+                  <FieldLabel htmlFor="new-group-province">จังหวัด (ไม่บังคับ)</FieldLabel>
+                  <Input id="new-group-province" name="province" placeholder="กรุงเทพ" />
+                </Field>
+                <Field>
+                  <FieldLabel htmlFor="new-group-department">ธุรกิจ</FieldLabel>
+                  <GroupBusinessSelect id="new-group-department" name="department" defaultValue={null} />
+                </Field>
+                <Button>เพิ่มกลุ่ม</Button>
+              </div>
+            </FieldGroup>
+          </form>
+        </CardContent>
+      </Card>
+
+      {groups.length > 0 && (
+        <ItemGroup className="gap-2">
+          {groups.map((group) => (
+            <Item key={group.id} variant="outline" size="sm">
+              <ItemContent className="min-w-0">
+                <ItemTitle>{group.name}</ItemTitle>
+                <ItemDescription>
+                  <span className="font-mono">{group.fb_group_id}</span>
+                  {group.province ? ` · ${group.province}` : ''}
+                  {` · ${businessUnitLabel(group.department) ?? 'ไม่ระบุธุรกิจ'}`}
+                </ItemDescription>
+              </ItemContent>
+              <ItemActions>
+                <form action={setGroupDepartmentAction} className="w-36">
+                  <input type="hidden" name="id" value={group.id} />
+                  <GroupBusinessSelect
+                    name="department"
+                    defaultValue={group.department}
+                    ariaLabel={`ธุรกิจของกลุ่ม ${group.name}`}
+                    submitOnChange
+                  />
                 </form>
-              );
-            })}
-          </div>
-        )}
-      </section>
-
-      {/* คลังกลุ่ม — เพิ่ม/ลบ */}
-      <section className="flex flex-col gap-3">
-        <div className="flex items-baseline justify-between gap-2">
-          <h2 className="text-base font-semibold">คลังกลุ่ม Facebook</h2>
-          <span className="text-xs text-muted-foreground">{groups.length} กลุ่ม</span>
-        </div>
-
-        <Card size="sm">
-          <CardHeader>
-            <CardTitle>เพิ่มกลุ่ม</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <form action={createGroupAction}>
-              <FieldGroup>
-                <div className="grid gap-4 sm:grid-cols-[2fr_1.5fr_1fr_1fr_auto] sm:items-end">
-                  <Field>
-                    <FieldLabel htmlFor="new-group-id">ลิงก์กลุ่ม หรือ ID กลุ่ม</FieldLabel>
-                    <Input
-                      id="new-group-id"
-                      name="fbGroupId"
-                      required
-                      placeholder="https://facebook.com/groups/123… หรือ 123456789"
-                    />
-                  </Field>
-                  <Field>
-                    <FieldLabel htmlFor="new-group-name">ชื่อกลุ่ม (ไม่บังคับ)</FieldLabel>
-                    <Input id="new-group-name" name="name" placeholder="เช่น หางานขับรถ กทม." />
-                  </Field>
-                  <Field>
-                    <FieldLabel htmlFor="new-group-province">จังหวัด (ไม่บังคับ)</FieldLabel>
-                    <Input id="new-group-province" name="province" placeholder="กรุงเทพ" />
-                  </Field>
-                  <Field>
-                    <FieldLabel htmlFor="new-group-department">ธุรกิจ</FieldLabel>
-                    <GroupBusinessSelect id="new-group-department" name="department" defaultValue={null} />
-                  </Field>
-                  <Button>เพิ่มกลุ่ม</Button>
-                </div>
-              </FieldGroup>
-            </form>
-          </CardContent>
-        </Card>
-
-        {groups.length > 0 && (
-          <ItemGroup className="gap-2">
-            {groups.map((group) => (
-              <Item key={group.id} variant="outline" size="sm">
-                <ItemContent className="min-w-0">
-                  <ItemTitle>{group.name}</ItemTitle>
-                  <ItemDescription>
-                    <span className="font-mono">{group.fb_group_id}</span>
-                    {group.province ? ` · ${group.province}` : ''}
-                    {` · ${businessUnitLabel(group.department) ?? 'ไม่ระบุธุรกิจ'}`}
-                  </ItemDescription>
-                </ItemContent>
-                <ItemActions>
-                  <form action={setGroupDepartmentAction} className="w-36">
-                    <input type="hidden" name="id" value={group.id} />
-                    <GroupBusinessSelect
-                      name="department"
-                      defaultValue={group.department}
-                      ariaLabel={`ธุรกิจของกลุ่ม ${group.name}`}
-                      submitOnChange
-                    />
-                  </form>
-                  <Button asChild variant="ghost" size="sm">
-                    <a href={`https://www.facebook.com/groups/${group.fb_group_id}`} target="_blank" rel="noreferrer">
-                      เปิด
-                      <ExternalLinkIcon data-icon="inline-end" />
-                    </a>
+                <Button asChild variant="ghost" size="sm">
+                  <a href={`https://www.facebook.com/groups/${group.fb_group_id}`} target="_blank" rel="noreferrer">
+                    เปิด
+                    <ExternalLinkIcon data-icon="inline-end" />
+                  </a>
+                </Button>
+                <form action={deleteGroupAction}>
+                  <input type="hidden" name="id" value={group.id} />
+                  <Button variant="destructive" size="sm" aria-label={`ลบ ${group.name}`}>
+                    ลบ
                   </Button>
-                  <form action={deleteGroupAction}>
-                    <input type="hidden" name="id" value={group.id} />
-                    <Button variant="destructive" size="sm" aria-label={`ลบ ${group.name}`}>
-                      ลบ
-                    </Button>
-                  </form>
-                </ItemActions>
-              </Item>
-            ))}
-          </ItemGroup>
-        )}
-      </section>
-    </div>
+                </form>
+              </ItemActions>
+            </Item>
+          ))}
+        </ItemGroup>
+      )}
+    </section>
   );
 }
