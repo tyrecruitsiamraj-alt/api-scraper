@@ -2,6 +2,9 @@ import 'server-only';
 import { q } from './db';
 import { buildPostTaskGroups, postTaskStage } from '../../src/core/post-task-state.js';
 import type { PostTaskCounts, PostTaskCurrent, PostTaskGroup } from '../../src/core/post-task-state.js';
+import { classifyGroupOutcome, GROUP_STATE } from '../../src/core/group-outcome.js';
+
+export type GroupOutcomeState = keyof typeof GROUP_STATE;
 
 // งานโพสต์ 1 task = 1 รอบโพสต์ (post_run_queue 1 แถว, mode=post)
 const AP_SCHEMA = process.env.AUTOPOST_SCHEMA || 'so_autopost_apiscraper';
@@ -192,27 +195,28 @@ export type ManualJoinGroup = {
    * limit = บอทกดเข้าร่วมครบโควต้ารอบนั้น · unknown = ไม่เจอช่องโพสต์และปุ่มเข้าร่วม
    * rejected = Facebook ไม่รับโพสต์ · failed = โพสต์ไม่สำเร็จ
    * post_pending = โพสต์แล้ว รอแอดมินอนุมัติโพสต์ · unconfirmed = โพสต์แล้วไม่เจอในกลุ่ม
+   * admin_paused = แอดมินพักกลุ่ม · unavailable = บัญชีนี้เปิดกลุ่มไม่ได้ (src/core/group-outcome.js)
    */
-  state: 'questions' | 'pending' | 'limit' | 'unknown' | 'rejected' | 'failed' | 'post_pending' | 'unconfirmed';
+  state: Exclude<GroupOutcomeState, 'ok' | 'never'>;
   /** ข้อความที่ Facebook หรือหน้ากลุ่มแสดง (ถ้ามี) */
   detail: string | null;
   request_no: string | null;
   seen_at: string;
 };
 
-const JOIN_STATES = new Set(['questions', 'pending', 'limit', 'unknown']);
-
 /**
  * ทุกกลุ่มที่ยังไม่ขึ้นในกลุ่ม พร้อมลิงก์ให้คนไปแก้เอง — ดูผลล่าสุดต่อบัญชี+กลุ่ม ย้อน 30 วัน
  * ผลล่าสุดสำเร็จและได้ลิงก์ = หายจากรายการเอง
  */
-export async function listManualJoinGroups(): Promise<ManualJoinGroup[]> {
-  try {
-    const rows = await q<{
-      user_id: string; account: string | null; group_id: string; group_name: string | null;
-      level: string; message: string | null; kind: string | null; join_state: string | null; fb_message: string | null;
-      seen_at: string; job_id: string | null; post_link: string | null; post_status: string | null;
-    }>(
+export type GroupOutcomeRow = {
+  user_id: string; account: string | null; group_id: string; group_name: string | null;
+  level: string; message: string | null; kind: string | null; join_state: string | null; fb_message: string | null;
+  seen_at: string; job_id: string | null; post_link: string | null; post_status: string | null;
+};
+
+/** ผลล่าสุดของทุกคู่ บัญชี × กลุ่ม ย้อน 30 วัน (group_id = เลขกลุ่มบน Facebook) — ใช้ร่วมกับข้อมูลที่ส่ง Jarvis */
+export async function loadLatestGroupOutcomes(): Promise<GroupOutcomeRow[]> {
+  return q<GroupOutcomeRow>(
       `WITH latest AS (
          SELECT DISTINCT ON (l.user_id, l.group_id)
                 l.user_id, l.group_id, l.level, l.message, l.meta->>'kind' AS kind, l.meta->>'state' AS join_state,
@@ -234,38 +238,17 @@ export async function listManualJoinGroups(): Promise<ManualJoinGroup[]> {
             ORDER BY p.created_at DESC LIMIT 1
          ) pl ON latest.level = 'success'
         ORDER BY latest.seen_at DESC
-        LIMIT 500`,
-    );
+        LIMIT 2000`,
+  );
+}
+
+export async function listManualJoinGroups(): Promise<ManualJoinGroup[]> {
+  try {
+    const rows = await loadLatestGroupOutcomes();
     const out: ManualJoinGroup[] = [];
     for (const r of rows) {
-      const groupUrl = `https://www.facebook.com/groups/${r.group_id}`;
-      const link = String(r.post_link ?? '').trim();
-      let state: ManualJoinGroup['state'];
-      let url = groupUrl;
-      let detail: string | null = null;
-      if (r.level === 'success') {
-        if (r.post_status === 'รออนุมัติ') {
-          state = 'post_pending';
-          if (link) url = link;
-        } else if (link) {
-          continue; // ขึ้นในกลุ่มแล้ว
-        } else {
-          state = 'unconfirmed';
-          url = `${groupUrl}/my_posted_content`;
-        }
-      } else if (r.kind === 'join' && r.join_state && JOIN_STATES.has(r.join_state)) {
-        state = r.join_state as ManualJoinGroup['state'];
-        if (state === 'unknown') {
-          // ข้อความที่อ่านจากหน้ากลุ่มบางทีเป็นแค่คำอธิบายความเป็นส่วนตัวของกลุ่ม — เก็บเฉพาะที่บอกเหตุจริง
-          const hint = r.message?.split('หน้ากลุ่มเขียนว่า:')[1]?.replace(/\(กลุ่ม \d+\)\s*$/, '').trim() ?? '';
-          detail = /พัก|ปิด|ลบ|ไม่พร้อมใช้งาน|ไม่มีเนื้อหา|paused|archived|unavailable/i.test(hint) ? hint : null;
-        }
-      } else if (r.kind === 'post_rejected') {
-        state = 'rejected';
-        detail = r.fb_message;
-      } else {
-        state = 'failed';
-      }
+      const { state, detail, url } = classifyGroupOutcome(r);
+      if (state === 'ok' || state === 'never') continue; // ขึ้นในกลุ่มแล้ว
       out.push({
         user_id: r.user_id,
         account: r.account,

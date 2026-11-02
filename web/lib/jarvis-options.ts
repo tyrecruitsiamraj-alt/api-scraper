@@ -1,5 +1,7 @@
 import 'server-only';
 import { q } from './db';
+import { loadLatestGroupOutcomes, type GroupOutcomeState } from './post-tasks';
+import { classifyGroupOutcome, GROUP_STATE } from '../../src/core/group-outcome.js';
 
 /**
  * ข้อมูลให้ Jarvis ใช้ตอนพนักงานเลือก บัญชี Facebook / กลุ่ม / เครื่อง / บัญชี Scrap ก่อนสั่งงาน
@@ -37,6 +39,28 @@ export type JarvisAccountOption = {
   home_group_ids: string[];
   /** เครื่องที่มี session ล็อกอินบัญชีนี้อยู่ (โพสต์จากเครื่องอื่นได้ แต่ต้องล็อกอินใหม่บนเครื่องนั้น) */
   session_workers: string[];
+  /** ธุรกิจของบัญชี LBD/LBA/LM — null = ยังไม่ได้เลือก */
+  department: string | null;
+  /**
+   * ผลล่าสุด (30 วัน) ของบัญชีนี้ในแต่ละกลุ่ม — เฉพาะกลุ่มที่เคยลองโพสต์
+   * กลุ่มที่ไม่อยู่ในรายการ = ยังไม่เคยลอง (state 'never', ติ๊กได้)
+   * recommended=false: ไม่ควรติ๊กให้ตั้งแต่แรก ลองไปก็ไม่ได้โพสต์จนกว่าคนจะไปแก้ที่ Facebook
+   */
+  group_status: JarvisGroupStatus[];
+};
+
+export type JarvisGroupStatus = {
+  /** id กลุ่มในระบบ (ตรงกับ JarvisGroupOption.id) */
+  group_id: string;
+  state: GroupOutcomeState;
+  /** คำบนจอ เช่น "ต้องเข้ากลุ่มเอง (มีคำถาม)" */
+  label: string;
+  recommended: boolean;
+  /** ข้อความที่ Facebook หรือหน้ากลุ่มแสดง (ถ้ามี) */
+  detail: string | null;
+  /** ลิงก์ให้คนกดไปแก้: หน้ากลุ่ม / โพสต์ที่รออนุมัติ */
+  url: string;
+  seen_at: string;
 };
 
 export type JarvisGroupOption = {
@@ -52,6 +76,13 @@ export type JarvisGroupOption = {
   last_posted_at: string | null;
   /** ผลย้อนหลัง 30 วัน — comments/phone_leads ขึ้นกับตัวเก็บคอมเมนต์ (ยังอ่านคอมเมนต์รายคนไม่ได้ ตัวเลขอาจต่ำกว่าจริง) */
   stats_30d: { attempts: number; posted: number; comments: number; phone_leads: number };
+  /** ธุรกิจของกลุ่ม LBD/LBA/LM — null = ยังไม่ได้เลือก */
+  department: string | null;
+  /**
+   * ติดที่ตัวกลุ่ม ทุกบัญชีโพสต์ไม่ได้ — ตอนนี้มีแค่ "แอดมินพักกลุ่ม"
+   * ดูจากครั้งล่าสุดที่บัญชีใดก็ได้เปิดกลุ่มนี้ · แอดมินเปิดคืนแล้วจะรู้เมื่อมีบัญชีลองโพสต์ครั้งถัดไป
+   */
+  blocked: { state: 'admin_paused'; label: string; detail: string | null; seen_at: string } | null;
 };
 
 export type JarvisWorkerOption = {
@@ -139,13 +170,14 @@ function machine(workerId: string | null): string | null {
 }
 
 export async function getJarvisOptions(): Promise<JarvisOptions> {
-  const [accountRows, groupRows, postQueueRows, autopostWorkers, scraperWorkers, scrapeQueueRows, connectorRows] = await Promise.all([
+  const [accountRows, groupRows, postQueueRows, autopostWorkers, scraperWorkers, scrapeQueueRows, connectorRows, outcomeRows] = await Promise.all([
     q<{
       id: string; env_key: string | null; email: string | null; skip_warmup: boolean; name: string; worker: string | null; worker_online: boolean; daily_cap: number | null;
       paused_until: string | null; pause_reason: string | null; group_ids: string[];
-      posted_today: number; age_days: number | null; running: number; queued: number;
+      posted_today: number; age_days: number | null; running: number; queued: number; department: string | null;
     }>(
       `SELECT u.id, u.env_key, u.email, COALESCE((to_jsonb(u)->>'skip_warmup')::boolean, false) AS skip_warmup,
+              NULLIF(to_jsonb(u)->>'department', '') AS department,
               COALESCE(NULLIF(TRIM(u.name), ''), u.env_key, u.id) AS name,
               u.preferred_worker AS worker,
               EXISTS (SELECT 1 FROM ${AP}.workers w WHERE w.name = u.preferred_worker AND w.last_seen > now() - ${ONLINE}) AS worker_online,
@@ -169,9 +201,9 @@ export async function getJarvisOptions(): Promise<JarvisOptions> {
     ),
     q<{
       id: string; fb_group_id: string; name: string | null; account_ids: string[]; last_posted_at: string | null;
-      attempts: number; posted: number; comments: number; phone_leads: number;
+      attempts: number; posted: number; comments: number; phone_leads: number; department: string | null;
     }>(
-      `SELECT g.id, g.fb_group_id, g.name,
+      `SELECT g.id, g.fb_group_id, g.name, NULLIF(TRIM(g.department), '') AS department,
               COALESCE((SELECT jsonb_agg(u.id) FROM ${AP}.users u WHERE COALESCE(u.group_ids::jsonb, '[]'::jsonb) ? g.id), '[]'::jsonb) AS account_ids,
               (SELECT max(rl.created_at) FROM ${AP}.run_logs rl WHERE rl.group_id = g.fb_group_id AND rl.level = 'success') AS last_posted_at,
               (SELECT count(*) FROM ${AP}.run_logs rl WHERE rl.group_id = g.fb_group_id AND rl.level IN ('success', 'warn', 'error')
@@ -186,8 +218,8 @@ export async function getJarvisOptions(): Promise<JarvisOptions> {
         ORDER BY g.name`,
     ).catch(async () =>
       // comment_leads ยังไม่ถูกสร้าง (ตัวเก็บคอมเมนต์ยังไม่เคยรัน) — ไม่นับเบอร์
-      q<{ id: string; fb_group_id: string; name: string | null; account_ids: string[]; last_posted_at: string | null; attempts: number; posted: number; comments: number; phone_leads: number }>(
-        `SELECT g.id, g.fb_group_id, g.name,
+      q<{ id: string; fb_group_id: string; name: string | null; account_ids: string[]; last_posted_at: string | null; attempts: number; posted: number; comments: number; phone_leads: number; department: string | null }>(
+        `SELECT g.id, g.fb_group_id, g.name, NULLIF(TRIM(g.department), '') AS department,
                 COALESCE((SELECT jsonb_agg(u.id) FROM ${AP}.users u WHERE COALESCE(u.group_ids::jsonb, '[]'::jsonb) ? g.id), '[]'::jsonb) AS account_ids,
                 NULL::timestamptz AS last_posted_at, 0 AS attempts, 0 AS posted, 0 AS comments, 0 AS phone_leads
            FROM ${AP}.groups g ORDER BY g.name`,
@@ -229,6 +261,8 @@ export async function getJarvisOptions(): Promise<JarvisOptions> {
         WHERE c.platform IN ('jobthai', 'jobbkk')
         ORDER BY c.platform, 3`,
     ).catch(() => []),
+    // สถานะบัญชี × กลุ่ม อ่านไม่ได้ = ไม่ส่งสถานะ (ทุกกลุ่มเป็น "ยังไม่เคยลอง") ไม่ทำให้ป๊อปทั้งป๊อปล่ม
+    loadLatestGroupOutcomes().catch(() => []),
   ]);
 
   // ชื่อไฟล์ session = facebook-<key>.json โดย key คิดแบบเดียวกับ facebookLogin (env_key → id → email)
@@ -245,6 +279,32 @@ export async function getJarvisOptions(): Promise<JarvisOptions> {
   }
 
   const allGroupIds = groupRows.map((g) => String(g.id));
+
+  // run_logs เก็บเลขกลุ่มบน Facebook — แปลงเป็น id กลุ่มในระบบที่ Jarvis ใช้
+  const groupIdByFb = new Map(groupRows.map((g) => [String(g.fb_group_id), String(g.id)]));
+  const statusByAccount = new Map<string, JarvisGroupStatus[]>();
+  const pausedByGroup = new Map<string, NonNullable<JarvisGroupOption['blocked']>>();
+  for (const r of outcomeRows) {
+    const groupId = groupIdByFb.get(String(r.group_id));
+    if (!groupId) continue; // กลุ่มถูกลบออกจากคลังแล้ว
+    const { state, detail, url } = classifyGroupOutcome(r);
+    const list = statusByAccount.get(r.user_id) ?? [];
+    list.push({ group_id: groupId, state, label: GROUP_STATE[state].label, recommended: GROUP_STATE[state].recommended, detail, url, seen_at: r.seen_at });
+    statusByAccount.set(r.user_id, list);
+  }
+  // กลุ่มติดที่ตัวกลุ่ม: ผลล่าสุดของกลุ่มนั้น (ข้ามทุกบัญชี) คือแอดมินพักกลุ่ม
+  const latestByGroup = new Map<string, JarvisGroupStatus>();
+  for (const list of statusByAccount.values()) {
+    for (const st of list) {
+      const prev = latestByGroup.get(st.group_id);
+      if (!prev || new Date(st.seen_at) > new Date(prev.seen_at)) latestByGroup.set(st.group_id, st);
+    }
+  }
+  for (const [groupId, st] of latestByGroup) {
+    if (st.state === 'admin_paused') {
+      pausedByGroup.set(groupId, { state: 'admin_paused', label: st.label, detail: st.detail, seen_at: st.seen_at });
+    }
+  }
   const allAccountIds = accountRows.map((r) => String(r.id));
   const accounts: JarvisAccountOption[] = accountRows.map((r) => {
     const daily_cap = effectiveDailyCap(r.daily_cap, r.age_days, process.env, r.skip_warmup);
@@ -266,6 +326,8 @@ export async function getJarvisOptions(): Promise<JarvisOptions> {
       group_ids: allGroupIds,
       home_group_ids: (r.group_ids ?? []).map(String),
       session_workers: sessionWorkers.get(sessionKey(r)) ?? [],
+      department: r.department,
+      group_status: statusByAccount.get(String(r.id)) ?? [],
     };
   });
 
@@ -283,6 +345,8 @@ export async function getJarvisOptions(): Promise<JarvisOptions> {
       comments: Number(g.comments) || 0,
       phone_leads: Number(g.phone_leads) || 0,
     },
+    department: g.department,
+    blocked: pausedByGroup.get(String(g.id)) ?? null,
   }));
 
   const workerMap = new Map<string, JarvisWorkerOption>();

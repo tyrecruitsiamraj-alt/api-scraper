@@ -256,6 +256,8 @@ const JOIN_STATE_LABEL: Record<ManualJoinGroup['state'], string> = {
   pending: 'ขอเข้ากลุ่มแล้ว รอแอดมินรับ',
   limit: 'ยังไม่ได้เข้ากลุ่ม',
   unknown: 'ไม่เจอช่องโพสต์',
+  admin_paused: 'แอดมินพักกลุ่ม',
+  unavailable: 'บัญชีนี้เปิดกลุ่มไม่ได้',
   rejected: 'Facebook ไม่รับโพสต์',
   failed: 'โพสต์ไม่สำเร็จ',
   post_pending: 'โพสต์รอแอดมินอนุมัติ',
