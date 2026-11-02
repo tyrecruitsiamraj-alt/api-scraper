@@ -5,12 +5,11 @@ import { ProviderLimitsPanel } from '@/components/ProviderLimitsPanel';
 import { FacebookQuotaPanel } from '@/components/FacebookQuotaPanel';
 import { ConnectorEditButton } from '@/components/ConnectorEditButton';
 import { NewUnifiedConnectorForm } from '../NewUnifiedConnectorForm';
-import { UserRoundIcon } from 'lucide-react';
+import { BusinessUnitSection } from '@/components/BusinessUnitSection';
+import { groupByBusinessUnit } from '@/lib/business-units';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Card } from '@/components/ui/card';
-import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from '@/components/ui/empty';
 import { Input } from '@/components/ui/input';
 import { Item, ItemActions, ItemContent, ItemDescription, ItemGroup, ItemMedia, ItemSeparator, ItemTitle } from '@/components/ui/item';
 
@@ -54,16 +53,20 @@ export default async function SettingsConnectorsPage() {
       <section className="flex flex-col gap-3">
         <div className="flex items-baseline justify-between gap-4">
           <div className="flex flex-col gap-0.5">
-            <h3 className="text-base font-semibold">บัญชีทั้งหมด</h3>
+            <h3 className="text-base font-semibold">บัญชีแยกตามธุรกิจ</h3>
             <p className="text-sm text-muted-foreground">แต่ละบัญชีทำงานทีละงาน จะได้ไม่ล็อกอินซ้อนกัน</p>
           </div>
           <span className="text-sm text-muted-foreground">{connectors.length} บัญชี</span>
         </div>
 
-        {connectors.length > 0 ? (
-          <Card className="py-0">
+        <div className="flex flex-col gap-3">
+          {groupByBusinessUnit(connectors, (c) => c.department).map((bu) => (
+            <BusinessUnitSection key={bu.code ?? 'none'} code={bu.code} detail={bu.detail} count={bu.items.length} unit="บัญชี">
+              {bu.items.length === 0 ? (
+                <p className="px-4 py-3 text-sm text-muted-foreground">ยังไม่มีบัญชีของ {bu.code} · กด เพิ่มบัญชีใหม่ ด้านล่างแล้วเลือกธุรกิจ {bu.code}</p>
+              ) : (
             <ItemGroup className="gap-0">
-              {connectors.map((c, index) => {
+              {bu.items.map((c, index) => {
                 const p = PLATFORM[c.platform] ?? { label: c.platform, letter: '?' };
                 const cooling = !!c.cooldown_until && new Date(c.cooldown_until) > new Date();
                 const paused = !!c.paused_until && new Date(c.paused_until) > new Date();
@@ -130,7 +133,7 @@ export default async function SettingsConnectorsPage() {
                               />
                               <Button variant="secondary" size="sm" type="submit">บันทึกเครื่อง</Button>
                             </form>
-                            <ConnectorEditButton id={id} platform="facebook" label={c.label} username={c.username ?? ''} skipWarmup={Boolean(c.skip_warmup)} hasPassword={Boolean(c.has_password)} groups={groups} groupIds={c.group_ids} />
+                            <ConnectorEditButton id={id} platform="facebook" label={c.label} username={c.username ?? ''} skipWarmup={Boolean(c.skip_warmup)} hasPassword={Boolean(c.has_password)} groups={groups} groupIds={c.group_ids} department={c.department} />
                             <form action={deleteFacebookAccountAction}>
                               <input type="hidden" name="id" value={id} />
                               <Button variant="destructive" size="sm" type="submit" aria-label={`ลบ ${c.label}`}>ลบ</Button>
@@ -143,7 +146,7 @@ export default async function SettingsConnectorsPage() {
                               <input type="hidden" name="enabled" value={(!c.enabled).toString()} />
                               <Button variant="ghost" size="sm" type="submit">{c.enabled ? 'ปิด' : 'เปิด'}</Button>
                             </form>
-                            <ConnectorEditButton id={id} platform={c.platform} label={c.label} username={c.username ?? ''} hasPassword={Boolean(c.has_password)} />
+                            <ConnectorEditButton id={id} platform={c.platform} label={c.label} username={c.username ?? ''} hasPassword={Boolean(c.has_password)} department={c.department} />
                             <form action={deleteConnectorAction}>
                               <input type="hidden" name="id" value={id} />
                               <Button variant="destructive" size="sm" type="submit" aria-label={`ลบ ${c.label}`}>ลบ</Button>
@@ -156,16 +159,10 @@ export default async function SettingsConnectorsPage() {
                 );
               })}
             </ItemGroup>
-          </Card>
-        ) : (
-          <Empty className="border">
-            <EmptyHeader>
-              <EmptyMedia variant="icon"><UserRoundIcon /></EmptyMedia>
-              <EmptyTitle>ยังไม่มีบัญชี</EmptyTitle>
-              <EmptyDescription>เพิ่มบัญชีแรกได้ที่ปุ่มด้านล่าง</EmptyDescription>
-            </EmptyHeader>
-          </Empty>
-        )}
+              )}
+            </BusinessUnitSection>
+          ))}
+        </div>
 
         <datalist id="known-facebook-workers">
           {workers.map((worker) => <option key={worker} value={worker} />)}

@@ -321,6 +321,7 @@ export async function createGroupAction(formData: FormData) {
   const name = String(formData.get('name') ?? '').trim();
   const province = String(formData.get('province') ?? '').trim();
   const department = readBusinessUnit(formData.get('department'));
+  if (!department) throw new Error('เลือกธุรกิจของกลุ่มนี้ (LBD / LBA / LM)');
   await createPostingGroup({ fbGroupId, name: name || null, province: province || null, department });
   revalidatePath('/settings/posting');
   revalidatePath('/orchestrator');
@@ -1002,6 +1003,8 @@ export async function createConnectorAction(formData: FormData) {
 
   if (!platform || !label || !username || !password) throw new Error('กรุณากรอกข้อมูล connector ให้ครบ');
   if (!['jobbkk', 'jobthai', 'facebook'].includes(platform)) throw new Error('แพลตฟอร์มไม่ถูกต้อง');
+  const department = readBusinessUnit(formData.get('department'));
+  if (!department) throw new Error('เลือกธุรกิจของบัญชีนี้ (LBD / LBA / LM)');
 
   if (platform === 'facebook') {
     const dailyCap = Number.isFinite(requestedDailyCap) ? Math.min(50, Math.max(1, requestedDailyCap)) : 15;
@@ -1016,6 +1019,7 @@ export async function createConnectorAction(formData: FormData) {
       preferredWorker: String(formData.get('preferredWorker') ?? '').trim(),
       skipWarmup: formData.has('skipWarmup'),
       groupIds: formData.getAll('groupIds').map((v) => String(v)).filter(Boolean),
+      department,
     });
     revalidatePath('/settings');
     revalidatePath('/settings/connectors');
@@ -1028,6 +1032,7 @@ export async function createConnectorAction(formData: FormData) {
   const scrapeLimit = Number.isFinite(requestedScrapeLimit) ? Math.min(100, Math.max(1, requestedScrapeLimit)) : 15;
 
   await insertConnector({
+    department,
     platform,
     label,
     username,
@@ -1074,12 +1079,18 @@ export async function editConnectorAction(formData: FormData) {
       username,
       password: password ? encryptFacebookPassword(password) : null,
       skipWarmup: formData.has('skipWarmup'),
+      department: readBusinessUnit(formData.get('department')),
     });
     // กลุ่มที่บัญชีโพสต์แก้จากฟอร์มเดียวกัน — ไม่ติ๊กเลย = ไม่มีกลุ่ม
     await setAccountGroups(id, formData.getAll('groupIds').map((v) => String(v)).filter(Boolean));
     revalidatePath('/settings/posting');
   } else {
-    await updateScraperConnector(id, { label, username, passwordEnc: password ? encryptSecret(password) : null });
+    await updateScraperConnector(id, {
+      label,
+      username,
+      passwordEnc: password ? encryptSecret(password) : null,
+      department: readBusinessUnit(formData.get('department')),
+    });
   }
   revalidatePath('/settings');
   revalidatePath('/settings/connectors');

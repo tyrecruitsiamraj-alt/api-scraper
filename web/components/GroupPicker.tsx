@@ -78,7 +78,7 @@ export function GroupPicker({
                   onCheckedChange={(v) => toggleSection(ids, v === true)}
                 />
                 <FieldLabel htmlFor={sectionId} className="font-medium">
-                  {businessUnitLabel(dept) ?? 'ไม่ระบุธุรกิจ'}
+                  {businessUnitLabel(dept) ?? 'ยังไม่ได้เลือกธุรกิจ'}
                   <span className="font-normal text-muted-foreground">
                     {picked}/{ids.length}
                   </span>

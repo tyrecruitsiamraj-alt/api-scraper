@@ -17,6 +17,7 @@ import {
 import { Field, FieldContent, FieldDescription, FieldGroup, FieldLabel, FieldSeparator } from '@/components/ui/field';
 import { Input } from '@/components/ui/input';
 import { GroupPicker } from '@/components/GroupPicker';
+import { GroupBusinessSelect } from '@/components/GroupBusinessSelect';
 import type { PostingGroup } from '@/lib/repo';
 
 /**
@@ -32,7 +33,10 @@ export function ConnectorEditButton({
   hasPassword = false,
   groups = [],
   groupIds = [],
+  department = null,
 }: {
+  /** ธุรกิจของบัญชี LBD/LBA/LM */
+  department?: string | null;
   id: string;
   platform: string;
   label: string;
@@ -64,6 +68,10 @@ export function ConnectorEditButton({
           <input type="hidden" name="id" value={id} />
           <input type="hidden" name="platform" value={platform} />
           <FieldGroup>
+            <Field>
+              <FieldLabel htmlFor={`${fieldId}-department`}>ธุรกิจ</FieldLabel>
+              <GroupBusinessSelect id={`${fieldId}-department`} name="department" defaultValue={department} />
+            </Field>
             <Field>
               <FieldLabel htmlFor={`${fieldId}-label`}>ชื่อที่แสดง</FieldLabel>
               <Input id={`${fieldId}-label`} name="label" defaultValue={label} required />

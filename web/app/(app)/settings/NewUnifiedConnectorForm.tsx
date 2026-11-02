@@ -19,6 +19,7 @@ import { Input } from '@/components/ui/input';
 import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select';
 import { Spinner } from '@/components/ui/spinner';
 import { GroupPicker } from '@/components/GroupPicker';
+import { GroupBusinessSelect } from '@/components/GroupBusinessSelect';
 import type { PostingGroup } from '@/lib/repo';
 
 const PLATFORMS = [
@@ -88,6 +89,11 @@ export function NewUnifiedConnectorForm({ workers = [], groups = [] }: { workers
                   <NativeSelectOption key={p.value} value={p.value}>{`${p.label} · ${p.detail}`}</NativeSelectOption>
                 ))}
               </NativeSelect>
+            </Field>
+
+            <Field>
+              <FieldLabel htmlFor="new-connector-department">ธุรกิจ</FieldLabel>
+              <GroupBusinessSelect id="new-connector-department" name="department" defaultValue={null} required />
             </Field>
 
             {platform && (

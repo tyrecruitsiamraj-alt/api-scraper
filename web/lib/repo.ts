@@ -613,6 +613,8 @@ export type UnifiedConnectorRow = {
   has_password: boolean;
   /** Facebook: id กลุ่มในคลังที่บัญชีนี้โพสต์ — scraper เป็น [] */
   group_ids: string[];
+  /** รหัสธุรกิจ LBD/LBA/LM — null = ไม่ระบุ */
+  department: string | null;
 };
 
 export async function listAllConnectors() {
@@ -624,7 +626,8 @@ export async function listAllConnectors() {
             NULL::timestamptz AS paused_until, NULL::text AS pause_reason,
             NULL::integer AS used_today, NULL::text AS preferred_worker, NULL::boolean AS skip_warmup,
             (NULLIF(password_enc, '') IS NOT NULL) AS has_password,
-            '[]'::jsonb AS group_ids
+            '[]'::jsonb AS group_ids,
+            NULLIF(to_jsonb(connectors)->>'department', '') AS department
        FROM connectors`,
   );
 
@@ -647,7 +650,8 @@ export async function listAllConnectors() {
               NULLIF(to_jsonb(u)->>'preferred_worker', '') AS preferred_worker,
               COALESCE((to_jsonb(u)->>'skip_warmup')::boolean, false) AS skip_warmup,
               (NULLIF(u.password, '') IS NOT NULL) AS has_password,
-              CASE WHEN jsonb_typeof(u.group_ids::jsonb) = 'array' THEN u.group_ids::jsonb ELSE '[]'::jsonb END AS group_ids
+              CASE WHEN jsonb_typeof(u.group_ids::jsonb) = 'array' THEN u.group_ids::jsonb ELSE '[]'::jsonb END AS group_ids,
+              NULLIF(to_jsonb(u)->>'department', '') AS department
          FROM ${AP}.users u`,
     );
   } catch {
@@ -666,7 +670,8 @@ export async function listAllConnectors() {
                 NULLIF(to_jsonb(u)->>'preferred_worker', '') AS preferred_worker,
                 false AS skip_warmup,
                 (NULLIF(u.password, '') IS NOT NULL) AS has_password,
-                '[]'::jsonb AS group_ids
+                '[]'::jsonb AS group_ids,
+                NULLIF(to_jsonb(u)->>'department', '') AS department
            FROM ${AP}.users u`,
       );
     } catch {
@@ -739,11 +744,14 @@ export async function insertConnector(c: {
   passwordEnc: string;
   scrapeLimit: number;
   dailyCap: number;
+  /** รหัสธุรกิจ LBD/LBA/LM… — null = ไม่ระบุ */
+  department?: string | null;
 }) {
+  await q('ALTER TABLE connectors ADD COLUMN IF NOT EXISTS department text'); // schema-029 แบบ runtime เหมือนฝั่ง Facebook
   const rows = await q<{ id: string }>(
-    `INSERT INTO connectors (platform, label, username, password_enc, scrape_limit, daily_cap)
-     VALUES ($1,$2,$3,$4,$5,$6) RETURNING id`,
-    [c.platform, c.label, c.username, c.passwordEnc, c.scrapeLimit, c.dailyCap],
+    `INSERT INTO connectors (platform, label, username, password_enc, scrape_limit, daily_cap, department)
+     VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id`,
+    [c.platform, c.label, c.username, c.passwordEnc, c.scrapeLimit, c.dailyCap, c.department ?? null],
   );
   return rows[0].id;
 }
@@ -760,18 +768,21 @@ export async function insertFacebookConnector(c: {
   skipWarmup?: boolean;
   /** กลุ่ม Facebook ที่บัญชีนี้โพสต์ (id ในคลังกลุ่ม) — เลือกตั้งแต่ตอนเพิ่มบัญชี */
   groupIds?: string[];
+  /** รหัสธุรกิจ LBD/LBA/LM… — null = ไม่ระบุ */
+  department?: string | null;
 }) {
   // These control columns are runtime migrations in the legacy Auto-Post server.
   // Ensure the one needed by this native Settings form before inserting.
   await q(`ALTER TABLE ${AP}.users ADD COLUMN IF NOT EXISTS daily_cap INTEGER`);
   await q(`ALTER TABLE ${AP}.users ADD COLUMN IF NOT EXISTS preferred_worker VARCHAR(255)`);
   await q(`ALTER TABLE ${AP}.users ADD COLUMN IF NOT EXISTS skip_warmup BOOLEAN NOT NULL DEFAULT false`);
+  await q(`ALTER TABLE ${AP}.users ADD COLUMN IF NOT EXISTS department VARCHAR(16)`);
   const id = `fb_${randomUUID().replace(/-/g, '').slice(0, 24)}`;
   await q(
     `INSERT INTO ${AP}.users
        (id, env_key, name, poster_name, email, password, group_ids, blacklist_groups,
-        post_settings, contact_phone, daily_cap, preferred_worker, skip_warmup)
-     VALUES ($1,$1,$2,$3,$4,$5,$10::jsonb,'[]'::jsonb,'{}'::jsonb,$6,$7,$8,$9)`,
+        post_settings, contact_phone, daily_cap, preferred_worker, skip_warmup, department)
+     VALUES ($1,$1,$2,$3,$4,$5,$10::jsonb,'[]'::jsonb,'{}'::jsonb,$6,$7,$8,$9,$11)`,
     [
       id,
       c.label,
@@ -783,6 +794,7 @@ export async function insertFacebookConnector(c: {
       c.preferredWorker?.trim() || null,
       Boolean(c.skipWarmup),
       JSON.stringify((c.groupIds ?? []).map(String)),
+      c.department ?? null,
     ],
   );
   return id;
@@ -799,8 +811,12 @@ export async function deleteConnector(id: string) {
 /** แก้ข้อมูล Scraper connector (jobbkk/jobthai). password ว่าง = ไม่เปลี่ยนรหัสเดิม. */
 export async function updateScraperConnector(
   id: string,
-  c: { label: string; username: string; passwordEnc: string | null },
+  c: { label: string; username: string; passwordEnc: string | null; department?: string | null },
 ) {
+  if (c.department !== undefined) {
+    await q('ALTER TABLE connectors ADD COLUMN IF NOT EXISTS department text');
+    await q('UPDATE connectors SET department=$2, updated_at=now() WHERE id=$1', [id, c.department]);
+  }
   if (c.passwordEnc) {
     await q('UPDATE connectors SET label=$2, username=$3, password_enc=$4, updated_at=now() WHERE id=$1', [
       id, c.label, c.username, c.passwordEnc,
@@ -813,8 +829,12 @@ export async function updateScraperConnector(
 /** แก้ข้อมูลบัญชี Facebook. password ว่าง = ไม่เปลี่ยนรหัสเดิม. */
 export async function updateFacebookAccount(
   id: string,
-  c: { label: string; username: string; password: string | null; skipWarmup?: boolean },
+  c: { label: string; username: string; password: string | null; skipWarmup?: boolean; department?: string | null },
 ) {
+  if (c.department !== undefined) {
+    await q(`ALTER TABLE ${AP}.users ADD COLUMN IF NOT EXISTS department VARCHAR(16)`);
+    await q(`UPDATE ${AP}.users SET department=$2, updated_at=now() WHERE id=$1`, [id, c.department]);
+  }
   if (c.skipWarmup !== undefined) {
     await q(`ALTER TABLE ${AP}.users ADD COLUMN IF NOT EXISTS skip_warmup BOOLEAN NOT NULL DEFAULT false`);
     await q(`UPDATE ${AP}.users SET skip_warmup=$2, updated_at=now() WHERE id=$1`, [id, c.skipWarmup]);
