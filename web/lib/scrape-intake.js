@@ -89,9 +89,13 @@ export function parseSalaryBounds(snapshot = {}) {
     return { salaryMin: digits(range[1]), salaryMax: digits(range[2]) };
   }
 
+  // รายได้ในใบขอคือเงินที่จ่าย จึงเป็นเพดานของเงินเดือนที่ผู้สมัครขอ ไม่ใช่ขั้นต่ำ
+  // (เดิม "19500" กลายเป็นขั้นต่ำ 19,500 → เว็บตัดคนที่ขอน้อยกว่านั้นทิ้งหมด · LAM6909001, 2 พ.ย. 2569)
+  // "25,000+" = จ่ายได้มากกว่านี้ ไม่มีเพดานให้ตั้ง
   const compact = income.replace(/\s+/g, '');
-  if (/^[\d,]+(?:\+|บาท|\/เดือน)*$/u.test(compact)) {
-    return { salaryMin: digits(income), salaryMax: '' };
+  if (/\+/.test(compact)) return { salaryMin: '', salaryMax: '' };
+  if (/^[\d,]+(?:บาท|\/เดือน)*$/u.test(compact)) {
+    return { salaryMin: '', salaryMax: digits(income) };
   }
   return { salaryMin: '', salaryMax: '' };
 }

@@ -36,8 +36,17 @@ test('salary comes from explicit bounds or a simple income figure, not mixed pro
     salaryMin: '20000',
     salaryMax: '25000',
   });
+  // รายได้ที่จ่ายคือเพดานของเงินเดือนที่ผู้สมัครขอ — ไม่ใช่ขั้นต่ำที่ตัดคนขอน้อยกว่าทิ้ง
+  assert.deepEqual(parseSalaryBounds({ income: '19500' }), {
+    salaryMin: '',
+    salaryMax: '19500',
+  });
+  assert.deepEqual(parseSalaryBounds({ income: '15,000 บาท/เดือน' }), {
+    salaryMin: '',
+    salaryMax: '15000',
+  });
   assert.deepEqual(parseSalaryBounds({ income: '25,000+' }), {
-    salaryMin: '25000',
+    salaryMin: '',
     salaryMax: '',
   });
   assert.deepEqual(parseSalaryBounds({ income: '20000-25000' }), {
@@ -69,7 +78,7 @@ test('criteria keeps operator overrides and skips empty snapshot fields', () => 
       gender: 'O',
       education: '',
       job_family: 'Sales',
-      income: '25000+',
+      income: '25000',
       age_min: '25',
       age_max: '45',
     },
@@ -87,7 +96,7 @@ test('criteria keeps operator overrides and skips empty snapshot fields', () => 
     industry: 'การขาย',
     province: 'สมุทรปราการ',
     education: 'ปริญญาตรี',
-    salaryMin: '25000',
+    salaryMax: '25000',
     ageMin: '25',
     ageMax: '45',
   });
@@ -133,8 +142,8 @@ test('orchestrator prefill shows ไม่ระบุ instead of ERP O, without
   assert.equal(plan.education, 'ไม่ระบุ');
   assert.equal(plan.keyword, '');
   assert.equal(plan.industry, '');
-  assert.equal(plan.salary_min, '30000');
-  assert.equal(plan.salary_max, '');
+  assert.equal(plan.salary_min, '');
+  assert.equal(plan.salary_max, '30000');
 });
 
 test('intake criteria is what Talent Normal Search actually applies', () => {
