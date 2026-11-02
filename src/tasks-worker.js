@@ -41,6 +41,7 @@ import { finalizeCandidateRecord, hasUsefulEducation, hasUsefulWorkExperience } 
 import { acceptedPositionsForTitle, suggestAdjacentPositions, positionsFromDescription } from './core/job-family.js';
 import { resolveSearchIdentityFromDescription } from '../web/lib/scrape-intake.js';
 import { filterZeroYieldExpansionTerms } from './core/scrape-failure-learning.js';
+import { isZeroYieldRound, zeroYieldNote } from './core/zero-yield.js';
 
 /**
  * Tasks worker — runs queued/due tasks as a full auto pipeline with live phases:
@@ -346,7 +347,11 @@ export async function runTask(t, runtime) {
   // must cover EVERY run, not just the first.
   const runIds = [r.runId];
   let savedTotal = await countTaskCandidates(t.id).catch(() => alreadyMatched + r.newCount + r.updatedCount);
-  if (descPositions && descPositions.length > 1 && savedTotal < target && r.status !== 'cooldown') {
+  // เปิดเยอะแล้วผ่าน 0 = เงื่อนไขผิด ไม่ใช่คำค้น — ไม่วนตำแหน่งอื่นด้วยเงื่อนไขเดิม (เผาโควตาเปล่า)
+  let zeroYieldRound = isZeroYieldRound(r, remainingTarget) ? r : null;
+  if (zeroYieldRound) {
+    console.warn(`  ${t.name}: เปิด ${r.opened} ใบ ผ่าน 0 — ไม่ขยายตำแหน่ง รอแก้เงื่อนไข`);
+  } else if (descPositions && descPositions.length > 1 && savedTotal < target && r.status !== 'cooldown') {
     // โหมดเนื้องาน: วนตำแหน่งที่เหลือ (ที่ AI เสนอ) จนครบ target
     try {
       const base = { ...(t.criteria || {}) };
@@ -357,12 +362,15 @@ export async function runTask(t, runtime) {
         qualificationSpec, jobFamily,
       });
       savedTotal = res.savedTotal;
+      zeroYieldRound = res.zeroYieldRound;
     } catch (e) {
       console.warn(`  ${t.name}: เนื้องาน-ขยายตำแหน่งข้าม — ${e.message}`);
     }
   } else if (t.expand_adjacent && savedTotal < target && r.status !== 'cooldown') {
     try {
-      savedTotal = await expandAdjacent({ t, connector, target, savedTotal, runtime, runIds, qualificationSpec, jobFamily });
+      const res = await expandAdjacent({ t, connector, target, savedTotal, runtime, runIds, qualificationSpec, jobFamily });
+      savedTotal = res.savedTotal;
+      zeroYieldRound = res.zeroYieldRound;
     } catch (e) {
       console.warn(`  ${t.name}: adjacent expansion skipped — ${e.message}`);
     }
@@ -402,7 +410,11 @@ export async function runTask(t, runtime) {
   const qualificationStats = await taskCandidateStats(t.id).catch(() => ({ qualified: matchedTotal, needs_review: 0, rejected: 0, total: matchedTotal }));
   const complete = t.mode !== 'count' || matchedTotal >= target;
   const resultStatus = complete ? 'done' : 'partial';
-  const resultNote = complete ? null : `ยังไม่ครบเป้า: ผ่านเกณฑ์ไม่ซ้ำ ${matchedTotal}/${target} · ต้องตรวจเพิ่ม ${qualificationStats.needs_review} · ไม่ผ่าน ${qualificationStats.rejected} — ระบบค้นครบทุกตำแหน่งที่ตรง Job Family ในรอบนี้แล้ว`;
+  const resultNote = complete
+    ? null
+    : zeroYieldRound
+      ? zeroYieldNote(zeroYieldRound)
+      : `ยังไม่ครบเป้า: ผ่านเกณฑ์ไม่ซ้ำ ${matchedTotal}/${target} · ต้องตรวจเพิ่ม ${qualificationStats.needs_review} · ไม่ผ่าน ${qualificationStats.rejected} — ระบบค้นครบทุกตำแหน่งที่ตรง Job Family ในรอบนี้แล้ว`;
   await setTaskPhase(t.id, resultStatus, target);
   await bumpTaskProgress(t.id, matchedTotal);
   await finishTask(t.id, {
@@ -464,7 +476,8 @@ async function skipZeroYieldExpansionTerms(positions, { jobFamily, platform, loc
  * วน scrape ตามรายชื่อตำแหน่ง (positions) จนครบ target / หมดตำแหน่ง / เจอ daily cap.
  * ใช้ร่วมกันทั้งโหมดขยายตำแหน่งใกล้เคียง (expandAdjacent) และโหมดเนื้องาน.
  * JobBKK ค้นได้ 3 ตำแหน่ง/ครั้ง, JobThai 1 ตำแหน่ง/ครั้ง.
- * @returns {Promise<{ savedTotal:number, used:string[] }>}
+ * หยุดก่อนครบเมื่อรอบไหนเปิดเยอะแล้วผ่าน 0 (zeroYieldRound) — เงื่อนไขผิด ตำแหน่งถัดไปก็ตกเหมือนกัน
+ * @returns {Promise<{ savedTotal:number, used:string[], zeroYieldRound: object|null }>}
  */
 async function scrapePositionList({ t, connector, target, savedTotal, runtime, runIds, positions, platform, base, maxRounds, qualificationSpec = {}, jobFamily = '' }) {
   const original = String((t.criteria || {}).position || (t.criteria || {}).keyword || '').trim();
@@ -480,6 +493,7 @@ async function scrapePositionList({ t, connector, target, savedTotal, runtime, r
   const batches = platform === 'jobbkk' ? chunk(list, 3) : list.map((g) => [g]);
   const cap = maxRounds ?? batches.length;
   const used = [];
+  let zeroYieldRound = null;
   for (const batch of batches.slice(0, cap)) {
     if (savedTotal >= target) break;
     const remaining = target - savedTotal;
@@ -506,8 +520,13 @@ async function scrapePositionList({ t, connector, target, savedTotal, runtime, r
       console.warn(`  ↳ หยุดค้น: ${er.error || 'daily cap'}`);
       break;
     }
+    if (isZeroYieldRound(er, remaining)) {
+      zeroYieldRound = er;
+      console.warn(`  ↳ หยุดค้น: เปิด ${er.opened} ใบ ผ่าน 0 — เงื่อนไขเดิมจะคัดออกเหมือนเดิม`);
+      break;
+    }
   }
-  return { savedTotal, used };
+  return { savedTotal, used, zeroYieldRound };
 }
 
 /**
@@ -522,7 +541,7 @@ async function expandAdjacent({ t, connector, target, savedTotal, runtime, runId
   const keyword = String(base.keyword || '').trim();
   const posNorm = (position || keyword).toLowerCase();
   const platform = connector.platform;
-  if (!posNorm) return savedTotal;
+  if (!posNorm) return { savedTotal, zeroYieldRound: null };
 
   let plan = null;
   try {
@@ -532,12 +551,12 @@ async function expandAdjacent({ t, connector, target, savedTotal, runtime, runId
     plan = await suggestAdjacentPositions({ position, keyword, province: base.province, platform });
     if (plan) { try { await saveCachedFamilyPlan(posNorm, platform, plan); } catch { /* non-fatal */ } }
   }
-  if (!plan) return savedTotal; // AI off / failed → no expansion
+  if (!plan) return { savedTotal, zeroYieldRound: null }; // AI off / failed → no expansion
 
   const green = Array.isArray(plan.tiers?.green) ? plan.tiers.green : [];
   console.log(`  🧭 Job Family ${plan.familyLabel || plan.family} → 🟢 [${green.join(', ') || '—'}]`);
 
-  const { savedTotal: newTotal, used: usedGreen } = await scrapePositionList({
+  const { savedTotal: newTotal, used: usedGreen, zeroYieldRound } = await scrapePositionList({
     t, connector, target, savedTotal, runtime, runIds,
     positions: green, platform, base, maxRounds: MAX_ADJACENT_ROUNDS,
     qualificationSpec, jobFamily: jobFamily || plan.family || '',
@@ -560,7 +579,7 @@ async function expandAdjacent({ t, connector, target, savedTotal, runtime, runId
     console.warn(`  adjacent_plan save failed: ${e.message}`);
   }
 
-  return savedTotal;
+  return { savedTotal, zeroYieldRound };
 }
 
 /**
