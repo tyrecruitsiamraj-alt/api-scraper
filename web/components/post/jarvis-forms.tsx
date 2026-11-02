@@ -90,6 +90,11 @@ export function PendingOrderCard({ order }: { order: JarvisPostOrder }) {
           </Alert>
         )}
         <p className="text-sm text-muted-foreground">กลุ่ม: {order.group_names.join(', ') || '-'}</p>
+        {order.group_links.length > 0 && (
+          <p className="text-sm text-muted-foreground">
+            ลิงก์สมัครแยกกลุ่ม {order.group_links.length} ลิงก์ · แต่ละกลุ่มได้ลิงก์ของตัวเอง Jarvis นับคนสมัครแยกกลุ่มได้
+          </p>
+        )}
         <Collapsible defaultOpen={order.issues.some((i) => !i.startsWith('ชนิด'))}>
           <CollapsibleTrigger asChild>
             <Button variant="ghost" size="sm" className="-ml-2">

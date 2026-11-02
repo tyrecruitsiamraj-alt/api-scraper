@@ -12,6 +12,7 @@ import { CONTENT_DISABLED_OPERATOR_MESSAGE, isContentGenerationEnabled, PRODUCT_
 import { renderPoster } from '../../src/core/poster.js';
 import { applyTrustedPosterFacts } from '../../src/core/campaign-facts.js';
 import { postCaptionIssues } from '../../src/core/post-caption-check.js';
+import { groupLinkIssues, parseGroupLinks } from '../../autopost/server/group-apply-link.js';
 import { normalizePosterLayout, normalizePosterStandard, posterFieldsForQuality, posterStandardFromFields, POSTER_TEMPLATE_ID, POSTER_TEMPLATE_VERSION, withPosterTemplate, buildPosterSvg } from '../../src/core/poster-template.js';
 import type { PosterLayout, PosterStandard } from '../../src/core/poster-template.js';
 import { evaluateResumeQualification } from '../../src/core/resume-qualification.js';
@@ -3480,6 +3481,10 @@ export type JarvisPostOrder = {
   jarvis_status: string;
   position: string;
   caption: string;
+  /** ลิงก์สมัครที่อยู่ในข้อความ (job_snapshot.apply_link) — ตัวที่ worker แทนด้วยลิงก์ของแต่ละกลุ่ม */
+  apply_link: string | null;
+  /** ลิงก์สมัครแยกกลุ่มจาก Jarvis (job_snapshot.group_links) — ว่าง = ลิงก์เดียวทุกกลุ่มแบบเดิม */
+  group_links: JarvisGroupLink[];
   post_mode: string;
   group_names: string[];
   issues: string[];
@@ -3504,6 +3509,7 @@ export type JarvisPostOrder = {
   group_results: JarvisGroupResult[];
 };
 
+export type JarvisGroupLink = { group_id: string; apply_link: string; link_code: string | null };
 export type JarvisPostRecord = { at: string; group_name: string; worker: string | null; ok: boolean; message: string | null };
 export type JarvisGroupResult = {
   fb_group_id: string;
@@ -3650,6 +3656,10 @@ export async function listJarvisPostOrders(): Promise<JarvisPostOrder[]> {
     const jobId = jarvisPostJobId(row.request_no);
     const issues = postCaptionIssues(caption);
     if (postMode !== 'caption_only') issues.push(`ชนิด "${postModeLabel(postMode)}" ยังต้องรอระบบแนบรูป`);
+    // ลิงก์สมัครแยกกลุ่ม: ข้อความต้องยังมีลิงก์เดิม ไม่งั้น worker แทนลิงก์ของกลุ่มไม่ได้
+    const applyLink = typeof s.apply_link === 'string' && s.apply_link.trim() ? s.apply_link.trim() : null;
+    const groupLinks = parseGroupLinks(s.group_links);
+    issues.push(...groupLinkIssues(caption, applyLink, groupLinks));
     if (!groupIds.length) issues.push('ยังไม่ได้เลือกกลุ่มใน Jarvis');
     const requestedAccountId = typeof s.account_id === 'string' && s.account_id.trim() ? s.account_id.trim() : null;
     const targetWorker = typeof s.worker === 'string' && s.worker.trim() ? s.worker.trim() : null;
@@ -3773,6 +3783,8 @@ export async function listJarvisPostOrders(): Promise<JarvisPostOrder[]> {
       jarvis_status: jarvisStatus,
       position: String(s.position ?? '').trim() || row.request_no,
       caption,
+      apply_link: applyLink,
+      group_links: groupLinks,
       post_mode: postMode,
       group_names: groupIds.map((id) => groupNames.get(id) ?? id),
       issues,
@@ -3845,15 +3857,17 @@ export async function repostJarvisOrder(requestNo: string, groupIds: string[], r
 
   const jobId = jarvisPostJobId(requestNo);
   const queueId = autopostId();
+  await q(`ALTER TABLE ${AP}.jobs ADD COLUMN IF NOT EXISTS group_links JSONB`);
   const client = await pool().connect();
   try {
     await client.query('BEGIN');
     // บัญชีที่มีงานอยู่แล้ว ไม่ปฏิเสธ — งานใหม่ต่อคิว worker รับทีละงานต่อบัญชีเอง (ล็อกต่อบัญชีใน claim)
+    // รอบโพสต์ซ้ำใช้ลิงก์แยกกลุ่มชุดล่าสุดจาก Jarvis ด้วย (worker แทนลิงก์ตอนโพสต์ — autopost/server/group-apply-link.js)
     await client.query(
-      `INSERT INTO ${AP}.jobs (id, title, owner, company, caption, status)
-       VALUES ($1, $2, 'SO Recruitment', 'SO Recruitment', $3, 'pending')
-       ON CONFLICT (id) DO UPDATE SET caption = EXCLUDED.caption`,
-      [jobId, `${order.position} · ${requestNo}`, order.caption],
+      `INSERT INTO ${AP}.jobs (id, title, owner, company, caption, apply_link, group_links, status)
+       VALUES ($1, $2, 'SO Recruitment', 'SO Recruitment', $3, $4, $5::jsonb, 'pending')
+       ON CONFLICT (id) DO UPDATE SET caption = EXCLUDED.caption, apply_link = EXCLUDED.apply_link, group_links = EXCLUDED.group_links`,
+      [jobId, `${order.position} · ${requestNo}`, order.caption, order.apply_link, order.group_links.length ? JSON.stringify(order.group_links) : null],
     );
     const prior = await client.query<{ n: number }>(
       `SELECT count(*)::int AS n FROM ${AP}.assignments WHERE id = $1 OR id LIKE $1 || '-r%'`,
@@ -3894,12 +3908,15 @@ export async function postJarvisOrder(requestNo: string, requestedBy: string | n
   const jobId = jarvisPostJobId(requestNo);
   const queueId = autopostId();
   await q(`ALTER TABLE ${AP}.post_run_queue ADD COLUMN IF NOT EXISTS target_worker VARCHAR(255)`);
+  await q(`ALTER TABLE ${AP}.jobs ADD COLUMN IF NOT EXISTS group_links JSONB`);
   const client = await pool().connect();
   try {
     await client.query('BEGIN');
     // บัญชีที่มีงานอยู่แล้ว ไม่ปฏิเสธ — งานใหม่ต่อคิว worker รับทีละงานต่อบัญชีเอง (ล็อกต่อบัญชีใน claim)
-    const snapshot = await client.query<{ group_ids: string[] }>(
-      `SELECT COALESCE(to_jsonb(r)->'job_snapshot'->'group_ids', '[]'::jsonb) AS group_ids
+    const snapshot = await client.query<{ group_ids: string[]; apply_link: string | null; group_links: unknown }>(
+      `SELECT COALESCE(to_jsonb(r)->'job_snapshot'->'group_ids', '[]'::jsonb) AS group_ids,
+              NULLIF(TRIM(to_jsonb(r)->'job_snapshot'->>'apply_link'), '') AS apply_link,
+              to_jsonb(r)->'job_snapshot'->'group_links' AS group_links
          FROM "jarvis_rm".job_posting_requests r
         WHERE r.request_no=$1 AND r.status='pending'
           AND COALESCE(NULLIF(to_jsonb(r)->>'request_type', ''), 'content')='content'
@@ -3917,11 +3934,14 @@ export async function postJarvisOrder(requestNo: string, requestedBy: string | n
     const groups = wanted.filter((id) => allowed.has(id));
     if (!groups.length) throw new Error('กลุ่มที่เลือกใน Jarvis ไม่มีในระบบ So Scraping');
     // ใบขอเดิมสั่งใหม่ใน Jarvis (เช่น หลังถูกตีกลับ): ใช้ job เดิม อัปเดตข้อความ แล้วเปิดรอบใหม่ jv-…-rN
+    // ลิงก์สมัครแยกกลุ่ม (apply_link เดิม + group_links) เก็บไว้ที่งาน worker แทนลิงก์ตอนโพสต์ลงแต่ละกลุ่ม
+    const groupLinks = parseGroupLinks(snapshot.rows[0].group_links);
     await client.query(
-      `INSERT INTO ${AP}.jobs (id, title, owner, company, caption, status)
-       VALUES ($1, $2, 'SO Recruitment', 'SO Recruitment', $3, 'pending')
-       ON CONFLICT (id) DO UPDATE SET caption = EXCLUDED.caption, title = EXCLUDED.title`,
-      [jobId, `${order.position} · ${requestNo}`, order.caption],
+      `INSERT INTO ${AP}.jobs (id, title, owner, company, caption, apply_link, group_links, status)
+       VALUES ($1, $2, 'SO Recruitment', 'SO Recruitment', $3, $4, $5::jsonb, 'pending')
+       ON CONFLICT (id) DO UPDATE SET caption = EXCLUDED.caption, title = EXCLUDED.title,
+         apply_link = EXCLUDED.apply_link, group_links = EXCLUDED.group_links`,
+      [jobId, `${order.position} · ${requestNo}`, order.caption, snapshot.rows[0].apply_link, groupLinks.length ? JSON.stringify(groupLinks) : null],
     );
     const prior = await client.query<{ n: number }>(
       `SELECT count(*)::int AS n FROM ${AP}.assignments WHERE id = $1 OR id LIKE $1 || '-r%'`,

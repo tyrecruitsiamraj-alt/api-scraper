@@ -93,6 +93,8 @@ export interface DynamicJob {
   company: string;
   caption: string;
   apply_link?: string;
+  /** ลิงก์สมัครแยกกลุ่มจาก Jarvis [{ group_id, apply_link, link_code }] — อ่านด้วย server/group-apply-link.js */
+  group_links?: unknown;
   comment_reply?: string;
   status?: string;
   image_ref?: string;

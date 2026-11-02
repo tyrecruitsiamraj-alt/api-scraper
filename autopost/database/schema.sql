@@ -54,6 +54,8 @@ CREATE TABLE IF NOT EXISTS jobs (
   province_note VARCHAR(255),
   caption TEXT NOT NULL,
   apply_link TEXT,
+  -- ลิงก์สมัครแยกกลุ่มจาก Jarvis [{ group_id, apply_link, link_code }] — worker แทน apply_link ตอนโพสต์ (server/group-apply-link.js)
+  group_links JSONB,
   comment_reply TEXT,
   job_type VARCHAR(100),
   status VARCHAR(50) DEFAULT 'pending',

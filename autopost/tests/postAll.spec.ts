@@ -21,6 +21,15 @@ import {
 } from '../src/helpers';
 import type { PostDelaySettings, DailyPlanItem } from '../src/helpers';
 
+/** ลิงก์สมัครแยกกลุ่มจาก Jarvis — นิยามเดียวกับฝั่งเว็บ (server/group-apply-link.js) */
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+const { captionForGroup } = require('../server/group-apply-link') as {
+  captionForGroup: (
+    job: { caption?: string | null; apply_link?: string | null; group_links?: unknown },
+    groupRowId: string
+  ) => { caption: string; apply_link: string | null; replaced: boolean };
+};
+
 const DEFAULT_SHEET_URL =
   process.env.DEFAULT_SHEET_URL ||
   'https://script.google.com/macros/s/AKfycbzqB97xnjUC7QZwTq2QnXUI372lxsO9acZTVxXJ3HF9G-T71h-HqccaNyMR6E612MYQ/exec';
@@ -274,12 +283,17 @@ test('Dynamic Post: รันโพสต์ตาม Assignments', async ({ pag
         console.log(`⚠️ [${userLabel}] ดึงรูป job "${job.title}" ไม่ได้ (${job.image_ref}) — โพสต์ข้อความล้วน`);
       }
 
+      /** ลิงก์สมัครแยกกลุ่ม: ใบสั่งจาก Jarvis ที่มี group_links → กลุ่มนี้ได้ลิงก์ของตัวเอง (ส่วนอื่นเหมือนเดิม) */
+      const perGroup = captionForGroup(job, item.group_row_id);
+      if (perGroup.replaced) {
+        console.log(`🔗 [${userLabel}] กลุ่ม ${item.fb_group_id} ใช้ลิงก์สมัครของกลุ่ม ${perGroup.apply_link}`);
+      }
       const postItem = {
         title: job.title,
         owner: job.owner,
         company: job.company,
-        caption: job.caption,
-        apply_link: job.apply_link,
+        caption: perGroup.caption,
+        apply_link: perGroup.apply_link || undefined,
         comment_reply: job.comment_reply,
         groupID: [item.fb_group_id],
         image_ref: job.image_ref,

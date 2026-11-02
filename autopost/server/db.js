@@ -958,6 +958,8 @@ async function ensureJobsProvinceColumns() {
 async function ensureJobsImageColumn() {
   try {
     await query(`ALTER TABLE jobs ADD COLUMN IF NOT EXISTS image_ref TEXT`);
+    // ลิงก์สมัครแยกกลุ่มจาก Jarvis (server/group-apply-link.js) — DB เดิมที่ยังไม่มีคอลัมน์
+    await query(`ALTER TABLE jobs ADD COLUMN IF NOT EXISTS group_links JSONB`);
   } catch (_) {
     // ignore if no permission / table variation
   }
