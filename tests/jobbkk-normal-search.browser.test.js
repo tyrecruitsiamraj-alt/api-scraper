@@ -29,11 +29,19 @@ const FIXTURE = `<!doctype html>
     </div>
   </div>
 
+  <!-- Live Ant Design multiple select: the search input sits in .ant-select-selection-search, a SIBLING of the chips,
+       so a chip reader that stops at the nearest "ant-select*" wrapper sees nothing (3 Nov 2026). -->
   <div class="ant-row ant-form-item-row" multiple readOnly placeholder="ค้นหาชื่อตำแหน่งงาน">
-    <div class="ant-select">
-      <div class="ant-select-selection-wrap">
+    <div class="ant-select ant-select-multiple">
+      <div class="ant-select-selector">
         <span>ค้นหาชื่อตำแหน่งงาน</span>
-        <input class="ant-select-selection-search-input" placeholder="ค้นหาชื่อตำแหน่งงาน" />
+        <div class="ant-select-selection-overflow" id="position-overflow">
+          <div class="ant-select-selection-overflow-item ant-select-selection-overflow-item-suffix">
+            <div class="ant-select-selection-search">
+              <input class="ant-select-selection-search-input" placeholder="ค้นหาชื่อตำแหน่งงาน" />
+            </div>
+          </div>
+        </div>
       </div>
     </div>
   </div>
@@ -89,11 +97,20 @@ const FIXTURE = `<!doctype html>
         const label = option.textContent.trim();
         if (!['เจ้าหน้าที่', 'ขาย'].includes(label)) return;
         const needle = label === 'ขาย' ? 'ค้นหา Keyword' : 'ค้นหาชื่อตำแหน่งงาน';
-        const wrap = [...document.querySelectorAll('.ant-select-selection-wrap')]
-          .find((el) => el.querySelector('input')?.placeholder === needle);
         const chip = document.createElement('span');
         chip.className = 'ant-select-selection-item';
         chip.textContent = label;
+        if (needle === 'ค้นหาชื่อตำแหน่งงาน') {
+          // Ant puts each chip in its own overflow item, before the search suffix.
+          const item = document.createElement('div');
+          item.className = 'ant-select-selection-overflow-item';
+          item.appendChild(chip);
+          const overflow = document.getElementById('position-overflow');
+          overflow.insertBefore(item, overflow.firstElementChild);
+          return;
+        }
+        const wrap = [...document.querySelectorAll('.ant-select-selection-wrap')]
+          .find((el) => el.querySelector('input')?.placeholder === needle);
         wrap.appendChild(chip);
       });
     }

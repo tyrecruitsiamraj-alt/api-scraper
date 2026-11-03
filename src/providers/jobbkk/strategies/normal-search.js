@@ -77,12 +77,34 @@ async function findChipInput(page, field) {
   ]);
 }
 
-/** ชิปที่กล่องตำแหน่ง/Keyword ถืออยู่จริง — อ่านจากกล่อง Ant Select ที่ครอบช่องพิมพ์ */
+/**
+ * ชิปที่กล่องตำแหน่ง/Keyword ถืออยู่จริง — อ่านจากกล่อง Ant Select ที่ครอบช่องพิมพ์
+ * ต้องเทียบชื่อคลาสทั้งคำ ("ant-select" ไม่ใช่ "contains") เพราะบนเว็บจริงช่องพิมพ์อยู่ใน
+ * .ant-select-selection-search ซึ่งเป็นพี่น้องของชิป ไม่ได้ครอบชิป — ถ้าจับตัวนั้นจะเห็นว่างเสมอ (3 พ.ย. 2569)
+ * คืน { tags, box } · box = โครงกล่องที่เห็น (คลาสของ ancestor + จำนวนชิปในแต่ละชั้น) ไว้ใส่ใน error
+ */
 async function readChipTags(input) {
-  const wrap = input.locator('xpath=ancestor::*[contains(@class,"ant-select") or contains(@class,"ant-form-item")][1]');
-  if (!(await wrap.count().catch(() => 0))) return [];
-  const texts = await wrap.locator('.ant-select-selection-item').allTextContents().catch(() => []);
-  return texts.map((text) => String(text || '').replace(/\s+/g, ' ').trim()).filter(Boolean);
+  const info = await input.evaluate((el) => {
+    const hasClass = (node, name) => node.classList && node.classList.contains(name);
+    const chain = [];
+    let node = el.parentElement;
+    let depth = 0;
+    let box = null;
+    while (node && depth < 8) {
+      const chips = [...node.querySelectorAll('.ant-select-selection-item')]
+        .map((c) => (c.getAttribute('title') || c.textContent || '').replace(/\s+/g, ' ').trim())
+        .filter(Boolean);
+      chain.push(`${node.tagName.toLowerCase()}.${[...node.classList].slice(0, 3).join('.') || '-'}[${chips.length}]`);
+      if (!box && (hasClass(node, 'ant-select') || hasClass(node, 'ant-form-item') || hasClass(node, 'ant-form-item-row') || hasClass(node, 'ant-select-selection-wrap'))) {
+        // กล่องแรกที่เป็น Ant Select ทั้งก้อน (ไม่ใช่ .ant-select-selection-search ที่ครอบแค่ช่องพิมพ์)
+        if (!hasClass(node, 'ant-select-selection-search')) box = { chips, label: chain[chain.length - 1] };
+      }
+      node = node.parentElement;
+      depth += 1;
+    }
+    return { tags: box?.chips ?? [], box: chain.join(' > ') };
+  }).catch(() => ({ tags: [], box: 'อ่านโครงกล่องไม่ได้' }));
+  return info;
 }
 
 /**
@@ -105,8 +127,9 @@ async function applyChipField(page, field, terms, report) {
     const picked = await clickMatchingOption(page, [term]);
     if (!picked) await page.keyboard.press('Enter').catch(() => {});
     await sleep(150);
-    const tags = await readChipTags(input);
+    const { tags, box } = await readChipTags(input);
     report[seenKey] = tags.join(', ');
+    report[`${field}Box`] = box;
     if (tagsMatchRequested(tags, [term])) verified = true;
   }
   if (verified) {
@@ -565,7 +588,8 @@ export async function runNormalSearch(page, criteria, { need = 15 } = {}) {
   const missing = missingRequiredNormalFilters(plan, report);
   if (missing.includes('position')) {
     const seen = [report.positionSeen, report.keywordSeen].filter(Boolean).join(' / ');
-    throw new Error(`JOBBKK_FILTER_NOT_APPLIED: Normal Search ไม่ยืนยันตำแหน่งหรือ Keyword จึงไม่รับผลค้นหาแบบกว้าง${seen ? ` (ชิปที่เห็น: ${seen})` : ' (กล่องตำแหน่งว่าง ไม่มีชิป)'}`);
+    const box = report.positionBox || report.keywordBox || '';
+    throw new Error(`JOBBKK_FILTER_NOT_APPLIED: Normal Search ไม่ยืนยันตำแหน่งหรือ Keyword จึงไม่รับผลค้นหาแบบกว้าง${seen ? ` (ชิปที่เห็น: ${seen})` : ' (กล่องตำแหน่งว่าง ไม่มีชิป)'}${box ? ` · โครงกล่อง: ${box}` : ''}`);
   }
   if (missing.includes('province')) {
     throw new Error(`JOBBKK_FILTER_NOT_APPLIED: Normal Search ไม่ยืนยันจังหวัดตามใบขอ จึงไม่รับผลค้นหาทั้งประเทศ${report.provinceSeen ? ` (${report.provinceSeen})` : ''}`);
