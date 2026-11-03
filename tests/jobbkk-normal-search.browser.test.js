@@ -29,24 +29,32 @@ const FIXTURE = `<!doctype html>
     </div>
   </div>
 
-  <!-- Live Ant Design multiple select: the search input sits in .ant-select-selection-search, a SIBLING of the chips,
-       so a chip reader that stops at the nearest "ant-select*" wrapper sees nothing (3 Nov 2026). -->
-  <div class="ant-row ant-form-item-row" multiple readOnly placeholder="ค้นหาชื่อตำแหน่งงาน">
-    <div class="ant-select ant-select-multiple">
+  <!-- Live JobBKK Talent (seen 3 Nov 2026): the position box is an Ant AutoComplete whose text input sits in a
+       DIV carrying the search-input class, with an "N/3" counter; chosen chips are drawn as red labels BESIDE the box
+       (sibling .mt-3 container, p + "Remove keyword" button), not as .ant-select-selection-item. Suggestions load async. -->
+  <div class="rounded-lg border-[1px] border-Border-color p-4">
+    <div class="ant-select ant-select-outlined ant-select-auto-complete ant-select-single ant-select-customize-input ant-select-show-search" name="searchJobPosition" api_type="position">
       <div class="ant-select-selector">
-        <span>ค้นหาชื่อตำแหน่งงาน</span>
-        <div class="ant-select-selection-overflow" id="position-overflow">
-          <div class="ant-select-selection-overflow-item ant-select-selection-overflow-item-suffix">
-            <div class="ant-select-selection-search">
-              <input class="ant-select-selection-search-input" placeholder="ค้นหาชื่อตำแหน่งงาน" />
+        <span class="ant-select-selection-wrap">
+          <span class="ant-select-selection-search">
+            <div class="ant-select-selection-search-input flex items-center gap-2" role="combobox">
+              <input maxlength="80" class="ant-input ant-input-outlined" type="text" value="" id="position-input" />
+              <div class="shrink-0">0/80</div>
+              <div class="shrink-0" id="position-counter">0/3</div>
             </div>
-          </div>
-        </div>
+          </span>
+          <span class="ant-select-selection-placeholder">ค้นหาชื่อตำแหน่งงาน</span>
+        </span>
       </div>
     </div>
+    <div class="mt-3 flex flex-wrap gap-2" id="position-chips"></div>
   </div>
-  <!-- The planner types the Thai part only ("เจ้าหน้าที่ IT" → "เจ้าหน้าที่"); the dropdown offers that exact chip. -->
-  <div class="ant-select-item-option-content">เจ้าหน้าที่</div>
+  <div class="ant-select-dropdown" id="position-dropdown" style="display:none">
+    <div class="ant-select-item ant-select-item-option ant-select-item-option-active">
+      <!-- The planner types the Thai part only ("เจ้าหน้าที่ IT" → "เจ้าหน้าที่"); the dropdown offers that exact chip. -->
+      <div class="ant-select-item-option-content">เจ้าหน้าที่</div>
+    </div>
+  </div>
 
   <div class="ant-select-selection-wrap">
     <span>ค้นหา Keyword</span>
@@ -91,7 +99,17 @@ const FIXTURE = `<!doctype html>
     document.getElementById('province').addEventListener('click', () => {
       document.getElementById('province-dropdown').style.display = 'block';
     });
-    // Live JobBKK: picking a position/keyword option adds an Ant Select chip into that box.
+    // Live JobBKK: suggestions arrive from the server, so the dropdown opens ~600ms after typing; Enter picks the active one.
+    document.getElementById('position-input').addEventListener('input', (event) => {
+      if (!event.target.value) return;
+      setTimeout(() => { document.getElementById('position-dropdown').style.display = 'block'; }, 600);
+    });
+    document.getElementById('position-input').addEventListener('keydown', (event) => {
+      if (event.key !== 'Enter') return;
+      const active = document.querySelector('#position-dropdown .ant-select-item-option-active .ant-select-item-option-content');
+      if (active && document.getElementById('position-dropdown').style.display !== 'none') active.click();
+    });
+    // Live JobBKK: picking a position/keyword option adds a chip for that box.
     for (const option of document.querySelectorAll('.ant-select-item-option-content')) {
       option.addEventListener('click', () => {
         const label = option.textContent.trim();
@@ -101,12 +119,15 @@ const FIXTURE = `<!doctype html>
         chip.className = 'ant-select-selection-item';
         chip.textContent = label;
         if (needle === 'ค้นหาชื่อตำแหน่งงาน') {
-          // Ant puts each chip in its own overflow item, before the search suffix.
+          // JobBKK: chip drawn beside the box, counter steps up, dropdown closes.
           const item = document.createElement('div');
-          item.className = 'ant-select-selection-overflow-item';
-          item.appendChild(chip);
-          const overflow = document.getElementById('position-overflow');
-          overflow.insertBefore(item, overflow.firstElementChild);
+          item.className = 'flex max-w-full items-start gap-2 rounded-md bg-Old-ci-red';
+          item.innerHTML = '<p class="!mb-0">' + label + '</p><button type="button" aria-label="Remove keyword">x</button>';
+          document.getElementById('position-chips').appendChild(item);
+          const counter = document.getElementById('position-counter');
+          counter.textContent = (Number(counter.textContent.split('/')[0]) + 1) + '/3';
+          document.getElementById('position-dropdown').style.display = 'none';
+          document.getElementById('position-input').value = '';
           return;
         }
         const wrap = [...document.querySelectorAll('.ant-select-selection-wrap')]

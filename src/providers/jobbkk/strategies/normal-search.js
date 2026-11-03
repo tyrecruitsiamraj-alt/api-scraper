@@ -78,39 +78,64 @@ async function findChipInput(page, field) {
 }
 
 /**
- * ชิปที่กล่องตำแหน่ง/Keyword ถืออยู่จริง — อ่านจากกล่อง Ant Select ที่ครอบช่องพิมพ์
- * ต้องเทียบชื่อคลาสทั้งคำ ("ant-select" ไม่ใช่ "contains") เพราะบนเว็บจริงช่องพิมพ์อยู่ใน
- * .ant-select-selection-search ซึ่งเป็นพี่น้องของชิป ไม่ได้ครอบชิป — ถ้าจับตัวนั้นจะเห็นว่างเสมอ (3 พ.ย. 2569)
- * คืน { tags, box } · box = โครงกล่องที่เห็น (คลาสของ ancestor + จำนวนชิปในแต่ละชั้น) ไว้ใส่ใน error
+ * ชิปที่กล่องตำแหน่ง/Keyword ถืออยู่จริง — ดูจากหน้า JobBKK จริง 3 พ.ย. 2569 (เจ้าของล็อกอินให้ดู):
+ * กล่องเป็น Ant AutoComplete (.ant-select[name=searchJobPosition]) ช่องพิมพ์คือ input.ant-input ใน div.ant-select-selection-search-input
+ * พร้อมตัวนับ "N/3" · ชิปที่เลือกแล้ววาดเป็นป้ายแดง "ใต้กล่อง" ในพี่น้องของ .ant-select (div.mt-3 > div > p + button[aria-label="Remove keyword"])
+ * ไม่ใช่ .ant-select-selection-item แบบ Ant ปกติ — จึงอ่านทั้งสองแบบ และอ่านตัวนับด้วย
+ * คืน { tags, count, box } · box = โครงกล่องที่เห็น ไว้ใส่ใน error เมื่อไม่ติด
  */
 async function readChipTags(input) {
   const info = await input.evaluate((el) => {
-    const hasClass = (node, name) => node.classList && node.classList.contains(name);
+    const clean = (t) => String(t || '').replace(/\s+/g, ' ').trim();
+    const box = el.closest('.ant-select') || el.closest('.ant-form-item') || el.closest('.ant-select-selection-wrap') || el.parentElement;
+    const tags = new Set();
+    for (const c of box.querySelectorAll('.ant-select-selection-item')) {
+      const t = clean(c.getAttribute('title') || c.textContent);
+      if (t) tags.add(t);
+    }
+    // ป้ายแดงใต้กล่อง: ปุ่มลบอยู่ข้างข้อความชิป ในพี่น้องของกล่อง
+    const around = box.parentElement || box;
+    for (const btn of around.querySelectorAll('button[aria-label="Remove keyword"], button[aria-label*="Remove"], button[aria-label*="ลบ"]')) {
+      const holder = btn.parentElement;
+      if (!holder || box.contains(holder)) continue;
+      const t = clean(holder.querySelector('p, span')?.textContent || holder.textContent);
+      if (t) tags.add(t);
+    }
+    let count = null;
+    for (const d of box.querySelectorAll('div, span')) {
+      const m = clean(d.textContent).match(/^(\d+)\/\d+$/);
+      if (m) { count = Number(m[1]); break; }
+    }
     const chain = [];
     let node = el.parentElement;
     let depth = 0;
-    let box = null;
-    while (node && depth < 8) {
-      const chips = [...node.querySelectorAll('.ant-select-selection-item')]
-        .map((c) => (c.getAttribute('title') || c.textContent || '').replace(/\s+/g, ' ').trim())
-        .filter(Boolean);
-      chain.push(`${node.tagName.toLowerCase()}.${[...node.classList].slice(0, 3).join('.') || '-'}[${chips.length}]`);
-      if (!box && (hasClass(node, 'ant-select') || hasClass(node, 'ant-form-item') || hasClass(node, 'ant-form-item-row') || hasClass(node, 'ant-select-selection-wrap'))) {
-        // กล่องแรกที่เป็น Ant Select ทั้งก้อน (ไม่ใช่ .ant-select-selection-search ที่ครอบแค่ช่องพิมพ์)
-        if (!hasClass(node, 'ant-select-selection-search')) box = { chips, label: chain[chain.length - 1] };
-      }
+    while (node && depth < 6) {
+      chain.push(`${node.tagName.toLowerCase()}.${[...node.classList].slice(0, 3).join('.') || '-'}`);
       node = node.parentElement;
       depth += 1;
     }
-    return { tags: box?.chips ?? [], box: chain.join(' > ') };
-  }).catch(() => ({ tags: [], box: 'อ่านโครงกล่องไม่ได้' }));
+    const beside = around !== box ? around.querySelectorAll('button[aria-label]').length : 0;
+    return { tags: [...tags], count, box: `${chain.join(' > ')} · ตัวนับ ${count ?? '-'} · ปุ่มลบข้างกล่อง ${beside}` };
+  }).catch(() => ({ tags: [], count: null, box: 'อ่านโครงกล่องไม่ได้' }));
   return info;
 }
 
+/** รอรายการแนะนำของกล่องตำแหน่ง/Keyword ขึ้นจริง (JobBKK โหลดคำแนะนำจากเซิร์ฟเวอร์ ใช้เวลาเกิน 0.25 วิ) */
+async function waitForChipSuggestions(page, timeoutMs = 4000) {
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    const options = page.locator('.ant-select-dropdown:visible .ant-select-item-option, .ant-select-dropdown:visible [role="option"]');
+    if ((await options.count().catch(() => 0)) > 0) return true;
+    await sleep(200);
+  }
+  return false;
+}
+
 /**
- * พิมพ์ชื่อตำแหน่ง/Keyword แล้วเลือกจากรายการ — นับว่า "ติด" ก็ต่อเมื่อเห็นชิปในกล่องจริง
- * เดิมนับว่าติดทันทีที่พิมพ์เสร็จ ทั้งที่เว็บไม่รับ ผลค้นเลยเป็นเรซูเม่ล่าสุดทั้งจังหวัดไม่กรองตำแหน่ง:
- * ใบคนขับรถ 2 ใบ เปิดดู 119 คน ไม่มีคนขับรถเลย เสียโควตาวันนั้นเปล่า (3 พ.ย. 2569)
+ * พิมพ์ชื่อตำแหน่ง/Keyword แล้วเลือกจากรายการ — นับว่า "ติด" ก็ต่อเมื่อเห็นชิปจริงหรือตัวนับขยับ
+ * เหตุเดิม (3 พ.ย. 2569): พิมพ์แล้วรอ 0.25 วิ รายการแนะนำยังเป็น "กำลังโหลด…" กด Enter ตอนนั้นไม่เกิดชิป
+ * แล้วโค้ดนับว่าติด → ค้นได้เรซูเม่ล่าสุดทั้งจังหวัด ใบคนขับรถ 2 ใบ เปิดดู 119 คน ไม่มีคนขับรถเลย
+ * พอรอให้รายการขึ้นแล้วกด Enter/คลิก ชิปขึ้นและผลค้นเหลือ 17,971 คน เป็นคนขับรถทั้งหมด (ดูบนเว็บจริง)
  */
 async function applyChipField(page, field, terms, report) {
   const seenKey = field === 'position' ? 'positionSeen' : 'keywordSeen';
@@ -121,16 +146,18 @@ async function applyChipField(page, field, terms, report) {
       if (!report.skipped.includes(field)) report.skipped.push(field);
       return;
     }
+    const before = await readChipTags(input);
     await clickWithoutNavigationWait(input);
     await input.fill(term);
-    await sleep(250);
+    await waitForChipSuggestions(page);
     const picked = await clickMatchingOption(page, [term]);
     if (!picked) await page.keyboard.press('Enter').catch(() => {});
-    await sleep(150);
-    const { tags, box } = await readChipTags(input);
+    await sleep(400);
+    const { tags, count, box } = await readChipTags(input);
     report[seenKey] = tags.join(', ');
     report[`${field}Box`] = box;
-    if (tagsMatchRequested(tags, [term])) verified = true;
+    const counterGrew = count != null && (before.count == null || count > before.count);
+    if (tagsMatchRequested(tags, [term]) || counterGrew) verified = true;
   }
   if (verified) {
     if (!report.applied.includes(field)) report.applied.push(field);
