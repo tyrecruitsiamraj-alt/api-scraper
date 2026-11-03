@@ -77,8 +77,15 @@ const FIXTURE = `<!doctype html>
   <div>25,000</div>
   <div>25000</div>
 
-  <button>อายุ</button>
-  <div>25</div>
+  <!-- Live JobBKK (3 Nov 2026): the age row is a readonly input with only a placeholder; opening it shows an .ant-dropdown
+       with two Ant selects (min/max) whose options are a virtual list of numbers; the chosen range lands in the input's value. -->
+  <span class="ant-input-affix-wrapper"><input id="f-age" class="ant-input" placeholder="อายุ" readonly /></span>
+  <div class="ant-dropdown" id="age-panel" style="display:none">
+    <div>อายุ</div>
+    <div class="ant-select" data-bound="min"><div class="ant-select-selector"><span class="ant-select-selection-item">อายุต่ำสุด</span></div></div>
+    <div class="ant-select" data-bound="max"><div class="ant-select-selector"><span class="ant-select-selection-item">อายุมากสุด</span></div></div>
+  </div>
+  <div class="ant-select-dropdown" id="age-list" style="display:none"></div>
 
   <button id="search">ค้นหาผู้สมัครงาน</button>
   <div id="count">ผลการค้นหา 0 เรซูเม่</div>
@@ -98,6 +105,48 @@ const FIXTURE = `<!doctype html>
     });
     document.getElementById('province').addEventListener('click', () => {
       document.getElementById('province-dropdown').style.display = 'block';
+    });
+    // Live JobBKK age row: input opens the panel; each select opens a number list drawn 8 rows at a time (virtual);
+    // ArrowDown moves the active row, Enter picks it, and the input shows "min - max".
+    const ageState = { min: 'อายุต่ำสุด', max: 'อายุมากสุด', bound: null, active: 0, start: 15, end: 60 };
+    const ageInput = document.getElementById('f-age');
+    const agePanel = document.getElementById('age-panel');
+    const ageList = document.getElementById('age-list');
+    const drawAge = () => {
+      const from = Math.max(ageState.start, ageState.start + ageState.active - 4);
+      let html = '';
+      for (let v = from; v < from + 8 && v <= ageState.end; v += 1) {
+        const idx = v - ageState.start;
+        html += '<div class="ant-select-item ant-select-item-option' + (idx === ageState.active ? ' ant-select-item-option-active' : '') + '" title="' + v + '">'
+          + '<div class="ant-select-item-option-content">' + v + '</div></div>';
+      }
+      ageList.innerHTML = html;
+    };
+    const pickAge = (value) => {
+      ageState[ageState.bound] = String(value);
+      agePanel.querySelector('[data-bound="' + ageState.bound + '"] .ant-select-selection-item').textContent = String(value);
+      ageInput.value = ageState.min + ' - ' + ageState.max;
+      ageList.style.display = 'none';
+      ageState.bound = null;
+    };
+    ageInput.addEventListener('click', () => { agePanel.style.display = agePanel.style.display === 'none' ? 'block' : 'none'; });
+    for (const sel of agePanel.querySelectorAll('.ant-select-selector')) {
+      sel.addEventListener('click', () => {
+        ageState.bound = sel.parentElement.getAttribute('data-bound');
+        ageState.active = 0;
+        ageList.style.display = 'block';
+        drawAge();
+      });
+    }
+    ageList.addEventListener('click', (event) => {
+      const row = event.target.closest('.ant-select-item-option');
+      if (row) pickAge(row.getAttribute('title'));
+    });
+    document.addEventListener('keydown', (event) => {
+      if (ageList.style.display === 'none') return;
+      if (event.key === 'ArrowDown') { ageState.active = Math.min(ageState.end - ageState.start, ageState.active + 1); drawAge(); }
+      if (event.key === 'Enter') pickAge(ageState.start + ageState.active);
+      if (event.key === 'Escape') { ageList.style.display = 'none'; agePanel.style.display = 'none'; }
     });
     // Live JobBKK: suggestions arrive from the server, so the dropdown opens ~600ms after typing; Enter picks the active one.
     document.getElementById('position-input').addEventListener('input', (event) => {
@@ -169,12 +218,14 @@ test('Talent Normal Search fills every requested filter then reads a Resume ID',
     salaryMin: '25000',
     salaryMax: '25000',
     ageMin: '25',
+    ageMax: '50',
     maxCandidates: 5,
   }, { need: 5 });
 
   assert.deepEqual(result.report.applied.sort(), [
     'age', 'education', 'jobTypes', 'keyword', 'position', 'province', 'salary',
   ].sort());
+  assert.equal(result.report.ageSeen, '25 - 50', 'age row shows the chosen range');
   assert.deepEqual(result.pool.map((item) => item.id), ['100001', '100002']);
   assert.equal(result.pagesScanned, 2);
   assert.equal(result.latest.method, 'talent_sort_label');

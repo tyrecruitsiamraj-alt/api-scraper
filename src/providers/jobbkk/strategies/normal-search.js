@@ -38,6 +38,8 @@ async function visibleOpenLayer(page) {
     page.locator('.ant-tree-select-dropdown:visible'),
     page.locator('[role="listbox"]:visible'),
     page.locator('[role="dialog"]:visible'),
+    // แถวตัวกรอง (เพศ/อายุ/เงินเดือน/วุฒิ) เปิดเป็น .ant-dropdown ที่มี radio หรือ select อยู่ข้างใน (JobBKK 3 พ.ย. 2569)
+    page.locator('.ant-dropdown:visible'),
   ]);
 }
 
@@ -50,17 +52,44 @@ async function closeOpenLayer(page) {
 
 async function clickMatchingOption(page, labels) {
   const layer = await visibleOpenLayer(page);
-  const scope = layer || page;
-  for (const label of labels) {
-    const exact = new RegExp(`^${escapeRegExp(label)}$`, 'u');
-    const option = await firstVisibleLocator([
-      scope.getByRole('option', { name: exact }),
-      scope.locator('.ant-select-item-option-content').filter({ hasText: exact }),
-      scope.getByText(exact),
-    ]);
-    if (!option) continue;
-    await clickWithoutNavigationWait(option);
-    return true;
+  // หาในแผงที่เปิดอยู่ก่อน ถ้าไม่เจอ (แผงเก่าค้างเปิด / ตัวเลือกวาดนอกแผง) ค่อยหาทั้งหน้า
+  const scopes = layer ? [layer, page] : [page];
+  for (const scope of scopes) {
+    for (const label of labels) {
+      const exact = new RegExp(`^${escapeRegExp(label)}$`, 'u');
+      const option = await firstVisibleLocator([
+        scope.getByRole('option', { name: exact }),
+        scope.locator('.ant-select-item-option-content').filter({ hasText: exact }),
+        scope.locator('label.ant-radio-wrapper, label.ant-checkbox-wrapper').filter({ hasText: exact }),
+        scope.getByText(exact),
+      ]);
+      if (!option) continue;
+      await clickWithoutNavigationWait(option);
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * เลือกตัวเลือกใน Ant Select ที่ไม่มีช่องค้นและวาดรายการแบบ virtual (เช่น อายุ 15–60):
+ * ตัวเลือกที่อยู่นอกจอยังไม่ถูกวาด คลิกตรง ๆ ไม่เจอ ต้องกดลูกศรลงไล่ไปจนตัวที่ไฮไลต์ตรงค่าที่ต้องการแล้วกด Enter
+ * (ลองบนหน้าจริง 3 พ.ย. 2569: พิมพ์เลขไม่ช่วย เพราะกล่องไม่ใช่ช่องค้น)
+ */
+async function pickOptionByKeyboard(page, wanted, maxSteps = 90) {
+  const target = String(wanted).replace(/[\s,]/g, '');
+  for (let i = 0; i < maxSteps; i += 1) {
+    const active = page.locator('.ant-select-dropdown:visible .ant-select-item-option-active').first();
+    // ห้ามรอ element ที่ไม่มี: textContent() ค่าเริ่มต้นรอ 30 วิ ต่อรอบ จะค้างเป็นชั่วโมง
+    const text = (await active.count().catch(() => 0)) > 0
+      ? String(await active.textContent({ timeout: 300 }).catch(() => '') || '').replace(/[\s,]/g, '')
+      : '';
+    if (text && text === target) {
+      await page.keyboard.press('Enter').catch(() => {});
+      return true;
+    }
+    await page.keyboard.press('ArrowDown').catch(() => {});
+    await sleep(60);
   }
   return false;
 }
@@ -453,11 +482,28 @@ function provinceTitlePattern(name) {
   return new RegExp(`^\\s*(?:จ\\.\\s*|จังหวัด\\s*)?${escapeRegExp(name)}(?:\\s*\\(.*\\))?\\s*(?:ทั้งหมด)?\\s*$`, 'u');
 }
 
+/**
+ * แถวตัวกรองบนหน้า Talent (ดูหน้าจริง 3 พ.ย. 2569): เป็น input readonly ที่มีแค่ placeholder ("เพศ", "อายุ", "เงินเดือน", "วุฒิการศึกษา" …)
+ * ไม่มีข้อความให้ getByText เจอ — เดิมหาแถวไม่เจอแล้วข้ามเงียบ ๆ ทุกตัวกรอง ผลค้นเช้า 3 พ.ย. จึงมีผู้หญิง 21/49 และอายุ 22–24 ปนทั้งที่ขอ ชาย 25–50
+ * ค่าที่เลือกแล้วจะไปอยู่ใน value ของ input นั้น (เช่น "ชาย", "25 - 50") ใช้ยืนยันว่าติดจริง
+ */
 async function openFilterRow(page, labelPattern) {
   return firstVisibleLocator([
     page.getByRole('button', { name: labelPattern }),
+    page.getByPlaceholder(labelPattern),
     page.getByText(labelPattern),
   ]);
+}
+
+async function readRowValue(opener) {
+  return String(await opener.evaluate((el) => ('value' in el ? el.value : el.textContent) || '').catch(() => '')).replace(/\s+/g, ' ').trim();
+}
+
+const digitsOf = (v) => String(v ?? '').replace(/[\s,]/g, '');
+/** ค่าที่แถวแสดงหลังเลือก มีค่าที่ขอครบไหม (เทียบแบบตัดช่องว่าง/จุลภาค) */
+function rowShows(value, wanted) {
+  const have = digitsOf(value);
+  return wanted.every((w) => have.includes(digitsOf(w)));
 }
 
 async function applySingleSelect(page, labelPattern, labels, field, report) {
@@ -467,11 +513,37 @@ async function applySingleSelect(page, labelPattern, labels, field, report) {
     return;
   }
   await clickWithoutNavigationWait(opener);
-  await sleep(250);
+  await sleep(300);
   const picked = await clickMatchingOption(page, labels);
+  await sleep(200);
   await closeOpenLayer(page);
-  if (picked) report.applied.push(field);
+  const shown = await readRowValue(opener);
+  report[`${field}Seen`] = shown;
+  // ติดจริง = แถวแสดงค่าที่เลือก (ปุ่มแบบเก่าที่ไม่มี value ให้ถือว่าติดเมื่อคลิกตัวเลือกได้)
+  const isInput = await opener.evaluate((el) => el.tagName === 'INPUT' || el.tagName === 'TEXTAREA').catch(() => false);
+  const verified = picked && (!isInput || labels.some((l) => shown.includes(String(l))));
+  if (verified) report.applied.push(field);
   else report.skipped.push(field);
+}
+
+/** เลือกค่าในช่อง select ช่องที่ index ของแผงที่เปิดอยู่ (0 = ต่ำสุด, 1 = สูงสุด) */
+async function pickInRangeSelect(page, index, labels, legacyPattern) {
+  // แผงของแถวนี้ = แผง .ant-dropdown ที่เปิดอยู่และมีช่อง select ข้างใน (ตัวล่าสุด) ไม่ใช่แผงอื่นที่ค้างเปิด
+  const panels = page.locator('.ant-dropdown:visible').filter({ has: page.locator('.ant-select') });
+  const panelCount = await panels.count().catch(() => 0);
+  const selects = panelCount ? panels.nth(panelCount - 1).locator('.ant-select') : null;
+  const control = selects && (await selects.count().catch(() => 0)) > index
+    ? selects.nth(index).locator('.ant-select-selector').first()
+    : await firstVisibleLocator([page.getByText(legacyPattern), page.locator('.ant-select-selector').nth(index)]);
+  if (!control) return false;
+  await clickWithoutNavigationWait(control);
+  await sleep(300);
+  if (await clickMatchingOption(page, labels)) return true;
+  for (const label of labels) {
+    if (await pickOptionByKeyboard(page, label)) return true;
+  }
+  await page.keyboard.press('Escape').catch(() => {});
+  return false;
 }
 
 async function applyRangeSelect(page, rowPattern, minLabels, maxLabels, field, report) {
@@ -481,25 +553,22 @@ async function applyRangeSelect(page, rowPattern, minLabels, maxLabels, field, r
     return;
   }
   await clickWithoutNavigationWait(opener);
-  await sleep(250);
-  let ok = false;
-  if (minLabels?.length) {
-    const minControl = await firstVisibleLocator([
-      page.getByText(/ต่ำสุด/u),
-      page.locator('.ant-select-selector').first(),
-    ]);
-    if (minControl) await clickWithoutNavigationWait(minControl);
-    ok = (await clickMatchingOption(page, minLabels)) || ok;
-  }
+  await sleep(300);
+  let okMin = true;
+  let okMax = true;
+  if (minLabels?.length) okMin = await pickInRangeSelect(page, 0, minLabels, /ต่ำสุด/u);
   if (maxLabels?.length) {
-    const maxControl = await firstVisibleLocator([
-      page.getByText(/สูงสุด/u),
-    ]);
-    if (maxControl) await clickWithoutNavigationWait(maxControl);
-    ok = (await clickMatchingOption(page, maxLabels)) || ok;
+    await sleep(200);
+    okMax = await pickInRangeSelect(page, 1, maxLabels, /สูงสุด|มากสุด/u);
   }
+  await sleep(200);
   await closeOpenLayer(page);
-  if (ok) report.applied.push(field);
+  const shown = await readRowValue(opener);
+  report[`${field}Seen`] = shown;
+  const hasValue = await opener.evaluate((el) => el.tagName === 'INPUT' || el.tagName === 'TEXTAREA').catch(() => false);
+  const wanted = [...(minLabels?.length ? [minLabels[0]] : []), ...(maxLabels?.length ? [maxLabels[0]] : [])];
+  const verified = okMin && okMax && (!hasValue || rowShows(shown, wanted));
+  if (verified) report.applied.push(field);
   else report.skipped.push(field);
 }
 
