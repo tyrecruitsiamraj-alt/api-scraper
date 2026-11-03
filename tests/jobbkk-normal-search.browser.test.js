@@ -37,7 +37,8 @@ const FIXTURE = `<!doctype html>
       </div>
     </div>
   </div>
-  <div class="ant-select-item-option-content">เจ้าหน้าที่ IT</div>
+  <!-- The planner types the Thai part only ("เจ้าหน้าที่ IT" → "เจ้าหน้าที่"); the dropdown offers that exact chip. -->
+  <div class="ant-select-item-option-content">เจ้าหน้าที่</div>
 
   <div class="ant-select-selection-wrap">
     <span>ค้นหา Keyword</span>
@@ -82,6 +83,20 @@ const FIXTURE = `<!doctype html>
     document.getElementById('province').addEventListener('click', () => {
       document.getElementById('province-dropdown').style.display = 'block';
     });
+    // Live JobBKK: picking a position/keyword option adds an Ant Select chip into that box.
+    for (const option of document.querySelectorAll('.ant-select-item-option-content')) {
+      option.addEventListener('click', () => {
+        const label = option.textContent.trim();
+        if (!['เจ้าหน้าที่', 'ขาย'].includes(label)) return;
+        const needle = label === 'ขาย' ? 'ค้นหา Keyword' : 'ค้นหาชื่อตำแหน่งงาน';
+        const wrap = [...document.querySelectorAll('.ant-select-selection-wrap')]
+          .find((el) => el.querySelector('input')?.placeholder === needle);
+        const chip = document.createElement('span');
+        chip.className = 'ant-select-selection-item';
+        chip.textContent = label;
+        wrap.appendChild(chip);
+      });
+    }
     document.querySelector('#province-dropdown .ant-tree-checkbox').addEventListener('click', (event) => {
       event.currentTarget.setAttribute('aria-checked', 'true');
       document.getElementById('province').value = 'สมุทรปราการ ทั้งหมด';
@@ -206,5 +221,23 @@ test('Province not in the tree records how the dropdown is built', async (t) => 
       assert.match(error.message, /เลื่อน \d+\/\d+ ครั้ง · โครงรายการ: ช่องค้น .* · แถว 10 .*virtual มี.*กล่อง div\.ant-tree-list-holder hidden \d+\/\d+/);
       return true;
     },
+  );
+});
+
+// 3 พ.ย. 2569: เว็บไม่รับชื่อตำแหน่ง (พิมพ์แล้วไม่มีชิปขึ้นในกล่อง) → ต้องหยุด ไม่รับผลค้นทั้งจังหวัด
+// เดิมนับว่า "ติด" ทันทีที่พิมพ์เสร็จ ใบคนขับรถ 2 ใบเปิดดู 119 คน ไม่มีคนขับรถเลย
+test('Normal Search refuses to search when the position chip never appears', async (t) => {
+  const browser = await chromium.launch({ headless: true });
+  t.after(async () => {
+    await browser.close().catch(() => {});
+  });
+  const page = await browser.newPage();
+  const fixture = FIXTURE.replace("['เจ้าหน้าที่', 'ขาย']", '[]');
+  assert.notEqual(fixture, FIXTURE, 'fixture rewrite applied');
+  await page.setContent(fixture, { waitUntil: 'domcontentloaded' });
+
+  await assert.rejects(
+    runNormalSearch(page, { position: 'พนักงานขับรถ', province: 'สมุทรปราการ', maxCandidates: 5 }, { need: 5 }),
+    /JOBBKK_FILTER_NOT_APPLIED: Normal Search ไม่ยืนยันตำแหน่ง.*กล่องตำแหน่งว่าง/u,
   );
 });

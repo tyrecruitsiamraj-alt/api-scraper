@@ -106,6 +106,8 @@ export async function runConnector(connector, criteria, runtime, opts = {}) {
   let updatedCount = 0;
   let failed = 0;
   let found = 0;
+  // ตัวกรองที่เว็บรับ/ไม่รับในรอบค้น (JobBKK Normal Search) — เก็บลง resume_search_attempts.search_metadata ให้ไล่ย้อนได้
+  let searchFilters = null;
   let filteredOut = 0; // ไม่ตรงเงื่อนไข local (อายุ/วุฒิ/จังหวัด/เพศ) — ข้ามโดยไม่นับเข้า target
   let opened = 0;
   let qualified = 0;
@@ -226,6 +228,11 @@ export async function runConnector(connector, criteria, runtime, opts = {}) {
       search = await runSearch();
     }
     found = search.ids.length;
+    if (search.strategies) {
+      searchFilters = search.strategies;
+      const normal = search.strategies.normal || {};
+      console.log(`  [${connector.label}] ตัวกรองที่ติด: ${(normal.applied || []).join(', ') || '-'} · ไม่ติด: ${(normal.skipped || []).join(', ') || '-'}`);
+    }
     // Provider ต้องผ่าน newest-first gate ก่อนคืน ids (official sort หรือหลักฐานวันที่บน card).
     // เก็บอันดับที่ผ่านการยืนยันไว้ก่อนตัดรายการซ้ำ เพื่อไม่เรียงกลับด้านตามเวลาเขียน DB.
     const sourceRankById = new Map(search.ids.map((id, index) => [String(id), index + 1]));
@@ -501,6 +508,7 @@ export async function runConnector(connector, criteria, runtime, opts = {}) {
       searchTier: opts.searchTier || 'direct', found, opened,
       unique: Math.max(0, opened - duplicate), qualified, needsReview, rejected, duplicate,
       quotaUsed: opened, durationSeconds: Math.max(0, Math.round((Date.now() - runStartedAt) / 1000)), reasonCounts,
+      searchMetadata: searchFilters ? { strategies: searchFilters } : {},
     }).catch((e) => console.warn(`  [second-brain] บันทึก Search Attempt ไม่สำเร็จ: ${e.message}`));
     const hit = classifyScrapeOutcome({ error, opened, qualified, rejected });
     if (hit) {

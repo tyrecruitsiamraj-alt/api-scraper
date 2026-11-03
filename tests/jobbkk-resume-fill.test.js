@@ -1,8 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  ageFromBirthDate,
   fillMissingFromRawText,
   finalizeCandidateRecord,
+  reconcileAge,
   isResumeProfileThin,
   parseResumeHtml,
 } from '../src/providers/jobbkk/parser.js';
@@ -181,4 +183,28 @@ test('classic #experience_page1 is materialized into work_experience', () => {
   assert.equal(parsed.education[0]?.degree, 'ปริญญาตรี');
   assert.equal(parsed.work_experience[0]?.position, 'พนักงานขับรถ');
   assert.match(parsed.work_experience[0]?.company || '', /เอ/);
+});
+
+// 3 พ.ย. 2569: "(1 ปี)" ตัวแรกในหน้าคือระยะเวลางาน ไม่ใช่อายุ — 10 จาก 49 คนได้อายุ 1–9 แล้วถูกคัด "อายุนอกช่วง"
+test('age comes from the birth-date line, not the first "(N ปี)" work duration', () => {
+  const record = { name: 'นายทดสอบ ระบบ', age: '', birth_date: '', education: [], work_experience: [] };
+  fillMissingFromRawText(record, [
+    'ประวัติการทำงาน บริษัท ตัวอย่าง จำกัด- เมษายน 2563 ถึง เมษายน 2564 (1 ปี)ตำแหน่งงาน:Leader',
+    'ส่วนสูง168 ซม.น้ำหนัก75 กก.เพศชายสถานะโสดวันเกิด13/07/2531 (38 ปี)สถานภาพทางทหารได้รับการยกเว้น',
+  ].join(' '));
+  assert.equal(record.age, '38');
+  assert.equal(record.birth_date, '13/07/2531');
+});
+
+test('reconcileAge trusts the birth date when the parsed age is off by more than a year', () => {
+  const now = new Date('2026-11-03T05:00:00+07:00');
+  assert.equal(ageFromBirthDate('13/07/2531', now), '38');
+  assert.equal(ageFromBirthDate('04/11/2531', now), '37'); // ยังไม่ถึงวันเกิดปีนี้
+  assert.equal(reconcileAge('1', '13/07/2531', now), '38');
+  assert.equal(reconcileAge('38', '13/07/2531', now), '38');
+  assert.equal(reconcileAge('37', '13/07/2531', now), '37'); // ต่างกัน 1 ปี เชื่อหน้าเว็บ
+  assert.equal(reconcileAge('', '01/03/2539', now), '30');
+  assert.equal(reconcileAge('45', '', now), '45');
+  assert.equal(reconcileAge('3', '', now), ''); // อายุ 3 ไม่มีวันเกิดให้เทียบ = ไม่รู้ ไม่ใช่ 3
+  assert.equal(finalizeCandidateRecord({ age: '2', birth_date: '09/06/2540', raw_text: '' }).age, ageFromBirthDate('09/06/2540'));
 });

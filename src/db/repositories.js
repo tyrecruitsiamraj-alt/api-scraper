@@ -358,17 +358,20 @@ export async function recordResumeSearchAttempt(attempt) {
     qualified: attempt.qualified ?? 0, needsReview: attempt.needsReview ?? 0, rejected: attempt.rejected ?? 0,
     duplicate: attempt.duplicate ?? 0, quotaUsed: attempt.quotaUsed ?? attempt.opened ?? 0,
     durationSeconds: attempt.durationSeconds ?? 0, reasonCounts: attempt.reasonCounts ?? {},
+    // ตัวกรองที่เว็บรับ/ไม่รับในรอบนี้ (เช่น JobBKK Normal Search applied/skipped + ชิปที่เห็น) — schema-030
+    searchMetadata: attempt.searchMetadata && typeof attempt.searchMetadata === 'object' ? attempt.searchMetadata : {},
   };
+  await query(`ALTER TABLE resume_search_attempts ADD COLUMN IF NOT EXISTS search_metadata jsonb NOT NULL DEFAULT '{}'::jsonb`);
   const inserted = await query(
     `INSERT INTO resume_search_attempts
        (task_id, run_id, connector_id, platform, job_family, location, search_term, search_tier,
         found_count, opened_count, unique_count, qualified_count, needs_review_count, rejected_count,
-        duplicate_count, quota_used, duration_seconds, reason_counts)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)
+        duplicate_count, quota_used, duration_seconds, reason_counts, search_metadata)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)
      ON CONFLICT (run_id) DO NOTHING`,
     [a.taskId, a.runId, a.connectorId, a.platform, a.jobFamily, a.location, a.searchTerm, a.searchTier,
      a.found, a.opened, a.unique, a.qualified, a.needsReview, a.rejected, a.duplicate,
-     a.quotaUsed, a.durationSeconds, a.reasonCounts],
+     a.quotaUsed, a.durationSeconds, a.reasonCounts, a.searchMetadata],
   );
   if (inserted.rowCount === 0 || !a.searchTerm || !a.platform) return;
   await query(

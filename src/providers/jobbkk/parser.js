@@ -71,10 +71,45 @@ function extractLineFromText(text) {
   // strict: require an id-shaped token near a LINE context (no English-prose "Line")
   return extractLineId(text);
 }
+/**
+ * อายุจากข้อความ — "(N ปี)" นับเฉพาะที่ต่อท้ายวันเกิด เช่น "วันเกิด13/07/2531 (38 ปี)"
+ * เดิมจับ "(N ปี)" ตัวแรกในทั้งหน้า ซึ่งคือระยะเวลางาน "เมษายน 2563 ถึง เมษายน 2564 (1 ปี)" ที่อยู่ก่อนวันเกิด
+ * → อายุกลายเป็น 1–9 แล้วถูกคัด "อายุนอกช่วง" 10 จาก 49 คน (3 พ.ย. 2569)
+ */
 function extractAge(text) {
-  const paren = String(text).match(/\((\d{1,2})\s*ปี\)/u);
-  if (paren?.[1]) return paren[1];
-  return firstMatch(text, [/(?:อายุ|Age)\s*[:\-]?\s*(\d{1,2})\s*(?:ปี|years?)?/iu]);
+  return firstMatch(text, [
+    /\d{1,2}\/\d{1,2}\/\d{2,4}\s*\((\d{1,2})\s*ปี\)/u,
+    /(?:วันเดือนปีเกิด|วันเกิด|Birth(?:day|\s*Date)?)\s*[:：]?[^()]{0,30}\((\d{1,2})\s*ปี\)/iu,
+    /^\s*\((\d{1,2})\s*ปี\)\s*$/u,
+    /(?:อายุ|Age)\s*[:\-]?\s*(\d{1,2})\s*(?:ปี|years?)?/iu,
+  ]);
+}
+
+/**
+ * อายุจากวันเกิด dd/mm/yyyy (รับ พ.ศ.) — คืน '' ถ้าอ่านไม่ได้หรือนอกช่วง 15–80
+ * ใช้ยืนยันอายุที่อ่านจากหน้า ถ้าสองค่าห่างกันเกิน 1 ปี ให้เชื่อวันเกิด
+ */
+export function ageFromBirthDate(birthDate, now = new Date()) {
+  const m = String(birthDate ?? '').match(/(\d{1,2})\/(\d{1,2})\/(\d{2,4})/);
+  if (!m) return '';
+  let year = Number(m[3]);
+  if (year < 100) year += year > now.getFullYear() % 100 ? 1900 : 2000;
+  if (year > 2400) year -= 543;
+  const month = Number(m[2]);
+  const day = Number(m[1]);
+  if (!(month >= 1 && month <= 12 && day >= 1 && day <= 31)) return '';
+  let age = now.getFullYear() - year;
+  if (now.getMonth() + 1 < month || (now.getMonth() + 1 === month && now.getDate() < day)) age -= 1;
+  return age >= 15 && age <= 80 ? String(age) : '';
+}
+
+export function reconcileAge(age, birthDate, now = new Date()) {
+  const parsed = Number.parseInt(clean(age), 10);
+  const parsedOk = Number.isFinite(parsed) && parsed >= 15 && parsed <= 80;
+  const computed = ageFromBirthDate(birthDate, now);
+  if (!computed) return parsedOk ? String(parsed) : '';
+  if (parsedOk && Math.abs(parsed - Number(computed)) <= 1) return String(parsed);
+  return computed;
 }
 function extractBirthDate(text) {
   return firstMatch(text, [/(?:วันเกิด|Birth(?:day| Date)?)\s*[:\-]?\s*(\d{1,2}\/\d{1,2}\/\d{2,4})/iu, /\b(\d{1,2}\/\d{1,2}\/\d{4})\b/]);
@@ -1144,6 +1179,7 @@ export function finalizeCandidateRecord(record = {}) {
   }
   if (isJunkPersonalField(next.marital_status)) next.marital_status = '';
   if (isJunkPersonalField(next.military_status)) next.military_status = '';
+  next.age = reconcileAge(next.age, next.birth_date);
   applyThaiNameSplit(next);
   next.parse_status = parseStatus(next, next.raw_text || '');
   return next;

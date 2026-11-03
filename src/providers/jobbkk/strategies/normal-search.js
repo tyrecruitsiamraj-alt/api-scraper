@@ -77,7 +77,22 @@ async function findChipInput(page, field) {
   ]);
 }
 
+/** ชิปที่กล่องตำแหน่ง/Keyword ถืออยู่จริง — อ่านจากกล่อง Ant Select ที่ครอบช่องพิมพ์ */
+async function readChipTags(input) {
+  const wrap = input.locator('xpath=ancestor::*[contains(@class,"ant-select") or contains(@class,"ant-form-item")][1]');
+  if (!(await wrap.count().catch(() => 0))) return [];
+  const texts = await wrap.locator('.ant-select-selection-item').allTextContents().catch(() => []);
+  return texts.map((text) => String(text || '').replace(/\s+/g, ' ').trim()).filter(Boolean);
+}
+
+/**
+ * พิมพ์ชื่อตำแหน่ง/Keyword แล้วเลือกจากรายการ — นับว่า "ติด" ก็ต่อเมื่อเห็นชิปในกล่องจริง
+ * เดิมนับว่าติดทันทีที่พิมพ์เสร็จ ทั้งที่เว็บไม่รับ ผลค้นเลยเป็นเรซูเม่ล่าสุดทั้งจังหวัดไม่กรองตำแหน่ง:
+ * ใบคนขับรถ 2 ใบ เปิดดู 119 คน ไม่มีคนขับรถเลย เสียโควตาวันนั้นเปล่า (3 พ.ย. 2569)
+ */
 async function applyChipField(page, field, terms, report) {
+  const seenKey = field === 'position' ? 'positionSeen' : 'keywordSeen';
+  let verified = false;
   for (const term of terms) {
     const input = await findChipInput(page, field);
     if (!input) {
@@ -90,8 +105,15 @@ async function applyChipField(page, field, terms, report) {
     const picked = await clickMatchingOption(page, [term]);
     if (!picked) await page.keyboard.press('Enter').catch(() => {});
     await sleep(150);
+    const tags = await readChipTags(input);
+    report[seenKey] = tags.join(', ');
+    if (tagsMatchRequested(tags, [term])) verified = true;
   }
-  if (!report.applied.includes(field)) report.applied.push(field);
+  if (verified) {
+    if (!report.applied.includes(field)) report.applied.push(field);
+  } else if (!report.skipped.includes(field)) {
+    report.skipped.push(field);
+  }
 }
 
 async function readSelectTags(page, openerPattern) {
@@ -542,7 +564,8 @@ export async function runNormalSearch(page, criteria, { need = 15 } = {}) {
   }
   const missing = missingRequiredNormalFilters(plan, report);
   if (missing.includes('position')) {
-    throw new Error('JOBBKK_FILTER_NOT_APPLIED: Normal Search ไม่ยืนยันตำแหน่งหรือ Keyword จึงไม่รับผลค้นหาแบบกว้าง');
+    const seen = [report.positionSeen, report.keywordSeen].filter(Boolean).join(' / ');
+    throw new Error(`JOBBKK_FILTER_NOT_APPLIED: Normal Search ไม่ยืนยันตำแหน่งหรือ Keyword จึงไม่รับผลค้นหาแบบกว้าง${seen ? ` (ชิปที่เห็น: ${seen})` : ' (กล่องตำแหน่งว่าง ไม่มีชิป)'}`);
   }
   if (missing.includes('province')) {
     throw new Error(`JOBBKK_FILTER_NOT_APPLIED: Normal Search ไม่ยืนยันจังหวัดตามใบขอ จึงไม่รับผลค้นหาทั้งประเทศ${report.provinceSeen ? ` (${report.provinceSeen})` : ''}`);
