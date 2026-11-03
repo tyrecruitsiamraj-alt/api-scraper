@@ -1,6 +1,6 @@
 import 'server-only';
 import { q } from './db';
-import { createScrapeTaskFromSoRecruit, enqueueScrapeForTask, getConnectorOption, listJarvisPostOrders, postJarvisOrder } from './repo';
+import { createScrapeTaskFromSoRecruit, enqueueScrapeForTask, getConnectorOption, listJarvisPostOrders, postJarvisOrder, skippedGroupsNote } from './repo';
 
 /**
  * เริ่มงานจากคำสั่ง Jarvis ทันที (ไม่ต้องมีคนกดในระบบนี้) — Jarvis เรียกหลังบันทึก job_posting_requests
@@ -13,7 +13,15 @@ if (!/^[A-Za-z_][A-Za-z0-9_-]*$/.test(AP_SCHEMA)) throw new Error(`AUTOPOST_SCHE
 const AP = `"${AP_SCHEMA}"`;
 
 export type JarvisStartResult =
-  | { ok: true; type: 'content'; request_no: string; queue_id: string; worker: string | null; preflight_queued: boolean }
+  | {
+      ok: true; type: 'content'; request_no: string; queue_id: string; worker: string | null; preflight_queued: boolean;
+      /** กลุ่มที่เข้าคิวจริง */
+      group_count: number;
+      /** กลุ่มที่ข้ามเพราะใบนี้เพิ่งลงไม่ถึง 2 วัน — Jarvis ควรบอกคนสั่งพร้อมวันที่โพสต์ได้อีก */
+      skipped_groups: { id: string; name: string; last_posted_at: string; available_at: string }[];
+      /** ข้อความสำหรับคนสั่ง — null เมื่อไม่ได้ข้ามอะไร */
+      message: string | null;
+    }
   | { ok: true; type: 'scraping'; request_no: string; task_id: string; queued: boolean; message: string | null }
   | { ok: false; status: number; error: string };
 
@@ -30,8 +38,18 @@ async function startContent(requestNo: string, requestedBy: string): Promise<Jar
   const preflightQueued = false;
 
   try {
-    const queueId = await postJarvisOrder(requestNo, requestedBy);
-    return { ok: true, type: 'content', request_no: requestNo, queue_id: queueId, worker: order.target_worker, preflight_queued: preflightQueued };
+    const started = await postJarvisOrder(requestNo, requestedBy);
+    return {
+      ok: true,
+      type: 'content',
+      request_no: requestNo,
+      queue_id: started.queueId,
+      worker: order.target_worker,
+      preflight_queued: preflightQueued,
+      group_count: started.groupCount,
+      skipped_groups: started.skipped.map((g) => ({ id: g.id, name: g.name, last_posted_at: g.last_posted_at, available_at: g.available_at })),
+      message: started.skipped.length ? skippedGroupsNote(started.skipped) : null,
+    };
   } catch (error) {
     return { ok: false, status: 422, error: (error as Error).message };
   }

@@ -3500,11 +3500,18 @@ export type JarvisPostOrder = {
   job_id: string | null;
   queue_status: string | null;
   queue_at: string | null;
+  /** ข้อความของรอบล่าสุด เช่น "Jarvis OPL… · ข้าม 3 กลุ่มที่เพิ่งลง" */
+  queue_message: string | null;
   post_link: string | null;
   /** โพสต์ที่ worker ยืนยันว่ากดโพสต์สำเร็จ (ล่าสุดก่อน) */
   posts: JarvisPostRecord[];
   /** กลุ่มที่เลือกได้ตอนสั่งโพสต์ซ้ำ */
   repost_groups: JarvisRepostGroup[];
+  /**
+   * กลุ่มที่ Jarvis เลือกมาแต่ใบนี้เพิ่งลงไม่ถึง 2 วัน — สั่งได้ ระบบข้ามกลุ่มพวกนี้แล้วโพสต์ที่เหลือ
+   * เดิมปฏิเสธทั้งใบด้วยข้อความ "ต้องเว้น 2 วัน" คนสั่งไม่รู้ว่าต้องทำยังไงต่อ (3 พ.ย. 2569)
+   */
+  recent_groups: JarvisRecentGroup[];
   /** ผลรายกลุ่มของใบนี้ (ทุกรอบรวมกัน, ผลล่าสุดของแต่ละกลุ่ม) */
   group_results: JarvisGroupResult[];
 };
@@ -3529,6 +3536,14 @@ export type JarvisGroupResult = {
   reactions: number | null;
   shares: number | null;
   collected_at: string | null;
+};
+export type JarvisRecentGroup = {
+  id: string;
+  fb_group_id: string;
+  name: string;
+  last_posted_at: string;
+  /** โพสต์ใบนี้ลงกลุ่มนี้ได้อีกครั้งเมื่อไร */
+  available_at: string;
 };
 export type JarvisRepostGroup = {
   id: string;
@@ -3685,8 +3700,8 @@ export async function listJarvisPostOrders(opts: { requestNos?: string[] } = {})
     if (accountIssue) issues.push(accountIssue);
     else if (groupIds.length && !account) issues.push('ไม่มีบัญชี Facebook ที่ผูกกับกลุ่มนี้');
     // รวมรอบโพสต์ซ้ำ (assignment jv-…-rN) ด้วย
-    const queue = await q<{ status: string; created_at: string }>(
-      `SELECT status, created_at FROM ${AP}.post_run_queue
+    const queue = await q<{ status: string; created_at: string; message: string | null }>(
+      `SELECT status, created_at, message FROM ${AP}.post_run_queue
         WHERE EXISTS (SELECT 1 FROM jsonb_array_elements_text(assignment_ids::jsonb) a
                        WHERE a = $1 OR a LIKE $1 || '-r%')
         ORDER BY created_at DESC LIMIT 1`,
@@ -3769,15 +3784,21 @@ export async function listJarvisPostOrders(opts: { requestNos?: string[] } = {})
         blocked_until: until > Date.now() ? new Date(until).toISOString() : null,
       };
     });
-    // สั่งใบใหม่ด้วยเลขใบขอเดิม: กลุ่มที่งานนี้เพิ่งโพสต์ไม่ถึง 2 วัน worker จะข้ามเงียบ ๆ — บอกก่อนสั่ง
-    if (row.status === 'pending') {
-      const recent = groupIds
-        .map((id) => ({ name: groupNames.get(id) ?? id, last: lastPostByFb.get(fbByRowId.get(id) ?? id) }))
-        .filter((g) => g.last && g.last + REPOST_MIN_GAP_DAYS * 86_400_000 > Date.now());
-      if (recent.length) {
-        issues.push(`งานนี้เพิ่งโพสต์ลง ${recent.map((g) => g.name).join(', ')} ต้องเว้น ${REPOST_MIN_GAP_DAYS} วันก่อนโพสต์ซ้ำกลุ่มเดิม`);
-      }
-    }
+    // สั่งใบใหม่ด้วยเลขใบขอเดิม: กลุ่มที่งานนี้เพิ่งโพสต์ไม่ถึง 2 วัน — ไม่ปฏิเสธทั้งใบ ตอนสั่งจะข้ามกลุ่มพวกนี้แล้วบอกคนสั่ง
+    const recentGroups: JarvisRecentGroup[] = row.status === 'pending'
+      ? groupIds.flatMap((id) => {
+        const fb = fbByRowId.get(id) ?? id;
+        const last = lastPostByFb.get(fb);
+        if (!last || last + REPOST_MIN_GAP_DAYS * 86_400_000 <= Date.now()) return [];
+        return [{
+          id,
+          fb_group_id: fb,
+          name: groupNames.get(id) ?? id,
+          last_posted_at: new Date(last).toISOString(),
+          available_at: new Date(last + REPOST_MIN_GAP_DAYS * 86_400_000).toISOString(),
+        }];
+      })
+      : [];
     const posted = await q<{ post_link: string | null }>(
       `SELECT post_link FROM ${AP}.post_logs
         WHERE job_id = $1 AND COALESCE(post_link, '') <> '' ORDER BY created_at DESC LIMIT 1`,
@@ -3809,9 +3830,11 @@ export async function listJarvisPostOrders(opts: { requestNos?: string[] } = {})
       job_id: queue[0] ? jobId : null,
       queue_status: queue[0]?.status ?? null,
       queue_at: queue[0]?.created_at ?? null,
+      queue_message: queue[0]?.message ?? null,
       post_link: posted[0]?.post_link ?? null,
       posts,
       repost_groups: repostGroups,
+      recent_groups: recentGroups,
       group_results: groupResults,
     });
   }
@@ -3905,7 +3928,23 @@ export async function repostJarvisOrder(requestNo: string, groupIds: string[], r
  * โพสต์คำสั่งจาก Jarvis 1 ใบ: สร้าง job + assignment ใน Auto-Post (id คงที่จากเลขใบขอ
  * กันกดซ้ำ) แล้วส่งเข้าคิวโพสต์ของบัญชีที่ผูกกลุ่มนั้น จากนั้นตั้งสถานะ Jarvis เป็น in_progress.
  */
-export async function postJarvisOrder(requestNo: string, requestedBy: string | null): Promise<string> {
+export type JarvisPostStarted = {
+  queueId: string;
+  /** กลุ่มที่ข้ามเพราะใบนี้เพิ่งลงไม่ถึง 2 วัน (ไม่ได้อยู่ในรอบนี้) */
+  skipped: JarvisRecentGroup[];
+  /** จำนวนกลุ่มที่เข้าคิวจริง */
+  groupCount: number;
+};
+
+/** "ข้าม 3 กลุ่มที่เพิ่งลง โพสต์ได้อีก 4 พ.ย. 09:21" — ว่างเมื่อไม่ได้ข้าม */
+export function skippedGroupsNote(skipped: JarvisRecentGroup[]): string {
+  if (!skipped.length) return '';
+  const latest = skipped.map((g) => new Date(g.available_at).getTime()).reduce((a, b) => Math.max(a, b), 0);
+  const when = new Date(latest).toLocaleString('th-TH', { timeZone: 'Asia/Bangkok', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+  return `ข้าม ${skipped.length} กลุ่มที่เพิ่งลง (${skipped.map((g) => g.name).join(', ')}) โพสต์ได้อีก ${when}`;
+}
+
+export async function postJarvisOrder(requestNo: string, requestedBy: string | null): Promise<JarvisPostStarted> {
   const order = (await listJarvisPostOrders({ requestNos: [requestNo] })).find((o) => o.request_no === requestNo);
   if (!order) throw new Error(`ไม่พบคำสั่งโพสต์ ${requestNo}`);
   if (order.jarvis_status !== 'pending') throw new Error('ใบนี้สั่งโพสต์ไปแล้ว');
@@ -3915,6 +3954,8 @@ export async function postJarvisOrder(requestNo: string, requestedBy: string | n
 
   const jobId = jarvisPostJobId(requestNo);
   const queueId = autopostId();
+  let skipped: JarvisRecentGroup[] = [];
+  let groupCount = 0;
   await q(`ALTER TABLE ${AP}.post_run_queue ADD COLUMN IF NOT EXISTS target_worker VARCHAR(255)`);
   await q(`ALTER TABLE ${AP}.jobs ADD COLUMN IF NOT EXISTS group_links JSONB`);
   const client = await pool().connect();
@@ -3939,8 +3980,16 @@ export async function postJarvisOrder(requestNo: string, requestedBy: string | n
       [wanted],
     );
     const allowed = new Set(known.rows.map((r) => r.id));
-    const groups = wanted.filter((id) => allowed.has(id));
-    if (!groups.length) throw new Error('กลุ่มที่เลือกใน Jarvis ไม่มีในระบบ So Scraping');
+    const inSystem = wanted.filter((id) => allowed.has(id));
+    if (!inSystem.length) throw new Error('กลุ่มที่เลือกใน Jarvis ไม่มีในระบบ So Scraping');
+    // กลุ่มที่ใบนี้เพิ่งลงไม่ถึง 2 วัน: ข้าม โพสต์ที่เหลือ — ถ้าเพิ่งลงครบทุกกลุ่ม ถึงจะปฏิเสธ
+    const recentById = new Map(order.recent_groups.map((g) => [g.id, g]));
+    skipped = inSystem.flatMap((id) => (recentById.has(id) ? [recentById.get(id)!] : []));
+    const groups = inSystem.filter((id) => !recentById.has(id));
+    if (!groups.length) {
+      throw new Error(`ทุกกลุ่มที่เลือกเพิ่งลงใบนี้ไม่ถึง ${REPOST_MIN_GAP_DAYS} วัน · ${skippedGroupsNote(skipped)}`);
+    }
+    groupCount = groups.length;
     // ใบขอเดิมสั่งใหม่ใน Jarvis (เช่น หลังถูกตีกลับ): ใช้ job เดิม อัปเดตข้อความ แล้วเปิดรอบใหม่ jv-…-rN
     // ลิงก์สมัครแยกกลุ่ม (apply_link เดิม + group_links) เก็บไว้ที่งาน worker แทนลิงก์ตอนโพสต์ลงแต่ละกลุ่ม
     const groupLinks = parseGroupLinks(snapshot.rows[0].group_links);
@@ -3964,7 +4013,8 @@ export async function postJarvisOrder(requestNo: string, requestedBy: string | n
     await client.query(
       `INSERT INTO ${AP}.post_run_queue (id, assignment_ids, user_id, status, requested_by, message, target_worker)
        VALUES ($1, $2::jsonb, $3, 'queued', $4, $5, $6)`,
-      [queueId, JSON.stringify([assignmentId]), order.account_id, requestedBy || 'web', `Jarvis ${requestNo}`, order.target_worker],
+      [queueId, JSON.stringify([assignmentId]), order.account_id, requestedBy || 'web',
+        skipped.length ? `Jarvis ${requestNo} · ${skippedGroupsNote(skipped)}` : `Jarvis ${requestNo}`, order.target_worker],
     );
     await client.query(
       `UPDATE "jarvis_rm".job_posting_requests SET status='in_progress', updated_at=now() WHERE request_no=$1 AND status='pending'
@@ -3978,7 +4028,7 @@ export async function postJarvisOrder(requestNo: string, requestedBy: string | n
   } finally {
     client.release();
   }
-  return queueId;
+  return { queueId, skipped, groupCount };
 }
 
 /** งานโพสต์ที่ผูกบัญชี+กลุ่มไว้แล้วใน Auto-Post — ให้สั่งโพสต์จากหน้าเว็บได้โดยตรง */

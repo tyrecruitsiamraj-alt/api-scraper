@@ -76,6 +76,11 @@ LMM6704005 (คนสวน สมุทรปราการ) ค้น 8 ค�
 → แก้แล้ว `autopost/src/helpers/facebookLogin.ts` `looksLikeFeedPage`: เห็นกล่อง "คิดอะไรอยู่" หรือโพสต์ในฟีดบนโดเมน facebook = เข้าฟีด ตัดสินก่อนอ่านข้อความ · เทสต์ `autopost/tests/facebookAuthState.spec.ts` (รัน `npx playwright test tests/facebookAuthState.spec.ts --project=ChromiumCollect` ไม่ต่อเน็ต) 5/5
 → หลังขึ้น RM009: กด "ยืนยันแล้ว" ให้ Moody Keyanna ในหน้า /autopost/jobs แล้วสั่งใบเดิมใหม่ · `tsc` ของ autopost มี error เก่าใน `loadConfig.ts` 9 จุด ไม่เกี่ยวกับไฟล์นี้
 
+**C6 หน้าสั่งใน Jarvis ต้องตัดสินแทนคนสั่ง** · 3 พ.ย. คนสั่งเลือกบัญชีที่ถูกพัก 2 ใบติด และเลือก 14 กลุ่มที่ใบเดิมเพิ่งลง ระบบตอบ "ต้องเว้น 2 วัน" ทั้งใบ
+→ ฝั่งเราทำแล้ว (ยังไม่ commit ตอนเขียน): `/options` ส่ง `accounts[].status = needs_verification` (เดิม 4 บัญชีที่ติดธงขึ้นว่า ready) · `accounts[].recommended` / `workers[].recommended` บอกค่าเริ่มต้น · `?request_no=` → `groups[].repost_wait` บอกกลุ่มที่ใบนี้เพิ่งลงพร้อมวันที่โพสต์ได้อีก · `/start` ไม่ปฏิเสธทั้งใบแล้ว ข้ามกลุ่มที่เพิ่งลง โพสต์ที่เหลือ ตอบ `skipped_groups` + `message` และ `/status` ส่ง `run_message` · หน้า /autopost/jobs บอกจำนวนกลุ่มที่จะข้าม
+→ ฝั่ง Jarvis: ข้อความสั่งงานอยู่ `docs/JARVIS_OPTIONS_PROMPT.md` ข้อ 6 (ค่าเริ่มต้นบัญชี/เครื่อง · จำกัดกลุ่มเท่า `remaining_today` · สีเทา+วันที่ให้กลุ่มที่เพิ่งลง · แสดง `message` หลังสั่ง) เจ้าของเอาไปวางใน Jarvis เอง
+→ พิสูจน์: curl `/options?request_no=LBM6903001` ด้วย key บน Vercel ต้องเห็นช่องใหม่ · สั่งใบที่มีกลุ่มเพิ่งลงจาก Jarvis ต้องได้ `ok:true` พร้อม `message` ไม่ใช่ 422
+
 ### D. Worker ไม่ตายเงียบ · +1
 
 **D1 พิสูจน์ตัวเฝ้าบน Windows** · ขอให้เจ้าของเปิด `output\worker-logs\watchdog.log` และ `alive-*.txt` บน RM009 ถ่ายจอมา ถ้าไม่มีไฟล์ = ตัวเฝ้าไม่เคยทำงาน แก้ `scripts/so-worker-control.ps1` (เก็บ BOM)

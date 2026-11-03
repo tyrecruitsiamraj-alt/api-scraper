@@ -70,6 +70,7 @@ import {
   enqueueAssignmentPost,
   postJarvisOrder,
   repostJarvisOrder,
+  skippedGroupsNote,
   updateJarvisPostCaption,
   recordCandidateActivity,
   reassessCandidateJob,
@@ -106,7 +107,8 @@ export async function postJarvisOrderAction(formData: FormData) {
   else if (formData.get('confirm') !== 'yes') notice = 'ติ๊กยืนยันก่อนว่าจะโพสต์จริงลงกลุ่ม';
   else {
     try {
-      await postJarvisOrder(requestNo, session.user?.email ?? session.user?.name ?? null);
+      const started = await postJarvisOrder(requestNo, session.user?.email ?? session.user?.name ?? null);
+      if (started.skipped.length) notice = `ส่ง ${requestNo} เข้าคิวโพสต์ ${started.groupCount} กลุ่ม · ${skippedGroupsNote(started.skipped)}`;
     } catch (error) {
       notice = error instanceof Error ? error.message : String(error);
     }

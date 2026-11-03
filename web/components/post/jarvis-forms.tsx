@@ -90,6 +90,11 @@ export function PendingOrderCard({ order }: { order: JarvisPostOrder }) {
           </Alert>
         )}
         <p className="text-sm text-muted-foreground">กลุ่ม: {order.group_names.join(', ') || '-'}</p>
+        {order.recent_groups.length > 0 && (
+          <p className="text-sm text-muted-foreground">
+            {order.recent_groups.length} กลุ่มเพิ่งลงใบนี้ไม่ถึง {REPOST_MIN_GAP_DAYS} วัน กดโพสต์แล้วระบบจะข้ามกลุ่มพวกนี้: {order.recent_groups.map((g) => g.name).join(', ')}
+          </p>
+        )}
         {order.group_links.length > 0 && (
           <p className="text-sm text-muted-foreground">
             ลิงก์สมัครแยกกลุ่ม {order.group_links.length} ลิงก์ · แต่ละกลุ่มได้ลิงก์ของตัวเอง Jarvis นับคนสมัครแยกกลุ่มได้

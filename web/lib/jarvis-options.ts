@@ -1,6 +1,7 @@
 import 'server-only';
 import { q } from './db';
 import { loadLatestGroupOutcomes, type GroupOutcomeState } from './post-tasks';
+import { REPOST_MIN_GAP_DAYS } from './repo';
 import { classifyGroupOutcome, GROUP_STATE } from '../../src/core/group-outcome.js';
 
 /**
@@ -16,7 +17,8 @@ const ONLINE = `interval '2 minutes'`;
 /** ชื่อกลุ่มที่ระบบตั้งไว้ชั่วคราวตอนเพิ่มด้วยเลขกลุ่ม — ยังไม่ใช่ชื่อจริงบน Facebook */
 const PLACEHOLDER_NAME = /^Group\s+\d+$/i;
 
-export type AccountStatus = 'ready' | 'full' | 'paused' | 'busy' | 'worker_offline' | 'no_worker';
+/** needs_verification = Facebook ขอยืนยันตัวตน ต้องมีคนไปทำที่เครื่องก่อน (3 พ.ย. 2569 เคยส่งเป็น ready ทั้งที่ติดธง) */
+export type AccountStatus = 'ready' | 'full' | 'paused' | 'busy' | 'worker_offline' | 'no_worker' | 'needs_verification';
 
 export type JarvisAccountOption = {
   id: string;
@@ -28,11 +30,16 @@ export type JarvisAccountOption = {
   remaining_today: number;
   paused_until: string | null;
   pause_reason: string | null;
+  /** Facebook ขอยืนยันตัวตนตั้งแต่เมื่อไร — null = ไม่ติด */
+  needs_verification_since: string | null;
+  needs_verification_note: string | null;
   /** งานโพสต์ของบัญชีนี้ที่ยังไม่จบ (1 บัญชีโพสต์ได้ทีละงาน) */
   queue: { running: number; queued: number };
   status: AccountStatus;
   /** ข้อความภาษาไทยสำหรับแจ้งพนักงาน (เช่น popup) — null เมื่อพร้อม */
   warning: string | null;
+  /** ควรเป็นค่าเริ่มต้นให้คนสั่ง: พร้อมโพสต์ ไม่มีคำเตือน และมี session บนเครื่องที่ออนไลน์ — true ได้หลายบัญชี Jarvis เลือกตัวแรก */
+  recommended: boolean;
   /** กลุ่มที่บัญชีนี้เลือกโพสต์ได้ = ทุกกลุ่มในระบบ (กลุ่มไม่ได้ผูกกับบัญชี) */
   group_ids: string[];
   /** กลุ่มที่ตั้งไว้กับบัญชีนี้ในหน้าตั้งค่า (ใช้กับโพสต์อัตโนมัติรายวัน) */
@@ -79,6 +86,11 @@ export type JarvisGroupOption = {
   /** ธุรกิจของกลุ่ม LBD/LBA/LM — null = ยังไม่ได้เลือก */
   department: string | null;
   /**
+   * ใบขอที่ส่งมากับ ?request_no= เพิ่งลงกลุ่มนี้ไม่ถึง 2 วัน — เลือกได้แต่รอบนี้จะถูกข้าม ควรขึ้นสีเทาพร้อม available_at
+   * null = ไม่ได้ส่ง request_no มา หรือใบนี้ยังไม่เคยลงกลุ่มนี้ / ลงเกิน 2 วันแล้ว
+   */
+  repost_wait: { request_no: string; last_posted_at: string; available_at: string } | null;
+  /**
    * ติดที่ตัวกลุ่ม ทุกบัญชีโพสต์ไม่ได้ — ตอนนี้มีแค่ "แอดมินพักกลุ่ม"
    * ดูจากครั้งล่าสุดที่บัญชีใดก็ได้เปิดกลุ่มนี้ · แอดมินเปิดคืนแล้วจะรู้เมื่อมีบัญชีลองโพสต์ครั้งถัดไป
    */
@@ -97,6 +109,8 @@ export type JarvisWorkerOption = {
   load: number;
   /** บัญชี Facebook ที่ล็อกอินอยู่บนเครื่องนี้ */
   fb_account_ids: string[];
+  /** ควรเป็นค่าเริ่มต้น: ออนไลน์และคิวเบาสุดในบรรดาเครื่องที่รับงานชนิดนั้น (แยก post / scrape) */
+  recommended: { post: boolean; scrape: boolean };
 };
 
 export type JarvisScrapeAccountOption = {
@@ -115,6 +129,8 @@ export type JarvisScrapeAccountOption = {
 
 export type JarvisOptions = {
   generated_at: string;
+  /** ใบขอที่ขอมา (?request_no=) — ใช้คิด groups[].repost_wait · null = ไม่ได้ส่ง */
+  request_no: string | null;
   accounts: JarvisAccountOption[];
   groups: JarvisGroupOption[];
   workers: JarvisWorkerOption[];
@@ -144,12 +160,20 @@ export function accountStatus(a: {
   daily_cap: number;
   paused_until: string | null;
   pause_reason: string | null;
+  needs_verification_since?: string | null;
+  needs_verification_note?: string | null;
   queue: { running: number; queued: number };
 }): { status: AccountStatus; warning: string | null } {
   if (a.paused_until && new Date(a.paused_until).getTime() > Date.now()) {
     return {
       status: 'paused',
       warning: `บัญชีถูกพักถึง ${thaiDateTime(a.paused_until)}${a.pause_reason ? ` (${a.pause_reason})` : ''}`,
+    };
+  }
+  if (a.needs_verification_since) {
+    return {
+      status: 'needs_verification',
+      warning: `Facebook ขอยืนยันตัวตนบัญชีนี้ตั้งแต่ ${thaiDateTime(a.needs_verification_since)} ต้องมีคนไปทำที่เครื่องก่อน${a.needs_verification_note ? ` (${a.needs_verification_note})` : ''}`,
     };
   }
   if (a.posted_today >= a.daily_cap) {
@@ -169,15 +193,19 @@ function machine(workerId: string | null): string | null {
   return workerId ? workerId.replace(/-\d{3,}$/, '') : null;
 }
 
-export async function getJarvisOptions(): Promise<JarvisOptions> {
-  const [accountRows, groupRows, postQueueRows, autopostWorkers, scraperWorkers, scrapeQueueRows, connectorRows, outcomeRows] = await Promise.all([
+export async function getJarvisOptions(opts: { requestNo?: string | null } = {}): Promise<JarvisOptions> {
+  const requestNo = String(opts.requestNo ?? '').trim() || null;
+  const [accountRows, groupRows, postQueueRows, autopostWorkers, scraperWorkers, scrapeQueueRows, connectorRows, outcomeRows, recentRows] = await Promise.all([
     q<{
       id: string; env_key: string | null; email: string | null; skip_warmup: boolean; name: string; worker: string | null; worker_online: boolean; daily_cap: number | null;
       paused_until: string | null; pause_reason: string | null; group_ids: string[];
+      needs_verification_since: string | null; needs_verification_note: string | null;
       posted_today: number; age_days: number | null; running: number; queued: number; department: string | null;
     }>(
       `SELECT u.id, u.env_key, u.email, COALESCE((to_jsonb(u)->>'skip_warmup')::boolean, false) AS skip_warmup,
               NULLIF(to_jsonb(u)->>'department', '') AS department,
+              NULLIF(to_jsonb(u)->>'needs_verification_since', '') AS needs_verification_since,
+              NULLIF(to_jsonb(u)->>'needs_verification_note', '') AS needs_verification_note,
               COALESCE(NULLIF(TRIM(u.name), ''), u.env_key, u.id) AS name,
               u.preferred_worker AS worker,
               EXISTS (SELECT 1 FROM ${AP}.workers w WHERE w.name = u.preferred_worker AND w.last_seen > now() - ${ONLINE}) AS worker_online,
@@ -263,7 +291,18 @@ export async function getJarvisOptions(): Promise<JarvisOptions> {
     ).catch(() => []),
     // สถานะบัญชี × กลุ่ม อ่านไม่ได้ = ไม่ส่งสถานะ (ทุกกลุ่มเป็น "ยังไม่เคยลอง") ไม่ทำให้ป๊อปทั้งป๊อปล่ม
     loadLatestGroupOutcomes().catch(() => []),
+    // ใบขอนี้เพิ่งลงกลุ่มไหนไม่ถึง 2 วัน (worker ข้ามคู่ งาน+กลุ่ม ที่เพิ่งลง) — คิดจาก run_logs success ของ job jv-<ใบขอ>
+    requestNo
+      ? q<{ group_id: string; last_posted_at: string }>(
+        `SELECT group_id, max(created_at) AS last_posted_at FROM ${AP}.run_logs
+          WHERE job_id = $1 AND level = 'success' AND group_id IS NOT NULL
+            AND created_at > now() - make_interval(days => $2)
+          GROUP BY group_id`,
+        [`jv-${requestNo.toLowerCase()}`, REPOST_MIN_GAP_DAYS],
+      ).catch(() => [])
+      : Promise.resolve([] as { group_id: string; last_posted_at: string }[]),
   ]);
+  const recentByFb = new Map(recentRows.map((r) => [String(r.group_id), r.last_posted_at]));
 
   // ชื่อไฟล์ session = facebook-<key>.json โดย key คิดแบบเดียวกับ facebookLogin (env_key → id → email)
   const sessionKey = (r: { env_key: string | null; id: string; email: string | null }) =>
@@ -315,17 +354,24 @@ export async function getJarvisOptions(): Promise<JarvisOptions> {
       daily_cap,
       paused_until: r.paused_until,
       pause_reason: r.pause_reason,
+      needs_verification_since: r.needs_verification_since,
+      needs_verification_note: r.needs_verification_note,
       queue: { running: r.running, queued: r.queued },
     };
+    const status = accountStatus(base);
+    const session_workers = sessionWorkers.get(sessionKey(r)) ?? [];
+    const onlineNames = new Set(autopostWorkers.filter((w) => w.online).map((w) => machine(w.name) ?? w.name));
     return {
       id: r.id,
       name: r.name,
       ...base,
       remaining_today: Math.max(0, daily_cap - base.posted_today),
-      ...accountStatus(base),
+      ...status,
+      // ค่าเริ่มต้นที่คนสั่งไม่ต้องคิด: พร้อม ไม่มีคำเตือน และล็อกอินอยู่บนเครื่องที่ออนไลน์
+      recommended: status.status === 'ready' && !status.warning && session_workers.some((w) => onlineNames.has(w)),
       group_ids: allGroupIds,
       home_group_ids: (r.group_ids ?? []).map(String),
-      session_workers: sessionWorkers.get(sessionKey(r)) ?? [],
+      session_workers,
       department: r.department,
       group_status: statusByAccount.get(String(r.id)) ?? [],
     };
@@ -347,13 +393,20 @@ export async function getJarvisOptions(): Promise<JarvisOptions> {
     },
     department: g.department,
     blocked: pausedByGroup.get(String(g.id)) ?? null,
+    repost_wait: (() => {
+      const last = requestNo ? recentByFb.get(String(g.fb_group_id)) : null;
+      if (!last || !requestNo) return null;
+      const availableAt = new Date(new Date(last).getTime() + REPOST_MIN_GAP_DAYS * 86_400_000);
+      if (availableAt.getTime() <= Date.now()) return null;
+      return { request_no: requestNo, last_posted_at: new Date(last).toISOString(), available_at: availableAt.toISOString() };
+    })(),
   }));
 
   const workerMap = new Map<string, JarvisWorkerOption>();
   const touch = (name: string): JarvisWorkerOption => {
     let w = workerMap.get(name);
     if (!w) {
-      w = { name, kinds: [], online: false, last_seen: null, build: null, post_queue: { running: 0, queued: 0 }, scrape_queue: { running: 0, queued: 0 }, load: 0, fb_account_ids: [] };
+      w = { name, kinds: [], online: false, last_seen: null, build: null, post_queue: { running: 0, queued: 0 }, scrape_queue: { running: 0, queued: 0 }, load: 0, fb_account_ids: [], recommended: { post: false, scrape: false } };
       workerMap.set(name, w);
     }
     return w;
@@ -405,6 +458,10 @@ export async function getJarvisOptions(): Promise<JarvisOptions> {
   const workers = [...workerMap.values()]
     .map((w) => ({ ...w, load: w.post_queue.running + w.post_queue.queued + w.scrape_queue.running + w.scrape_queue.queued }))
     .sort((a, b) => Number(b.online) - Number(a.online) || a.load - b.load || a.name.localeCompare(b.name));
+  // เครื่องที่ควรเป็นค่าเริ่มต้น = ออนไลน์และคิวเบาสุดของงานชนิดนั้น (เรียงไว้แล้ว ตัวแรกที่เข้าเงื่อนไขคือตัวแนะนำ)
+  const firstPost = workers.find((w) => w.online && w.kinds.includes('autopost'));
+  const firstScrape = workers.find((w) => w.online && w.kinds.includes('scraper'));
+  for (const w of workers) w.recommended = { post: w === firstPost, scrape: w === firstScrape };
 
   const scrape_accounts: JarvisScrapeAccountOption[] = connectorRows.map((c) => {
     const queue = connectorQueue.get(String(c.id)) ?? { running: 0, queued: 0 };
@@ -428,5 +485,5 @@ export async function getJarvisOptions(): Promise<JarvisOptions> {
     };
   });
 
-  return { generated_at: new Date().toISOString(), accounts, groups, workers, scrape_accounts };
+  return { generated_at: new Date().toISOString(), request_no: requestNo, accounts, groups, workers, scrape_accounts };
 }

@@ -47,6 +47,8 @@ export type JarvisRequestStatus =
       /** queued = รอเครื่อง · running = กำลังโพสต์ · completed = จบรอบ · failed = รอบนี้ล้ม · null = ยังไม่เริ่ม */
       run_status: string | null;
       run_queued_at: string | null;
+      /** ข้อความของรอบล่าสุด เช่น "ข้าม 3 กลุ่มที่เพิ่งลง โพสต์ได้อีก 4 พ.ย. 09:21" */
+      run_message: string | null;
       summary: {
         groups: number;
         posted: number;
@@ -178,6 +180,7 @@ export async function getJarvisStatuses(requestNos: string[]): Promise<JarvisReq
       worker: order.target_worker ?? order.posts[0]?.worker ?? null,
       run_status: order.queue_status,
       run_queued_at: order.queue_at,
+      run_message: order.queue_message,
       summary: {
         groups: groups.length,
         posted: groups.filter((g) => g.status === 'posted').length,
