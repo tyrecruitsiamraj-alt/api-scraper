@@ -345,7 +345,22 @@ async function hasFacebookLoginErrorVisible(page: Page): Promise<boolean> {
   );
 }
 
-async function getAuthState(page: Page): Promise<AuthState> {
+/** กล่องเขียนโพสต์ หรือรายการโพสต์ในฟีด มองเห็นอยู่ไหม — หลักฐานว่าเข้าฟีดแล้วจริง */
+export async function looksLikeFeedPage(page: Page): Promise<boolean> {
+  const composer = await page
+    .getByText(/คิดอะไรอยู่|What'?s on your mind|What are you thinking|Write something/i)
+    .first()
+    .isVisible({ timeout: 1500 })
+    .catch(() => false);
+  if (composer) return true;
+  return page
+    .locator('[role="feed"] [role="article"], [role="feed"] article, main [role="article"]')
+    .first()
+    .isVisible({ timeout: 1500 })
+    .catch(() => false);
+}
+
+export async function getAuthState(page: Page): Promise<AuthState> {
   const url = page.url();
   // ดูเฉพาะ path ไม่ดู query: ยืนยันตัวตนเสร็จ Facebook พากลับหน้า Home เป็น /?checkpoint_src=any
   // ถ้าดูทั้งลิงก์จะเข้าใจผิดว่ายังติด checkpoint แล้วรอจนหมดเวลา (เกิด 28 ต.ค. 2569)
@@ -364,6 +379,14 @@ async function getAuthState(page: Page): Promise<AuthState> {
     return 'checkpoint';
   }
   if (/\/login\/?(\?|$)|login\.php/i.test(url)) return 'login_form';
+  /**
+   * เห็นกล่อง "คิดอะไรอยู่" หรือฟีดบนโดเมน facebook = เข้าฟีดแล้ว ตัดสินก่อนอ่านข้อความหน้า
+   * เดิมอ่านแค่ 1,200 ตัวอักษรแรกของหน้า ซึ่งเป็นเมนูซ้าย + "ทางลัดของคุณ" (ชื่องานยาว) จนไม่ถึงกล่องโพสต์
+   * บอทเลยนั่งรอ "ยืนยันตัวตน" 5 นาทีทั้งที่ฟีดขึ้นอยู่ตรงหน้า แล้วพักบัญชีผิด ๆ (Moody Keyanna 3 พ.ย. 2569)
+   */
+  if (/facebook\.com/i.test(url) && (await looksLikeFeedPage(page))) {
+    return 'logged_in';
+  }
   const snippet = await page
     .evaluate(() => (document.body?.innerText || '').slice(0, 1200))
     .catch(() => '');

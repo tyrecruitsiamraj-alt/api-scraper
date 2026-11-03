@@ -72,6 +72,10 @@ LMM6704005 (คนสวน สมุทรปราการ) ค้น 8 ค�
 → ขึ้นแล้วทั้ง 2 ที่: Vercel (53eb305) และ RM009 heartbeat `workers.meta.build_sha = 53eb305` ทั้ง Autopost และ scraper-1/2 (ดู 3 พ.ย. 09:04) · ยังไม่มีใบจริงที่มี group_links เข้ามา
 → พิสูจน์: ใบสั่งแรกที่มี group_links ดู post_logs ของใบนั้น ลิงก์ในโพสต์แต่ละกลุ่มต้องต่างกัน
 
+**C5 บอทจำหน้าฟีดไม่ได้ พักบัญชีผิด** · 3 พ.ย. 14:55 ใบ LBM6903001-r6 (Moody Keyanna) ฟีดขึ้นครบ (กล่อง "คุณคิดอะไรอยู่ Moody") แต่บอทอ่านแค่ 1,200 ตัวอักษรแรกของหน้า = เมนูซ้าย + "ทางลัดของคุณ" ชื่องานยาว ไม่ถึงกล่องโพสต์ → รอ "ยืนยันตัวตน" 5 นาที ล้ม แล้วตั้ง `needs_verification_since` ให้บัญชีทั้งที่ไม่ได้ติดอะไร
+→ แก้แล้ว `autopost/src/helpers/facebookLogin.ts` `looksLikeFeedPage`: เห็นกล่อง "คิดอะไรอยู่" หรือโพสต์ในฟีดบนโดเมน facebook = เข้าฟีด ตัดสินก่อนอ่านข้อความ · เทสต์ `autopost/tests/facebookAuthState.spec.ts` (รัน `npx playwright test tests/facebookAuthState.spec.ts --project=ChromiumCollect` ไม่ต่อเน็ต) 5/5
+→ หลังขึ้น RM009: กด "ยืนยันแล้ว" ให้ Moody Keyanna ในหน้า /autopost/jobs แล้วสั่งใบเดิมใหม่ · `tsc` ของ autopost มี error เก่าใน `loadConfig.ts` 9 จุด ไม่เกี่ยวกับไฟล์นี้
+
 ### D. Worker ไม่ตายเงียบ · +1
 
 **D1 พิสูจน์ตัวเฝ้าบน Windows** · ขอให้เจ้าของเปิด `output\worker-logs\watchdog.log` และ `alive-*.txt` บน RM009 ถ่ายจอมา ถ้าไม่มีไฟล์ = ตัวเฝ้าไม่เคยทำงาน แก้ `scripts/so-worker-control.ps1` (เก็บ BOM)

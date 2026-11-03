@@ -54,7 +54,7 @@ export default defineConfig({
     {
       name: 'ChromiumCollect',
       /** รันเฉพาะเทสต์เก็บ comment — ไม่รัน postAll/checkFacebookSession ซ้ำแบบ headless */
-      testMatch: ['**/collectComments.spec.ts', '**/collectPostComments.logic.spec.ts'],
+      testMatch: ['**/collectComments.spec.ts', '**/collectPostComments.logic.spec.ts', '**/facebookAuthState.spec.ts'],
       use: {
         ...devices['Desktop Chrome'],
         channel: 'chrome',
