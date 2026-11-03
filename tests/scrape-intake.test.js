@@ -36,14 +36,14 @@ test('salary comes from explicit bounds or a simple income figure, not mixed pro
     salaryMin: '20000',
     salaryMax: '25000',
   });
-  // รายได้ที่จ่ายคือเพดานของเงินเดือนที่ผู้สมัครขอ — ไม่ใช่ขั้นต่ำที่ตัดคนขอน้อยกว่าทิ้ง
+  // 3 พ.ย. 2569: รายได้ของงานเป็นแค่ข้อมูล ไม่ใช่เพดานที่ผู้สมัครขอได้ (คนขับรถกรุงเทพตกเพราะเงินเดือน 48/49 คน)
   assert.deepEqual(parseSalaryBounds({ income: '19500' }), {
     salaryMin: '',
-    salaryMax: '19500',
+    salaryMax: '',
   });
   assert.deepEqual(parseSalaryBounds({ income: '15,000 บาท/เดือน' }), {
     salaryMin: '',
-    salaryMax: '15000',
+    salaryMax: '',
   });
   assert.deepEqual(parseSalaryBounds({ income: 'ไม่เกิน 15,000 บาท' }), {
     salaryMin: '',
@@ -57,9 +57,10 @@ test('salary comes from explicit bounds or a simple income figure, not mixed pro
     salaryMin: '25000',
     salaryMax: '',
   });
+  // ช่วงรายได้ของงานก็เป็นข้อมูลเหมือนกัน ไม่ใช่กรอบที่คัดคน
   assert.deepEqual(parseSalaryBounds({ income: '20000-25000' }), {
-    salaryMin: '20000',
-    salaryMax: '25000',
+    salaryMin: '',
+    salaryMax: '',
   });
   assert.deepEqual(parseSalaryBounds({ income: 'เงินเดือน 12,000 + ค่าเที่ยว 3,000 บาท' }), {
     salaryMin: '',
@@ -104,7 +105,6 @@ test('criteria keeps operator overrides and skips empty snapshot fields', () => 
     industry: 'การขาย',
     province: 'สมุทรปราการ',
     education: 'ปริญญาตรี',
-    salaryMax: '25000',
     ageMin: '25',
     ageMax: '45',
   });
@@ -151,7 +151,7 @@ test('orchestrator prefill shows ไม่ระบุ instead of ERP O, without
   assert.equal(plan.keyword, '');
   assert.equal(plan.industry, '');
   assert.equal(plan.salary_min, '');
-  assert.equal(plan.salary_max, '30000');
+  assert.equal(plan.salary_max, '');
 });
 
 test('intake criteria is what Talent Normal Search actually applies', () => {
@@ -162,7 +162,7 @@ test('intake criteria is what Talent Normal Search actually applies', () => {
       keyword: 'ขาย',
       industry: 'การขาย',
       education: 'ปริญญาตรี',
-      income: '25000',
+      income: 'ไม่เกิน 25000',
       age_min: '25',
     },
     overrides: { gender: 'ไม่ระบุ' },
@@ -171,6 +171,12 @@ test('intake criteria is what Talent Normal Search actually applies', () => {
   assert.deepEqual(plan.map((step) => step.field), [
     'position', 'keyword', 'jobTypes', 'province', 'education', 'salary', 'age',
   ]);
+  // รายได้เฉย ๆ ไม่ใส่ช่องเงินเดือนบนเว็บ (3 พ.ย. 2569)
+  const plain = planTalentNormalFilters(buildScrapeCriteria({
+    snapshot: { position: 'เจ้าหน้าที่ IT', location: 'สมุทรปราการ', income: '25000' },
+    overrides: {},
+  }));
+  assert.equal(plain.some((step) => step.field === 'salary'), false);
 });
 
 test('hydrate fills empty snapshot fields from ERP/jobs without inventing or overwriting', () => {

@@ -84,18 +84,15 @@ export function parseSalaryBounds(snapshot = {}) {
   const income = snapshotText(snapshot, 'income', 'salary');
   if (!income) return { salaryMin: '', salaryMax: '' };
 
-  const range = income.match(/(\d[\d,]*)\s*(?:-|–|—|ถึง)\s*(\d[\d,]*)/u);
-  if (range) {
-    return { salaryMin: digits(range[1]), salaryMax: digits(range[2]) };
-  }
-
-  // กติกาเจ้าของ 2 พ.ย. 2569: ใส่ตามคำในใบขอ — "ไม่เกิน 15,000" = ช่องสูงสุด · "15,000 ขึ้นไป" / "15,000+" = ช่องต่ำสุด
-  // เลขเดียวเฉย ๆ คือเงินที่จ่าย จึงเป็นเพดานของเงินเดือนที่ผู้สมัครขอ (เดิมใส่เป็นขั้นต่ำ เว็บตัดคนที่ขอน้อยกว่าทิ้งหมด · LAM6909001)
+  // กติกาเจ้าของ 3 พ.ย. 2569: "รายได้" ของงานเป็นแค่ข้อมูล ไม่ใช่เพดานที่ผู้สมัครขอได้ — เป็นขอบเขตเฉพาะเมื่อใบขอเขียนคำบอกเอง
+  // "ไม่เกิน 15,000" = ช่องสูงสุด · "15,000 ขึ้นไป" / "15,000+" = ช่องต่ำสุด · เลขเดียวหรือช่วง = ไม่ใส่ช่องเงินเดือน
+  // เดิมเลขเดียวเป็นเพดาน: ใบคนขับรถกรุงเทพ รายได้ 11,160 ตกเพราะเงินเดือน 48 จาก 49 คน (คนขับรถขอ 12,000–65,000) คนสรรหาไม่ได้เห็นใครเลย
   const compact = income.replace(/\s+/g, '');
-  const lone = compact.match(/^(?:ไม่เกิน|ไม่ถึง|สูงสุด)?([\d,]+)(?:\+|ขึ้นไป|บาท|\/เดือน)*$/u);
-  if (!lone) return { salaryMin: '', salaryMax: '' };
-  if (/ขึ้นไป|\+/.test(compact)) return { salaryMin: digits(lone[1]), salaryMax: '' };
-  return { salaryMin: '', salaryMax: digits(lone[1]) };
+  const capped = compact.match(/^(?:ไม่เกิน|ไม่ถึง|สูงสุด)([\d,]+)(?:บาท|\/เดือน)*$/u);
+  if (capped) return { salaryMin: '', salaryMax: digits(capped[1]) };
+  const floored = compact.match(/^([\d,]+)(?:บาท|\/เดือน)*(?:\+|ขึ้นไป)(?:บาท|\/เดือน)*$/u);
+  if (floored) return { salaryMin: digits(floored[1]), salaryMax: '' };
+  return { salaryMin: '', salaryMax: '' };
 }
 
 function pickOverrideOrSnapshot(overrides, key, snapshot, ...snapKeys) {
