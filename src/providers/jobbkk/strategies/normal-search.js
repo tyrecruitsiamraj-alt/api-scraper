@@ -1,3 +1,5 @@
+import { join } from 'node:path';
+import { AUTH_DIR } from '../../../config.js';
 import { clickWithoutNavigationWait } from '../browser/safe-click.js';
 import { ensureLatestUpdatedSort } from '../latest-sort.js';
 import {
@@ -79,7 +81,8 @@ async function clickMatchingOption(page, labels) {
 async function pickOptionByKeyboard(page, wanted, maxSteps = 90) {
   const target = String(wanted).replace(/[\s,]/g, '');
   for (let i = 0; i < maxSteps; i += 1) {
-    const active = page.locator('.ant-select-dropdown:visible .ant-select-item-option-active').first();
+    // รายการที่เพิ่งเปิดคือตัวท้ายสุดใน body (Ant ต่อท้ายทุกครั้ง) — ตัวแรกอาจเป็นรายการแนะนำตำแหน่งที่ยังค้างอยู่
+    const active = page.locator('.ant-select-dropdown:visible').last().locator('.ant-select-item-option-active').first();
     // ห้ามรอ element ที่ไม่มี: textContent() ค่าเริ่มต้นรอ 30 วิ ต่อรอบ จะค้างเป็นชั่วโมง
     const text = (await active.count().catch(() => 0)) > 0
       ? String(await active.textContent({ timeout: 300 }).catch(() => '') || '').replace(/[\s,]/g, '')
@@ -176,23 +179,39 @@ async function applyChipField(page, field, terms, report) {
       return;
     }
     const before = await readChipTags(input);
-    await clickWithoutNavigationWait(input);
-    await input.fill(term);
-    await waitForChipSuggestions(page);
-    const picked = await clickMatchingOption(page, [term]);
-    if (!picked) await page.keyboard.press('Enter').catch(() => {});
-    await sleep(400);
-    const { tags, count, box } = await readChipTags(input);
-    report[seenKey] = tags.join(', ');
-    report[`${field}Box`] = box;
-    const counterGrew = count != null && (before.count == null || count > before.count);
-    if (tagsMatchRequested(tags, [term]) || counterGrew) verified = true;
+    // รอบแรกพิมพ์ทีละตัวอักษรเหมือนคน (ค่าใส่ทั้งก้อนด้วย fill บางทีกล่อง React ไม่ยิงโหลดคำแนะนำ) · รอบสองลอง fill
+    for (let attempt = 0; attempt < 2 && !verified; attempt += 1) {
+      await clickWithoutNavigationWait(input);
+      await input.fill('').catch(() => {});
+      if (attempt === 0) await input.pressSequentially(term, { delay: 40 }).catch(async () => input.fill(term));
+      else await input.fill(term);
+      const suggested = await waitForChipSuggestions(page, 6000);
+      const picked = suggested && (await clickMatchingOption(page, [term]));
+      if (!picked) {
+        // ไม่มีตัวเลือกตรงคำ: ลูกศรลงให้ตัวแรกไฮไลต์แล้ว Enter (กล่องนี้รับ Enter เป็นการเลือกตัวที่ไฮไลต์)
+        await page.keyboard.press('ArrowDown').catch(() => {});
+        await page.keyboard.press('Enter').catch(() => {});
+      }
+      await sleep(500);
+      const { tags, count, box } = await readChipTags(input);
+      report[seenKey] = tags.join(', ');
+      report[`${field}Box`] = `${box} · รายการแนะนำ${suggested ? 'ขึ้น' : 'ไม่ขึ้นใน 6 วิ'} · ${picked ? 'คลิกตัวเลือกตรงคำ' : 'ใช้ลูกศร+Enter'} · รอบ ${attempt + 1}`;
+      const counterGrew = count != null && (before.count == null || count > before.count);
+      if (tagsMatchRequested(tags, [term]) || counterGrew) verified = true;
+    }
   }
   if (verified) {
     if (!report.applied.includes(field)) report.applied.push(field);
   } else if (!report.skipped.includes(field)) {
     report.skipped.push(field);
   }
+}
+
+/** เซฟภาพหน้าจอตอนตัวกรองไม่ติด ให้คนเปิดดูที่เครื่อง worker ได้ (ไม่ต้องเดาโครงหน้า) */
+async function saveFilterDebugShot(page, field) {
+  const shot = join(AUTH_DIR, `jobbkk-filter-${field}-${Date.now()}.png`);
+  const ok = await page.screenshot({ path: shot, fullPage: true }).then(() => true).catch(() => false);
+  return ok ? shot : null;
 }
 
 async function readSelectTags(page, openerPattern) {
@@ -685,7 +704,8 @@ export async function runNormalSearch(page, criteria, { need = 15 } = {}) {
   if (missing.includes('position')) {
     const seen = [report.positionSeen, report.keywordSeen].filter(Boolean).join(' / ');
     const box = report.positionBox || report.keywordBox || '';
-    throw new Error(`JOBBKK_FILTER_NOT_APPLIED: Normal Search ไม่ยืนยันตำแหน่งหรือ Keyword จึงไม่รับผลค้นหาแบบกว้าง${seen ? ` (ชิปที่เห็น: ${seen})` : ' (กล่องตำแหน่งว่าง ไม่มีชิป)'}${box ? ` · โครงกล่อง: ${box}` : ''}`);
+    const shot = await saveFilterDebugShot(page, 'position');
+    throw new Error(`JOBBKK_FILTER_NOT_APPLIED: Normal Search ไม่ยืนยันตำแหน่งหรือ Keyword จึงไม่รับผลค้นหาแบบกว้าง${seen ? ` (ชิปที่เห็น: ${seen})` : ' (กล่องตำแหน่งว่าง ไม่มีชิป)'}${box ? ` · โครงกล่อง: ${box}` : ''}${shot ? ` · ภาพหน้าจอ: ${shot}` : ''}`);
   }
   if (missing.includes('province')) {
     throw new Error(`JOBBKK_FILTER_NOT_APPLIED: Normal Search ไม่ยืนยันจังหวัดตามใบขอ จึงไม่รับผลค้นหาทั้งประเทศ${report.provinceSeen ? ` (${report.provinceSeen})` : ''}`);
