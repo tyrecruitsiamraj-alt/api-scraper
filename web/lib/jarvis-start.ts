@@ -18,7 +18,7 @@ export type JarvisStartResult =
   | { ok: false; status: number; error: string };
 
 async function startContent(requestNo: string, requestedBy: string): Promise<JarvisStartResult> {
-  const order = (await listJarvisPostOrders()).find((o) => o.request_no === requestNo);
+  const order = (await listJarvisPostOrders({ requestNos: [requestNo] })).find((o) => o.request_no === requestNo);
   if (!order) return { ok: false, status: 404, error: `ไม่พบคำสั่งโพสต์ ${requestNo}` };
   if (order.jarvis_status !== 'pending') return { ok: false, status: 409, error: 'ใบนี้สั่งโพสต์ไปแล้ว' };
   if (order.issues.length) return { ok: false, status: 422, error: `ยังโพสต์ไม่ได้: ${order.issues.join(', ')}` };

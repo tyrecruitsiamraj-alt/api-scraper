@@ -3618,11 +3618,17 @@ async function pickPostAccount(groupIds: string[]) {
   return rows[0] ?? null;
 }
 
-export async function listJarvisPostOrders(): Promise<JarvisPostOrder[]> {
+/**
+ * @param opts.requestNos โหลดเฉพาะใบเหล่านี้ — เส้นที่ Jarvis รอคำตอบ (start/status) ต้องใช้ ไม่งั้นทุกใบ × ~8 query
+ *   เกิน 10 วิที่ Jarvis รอ แล้ว Jarvis บอกคนสั่งว่า "ติดต่อ So Scraping ไม่ได้" ทั้งที่ฝั่งเราทำต่อจนจบ (3 พ.ย. 2569)
+ */
+export async function listJarvisPostOrders(opts: { requestNos?: string[] } = {}): Promise<JarvisPostOrder[]> {
   // ใบที่จบรอบแล้ว: เปลี่ยนเป็นโพสต์แล้ว/ตีกลับก่อนแสดง (เครื่อง worker ก็เรียกทุก 5 นาที)
   await syncJarvisPostOrders(q, { autopostSchema: AP_SCHEMA }).catch((e) =>
     console.warn(`[jarvis] อัปเดตสถานะใบสั่งโพสต์ไม่สำเร็จ: ${(e as Error).message}`),
   );
+  const onlyNos = opts.requestNos ? [...new Set(opts.requestNos.map((r) => r.trim()).filter(Boolean))] : null;
+  if (onlyNos && !onlyNos.length) return [];
   let rows: JarvisPostRow[];
   try {
     rows = await q<JarvisPostRow>(
@@ -3632,7 +3638,9 @@ export async function listJarvisPostOrders(): Promise<JarvisPostOrder[]> {
           AND to_jsonb(r)->'job_snapshot' ? 'caption'
           AND r.status IN ('pending', 'in_progress', 'posted')
           AND r.created_at > now() - interval '30 days'
+          AND ($1::text[] IS NULL OR r.request_no = ANY($1::text[]))
         ORDER BY r.created_at DESC`,
+      [onlyNos],
     );
   } catch {
     return [];
@@ -3815,7 +3823,7 @@ export async function listJarvisPostOrders(): Promise<JarvisPostOrder[]> {
  * เป็นฉบับล่าสุดจาก Jarvis) + assignment ใหม่ jv-…-rN แล้วเข้าคิวโพสต์ สถานะใน Jarvis คงเป็น posted.
  */
 export async function repostJarvisOrder(requestNo: string, groupIds: string[], requestedBy: string | null): Promise<string> {
-  const order = (await listJarvisPostOrders()).find((o) => o.request_no === requestNo);
+  const order = (await listJarvisPostOrders({ requestNos: [requestNo] })).find((o) => o.request_no === requestNo);
   if (!order) throw new Error(`ไม่พบคำสั่งโพสต์ ${requestNo}`);
   if (order.jarvis_status === 'pending') throw new Error('ใบนี้ยังไม่เคยโพสต์ ใช้ปุ่มโพสต์ปกติก่อน');
   if (order.queue_status === 'queued' || order.queue_status === 'running') throw new Error('ใบนี้มีรอบโพสต์รอคิวหรือกำลังโพสต์อยู่');
@@ -3898,7 +3906,7 @@ export async function repostJarvisOrder(requestNo: string, groupIds: string[], r
  * กันกดซ้ำ) แล้วส่งเข้าคิวโพสต์ของบัญชีที่ผูกกลุ่มนั้น จากนั้นตั้งสถานะ Jarvis เป็น in_progress.
  */
 export async function postJarvisOrder(requestNo: string, requestedBy: string | null): Promise<string> {
-  const order = (await listJarvisPostOrders()).find((o) => o.request_no === requestNo);
+  const order = (await listJarvisPostOrders({ requestNos: [requestNo] })).find((o) => o.request_no === requestNo);
   if (!order) throw new Error(`ไม่พบคำสั่งโพสต์ ${requestNo}`);
   if (order.jarvis_status !== 'pending') throw new Error('ใบนี้สั่งโพสต์ไปแล้ว');
   if (order.issues.length) throw new Error(`ยังโพสต์ไม่ได้: ${order.issues.join(', ')}`);

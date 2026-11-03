@@ -111,7 +111,7 @@ export async function getJarvisStatuses(requestNos: string[]): Promise<JarvisReq
   const byNo = new Map(requests.map((r) => [r.request_no, r]));
   const needPosts = requests.some((r) => r.request_type !== 'scraping');
   const needTasks = requests.some((r) => r.request_type === 'scraping');
-  const [orders, tasks] = await Promise.all([needPosts ? listJarvisPostOrders() : [], needTasks ? listTasks() : []]);
+  const [orders, tasks] = await Promise.all([needPosts ? listJarvisPostOrders({ requestNos: wanted }) : [], needTasks ? listTasks() : []]);
 
   const out: JarvisRequestStatus[] = [];
   for (const requestNo of wanted) {
