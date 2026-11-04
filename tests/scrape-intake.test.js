@@ -295,3 +295,20 @@ test('buildScrapeCriteria uses the description fallback only when the snapshot h
   assert.equal(buildScrapeCriteria({ snapshot: { position: 'ช่าง' }, descriptionFallback: 'งานซ่อมบำรุง' }).job_description, 'งานซ่อมบำรุง');
   assert.equal(buildScrapeCriteria({ snapshot: { position: 'ช่าง', job_description: 'งานไฟฟ้า' }, descriptionFallback: 'งานซ่อมบำรุง' }).job_description, 'งานไฟฟ้า');
 });
+
+// เจ้าของ 4 พ.ย. 2569: ใบที่ผิดเพราะตัวใบขอเอง ต้องสั่งไม่ได้ตั้งแต่แรก
+test('ใบขอ Scrap ที่ตำแหน่งกว้างเกินหรืออายุใช้ไม่ได้ สั่งไม่ได้ พร้อมบอกเหตุ', async () => {
+  const { scrapeRequestProblems, SCRAPE_RULES } = await import('../web/lib/scrape-intake.js');
+  assert.deepEqual(scrapeRequestProblems({ position: 'ช่าง', ageMin: '20', ageMax: '20' }), [
+    'ชื่อตำแหน่ง "ช่าง" กว้างเกินไป เว็บหางานไม่รับ ใส่ให้ชัด เช่น ช่างไฟฟ้า ช่างอาคาร ช่างแอร์',
+    'ช่วงอายุ 20–20 ปี แคบเกินไป ต้องห่างกันอย่างน้อย 2 ปี',
+  ]);
+  assert.deepEqual(scrapeRequestProblems({ position: 'เจ้าหน้าที่' }), ['ชื่อตำแหน่ง "เจ้าหน้าที่" กว้างเกินไป เว็บหางานไม่รับ ใส่ชื่อตำแหน่งเต็ม']);
+  assert.deepEqual(scrapeRequestProblems({ ageMin: '45', ageMax: '25' }), ['อายุต่ำสุด 45 ปี มากกว่าอายุสูงสุด 25 ปี']);
+  assert.deepEqual(scrapeRequestProblems({ ageMin: '10', ageMax: '40' }), ['ช่วงอายุต้องอยู่ระหว่าง 15–80 ปี']);
+  // ใบปกติสั่งได้
+  assert.deepEqual(scrapeRequestProblems({ position: 'ช่างอาคาร', ageMin: '23', ageMax: '48' }), []);
+  assert.deepEqual(scrapeRequestProblems({ position: 'พนักงานขับรถ', ageMin: '25' }), []);
+  assert.deepEqual(scrapeRequestProblems({}), []);
+  assert.ok(SCRAPE_RULES.too_generic_titles.includes('ช่าง'));
+});

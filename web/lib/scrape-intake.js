@@ -244,6 +244,42 @@ export function buildScrapeCriteria({
   return criteria;
 }
 
+/**
+ * กติกาใบขอ Scrap ที่ผิดเพราะใบขอเอง — สั่งไม่ได้ตั้งแต่แรก (เจ้าของ 4 พ.ย. 2569:
+ * "ถ้าไม่ผ่านเพราะใบขอ ให้เขาสั่งมาไม่ได้แต่แรกเลย") · Jarvis อ่านชุดเดียวกันจาก /options (scrape_rules)
+ * - ชื่อตำแหน่งกว้างเกิน: "ช่าง" ค้นจริง 14 รอบได้ 0 ทุกรอบ (JobBKK ไม่รับเป็นตำแหน่ง)
+ * - ช่วงอายุแคบเกิน: "20–20 ปี" เจอในใบจริง
+ */
+export const SCRAPE_RULES = Object.freeze({
+  too_generic_titles: Object.freeze(['ช่าง', 'พนักงาน', 'เจ้าหน้าที่', 'ผู้ช่วย']),
+  min_age_span: 2,
+  age_min: 15,
+  age_max: 80,
+});
+
+/** ปัญหาของใบขอที่ทำให้ค้นไม่ได้ (ว่าง = สั่งได้) — คำบนจอสำหรับคนสั่ง */
+export function scrapeRequestProblems(criteria = {}) {
+  const problems = [];
+  const position = clean(criteria.position);
+  if (position && SCRAPE_RULES.too_generic_titles.includes(position)) {
+    problems.push(position === 'ช่าง'
+      ? 'ชื่อตำแหน่ง "ช่าง" กว้างเกินไป เว็บหางานไม่รับ ใส่ให้ชัด เช่น ช่างไฟฟ้า ช่างอาคาร ช่างแอร์'
+      : `ชื่อตำแหน่ง "${position}" กว้างเกินไป เว็บหางานไม่รับ ใส่ชื่อตำแหน่งเต็ม`);
+  }
+  const minAge = criteria.ageMin ? Number.parseInt(criteria.ageMin, 10) : NaN;
+  const maxAge = criteria.ageMax ? Number.parseInt(criteria.ageMax, 10) : NaN;
+  const outOfRange = (n) => !Number.isFinite(n) || n < SCRAPE_RULES.age_min || n > SCRAPE_RULES.age_max;
+  if ((criteria.ageMin && outOfRange(minAge)) || (criteria.ageMax && outOfRange(maxAge))) {
+    problems.push(`ช่วงอายุต้องอยู่ระหว่าง ${SCRAPE_RULES.age_min}–${SCRAPE_RULES.age_max} ปี`);
+  } else if (Number.isFinite(minAge) && Number.isFinite(maxAge)) {
+    if (minAge > maxAge) problems.push(`อายุต่ำสุด ${minAge} ปี มากกว่าอายุสูงสุด ${maxAge} ปี`);
+    else if (maxAge - minAge < SCRAPE_RULES.min_age_span) {
+      problems.push(`ช่วงอายุ ${minAge}–${maxAge} ปี แคบเกินไป ต้องห่างกันอย่างน้อย ${SCRAPE_RULES.min_age_span} ปี`);
+    }
+  }
+  return problems;
+}
+
 export function assertAgeRange(criteria) {
   const minAge = criteria.ageMin ? Number.parseInt(criteria.ageMin, 10) : NaN;
   const maxAge = criteria.ageMax ? Number.parseInt(criteria.ageMax, 10) : NaN;

@@ -4,6 +4,7 @@ import { loadLatestGroupOutcomes, type GroupOutcomeState } from './post-tasks';
 import { REPOST_MIN_GAP_DAYS } from './repo';
 import { normalizeGroupJobTypes } from './group-job-types';
 import { classifyGroupOutcome, GROUP_STATE } from '../../src/core/group-outcome.js';
+import { SCRAPE_RULES } from './scrape-intake.js';
 
 /**
  * ข้อมูลให้ Jarvis ใช้ตอนพนักงานเลือก บัญชี Facebook / กลุ่ม / เครื่อง / บัญชี Scrap ก่อนสั่งงาน
@@ -149,6 +150,8 @@ export type JarvisOptions = {
   groups: JarvisGroupOption[];
   workers: JarvisWorkerOption[];
   scrape_accounts: JarvisScrapeAccountOption[];
+  /** กติกาใบขอ Scrap ที่สั่งไม่ได้ (นิยามเดียวกับที่ /start ตีกลับ) — Jarvis ใช้ปิดปุ่มสั่งตั้งแต่แรก */
+  scrape_rules: typeof SCRAPE_RULES;
 };
 
 /** เพดานโพสต์/วัน: daily_cap > POST_DAILY_CAP > 15 แล้ววอร์มตามอายุบัญชี (เหมือน worker) */
@@ -518,5 +521,5 @@ export async function getJarvisOptions(opts: { requestNo?: string | null } = {})
     };
   });
 
-  return { generated_at: new Date().toISOString(), request_no: requestNo, accounts, groups, workers, scrape_accounts };
+  return { generated_at: new Date().toISOString(), request_no: requestNo, accounts, groups, workers, scrape_accounts, scrape_rules: SCRAPE_RULES };
 }

@@ -23,6 +23,7 @@ export { runLog } from './runLog';
 export {
   buildDailyPostPlanForUser,
   pauseUserPosting,
+  pauseUserForFacebookLimit,
   isAccountLimitedMessage,
   getFailStreakLimit,
   getPauseHours,

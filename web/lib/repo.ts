@@ -20,7 +20,7 @@ import { normalizePosterLayout, normalizePosterStandard, posterFieldsForQuality,
 import type { PosterLayout, PosterStandard } from '../../src/core/poster-template.js';
 import { evaluateResumeQualification } from '../../src/core/resume-qualification.js';
 import { selectPreferredScrapeWorker } from '../../src/core/worker-selection.js';
-import { assertAgeRange, buildScrapeCriteria, hydrateJobSnapshot, jobDescriptionFromJarvis } from './scrape-intake.js';
+import { assertAgeRange, buildScrapeCriteria, hydrateJobSnapshot, jobDescriptionFromJarvis, scrapeRequestProblems } from './scrape-intake.js';
 
 // schema ของ autopost — แยกต่อ project ได้ผ่าน env (ไม่ตั้ง = so_autopost_jobs เดิม)
 // ใช้กับทุก query ข้าม schema ไปฝั่ง autopost. ค่าจาก env เราคุมเอง (ไม่ใช่ input ผู้ใช้)
@@ -2111,6 +2111,13 @@ export async function createScrapeTaskFromSoRecruit(
   const rawSnapshot = (req[0].job_snapshot ?? {}) as Record<string, unknown>;
   const chosenWorker = String(rawSnapshot.scrape_worker ?? '').trim();
   const criteria = chosenWorker ? { ...described, preferred_worker: chosenWorker } : described;
+  // ใบขอที่ผิดเพราะตัวใบเอง (ตำแหน่งกว้างเกิน · อายุใช้ไม่ได้) ตีกลับ Jarvis ทันทีพร้อมเหตุ ไม่รับไปแล้วค่อยล้ม
+  const problems = scrapeRequestProblems(criteria);
+  if (problems.length) {
+    const reason = `สั่ง Scrap ไม่ได้: ${problems.join(' · ')}`;
+    await rejectSoRecruitRequest(requestNo, reason, 'scraping');
+    throw new Error(reason);
+  }
   assertAgeRange(criteria);
   const position = criteria.position || req[0].erp_title || '';
   const target = Math.max(1, overrides?.target || req[0].erp_remaining || req[0].erp_qty || 20);

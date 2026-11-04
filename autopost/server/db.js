@@ -4,6 +4,7 @@
 require('dotenv').config();
 const { Pool } = require('pg');
 const { classifyPostFailure } = require('./failure-learning');
+const { FB_LIMIT_LOG_PREFIX, STRIKE_WINDOW_DAYS, facebookLimitPauseHours, facebookLimitReason } = require('./fb-limit-pause');
 
 const DATABASE_URL = process.env.DATABASE_URL;
 const SCHEMA = process.env.DB_SCHEMA || 'so_autopost_apiscraper';
@@ -2075,6 +2076,24 @@ async function pauseUser(userId, hours, reason) {
   return rows[0] || null;
 }
 
+/**
+ * Facebook จำกัดการโพสต์ของบัญชี — นับครั้งที่โดนใน 7 วันจากบันทึกรอบ แล้วพักตามขั้น (fb-limit-pause.js)
+ * เรียกก่อนเขียนบันทึกของครั้งนี้ จึงบวก 1 ให้ครั้งนี้เอง
+ */
+async function pauseUserForFacebookLimit(userId, baseHours = 24) {
+  const { rows } = await query(
+    `SELECT count(*)::int AS n FROM run_logs
+      WHERE user_id::text = $1 AND message LIKE $2
+        AND created_at > NOW() - ($3::int * INTERVAL '1 day')`,
+    [String(userId), `${FB_LIMIT_LOG_PREFIX}%`, STRIKE_WINDOW_DAYS]
+  );
+  const strikes = (rows[0]?.n || 0) + 1;
+  const hours = facebookLimitPauseHours(strikes, baseHours);
+  const reason = facebookLimitReason(strikes, hours);
+  const row = await pauseUser(userId, hours, reason);
+  return row ? { ...row, hours, strikes, reason } : null;
+}
+
 async function resumeUser(userId) {
   await ensureUsersPostControlColumns();
   const { rows } = await query(
@@ -2884,6 +2903,7 @@ module.exports = {
   touchWorkerHeartbeat,
   completePostRunJob,
   pauseUser,
+  pauseUserForFacebookLimit,
   resumeUser,
   countPostsTodayByUser,
   getUsersPostingStatus,

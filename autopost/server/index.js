@@ -1640,7 +1640,10 @@ app.post('/api/worker/post/pause-user', async (req, res) => {
     if (!requirePostWorkerToken(req, res)) return;
     const userId = String(req.body?.user_id || '').trim();
     if (!userId) return res.status(400).json({ error: 'user_id required' });
-    const row = await db.pauseUser(userId, Number(req.body?.hours) || 24, req.body?.reason || null);
+    // kind=fb_limited: Facebook จำกัดบัญชี — ให้เซิร์ฟเวอร์นับครั้งที่โดนแล้วพักตามขั้น (โดนซ้ำพักนานขึ้น)
+    const row = req.body?.kind === 'fb_limited'
+      ? await db.pauseUserForFacebookLimit(userId, Number(req.body?.hours) || 24)
+      : await db.pauseUser(userId, Number(req.body?.hours) || 24, req.body?.reason || null);
     if (!row) return res.status(404).json({ error: 'user not found' });
     logger.warn('post_user.paused', { user_id: userId, until: row.paused_until, reason: row.pause_reason });
     res.json({ ok: true, user: row });
