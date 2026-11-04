@@ -99,7 +99,7 @@ export default async function ScrapingPage(props: { searchParams?: Promise<{ not
         </Button>
       </header>
 
-      <MachineStatus kind="scraper" />
+      <MachineStatus kind="scraper" back="/scraping" />
 
       {notice && (
         <Alert role="status">

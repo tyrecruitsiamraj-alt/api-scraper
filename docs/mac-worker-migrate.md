@@ -88,6 +88,27 @@ hostname
 - JobBKK ล็อกอินได้ที่เดียวต่อบัญชี: ระบบกันไม่ให้สองเครื่องรันบัญชีเดียวกันพร้อมกัน
   แต่สลับเครื่องเมื่อไรจะล็อกอินใหม่และเตะอีกเครื่องออก
 
+## 3.2) Mac อยู่ห้อง server (ไม่มีคนนั่งหน้าเครื่อง)
+
+ตั้งตอนยังมีจอต่ออยู่ ครั้งเดียว:
+
+1. System Settings → General → Sharing → เปิด **Screen Sharing** + **Remote Login** · ขอ IP ประจำจาก IT
+   เข้าจาก Mac: Finder → Go → Connect to Server → `vnc://<IP>` · จาก Windows ใช้โปรแกรม VNC
+2. Energy → เปิด "Start up automatically after a power failure" + ไม่ให้หลับ
+3. Users & Groups → ล็อกอินอัตโนมัติ (ต้องปิด FileVault — ให้ IT ตัดสิน)
+4. เปิด `SO-Workers.command` 1 ครั้ง แล้วเปิดสวิตช์ที่ต้องการ
+   → ตั้ง LaunchAgent `com.so.workers.autostart` ให้เอง: ล็อกอินแล้วเปิดสวิตช์ที่เปิดค้างไว้ล่าสุด
+   (ปิดสวิตช์ = รีสตาร์ตแล้วไม่เปิด) · log อยู่ `.run/autostart.log`
+
+ระหว่างใช้งาน:
+
+- **อัปเดตโค้ด:** เว็บ → แถบสถานะเครื่อง → ปุ่ม **อัปเดตโค้ดทุกเครื่อง**
+  Mac ปิด Scrap + Autopost → ดึงโค้ด → เปิดตัวที่เคยเปิดกลับ (log `.run/remote-update.log`)
+  ต้องเปิด Scrap ไว้บนเครื่องนั้น (คำสั่งเดินทางผ่านคิวของ Scrap) · ไม่สั่งให้ถ้ามีงานโพสต์กำลังวิ่ง
+  Windows อัปเดตแค่ Scrap — Autopost ยังต้องกดที่เครื่อง
+- **ล็อกอินติด OTP / captcha / Facebook ขอยืนยัน:** เข้า Screen Sharing แล้วทำบนจอเครื่องเอง
+- เข้าทาง SSH ได้ด้วย: `bash scripts/so-worker-mac-lib.sh status|update`
+
 ## 4) เช็คว่าเวิร์ค
 
 - so-scraping → ops / workers: `machine_name` = hostname Mac, `build_sha` ตรง `main`

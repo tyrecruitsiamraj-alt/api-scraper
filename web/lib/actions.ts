@@ -16,6 +16,7 @@ import { normalizePosterExtras, normalizePosterLayout } from '../../src/core/pos
 import type { PosterExtra, PosterLayout } from '../../src/core/poster-template.js';
 import {
   createAdjacentTask,
+  enqueueWorkerCodeUpdate,
   createScrapeTaskFromSoRecruit,
   createCampaignFromRequest,
   enqueueDraftForCampaign,
@@ -245,6 +246,30 @@ export async function runFacebookPreflightAction(formData: FormData) {
   await enqueueFacebookPreflight(userId, session.user?.email ?? session.user?.name ?? null);
   revalidatePath('/autopost');
   revalidatePath('/orchestrator');
+}
+
+/** ปุ่ม "อัปเดตโค้ดทุกเครื่อง" ใต้สถานะเครื่อง — สั่งผ่านคิว ไม่ต้องเข้าไปกดที่เครื่อง */
+export async function updateWorkersCodeAction(formData: FormData) {
+  await requireSession();
+  const raw = String(formData.get('back') ?? '').trim();
+  const back = /^\/[A-Za-z0-9/_-]*$/.test(raw) ? raw : '/orchestrator';
+  let notice: string;
+  try {
+    const { enqueued, posting } = await enqueueWorkerCodeUpdate();
+    const machines = [...new Set(enqueued.map((e) => e.machine.replace(/\.local$/i, '')))];
+    if (posting) {
+      notice = `ยังไม่อัปเดต: Autopost กำลังโพสต์อยู่ ${posting} งาน รอให้โพสต์เสร็จแล้วกดใหม่`;
+    } else if (!machines.length) {
+      notice = 'ไม่มีเครื่อง Scrap ออนไลน์ให้อัปเดต หรือสั่งไปแล้วกำลังรอเครื่องรับ';
+    } else {
+      notice = `สั่งอัปเดตโค้ดแล้ว ${machines.length} เครื่อง: ${machines.join(', ')} · เครื่องจะเปิดตัวเองใหม่ภายใน 1–2 นาที`;
+      if (enqueued.some((e) => !e.whole_machine)) notice += ' · Autopost บนเครื่อง Windows ยังต้องกดอัปเดตโค้ดที่เครื่อง';
+    }
+  } catch (error) {
+    notice = `สั่งอัปเดตไม่สำเร็จ: ${error instanceof Error ? error.message : String(error)}`;
+  }
+  revalidatePath(back);
+  redirect(`${back}?notice=${encodeURIComponent(notice)}`);
 }
 
 async function requireSession() {

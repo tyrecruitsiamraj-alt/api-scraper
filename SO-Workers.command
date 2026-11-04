@@ -19,6 +19,9 @@ if [ ! -f "$LIB" ] || [ ! -f "$PANEL" ]; then
 fi
 chmod +x "$LIB" "$ROOT/SO-Workers.command" 2>/dev/null || true
 
+# ตั้งให้ worker เปิดเองหลังเครื่องรีสตาร์ต (ทำซ้ำได้ ไม่เปลี่ยนอะไรถ้าตั้งไว้แล้ว)
+/bin/bash "$LIB" install-autostart >/dev/null 2>&1 || true
+
 # เปิดแผงนอก process ของ Terminal แล้วปิดหน้าต่าง .command
 /usr/bin/osascript "$PANEL" "$LIB" >/dev/null 2>&1 &
 

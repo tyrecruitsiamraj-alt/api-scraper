@@ -13,7 +13,7 @@
 //   node workers/runner.js            # loop forever (daemon)
 //   node workers/runner.js --once     # claim+run a single job, then exit
 import os from 'node:os';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import { closeSync, existsSync, mkdirSync, openSync, statSync, unlinkSync, utimesSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { sleep } from '../src/config.js';
@@ -118,6 +118,7 @@ async function heartbeat() {
       build_sha: WORKER_BUILD_SHA,
       source_sha: WORKER_SOURCE_SHA,
       machine_name: os.hostname(),
+      platform: process.platform, // เว็บใช้ตัดสินว่าสั่งอัปเดตครั้งเดียวต่อเครื่อง (Mac) หรือทุก slot
       content_pipeline: CONTENT_PIPELINE_RELEASE,
       types: SUPPORTED,
       image_generation: imageGenerationCapability(),
@@ -199,6 +200,20 @@ const HANDLERS = {
   async update_code(job) {
     const cwd = process.cwd();
     const run = (args) => execFileSync('git', args, { cwd, encoding: 'utf8' }).trim();
+    const macLib = resolve(cwd, 'scripts', 'so-worker-mac-lib.sh');
+    if (process.platform === 'darwin' && existsSync(macLib)) {
+      // Mac: ให้แผงสวิตช์อัปเดตทั้งเครื่อง (ปิด Scrap + Autopost → ดึงโค้ด → เปิดตัวที่เคยเปิดกลับ).
+      // รอ 5 วินาทีให้งานนี้ปิดก่อน และแยก process ออกไปให้ launchd ดูแล ไม่งั้นโดนปิดตามตอนปิด Scrap
+      const log = resolve(cwd, '.run', 'remote-update.log');
+      mkdirSync(dirname(log), { recursive: true });
+      const script = `sleep 5; date; /bin/bash ${JSON.stringify(macLib)} update`;
+      spawn('/bin/bash', ['-c', `nohup /bin/bash -c ${JSON.stringify(script)} >> ${JSON.stringify(log)} 2>&1 &`], {
+        cwd,
+        detached: true,
+        stdio: 'ignore',
+      }).unref();
+      return { ok: true, sha: 'pending', whole_machine: true };
+    }
     run(['fetch', 'origin', 'main']);
     try { run(['checkout', '-B', 'main', 'origin/main']); } catch { /* reset below */ }
     run(['reset', '--hard', 'origin/main']);

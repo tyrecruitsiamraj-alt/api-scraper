@@ -103,7 +103,7 @@ export default async function AutopostJobsPage(props: { searchParams?: Promise<{
 
       <AutopostNav />
 
-      <MachineStatus kind="autopost" />
+      <MachineStatus kind="autopost" back="/autopost/jobs" />
 
       {needVerify.length > 0 && <VerificationSection accounts={needVerify} />}
 

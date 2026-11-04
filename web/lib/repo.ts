@@ -4824,6 +4824,73 @@ export async function listWorkerHeartbeats(): Promise<WorkerHeartbeat[]> {
   return out;
 }
 
+export type WorkerCodeUpdate = {
+  worker: string;
+  machine: string;
+  jobId: string;
+  prior_sha: string | null;
+  /** Mac: อัปเดตทั้งเครื่อง (Scrap + Autopost) · เครื่องอื่น: อัปเดตเฉพาะ Scrap slot นั้น */
+  whole_machine: boolean;
+};
+
+/**
+ * สั่งเครื่อง Scrap ที่ออนไลน์ให้ดึงโค้ดล่าสุดแล้วเปิดตัวเองใหม่ (งาน update_code ในคิว).
+ * Mac สั่งครั้งเดียวต่อเครื่อง เพราะคำสั่งเดียวปิด-เปิดทั้งเครื่อง ถ้าสั่งทุก slot เครื่องจะรีสตาร์ตซ้ำ
+ * งาน update_code ที่ยังรออยู่ของ slot เดียวกันไม่สั่งซ้ำ
+ */
+export async function enqueueWorkerCodeUpdate(only: string[] = []): Promise<{
+  enqueued: WorkerCodeUpdate[];
+  online: { name: string; build_sha: string | null }[];
+  /** งานโพสต์ที่กำลังวิ่ง — มากกว่า 0 = ไม่สั่งอัปเดต (ปิดเครื่องกลางโพสต์ = โพสต์ค้างครึ่งทาง) */
+  posting: number;
+}> {
+  const [busy] = await q<{ n: number }>(
+    `SELECT count(*)::int AS n FROM ${AP}.post_run_queue WHERE status = 'running'`,
+  );
+  if ((busy?.n ?? 0) > 0) return { enqueued: [], online: [], posting: busy.n };
+  const online = await q<{ name: string; build_sha: string | null; machine: string | null; platform: string | null }>(
+    `SELECT name, meta->>'build_sha' AS build_sha, NULLIF(meta->>'machine_name', '') AS machine, meta->>'platform' AS platform
+       FROM workers
+      WHERE kind = 'scraper'
+        AND last_seen > now() - interval '2 minutes'
+        AND name ~ 'scraper-[0-9]+$'
+        AND NOT EXISTS (
+          SELECT 1 FROM work_queue w
+           WHERE w.type = 'update_code' AND w.status IN ('queued', 'running') AND w.preferred_worker = workers.name)
+      ORDER BY name`,
+  );
+  const wanted = only.length ? online.filter((w) => only.includes(w.name)) : online;
+  const macDone = new Set<string>();
+  const targets = wanted.filter((w) => {
+    if (w.platform !== 'darwin') return true;
+    const key = (w.machine || w.name).toLowerCase();
+    if (macDone.has(key)) return false;
+    macDone.add(key);
+    return true;
+  });
+  const enqueued: WorkerCodeUpdate[] = [];
+  for (const w of targets) {
+    const rows = await q<{ id: string }>(
+      `INSERT INTO work_queue (type, module, connector_key, ref_id, payload, owner_user, preferred_worker, priority)
+       VALUES ('update_code', 'system', $1, NULL, $2::jsonb, NULL, $3, 2000)
+       RETURNING id`,
+      [
+        `system:update_code:${w.name}:${Date.now()}`,
+        JSON.stringify({ restart: true, requested_at: new Date().toISOString() }),
+        w.name,
+      ],
+    );
+    enqueued.push({
+      worker: w.name,
+      machine: w.machine || w.name,
+      jobId: rows[0].id,
+      prior_sha: w.build_sha,
+      whole_machine: w.platform === 'darwin',
+    });
+  }
+  return { enqueued, online: online.map((w) => ({ name: w.name, build_sha: w.build_sha })), posting: 0 };
+}
+
 export type MachineStatusRow = {
   name: string;
   kind: 'autopost' | 'scraper';

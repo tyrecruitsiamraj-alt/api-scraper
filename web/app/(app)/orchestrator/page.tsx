@@ -265,7 +265,7 @@ export default async function OrchestratorPage(props: { searchParams?: Promise<{
         </Alert>
       )}
 
-      <MachineStatus />
+      <MachineStatus back="/orchestrator" />
 
       <Collapsible className="rounded-lg border bg-card px-4 py-2">
         <CollapsibleTrigger asChild>

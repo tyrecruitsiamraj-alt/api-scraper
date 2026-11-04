@@ -1,7 +1,9 @@
 import { listMachineStatus } from '@/lib/repo';
 import type { MachineStatusRow } from '@/lib/repo';
 import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
+import { updateWorkersCodeAction } from '@/lib/actions';
 
 /** เครื่อง Scrap: แปลงเนื้องาน/อ่านไฟล์แนบใช้ได้ไหม บอกเป็นคำ */
 function AiStatus({ ai }: { ai: NonNullable<MachineStatusRow['ai']> }) {
@@ -25,9 +27,12 @@ function silentFor(lastSeen: string): string {
 }
 
 /** แถบสถานะเครื่อง: ออนไลน์ไหม กำลังทำกี่งาน รอคิวกี่งาน โค้ดรุ่นไหน — ให้ดูเองได้โดยไม่ต้องถามใคร */
-export async function MachineStatus({ kind }: { kind?: 'autopost' | 'scraper' }) {
+export async function MachineStatus({ kind, back }: { kind?: 'autopost' | 'scraper'; back: string }) {
   const { machines, retired } = await listMachineStatus();
   const rows = kind ? machines.filter((m) => m.kind === kind) : machines;
+  // โค้ดล่าสุด = commit ที่เว็บนี้ deploy (Vercel ใส่ให้) · ไม่มีค่า = ไม่บอกว่าเก่า
+  const latest = process.env.VERCEL_GIT_COMMIT_SHA?.trim() || '';
+  const canUpdate = machines.some((m) => m.kind === 'scraper' && m.online);
   const hidden = (kind ? retired.filter((r) => r.kind === kind) : retired).length;
   return (
     <Card size="sm">
@@ -53,12 +58,23 @@ export async function MachineStatus({ kind }: { kind?: 'autopost' | 'scraper' })
                 กำลังโพสต์ {m.running} · รอคิว {m.queued}
               </span>
             )}
-            {m.build_sha && <span className="font-mono text-xs text-muted-foreground">โค้ด {m.build_sha.slice(0, 7)}</span>}
+            {m.build_sha && (
+              <span className="text-xs text-muted-foreground">
+                <span className="font-mono">โค้ด {m.build_sha.slice(0, 7)}</span>
+                {latest && !latest.startsWith(m.build_sha.slice(0, 7)) && ' · ยังไม่อัปเดต'}
+              </span>
+            )}
             {m.online && m.kind === 'scraper' && m.ai && <AiStatus ai={m.ai} />}
             {!m.online && <span className="text-muted-foreground">เปิดสวิตช์บนเครื่องนั้น</span>}
           </div>
         ))}
         {hidden > 0 && <p className="text-xs text-muted-foreground">ไม่แสดงเครื่องที่เงียบเกิน 7 วัน {hidden} เครื่อง</p>}
+        {canUpdate && (
+          <form action={updateWorkersCodeAction}>
+            <input type="hidden" name="back" value={back} />
+            <Button type="submit" variant="outline" size="sm">อัปเดตโค้ดทุกเครื่อง</Button>
+          </form>
+        )}
       </CardContent>
     </Card>
   );
