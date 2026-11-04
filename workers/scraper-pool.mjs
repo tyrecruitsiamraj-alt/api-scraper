@@ -10,7 +10,9 @@ import { spawn } from 'node:child_process';
 import { readFileSync, unlinkSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
+import os from 'node:os';
 import { getPool } from '../src/db/pool.js';
+import { scraperSlotLockName, scraperSlotName, scraperSlotPrefix } from '../src/core/worker-selection.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const RUNNER = path.join(__dirname, 'runner.js');
@@ -22,6 +24,26 @@ const RECHECK_MS = Math.max(15_000, Number.parseInt(process.env.SCRAPER_POOL_REC
 const children = new Map(); // slot number -> child process
 const restartTimers = new Map(); // slot number -> one pending restart only
 let stopping = false;
+let slotPrefix = '';
+
+// ทุกเครื่องเคยใช้ชื่อ scraper-1/2 ซ้ำกัน → เครื่องที่สองทับสถานะเครื่องแรกและแย่งงานที่ pin ไว้.
+// ดูว่าชื่อเดิมเป็นของเครื่องไหนในฐาน ถ้าเป็นของเครื่องอื่น ให้เครื่องนี้เติมชื่อเครื่องนำหน้า.
+// อ่านฐานไม่ได้ = ยังไม่เปิด runner (runner ก็ทำงานไม่ได้อยู่ดี) ลองใหม่ทุก 10 วินาที
+async function resolveSlotPrefix() {
+  for (;;) {
+    try {
+      const { rows } = await getPool().query(
+        `SELECT name, meta->>'machine_name' AS machine_name FROM workers WHERE name ~ '^scraper-[0-9]+$'`,
+      );
+      return scraperSlotPrefix({ hostname: os.hostname(), slots: rows, explicit: process.env.SCRAPER_SLOT_PREFIX });
+    } catch (e) {
+      console.error(`[pool] อ่านชื่อ slot จากฐานไม่ได้ (${e.message}) — ลองใหม่ใน 10s`);
+      await new Promise((r) => setTimeout(r, 10_000));
+    }
+  }
+}
+
+const slotName = (slot) => scraperSlotName(slotPrefix, slot);
 
 async function countScraperAccounts() {
   const { rows } = await getPool().query(
@@ -45,7 +67,7 @@ function launch(slot) {
   // guard they overwrite the same Map entry; the losing child exits on the
   // process lock and schedules another restart forever.
   if (stopping || children.has(slot)) return;
-  const env = { ...process.env, WORKER_NAME: `scraper-${slot}` };
+  const env = { ...process.env, WORKER_NAME: slotName(slot) };
   // windowsHide: บน Windows node.exe เป็น console app — ถ้า inherit/ไม่ซ่อน
   // จะเด้งหน้าต่างดำทีละ runner (2–8 บาน) ทั้งที่เปิดจากแผงสวิตช์
   const child = spawn(process.execPath, [RUNNER], {
@@ -69,7 +91,7 @@ function releaseExitedChildLock(slot, pid) {
   // A force-killed runner cannot execute its finally handler.  Remove only
   // the slot lock whose recorded PID is the child that just exited; never
   // touch a lock owned by another launcher/process.
-  const lockPath = path.join(OUTPUT_DIR, `runner-scraper-${slot}.lock`);
+  const lockPath = path.join(OUTPUT_DIR, `runner-${scraperSlotLockName(slotName(slot))}.lock`);
   try {
     const owner = readFileSync(lockPath, 'utf8').trim().split(/\s+/, 1)[0];
     if (owner === String(pid)) unlinkSync(lockPath);
@@ -118,6 +140,7 @@ function shutdown() {
 process.on('SIGINT', shutdown);
 process.on('SIGTERM', shutdown);
 
-console.log(`scraper pool launcher up — MIN=${MIN} MAX=${MAX} recheck=${RECHECK_MS}ms`);
+slotPrefix = await resolveSlotPrefix();
+console.log(`scraper pool launcher up — MIN=${MIN} MAX=${MAX} recheck=${RECHECK_MS}ms · ชื่อ slot: ${slotName(1)}, ${slotName(2)}, ...`);
 await scale();
 setInterval(scale, RECHECK_MS);

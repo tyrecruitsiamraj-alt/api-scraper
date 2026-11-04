@@ -29,6 +29,7 @@ import { measureCampaign } from '../src/core/orchestrator-measure.js';
 import { sendAlert } from '../src/core/alert.js';
 import { classifyScrapeTaskResult, cooldownError, requireSuccessfulScrapeTaskResult } from '../src/core/scrape-task-result.js';
 import { imageGenerationCapability } from '../src/core/ai-image.js';
+import { scraperSlotLockName } from '../src/core/worker-selection.js';
 
 // ชื่อ Worker ต้องตรงกับ preferred_worker ใน Queue. เดิม heartbeat ใช้ hostname
 // เสมอ แม้ launcher ตั้ง WORKER_NAME คนละ slot ทำให้หลาย process ทับสถานะกัน.
@@ -55,9 +56,7 @@ const MEASURE_MAX_CHECKS = Number.parseInt(process.env.MEASURE_MAX_CHECKS ?? '96
 // The pool intentionally starts multiple runner slots. A single global lock
 // made those slots kill/restart one another forever. Keep one lock per slot;
 // separate pool launchers still collide on the same slot names and fail safe.
-const PROCESS_SLOT = String(process.env.WORKER_NAME || 'standalone')
-  .replace(/[^A-Za-z0-9._-]+/g, '-')
-  .slice(0, 80) || 'standalone';
+const PROCESS_SLOT = scraperSlotLockName(process.env.WORKER_NAME);
 const PROCESS_LOCK_PATH = resolve(process.cwd(), 'output', `runner-${PROCESS_SLOT}.lock`);
 const PROCESS_LOCK_STALE_MS = 60_000;
 let ownsProcessLock = false;
