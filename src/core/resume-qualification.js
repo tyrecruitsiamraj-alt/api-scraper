@@ -121,14 +121,22 @@ export function evaluateResumeQualification(candidate = {}, { criteria = {}, sou
     : [];
   const desiredRoleMatched = desiredRoleQuality > 0;
   const experienceRoleMatched = experienceRoleQualities.length > 0;
+  // สายงานไม่ใช่เกณฑ์ตัด (เจ้าของ 4 พ.ย. 2569: "เอาแค่อยู่กรุงเทพ อายุเข้าเกณฑ์ เพศใช่ เนื้องานค่อยว่ากัน")
+  // เกณฑ์ตัดมีแค่ที่ใบขอเขียน: จังหวัด อายุ เพศ (และวุฒิ/เพดานเงินเดือนถ้าระบุ) · คำตำแหน่งที่ AI เลือก
+  // ใช้เรียงลำดับเท่านั้น — เดิมคนขับรถที่เขียนประวัติงานไม่ตรงคำตกทั้ง 176 คนใน 2 สัปดาห์
+  let roleMatched = null; // null = เรซูเม่ไม่ระบุตำแหน่ง
   if (acceptedPositions.length) {
     const identity = clean(candidate.name || candidate.full_name);
     if (!identity) missing.push('insufficient_evidence:identity');
-    if (!roleText) missing.push('insufficient_evidence:job_family');
-    else if (!acceptedPositions.some((position) => roleMatches(roleText, position))) rejected.push('wrong_job_family');
-    else passed.push('job_family');
+    if (roleText) roleMatched = acceptedPositions.some((position) => roleMatches(roleText, position));
+    if (roleMatched) passed.push('job_family');
   }
 
+  // เกณฑ์ตัดจริงมีแค่ จังหวัด อายุ เพศ และเพดานเงินเดือน (ใบขอเขียน "ไม่เกิน") — เจ้าของ 4 พ.ย. 2569
+  // "เอาแค่อยู่กรุงเทพ อายุเข้าเกณฑ์ เพศใช่ เนื้องานค่อยว่ากัน ไม่งั้น 0 ตลอด"
+  // วุฒิ ใบขับขี่ ทักษะ และเงื่อนไขที่ AI อ่านจากเนื้องาน = คะแนนเรียงลำดับ ไม่ตัดใครทิ้ง
+  const softFromFilters = [];
+  const softMissFromFilters = [];
   for (const f of filters) {
     const value = clean(f.value);
     if (f.field === 'province') {
@@ -139,9 +147,8 @@ export function evaluateResumeQualification(candidate = {}, { criteria = {}, sou
     } else if (f.field === 'education') {
       const got = eduRank([candidate.education_summary, ...(candidate.education || []).map((v) => JSON.stringify(v))].join(' '));
       const want = eduRank(value);
-      if (!got) missing.push('insufficient_evidence:education');
-      else if (want && got < want) rejected.push('education_below_minimum');
-      else passed.push('education');
+      if (got && (!want || got >= want)) softFromFilters.push(`วุฒิ ${value}`);
+      else softMissFromFilters.push(`วุฒิ ${value}`);
     } else if (f.field === 'gender') {
       const got = clean(candidate.gender);
       if (!got) missing.push('insufficient_evidence:gender');
@@ -157,7 +164,8 @@ export function evaluateResumeQualification(candidate = {}, { criteria = {}, sou
       const salaryRange = salaryNumbers(candidate.expected_salary);
       const got = salaryRange.length ? Math.min(...salaryRange) : null;
       const want = num(value);
-      if (got == null) missing.push('insufficient_evidence:salary');
+      // ไม่ระบุเงินเดือนที่ต้องการ = ไม่รู้ ไม่ใช่เกินกรอบ — ไม่กันคนออก
+      if (got == null) softMissFromFilters.push('เงินเดือนที่ต้องการ (เรซูเม่ไม่ระบุ)');
       else if (want != null && got > want) rejected.push('compensation_mismatch');
       else passed.push('salary_max');
     } else {
@@ -166,14 +174,13 @@ export function evaluateResumeQualification(candidate = {}, { criteria = {}, sou
       const matched = f.match_mode === 'all'
         ? terms.every((term) => termMatches(allText, term))
         : terms.some((term) => termMatches(allText, term));
-      const fieldName = f.field === 'driving_license' || f.field === 'license' ? 'required_license' : f.field === 'skill' ? 'required_skill' : f.field;
-      if (!matched) missing.push(`insufficient_evidence:${fieldName}`);
-      else passed.push(fieldName);
+      if (matched) softFromFilters.push(value);
+      else softMissFromFilters.push(value);
     }
   }
 
-  const softPassed = [];
-  const softMissing = [];
+  const softPassed = [...softFromFilters];
+  const softMissing = [...softMissFromFilters];
   for (const item of sourcingSpec.soft_scores || []) {
     const value = clean(item?.value);
     const sourceTerms = (item?.evidence_terms || []).length ? item.evidence_terms : [value];
@@ -183,6 +190,10 @@ export function evaluateResumeQualification(candidate = {}, { criteria = {}, sou
       : terms.some((term) => termMatches(allText, term));
     if (matched) softPassed.push(value || item?.field || 'soft_score');
     else softMissing.push(value || item?.field || 'soft_score');
+  }
+
+  if (acceptedPositions.length && !roleMatched) {
+    softMissing.push(roleMatched === null ? 'ตำแหน่งที่ต้องการ (เรซูเม่ไม่ระบุ)' : 'ตำแหน่งตรงคำที่ค้น');
   }
 
   const reasons = [...new Set(rejected.length ? rejected : missing)];
@@ -210,8 +221,10 @@ export function evaluateResumeQualification(candidate = {}, { criteria = {}, sou
     soft_evidence: softScore,
     evidence_confidence: confidenceBonus,
   } : null;
+  // ตำแหน่งไม่ตรงยังผ่าน (ไม่ตัด) แต่คะแนนต้องต่ำกว่าคนตำแหน่งตรงเสมอ — ขั้นต่ำ 40 แทน 60
+  const qualifiedFloor = acceptedPositions.length && !roleMatched ? 40 : 60;
   const qualifiedScore = acceptedPositions.length
-    ? Math.max(60, Math.min(100, roleScore + hardScore + softScore + confidenceBonus))
+    ? Math.max(qualifiedFloor, Math.min(roleMatched ? 100 : 59, roleScore + hardScore + softScore + confidenceBonus))
     : softTotal ? 60 + Math.round((softPassed.length / softTotal) * 40) : 100;
   return {
     status,
@@ -224,6 +237,7 @@ export function evaluateResumeQualification(candidate = {}, { criteria = {}, sou
       soft_missing: [...new Set(softMissing)],
       score_breakdown: scoreBreakdown,
       scorecard_version: acceptedPositions.length ? 'candidate-fit-v1' : 'qualification-v1',
+      role_match: acceptedPositions.length ? roleMatched : undefined,
       confidence_score: confidenceScore,
     },
     hardFilterCount: filters.length,
@@ -242,11 +256,17 @@ const REJECTION_LABEL = {
   compensation_mismatch: 'เงินเดือนเกินกรอบ',
 };
 
-export function summarizeRejections(found, opened, reasonCounts = {}) {
+// โปรไฟล์/ไฟล์แนบไม่ครบไม่ใช่เหตุตัดแล้ว (เก็บเป็น "ต้องตรวจเพิ่ม") — ไม่นับเป็นเหตุ "ถูกคัดออก"
+const NOT_A_REJECTION = new Set(['duplicate', 'incomplete_profile', 'incomplete_attachments', 'missing_contact']);
+
+export function summarizeRejections(found, opened, reasonCounts = {}, needsReview = 0) {
   const parts = Object.entries(reasonCounts)
-    .filter(([key, count]) => count > 0 && key !== 'duplicate' && !key.includes(':'))
+    .filter(([key, count]) => count > 0 && !NOT_A_REJECTION.has(key) && !key.includes(':'))
     .sort((a, b) => b[1] - a[1])
     .map(([key, count]) => `${REJECTION_LABEL[key] || key} ${count}`);
   const why = parts.length ? ` · ${parts.join(' · ')} (คนเดียวตกได้หลายข้อ)` : '';
+  if (needsReview > 0) {
+    return `เว็บให้มา ${found} คน เปิดดู ${opened} คน ยังไม่มีใครผ่านครบ · ต้องตรวจเพิ่ม ${needsReview} คน (ข้อมูลในเรซูเม่ไม่ครบ ดูได้ในหน้าผู้สมัคร)${parts.length ? ` · ไม่ผ่าน: ${parts.join(' · ')}` : ''}`;
+  }
   return `เว็บให้มา ${found} คน เปิดดู ${opened} คน แต่ถูกคัดออกทั้งหมดด้วยเงื่อนไข${why}`;
 }

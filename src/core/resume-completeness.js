@@ -91,3 +91,22 @@ export function isResumeDeliveryComplete(record = {}, assets = [], opts = {}) {
     && resumeContactGaps(record).length === 0
     && isResumeAttachmentsComplete(record, assets, opts);
 }
+
+/**
+ * โปรไฟล์หรือไฟล์แนบไม่ครบ ไม่ทิ้งคนอีกแล้ว (เจ้าของ 4 พ.ย. 2569: "เพิ่มเช็คอีกทีเข้าไปว่าขาดอะไรก็บอกไป")
+ * คนที่ผ่านเกณฑ์ลดเป็น "ต้องตรวจเพิ่ม" พร้อมเหตุว่าขาดอะไร · คนที่ตกเกณฑ์อยู่แล้วยังตก แต่บันทึกว่าขาดอะไรด้วย
+ * เดิมทิ้งทันที: 2 สัปดาห์ก่อน 4 พ.ย. JobBKK ทิ้งไป 353 คน มากกว่าคนที่ตกเกณฑ์จริงทุกข้อรวมกัน
+ */
+export function applyCompletenessGaps(qualification = {}, { bodyGaps = [], attachmentGaps = [] } = {}) {
+  const gapReasons = [
+    ...bodyGaps.map((gap) => `incomplete:${gap}`),
+    ...attachmentGaps.map((gap) => `incomplete_attachments:${gap}`),
+  ];
+  if (!gapReasons.length) return qualification;
+  const status = qualification.status === 'rejected' ? 'rejected' : 'needs_review';
+  const reasons = [...new Set([...(qualification.reasons || []), ...gapReasons])];
+  const score = status === 'rejected' ? 0 : Math.min(qualification.score ?? 60, Math.max(40, 80 - gapReasons.length * 10));
+  return { ...qualification, status, reasons, score };
+}
+
+export { BODY_GAP_LABEL, ATTACHMENT_GAP_LABEL, completenessReasonLabel } from './completeness-labels.js';

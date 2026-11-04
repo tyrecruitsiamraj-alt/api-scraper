@@ -4,6 +4,7 @@ import { splitCriteria } from './core/candidate-match.js';
 import { classifyScrapeOutcome, lessonRowsToLogHits, rememberedPreventionLog } from './core/scrape-failure-learning.js';
 import { evaluateResumeQualification, summarizeRejections } from './core/resume-qualification.js';
 import {
+  applyCompletenessGaps,
   isResumeAttachmentsComplete,
   isResumeBodyComplete,
   isResumeDeliveryComplete,
@@ -342,13 +343,13 @@ export async function runConnector(connector, criteria, runtime, opts = {}) {
           if (provider.finalizeCandidateRecord) parsed = provider.finalizeCandidateRecord(parsed);
         }
         opened += 1;
-        if (!isResumeBodyComplete(parsed)) {
-          const gaps = resumeBodyGaps(parsed);
+        // โปรไฟล์ไม่ครบไม่ทิ้งแล้ว — เก็บเป็น "ต้องตรวจเพิ่ม" พร้อมบอกว่าขาดช่องไหน (applyCompletenessGaps ด้านล่าง)
+        let bodyGaps = resumeBodyGaps(parsed);
+        if (bodyGaps.length) {
           reasonCounts.incomplete_profile = (reasonCounts.incomplete_profile || 0) + 1;
           // นับแยกว่าขาดช่องไหน — แยกได้ว่าคนกรอกไม่ครบจริง หรือตัวอ่านโปรไฟล์อ่านช่องนั้นไม่ออก
-          for (const gap of gaps) reasonCounts[`incomplete:${gap}`] = (reasonCounts[`incomplete:${gap}`] || 0) + 1;
-          console.warn(`  ✗ skip incomplete resume ${id}: ${gaps.join(',')}`);
-          return; // do not upsert incomplete rows — desk must only show complete data
+          for (const gap of bodyGaps) reasonCounts[`incomplete:${gap}`] = (reasonCounts[`incomplete:${gap}`] || 0) + 1;
+          console.warn(`  ⚠ resume ${id}: ข้อมูลไม่ครบ (${bodyGaps.join(',')}) — เก็บไว้ให้คนตรวจ`);
         }
         const qualification = evaluateResumeQualification(parsed, {
           criteria: { ...criteria, ...localFilters },
@@ -385,12 +386,7 @@ export async function runConnector(connector, criteria, runtime, opts = {}) {
             html = await provider.fetchResumeHtml(sess, id, runtime);
             parsed = provider.parseResumeHtml(html, { sourceUrl: url, index: saved + 1, focusPosition: criteria.position || '-' });
             if (provider.finalizeCandidateRecord) parsed = provider.finalizeCandidateRecord(parsed);
-            if (!isResumeBodyComplete(parsed)) {
-              reasonCounts.incomplete_profile = (reasonCounts.incomplete_profile || 0) + 1;
-              for (const gap of resumeBodyGaps(parsed)) reasonCounts[`incomplete:${gap}`] = (reasonCounts[`incomplete:${gap}`] || 0) + 1;
-              console.warn(`  ✗ skip incomplete resume ${id} after attach refetch: ${resumeBodyGaps(parsed).join(',')}`);
-              return;
-            }
+            bodyGaps = resumeBodyGaps(parsed);
           }
           if (provider.collectAssetsForDb) {
             assets = await provider.collectAssetsForDb(sess.request, parsed, { profileOnly: false });
@@ -400,12 +396,12 @@ export async function runConnector(connector, criteria, runtime, opts = {}) {
           console.warn(`  ↻ resume ${id}: attachments incomplete (${gaps.join(',')}) — retry ${attempt + 1}/${MAX_ATTACH_TRIES}`);
           await sleep(800 + attempt * 400);
         }
-        if (!isResumeAttachmentsComplete(parsed, assets, attachOpts)) {
-          const gaps = resumeAttachmentGaps(parsed, assets, attachOpts);
+        const attachmentGaps = resumeAttachmentGaps(parsed, assets, attachOpts);
+        if (attachmentGaps.length) {
           reasonCounts.incomplete_attachments = (reasonCounts.incomplete_attachments || 0) + 1;
-          console.warn(`  ✗ skip incomplete attachments ${id}: ${gaps.join(',')}`);
-          return;
+          console.warn(`  ⚠ resume ${id}: ไฟล์แนบไม่ครบ (${attachmentGaps.join(',')}) — เก็บไว้ให้คนตรวจ`);
         }
+        finalQualification = applyCompletenessGaps(finalQualification, { bodyGaps, attachmentGaps });
 
         const { isNew, taskLink } = await withTransaction(async (client) => {
           const cand = await upsertCandidate(client, parsed, { platform: connector.platform, externalId: provider.externalId(url) });
@@ -477,7 +473,7 @@ export async function runConnector(connector, criteria, runtime, opts = {}) {
       console.log(`  [${connector.label}] สรุปกรอง: ผ่าน ${qualified} · ตรวจเพิ่ม ${needsReview} · ไม่ผ่าน ${rejected} · ซ้ำ ${duplicate}`);
       // บันทึกไว้ใน error field (ว่างอยู่) เมื่อได้ 0 — ให้หน้าเว็บอธิบายเหตุถูก
       if (saved - resumeFrom === 0 && filteredOut > 0 && !error) {
-        error = summarizeRejections(found, opened, reasonCounts);
+        error = summarizeRejections(found, opened, reasonCounts, needsReview);
       }
     }
   } catch (e) {

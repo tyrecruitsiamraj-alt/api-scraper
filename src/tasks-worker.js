@@ -42,6 +42,7 @@ import { acceptedPositionsForTitle, suggestAdjacentPositions, positionsFromDescr
 import { resolveSearchIdentityFromDescription } from '../web/lib/scrape-intake.js';
 import { filterZeroYieldExpansionTerms } from './core/scrape-failure-learning.js';
 import { isZeroYieldRound, zeroYieldNote } from './core/zero-yield.js';
+import { matchBankCandidates } from './core/candidate-bank.js';
 
 /**
  * Tasks worker — runs queued/due tasks as a full auto pipeline with live phases:
@@ -183,7 +184,7 @@ export async function runTask(t, runtime) {
   }
 
   const target = t.mode === 'count' ? t.target_count || connector.scrape_limit : connector.scrape_limit;
-  const alreadyMatched = t.mode === 'count' ? await countTaskCandidates(t.id).catch(() => 0) : 0;
+  let alreadyMatched = t.mode === 'count' ? await countTaskCandidates(t.id).catch(() => 0) : 0;
   if (t.mode === 'count' && alreadyMatched >= target) {
     await setTaskPhase(t.id, 'done', target);
     await bumpTaskProgress(t.id, alreadyMatched);
@@ -191,7 +192,7 @@ export async function runTask(t, runtime) {
     console.log(`  ${t.name}: ครบเป้าแล้ว ${alreadyMatched}/${target} Resume (ไม่ค้นซ้ำ)`);
     return { status: 'done', taskId: t.id, matchedTotal: alreadyMatched, target };
   }
-  const remainingTarget = Math.max(1, target - alreadyMatched);
+  let remainingTarget = Math.max(1, target - alreadyMatched);
   const criteria = { ...(t.criteria || {}), maxCandidates: remainingTarget, updatedSince: t.updated_since ?? undefined };
   delete criteria.job_description; // meta ของโหมดเนื้องาน — ไม่ส่งเข้า connector
   // ทุก retry เริ่ม search page ใหม่ แต่จำนวนผลลัพธ์อิงตาราง dedupe ของ task
@@ -300,6 +301,29 @@ export async function runTask(t, runtime) {
       accepted_positions: acceptedPositionsForTitle(directPosition),
       scorecard_version: 'candidate-fit-v1',
     };
+  }
+
+  // ---- phase 0: คลังผู้สมัคร — คนที่เรามีอยู่แล้วและผ่านเกณฑ์ ผูกเข้าใบก่อนออกไปค้นเว็บ ----
+  if (t.mode === 'count') {
+    try {
+      const bank = await matchBankCandidates({ taskId: t.id, criteria, qualificationSpec, target: remainingTarget });
+      console.log(`  📚 คลังผู้สมัคร: ดู ${bank.scanned} คน · ผ่านเกณฑ์เพิ่ม ${bank.qualified} คน`);
+    } catch (e) {
+      console.warn(`  📚 คลังผู้สมัคร: ค้นไม่สำเร็จ (${e.message}) — ไปค้นเว็บต่อ`);
+    }
+    const afterBank = await countTaskCandidates(t.id).catch(() => alreadyMatched);
+    if (afterBank >= target) {
+      await setTaskPhase(t.id, 'done', target);
+      await bumpTaskProgress(t.id, afterBank);
+      await finishTask(t.id, { status: 'done', phase: 'done', runId: t.last_run_id, error: null, nextRunAt: nextRunFrom(t.schedule_cron) });
+      console.log(`  ${t.name}: ได้ครบเป้าจากคลังผู้สมัคร ${afterBank}/${target} (ไม่ออกไปค้นเว็บ)`);
+      return { status: 'done', taskId: t.id, matchedTotal: afterBank, target, fromBank: true };
+    }
+    if (afterBank > alreadyMatched) {
+      alreadyMatched = afterBank;
+      remainingTarget = Math.max(1, target - alreadyMatched);
+      criteria.maxCandidates = remainingTarget;
+    }
   }
 
   // ---- phase 1: scrape ----

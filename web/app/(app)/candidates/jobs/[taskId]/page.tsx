@@ -6,6 +6,7 @@ import { reassessCandidateJobAction } from '@/lib/actions';
 import { humanizeJobFamily, operatorJobTitle } from '@/lib/operator-copy';
 import { ArrowLeftIcon, CheckCircle2Icon, InfoIcon, UsersIcon } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { completenessReasonLabel } from '../../../../../../src/core/completeness-labels.js';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
@@ -42,6 +43,8 @@ const EVIDENCE: Record<string, string> = {
 
 function humanReason(value: string) {
   if (REASON[value]) return REASON[value];
+  const gap = completenessReasonLabel(value);
+  if (gap) return gap;
   if (value.startsWith('insufficient_evidence:')) {
     const field = value.split(':')[1] || '';
     return `ต้องตรวจหลักฐานเพิ่ม: ${EVIDENCE[field] || field.replaceAll('_', ' ')}`;
@@ -156,6 +159,7 @@ export default async function CandidateJobDetailPage(
                         <div className="flex flex-wrap items-center gap-1.5">
                           {rank && <Badge>อันดับ {rank}</Badge>}
                           <Badge variant={state.variant}>{state.label}</Badge>
+                          {candidate.matched_position === 'จากคลังผู้สมัคร' && <Badge variant="outline">จากคลังผู้สมัคร</Badge>}
                           {candidate.viewed_at && <Badge variant="outline">เปิดอ่านแล้ว</Badge>}
                           {candidate.called_at && <Badge variant="outline">โทรแล้ว</Badge>}
                         </div>

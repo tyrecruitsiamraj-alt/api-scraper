@@ -12,10 +12,11 @@ test('ผ่านเมื่อหลักฐาน Hard Filter ครบ', (
   assert.equal(result.score, 100);
 });
 
-test('ข้อมูลใบอนุญาตบังคับหายไปต้องตรวจเพิ่มและห้ามนับผ่าน', () => {
+// เจ้าของ 4 พ.ย. 2569: เกณฑ์ตัดมีแค่ จังหวัด อายุ เพศ (+ เพดานเงินเดือน) ที่เหลือใช้เรียงลำดับ
+test('ไม่พบใบขับขี่ในเรซูเม่ ไม่ตัดทิ้ง แต่บอกว่ายังไม่พบ', () => {
   const result = evaluateResumeQualification({}, { sourcingSpec: { hard_filters: [{ field: 'license', value: 'ใบขับขี่รถยนต์' }] } });
-  assert.equal(result.status, 'needs_review');
-  assert.match(result.reasons[0], /required_license/);
+  assert.equal(result.status, 'qualified');
+  assert.deepEqual(result.evidence.soft_missing, ['ใบขับขี่รถยนต์']);
 });
 
 test('หลักฐานว่าไม่ผ่าน Hard Filter ต้องถูกปฏิเสธ', () => {
@@ -24,13 +25,14 @@ test('หลักฐานว่าไม่ผ่าน Hard Filter ต้อ�
   assert.deepEqual(result.reasons, ['location_mismatch']);
 });
 
-test('ตำแหน่งใน Family เดียวกันแต่คนละงานต้องไม่ผ่าน', () => {
-  const result = evaluateResumeQualification(
-    { name: 'ผู้สมัครทดสอบ', desired_positions: 'ช่างซ่อมบำรุงอากาศยาน' },
-    { sourcingSpec: { accepted_positions: ['QA Engineer', 'Data Tester', 'ETL Developer'] } },
-  );
-  assert.equal(result.status, 'rejected');
-  assert.deepEqual(result.reasons, ['wrong_job_family']);
+test('ตำแหน่งคนละสายไม่ตัดทิ้ง แต่อยู่ต่ำกว่าคนที่ตำแหน่งตรง', () => {
+  const spec = { sourcingSpec: { accepted_positions: ['QA Engineer', 'Data Tester', 'ETL Developer'] } };
+  const other = evaluateResumeQualification({ name: 'ผู้สมัครหนึ่ง', desired_positions: 'ช่างซ่อมบำรุงอากาศยาน' }, spec);
+  const match = evaluateResumeQualification({ name: 'ผู้สมัครสอง', desired_positions: 'Data Tester' }, spec);
+  assert.equal(other.status, 'qualified');
+  assert.equal(other.evidence.role_match, false);
+  assert.ok(other.evidence.soft_missing.includes('ตำแหน่งตรงคำที่ค้น'));
+  assert.ok(match.score > other.score);
 });
 
 test('Resume ที่ไม่มีชื่อห้ามนับผ่านงาน Sourcing', () => {
@@ -42,13 +44,13 @@ test('Resume ที่ไม่มีชื่อห้ามนับผ่า�
   assert.match(result.reasons[0], /identity/);
 });
 
-test('Hard Filter แบบ all ต้องมีหลักฐานครบทุกข้อ', () => {
+test('ทักษะจากเนื้องานที่หลักฐานไม่ครบ ไม่ตัดทิ้ง แต่บอกว่ายังไม่พบ', () => {
   const result = evaluateResumeQualification(
     { name: 'ผู้สมัครทดสอบ', desired_positions: 'Data Tester', raw_text: 'ใช้ SQL ทดสอบฐานข้อมูล' },
     { sourcingSpec: { accepted_positions: ['Data Tester'], hard_filters: [{ field: 'skill', value: 'Data testing stack', evidence_terms: ['SQL', 'ETL/ELT'], match_mode: 'all' }] } },
   );
-  assert.equal(result.status, 'needs_review');
-  assert.match(result.reasons[0], /required_skill/);
+  assert.equal(result.status, 'qualified');
+  assert.deepEqual(result.evidence.soft_missing, ['Data testing stack']);
 });
 
 test('Hard Filter แบบ all ผ่านเมื่อหลักฐานครบ', () => {
@@ -171,5 +173,35 @@ test('summarizeRejections names the reasons people actually failed on, biggest f
     gender_mismatch: 9, age_out_of_range: 23, wrong_job_family: 21, 'incomplete:gender': 3,
     incomplete_profile: 37, incomplete_attachments: 19, 'incomplete:work_experience': 35,
   });
-  assert.equal(text, 'เว็บให้มา 105 คน เปิดดู 60 คน แต่ถูกคัดออกทั้งหมดด้วยเงื่อนไข · โปรไฟล์กรอกไม่ครบ 37 · อายุนอกช่วง 23 · ประสบการณ์ไม่ตรงสายงาน 21 · ไฟล์แนบไม่ครบ 19 · เพศไม่ตรง 9 (คนเดียวตกได้หลายข้อ)');
+  // โปรไฟล์/ไฟล์แนบไม่ครบ ไม่ใช่เหตุตัดแล้ว (4 พ.ย. 2569) จึงไม่อยู่ในรายการ "ถูกคัดออก"
+  assert.equal(text, 'เว็บให้มา 105 คน เปิดดู 60 คน แต่ถูกคัดออกทั้งหมดด้วยเงื่อนไข · อายุนอกช่วง 23 · ประสบการณ์ไม่ตรงสายงาน 21 · เพศไม่ตรง 9 (คนเดียวตกได้หลายข้อ)');
+});
+
+test('มีคนต้องตรวจเพิ่ม ห้ามบอกว่าถูกคัดออกทั้งหมด', () => {
+  const text = summarizeRejections(60, 40, { incomplete_profile: 12, age_out_of_range: 5 }, 12);
+  assert.equal(text, 'เว็บให้มา 60 คน เปิดดู 40 คน ยังไม่มีใครผ่านครบ · ต้องตรวจเพิ่ม 12 คน (ข้อมูลในเรซูเม่ไม่ครบ ดูได้ในหน้าผู้สมัคร) · ไม่ผ่าน: อายุนอกช่วง 5');
+});
+
+// ตัวอย่างของเจ้าของ 4 พ.ย. 2569: พนักงานขาย หญิง 25–50 ปี กรุงเทพ
+// "เอาแค่อยู่กรุงเทพ อายุเข้าเกณฑ์ เพศใช่ เนื้องานค่อยว่ากัน ไม่งั้น 0 ตลอด"
+test('พนักงานขาย หญิง 25–50 กรุงเทพ: ตัดแค่ จังหวัด อายุ เพศ', () => {
+  const criteria = { province: 'กรุงเทพมหานคร', gender: 'หญิง', ageMin: '25', ageMax: '50', education: 'ปริญญาตรี' };
+  const sourcingSpec = { accepted_positions: ['พนักงานขาย'] };
+  const base = {
+    name: 'ผู้สมัครทดสอบ', gender: 'หญิง', age: '32', desired_work_area: 'กรุงเทพมหานคร',
+    desired_positions: 'แคชเชียร์', education_summary: 'ม.6',
+  };
+  const ok = evaluateResumeQualification(base, { criteria, sourcingSpec });
+  assert.equal(ok.status, 'qualified', 'ตำแหน่งไม่ตรงและวุฒิต่ำกว่า ยังผ่าน');
+  assert.ok(ok.evidence.soft_missing.includes('วุฒิ ปริญญาตรี'));
+  assert.equal(evaluateResumeQualification({ ...base, gender: 'ชาย' }, { criteria, sourcingSpec }).status, 'rejected');
+  assert.equal(evaluateResumeQualification({ ...base, age: '55' }, { criteria, sourcingSpec }).status, 'rejected');
+  assert.equal(evaluateResumeQualification({ ...base, desired_work_area: 'เชียงใหม่' }, { criteria, sourcingSpec }).status, 'rejected');
+});
+
+test('เพดานเงินเดือนยังตัด แต่เรซูเม่ไม่ระบุเงินเดือนไม่ตัด', () => {
+  const criteria = { salaryMax: '18000' };
+  assert.equal(evaluateResumeQualification({ expected_salary: '25,000' }, { criteria }).status, 'rejected');
+  assert.equal(evaluateResumeQualification({ expected_salary: '15,000-18,000' }, { criteria }).status, 'qualified');
+  assert.equal(evaluateResumeQualification({}, { criteria }).status, 'qualified');
 });
