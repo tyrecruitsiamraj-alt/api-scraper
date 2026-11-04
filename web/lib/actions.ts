@@ -71,6 +71,7 @@ import {
   isGroupSector,
   postJarvisOrder,
   repostJarvisOrder,
+  setPostingGroupProvince,
   setPostingGroupSector,
   skippedGroupsNote,
   updateJarvisPostCaption,
@@ -339,6 +340,16 @@ function readGroupSector(value: FormDataEntryValue | null): GroupSector {
   if (!code) return 'private';
   if (!isGroupSector(code)) throw new Error(`ไม่รู้จักประเภทกลุ่ม ${code}`);
   return code;
+}
+
+/** ตั้งจังหวัดของกลุ่ม (พิมพ์ในรายการกลุ่มแล้วกด Enter) — หลายจังหวัดคั่นด้วยจุลภาค · ว่าง = ไม่ระบุ */
+export async function setGroupProvinceAction(formData: FormData) {
+  await requireSession();
+  const id = String(formData.get('id') ?? '').trim();
+  if (!id) throw new Error('ไม่พบกลุ่ม');
+  const province = String(formData.get('province') ?? '').replace(/\s+/g, ' ').trim();
+  await setPostingGroupProvince(id, province || null);
+  revalidatePath('/settings/posting');
 }
 
 /** เปลี่ยนประเภทกลุ่ม ราชการ/เอกชน (เลือกจากรายการกลุ่ม) */

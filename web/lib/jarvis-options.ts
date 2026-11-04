@@ -38,8 +38,10 @@ export type JarvisAccountOption = {
   status: AccountStatus;
   /** ข้อความภาษาไทยสำหรับแจ้งพนักงาน (เช่น popup) — null เมื่อพร้อม */
   warning: string | null;
-  /** ควรเป็นค่าเริ่มต้นให้คนสั่ง: พร้อมโพสต์ ไม่มีคำเตือน และมี session บนเครื่องที่ออนไลน์ — true ได้หลายบัญชี Jarvis เลือกตัวแรก */
+  /** ใช้ได้เลย: พร้อมโพสต์ ไม่มีคำเตือน (บัญชีที่ยังไม่เคยล็อกอินก็นับว่าใช้ได้) — true ได้หลายบัญชี Jarvis เลือกตัวแรกตาม sort_rank */
   recommended: boolean;
+  /** ลำดับที่ควรแสดง: 0 พร้อมและล็อกอินอยู่บนเครื่องออนไลน์ · 1 พร้อมแต่ยังไม่เคยล็อกอิน · 2 ใช้ได้แต่มีเงื่อนไข (มีงานค้าง/โควต้าเต็ม/เครื่องออฟไลน์) · 3 ใช้ไม่ได้ (ถูกพัก/ต้องยืนยันตัวตน) */
+  sort_rank: 0 | 1 | 2 | 3;
   /** กลุ่มที่บัญชีนี้เลือกโพสต์ได้ = ทุกกลุ่มในระบบ (กลุ่มไม่ได้ผูกกับบัญชี) */
   group_ids: string[];
   /** กลุ่มที่ตั้งไว้กับบัญชีนี้ในหน้าตั้งค่า (ใช้กับโพสต์อัตโนมัติรายวัน) */
@@ -87,6 +89,10 @@ export type JarvisGroupOption = {
   department: string | null;
   /** ประเภทกลุ่ม: 'private' เอกชน (ชุดเดิม) · 'government' ราชการ (นำเข้าจากชีตทีม Online 4 พ.ย. 2569, 2,000+ กลุ่ม) — Jarvis ควรให้เลือกประเภทก่อนแล้วค่อยเลือกกลุ่ม */
   sector: 'private' | 'government';
+  /** จังหวัดที่กลุ่มล็อกไว้ (ถอดจากชื่อกลุ่ม/คนตั้งในหน้าตั้งค่า) — [] = ยังไม่ระบุ · หลายจังหวัดได้ */
+  provinces: string[];
+  /** กลุ่มทั่วประเทศ/ทุกจังหวัด — ควรขึ้นต่อท้ายกลุ่มของจังหวัดที่เลือก */
+  nationwide: boolean;
   /**
    * ใบขอที่ส่งมากับ ?request_no= เพิ่งลงกลุ่มนี้ไม่ถึง 2 วัน — เลือกได้แต่รอบนี้จะถูกข้าม ควรขึ้นสีเทาพร้อม available_at
    * null = ไม่ได้ส่ง request_no มา หรือใบนี้ยังไม่เคยลงกลุ่มนี้ / ลงเกิน 2 วันแล้ว
@@ -231,7 +237,7 @@ export async function getJarvisOptions(opts: { requestNo?: string | null } = {})
     ),
     q<{
       id: string; fb_group_id: string; name: string | null; account_ids: string[]; last_posted_at: string | null;
-      attempts: number; posted: number; comments: number; phone_leads: number; department: string | null; sector: string | null;
+      attempts: number; posted: number; comments: number; phone_leads: number; department: string | null; sector: string | null; province: string | null;
     }>(
       // สถิติรายกลุ่มรวมครั้งเดียวต่อตาราง (กลุ่ม 2,000+ หลังนำเข้าชีตราชการ — subquery ต่อแถวช้าเกิน)
       `WITH rl AS (
@@ -249,7 +255,7 @@ export async function getJarvisOptions(opts: { requestNo?: string | null } = {})
        ua AS (
          SELECT gid, jsonb_agg(uid) AS account_ids FROM (
            SELECT u.id AS uid, jsonb_array_elements_text(COALESCE(u.group_ids::jsonb, '[]'::jsonb)) AS gid FROM ${AP}.users u) x GROUP BY gid)
-       SELECT g.id, g.fb_group_id, g.name, NULLIF(TRIM(g.department), '') AS department,
+       SELECT g.id, g.fb_group_id, g.name, g.province, NULLIF(TRIM(g.department), '') AS department,
               NULLIF(to_jsonb(g)->>'sector', '') AS sector,
               COALESCE(ua.account_ids, '[]'::jsonb) AS account_ids,
               rl.last_posted_at, COALESCE(rl.attempts, 0) AS attempts, COALESCE(rl.posted, 0) AS posted,
@@ -262,8 +268,8 @@ export async function getJarvisOptions(opts: { requestNo?: string | null } = {})
         ORDER BY g.name`,
     ).catch(async () =>
       // comment_leads ยังไม่ถูกสร้าง (ตัวเก็บคอมเมนต์ยังไม่เคยรัน) — ไม่นับเบอร์
-      q<{ id: string; fb_group_id: string; name: string | null; account_ids: string[]; last_posted_at: string | null; attempts: number; posted: number; comments: number; phone_leads: number; department: string | null; sector: string | null }>(
-        `SELECT g.id, g.fb_group_id, g.name, NULLIF(TRIM(g.department), '') AS department, NULLIF(to_jsonb(g)->>'sector', '') AS sector,
+      q<{ id: string; fb_group_id: string; name: string | null; account_ids: string[]; last_posted_at: string | null; attempts: number; posted: number; comments: number; phone_leads: number; department: string | null; sector: string | null; province: string | null }>(
+        `SELECT g.id, g.fb_group_id, g.name, g.province, NULLIF(TRIM(g.department), '') AS department, NULLIF(to_jsonb(g)->>'sector', '') AS sector,
                 COALESCE((SELECT jsonb_agg(u.id) FROM ${AP}.users u WHERE COALESCE(u.group_ids::jsonb, '[]'::jsonb) ? g.id), '[]'::jsonb) AS account_ids,
                 NULL::timestamptz AS last_posted_at, 0 AS attempts, 0 AS posted, 0 AS comments, 0 AS phone_leads
            FROM ${AP}.groups g ORDER BY g.name`,
@@ -383,8 +389,10 @@ export async function getJarvisOptions(opts: { requestNo?: string | null } = {})
       ...base,
       remaining_today: Math.max(0, daily_cap - base.posted_today),
       ...status,
-      // ค่าเริ่มต้นที่คนสั่งไม่ต้องคิด: พร้อม ไม่มีคำเตือน และล็อกอินอยู่บนเครื่องที่ออนไลน์
-      recommended: status.status === 'ready' && !status.warning && session_workers.some((w) => onlineNames.has(w)),
+      // ใช้ได้ = พร้อมโพสต์ (เจ้าของ 4 พ.ย. 2569: บัญชีที่ยังไม่เคยล็อกอินก็ใช้ได้ แค่ยังไม่เคยถูกใช้ ให้ขึ้นบน ๆ เหมือนกัน)
+      // บัญชีที่มี session บนเครื่องออนไลน์มาก่อน (sort_rank 0) บัญชีใหม่ตามมา (1) ตัวที่ใช้ไม่ได้อยู่ล่างสุด
+      recommended: status.status === 'ready' && !status.warning,
+      sort_rank: status.status === 'ready' ? (session_workers.some((w) => onlineNames.has(w)) ? 0 : 1) : status.status === 'busy' || status.status === 'full' || status.status === 'worker_offline' ? 2 : 3,
       group_ids: allGroupIds,
       home_group_ids: (r.group_ids ?? []).map(String),
       session_workers,
@@ -409,6 +417,8 @@ export async function getJarvisOptions(opts: { requestNo?: string | null } = {})
     },
     department: g.department,
     sector: g.sector === 'government' ? 'government' : 'private',
+    provinces: String(g.province ?? '').split(/[,،]/).map((v) => v.trim()).filter((v) => v && v !== 'ทั่วประเทศ'),
+    nationwide: /ทั่วประเทศ/.test(String(g.province ?? '')),
     blocked: pausedByGroup.get(String(g.id)) ?? null,
     repost_wait: (() => {
       const last = requestNo ? recentByFb.get(String(g.fb_group_id)) : null;

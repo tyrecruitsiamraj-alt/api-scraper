@@ -1,5 +1,5 @@
 import { ExternalLinkIcon } from 'lucide-react';
-import { createGroupAction, deleteGroupAction, setGroupDepartmentAction, setGroupSectorAction } from '@/lib/actions';
+import { createGroupAction, deleteGroupAction, setGroupDepartmentAction, setGroupProvinceAction, setGroupSectorAction } from '@/lib/actions';
 import { listPostingGroups } from '@/lib/repo';
 import type { PostingGroup } from '@/lib/repo';
 import { GROUP_SECTORS, groupSectorLabel, isGroupSector } from '@/lib/group-sectors';
@@ -23,12 +23,20 @@ const MAX_ROWS = 200;
  * การเลือกว่าบัญชีไหนโพสต์กลุ่มไหน อยู่ในฟอร์มเพิ่ม/แก้ไขบัญชี (ตั้งค่า → บัญชีที่ใช้งาน)
  * ไม่ใช่ตารางบัญชี × กลุ่มที่นี่ (เคยเป็นช่องติ๊ก 34 × 37 บนหน้าเดียว)
  */
-export async function PostingGroupsManager({ sector = 'all', query = '' }: { sector?: string; query?: string }) {
+/** จังหวัดของกลุ่มเป็นข้อความ "ก, ข" — แยกเป็นรายการ */
+function provincesOf(group: PostingGroup): string[] {
+  return String(group.province ?? '').split(/[,،]/).map((v) => v.trim()).filter(Boolean);
+}
+
+export async function PostingGroupsManager({ sector = 'all', query = '', province = '' }: { sector?: string; query?: string; province?: string }) {
   const groups = await listPostingGroups();
   const sectorFilter = isGroupSector(sector) ? sector : 'all';
   const needle = query.trim().toLowerCase();
+  const provinceFilter = province.trim();
+  const allProvinces = [...new Set(groups.flatMap(provincesOf))].sort((a, b) => a.localeCompare(b, 'th'));
   const visible = groups.filter((g) =>
     (sectorFilter === 'all' || g.sector === sectorFilter)
+    && (!provinceFilter || (provinceFilter === '__none__' ? provincesOf(g).length === 0 : provincesOf(g).includes(provinceFilter)))
     && (!needle || `${g.name} ${g.fb_group_id} ${g.province ?? ''}`.toLowerCase().includes(needle)));
   const shown = visible.slice(0, MAX_ROWS);
   const countBySector = (code: string) => groups.filter((g) => g.sector === code).length;
@@ -92,6 +100,16 @@ export async function PostingGroupsManager({ sector = 'all', query = '' }: { sec
             ))}
           </NativeSelect>
         </Field>
+        <Field className="w-48">
+          <FieldLabel htmlFor="group-filter-province">จังหวัด</FieldLabel>
+          <NativeSelect id="group-filter-province" name="province" size="sm" defaultValue={provinceFilter} className="w-full">
+            <NativeSelectOption value="">ทุกจังหวัด</NativeSelectOption>
+            <NativeSelectOption value="__none__">ยังไม่ระบุจังหวัด</NativeSelectOption>
+            {allProvinces.map((p) => (
+              <NativeSelectOption key={p} value={p}>{p}</NativeSelectOption>
+            ))}
+          </NativeSelect>
+        </Field>
         <Field className="min-w-64 flex-1">
           <FieldLabel htmlFor="group-filter-q">ค้นหาชื่อกลุ่ม / เลขกลุ่ม / จังหวัด</FieldLabel>
           <Input id="group-filter-q" name="q" defaultValue={query} placeholder="เช่น ขับรถ, ภูเก็ต, 5850142" />
@@ -117,10 +135,20 @@ export async function PostingGroupsManager({ sector = 'all', query = '' }: { sec
                 </ItemTitle>
                 <ItemDescription>
                   <span className="font-mono">{group.fb_group_id}</span>
-                  {group.province ? ` · ${group.province}` : ''}
+                  {group.province ? ` · ${group.province}` : ' · ยังไม่ระบุจังหวัด'}
                 </ItemDescription>
               </ItemContent>
               <ItemActions>
+                <form action={setGroupProvinceAction} className="w-44">
+                  <input type="hidden" name="id" value={group.id} />
+                  <Input
+                    name="province"
+                    defaultValue={group.province ?? ''}
+                    placeholder="จังหวัด แล้วกด Enter"
+                    aria-label={`จังหวัดของกลุ่ม ${group.name}`}
+                    className="h-8 text-sm"
+                  />
+                </form>
                 <form action={setGroupSectorAction} className="w-28">
                   <input type="hidden" name="id" value={group.id} />
                   <GroupSectorSelect

@@ -4166,6 +4166,11 @@ export async function createPostingGroup(input: {
   return id;
 }
 
+/** ตั้งจังหวัดของกลุ่ม — หลายจังหวัดคั่นด้วยจุลภาค · "ทั่วประเทศ" = ทุกจังหวัด · ว่าง = ไม่ระบุ */
+export async function setPostingGroupProvince(id: string, province: string | null): Promise<void> {
+  await q(`UPDATE ${AP}.groups SET province = $2 WHERE id = $1`, [id, province]);
+}
+
 /** เปลี่ยนประเภทกลุ่ม ราชการ/เอกชน */
 export async function setPostingGroupSector(id: string, sector: GroupSector): Promise<void> {
   await ensureGroupSectorColumn();
