@@ -39,7 +39,7 @@ export async function POST(req: Request) {
        FROM workers
       WHERE kind = 'scraper'
         AND last_seen > now() - interval '2 minutes'
-        AND name ~ '^scraper-[0-9]+$'
+        AND name ~ 'scraper-[0-9]+$'
       ORDER BY name`,
   );
 
