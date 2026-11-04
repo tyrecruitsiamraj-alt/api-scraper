@@ -12,7 +12,8 @@ export function postCaptionIssues(caption) {
   if (!text) return ['ไม่มีข้อความประกาศ'];
   const issues = [];
   if (/OPL\s*-?\s*\d/i.test(text)) issues.push('มีเลขใบขอ (OPL…) อยู่ในข้อความ');
-  if (/ขอให้\s*OPL|ผู้ประสานงาน|หมายเหตุภายใน/u.test(text)) issues.push('มีข้อความสั่งงานภายในอยู่ในข้อความ');
+  // "ผู้ประสานงาน" เดี่ยว ๆ เป็นชื่อตำแหน่ง/หน้าที่งานจริงได้ — เคยบล็อกใบ OPL6910057/OPL6910066 ผิด (4 พ.ย. 2569)
+  if (/ขอให้\s*OPL|หมายเหตุภายใน/u.test(text)) issues.push('มีข้อความสั่งงานภายในอยู่ในข้อความ');
   const hasPhone = /0\d[\d\s-]{7,11}\d/.test(text);
   const hasLink = /https?:\/\/\S+/i.test(text);
   if (!hasPhone && !hasLink) issues.push('ไม่มีเบอร์โทรหรือลิงก์สมัคร');

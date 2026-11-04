@@ -18,6 +18,15 @@ test('internal request numbers and instructions are blocked', () => {
   assert.ok(issues.some((i) => i.includes('สั่งงานภายใน')));
 });
 
+test('a coordinator duty in the job description is not internal text', () => {
+  const caption = `${GOOD}\n- ตำแหน่งผู้ประสานงานต้องทำหน้าที่ประสานงานต่างๆ ให้กับบริษัทฯ , ลูกค้าและพนักงาน\n- ประสบการณ์ ขับรถอย่างน้อย2 ปีสำหรับผู้ประสานงานจะต้องมีประสบการณ์คุมงานได้`;
+  assert.deepEqual(postCaptionIssues(caption), []);
+});
+
+test('an internal note is still blocked', () => {
+  assert.ok(postCaptionIssues(`${GOOD}\nหมายเหตุภายใน: รอคอนเฟิร์มลูกค้า`).some((i) => i.includes('สั่งงานภายใน')));
+});
+
 test('a caption without any way to apply is blocked', () => {
   assert.deepEqual(postCaptionIssues('รับสมัครพนักงานขับรถ เงินเดือน 13,000'), ['ไม่มีเบอร์โทรหรือลิงก์สมัคร']);
   assert.deepEqual(postCaptionIssues('   '), ['ไม่มีข้อความประกาศ']);
