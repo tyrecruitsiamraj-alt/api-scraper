@@ -6,7 +6,7 @@ import { usePathname } from 'next/navigation';
 import { signOut, useSession } from 'next-auth/react';
 import { useEffect, useState } from 'react';
 import type { LucideIcon } from 'lucide-react';
-import { LayoutDashboardIcon, LogOutIcon, MegaphoneIcon, MenuIcon, SearchIcon, SettingsIcon, UsersIcon } from 'lucide-react';
+import { ClipboardListIcon, LayoutDashboardIcon, LogOutIcon, MegaphoneIcon, MenuIcon, SearchIcon, SettingsIcon, UsersIcon } from 'lucide-react';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
 import { Separator } from '@/components/ui/separator';
@@ -21,6 +21,7 @@ const DESKTOP_NAV: (NavItem & { icon: LucideIcon })[] = [
   { href: '/scraping', label: 'งาน Scrap', icon: SearchIcon },
   { href: '/autopost/jobs', label: 'งานโพสต์', icon: MegaphoneIcon, also: ['/autopost'] },
   { href: '/candidates', label: 'คลังผู้สมัคร', icon: UsersIcon },
+  { href: '/orders', label: 'คำสั่งงาน', icon: ClipboardListIcon },
   { href: '/settings', label: 'ตั้งค่า', icon: SettingsIcon, also: ['/connectors'] },
 ];
 const NAV: NavItem[] = DESKTOP_NAV;
