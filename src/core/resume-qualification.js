@@ -122,14 +122,16 @@ export function evaluateResumeQualification(candidate = {}, { criteria = {}, sou
   const desiredRoleMatched = desiredRoleQuality > 0;
   const experienceRoleMatched = experienceRoleQualities.length > 0;
   // สายงานไม่ใช่เกณฑ์ตัด (เจ้าของ 4 พ.ย. 2569: "เอาแค่อยู่กรุงเทพ อายุเข้าเกณฑ์ เพศใช่ เนื้องานค่อยว่ากัน")
-  // เกณฑ์ตัดมีแค่ที่ใบขอเขียน: จังหวัด อายุ เพศ (และวุฒิ/เพดานเงินเดือนถ้าระบุ) · คำตำแหน่งที่ AI เลือก
-  // ใช้เรียงลำดับเท่านั้น — เดิมคนขับรถที่เขียนประวัติงานไม่ตรงคำตกทั้ง 176 คนใน 2 สัปดาห์
+  // แต่ตำแหน่งไม่ตรงสาย "โชว์แต่ไม่นับเป้า" (เจ้าของเคาะวันเดียวกัน) = ต้องตรวจเพิ่ม ไม่ใช่ไม่ผ่าน
+  // เดิมคนขับรถที่เขียนประวัติงานไม่ตรงคำตกทิ้งทั้ง 176 คนใน 2 สัปดาห์
   let roleMatched = null; // null = เรซูเม่ไม่ระบุตำแหน่ง
   if (acceptedPositions.length) {
     const identity = clean(candidate.name || candidate.full_name);
     if (!identity) missing.push('insufficient_evidence:identity');
     if (roleText) roleMatched = acceptedPositions.some((position) => roleMatches(roleText, position));
     if (roleMatched) passed.push('job_family');
+    else if (roleMatched === false) missing.push('off_role');
+    else missing.push('insufficient_evidence:job_family');
   }
 
   // เกณฑ์ตัดจริงมีแค่ จังหวัด อายุ เพศ และเพดานเงินเดือน (ใบขอเขียน "ไม่เกิน") — เจ้าของ 4 พ.ย. 2569
@@ -192,10 +194,6 @@ export function evaluateResumeQualification(candidate = {}, { criteria = {}, sou
     else softMissing.push(value || item?.field || 'soft_score');
   }
 
-  if (acceptedPositions.length && !roleMatched) {
-    softMissing.push(roleMatched === null ? 'ตำแหน่งที่ต้องการ (เรซูเม่ไม่ระบุ)' : 'ตำแหน่งตรงคำที่ค้น');
-  }
-
   const reasons = [...new Set(rejected.length ? rejected : missing)];
   const status = rejected.length ? 'rejected' : missing.length ? 'needs_review' : 'qualified';
   const softTotal = softPassed.length + softMissing.length;
@@ -221,10 +219,8 @@ export function evaluateResumeQualification(candidate = {}, { criteria = {}, sou
     soft_evidence: softScore,
     evidence_confidence: confidenceBonus,
   } : null;
-  // ตำแหน่งไม่ตรงยังผ่าน (ไม่ตัด) แต่คะแนนต้องต่ำกว่าคนตำแหน่งตรงเสมอ — ขั้นต่ำ 40 แทน 60
-  const qualifiedFloor = acceptedPositions.length && !roleMatched ? 40 : 60;
   const qualifiedScore = acceptedPositions.length
-    ? Math.max(qualifiedFloor, Math.min(roleMatched ? 100 : 59, roleScore + hardScore + softScore + confidenceBonus))
+    ? Math.max(60, Math.min(100, roleScore + hardScore + softScore + confidenceBonus))
     : softTotal ? 60 + Math.round((softPassed.length / softTotal) * 40) : 100;
   return {
     status,
@@ -257,7 +253,7 @@ const REJECTION_LABEL = {
 };
 
 // โปรไฟล์/ไฟล์แนบไม่ครบไม่ใช่เหตุตัดแล้ว (เก็บเป็น "ต้องตรวจเพิ่ม") — ไม่นับเป็นเหตุ "ถูกคัดออก"
-const NOT_A_REJECTION = new Set(['duplicate', 'incomplete_profile', 'incomplete_attachments', 'missing_contact']);
+const NOT_A_REJECTION = new Set(['duplicate', 'incomplete_profile', 'incomplete_attachments', 'missing_contact', 'off_role']);
 
 export function summarizeRejections(found, opened, reasonCounts = {}, needsReview = 0) {
   const parts = Object.entries(reasonCounts)

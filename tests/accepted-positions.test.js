@@ -17,8 +17,8 @@ test('ตำแหน่งที่มีคำขยายยังรับ�
   assert.ok(!result.reasons.includes('wrong_job_family'), JSON.stringify(result.reasons));
 });
 
-// เจ้าของ 4 พ.ย. 2569: สายงานไม่ใช่เหตุตัด แต่คนสายตรงต้องอยู่บนกว่าเสมอ
-test('คนละสายงานไม่ถูกตัด แต่อยู่ต่ำกว่าคนสายตรง', () => {
+// เจ้าของ 4 พ.ย. 2569: สายงานไม่ใช่เหตุตัด แต่คนไม่ตรงสายไม่นับเป้า
+test('คนละสายงานไม่ถูกตัด แต่ไปอยู่ต้องตรวจเพิ่ม', () => {
   const accepted = acceptedPositionsForTitle('พนักงานขับรถ นายไทย');
   const spec = { criteria: {}, sourcingSpec: { accepted_positions: accepted } };
   const mechanic = { name: 'ทดสอบ', desired_positions: '1. ช่างซ่อมบำรุง', work_experience: [{ position: 'ช่าง Service' }] };
@@ -26,8 +26,9 @@ test('คนละสายงานไม่ถูกตัด แต่อย�
   const off = evaluateResumeQualification(mechanic, spec);
   const on = evaluateResumeQualification(driver, spec);
   assert.ok(!off.reasons.includes('wrong_job_family'));
+  assert.equal(off.status, 'needs_review', 'โชว์แต่ไม่นับเป้า');
   assert.equal(off.evidence.role_match, false);
-  assert.ok(on.score > off.score);
+  assert.equal(on.status, 'qualified');
 });
 
 test('ตำแหน่งที่พจนานุกรมไม่รู้จัก ใช้ชื่อตำแหน่งเดิมอย่างเดียว', () => {

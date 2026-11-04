@@ -25,14 +25,17 @@ test('หลักฐานว่าไม่ผ่าน Hard Filter ต้อ�
   assert.deepEqual(result.reasons, ['location_mismatch']);
 });
 
-test('ตำแหน่งคนละสายไม่ตัดทิ้ง แต่อยู่ต่ำกว่าคนที่ตำแหน่งตรง', () => {
+// เจ้าของ 4 พ.ย. 2569: ตำแหน่งไม่ตรงสาย "โชว์แต่ไม่นับเป้า"
+test('ตำแหน่งคนละสายไม่ตัดทิ้ง แต่ไปอยู่ต้องตรวจเพิ่ม ไม่นับเป้า', () => {
   const spec = { sourcingSpec: { accepted_positions: ['QA Engineer', 'Data Tester', 'ETL Developer'] } };
   const other = evaluateResumeQualification({ name: 'ผู้สมัครหนึ่ง', desired_positions: 'ช่างซ่อมบำรุงอากาศยาน' }, spec);
+  const unknown = evaluateResumeQualification({ name: 'ผู้สมัครสาม' }, spec);
   const match = evaluateResumeQualification({ name: 'ผู้สมัครสอง', desired_positions: 'Data Tester' }, spec);
-  assert.equal(other.status, 'qualified');
-  assert.equal(other.evidence.role_match, false);
-  assert.ok(other.evidence.soft_missing.includes('ตำแหน่งตรงคำที่ค้น'));
-  assert.ok(match.score > other.score);
+  assert.equal(other.status, 'needs_review');
+  assert.deepEqual(other.reasons, ['off_role']);
+  assert.equal(unknown.status, 'needs_review');
+  assert.deepEqual(unknown.reasons, ['insufficient_evidence:job_family']);
+  assert.equal(match.status, 'qualified');
 });
 
 test('Resume ที่ไม่มีชื่อห้ามนับผ่านงาน Sourcing', () => {
@@ -191,9 +194,11 @@ test('พนักงานขาย หญิง 25–50 กรุงเทพ:
     name: 'ผู้สมัครทดสอบ', gender: 'หญิง', age: '32', desired_work_area: 'กรุงเทพมหานคร',
     desired_positions: 'แคชเชียร์', education_summary: 'ม.6',
   };
-  const ok = evaluateResumeQualification(base, { criteria, sourcingSpec });
-  assert.equal(ok.status, 'qualified', 'ตำแหน่งไม่ตรงและวุฒิต่ำกว่า ยังผ่าน');
+  const ok = evaluateResumeQualification({ ...base, desired_positions: 'พนักงานขายหน้าร้าน' }, { criteria, sourcingSpec });
+  assert.equal(ok.status, 'qualified', 'วุฒิต่ำกว่าที่ใบขอเขียน ยังผ่าน');
   assert.ok(ok.evidence.soft_missing.includes('วุฒิ ปริญญาตรี'));
+  const cashier = evaluateResumeQualification(base, { criteria, sourcingSpec });
+  assert.equal(cashier.status, 'needs_review', 'แคชเชียร์ไม่ตรงสาย: โชว์แต่ไม่นับเป้า');
   assert.equal(evaluateResumeQualification({ ...base, gender: 'ชาย' }, { criteria, sourcingSpec }).status, 'rejected');
   assert.equal(evaluateResumeQualification({ ...base, age: '55' }, { criteria, sourcingSpec }).status, 'rejected');
   assert.equal(evaluateResumeQualification({ ...base, desired_work_area: 'เชียงใหม่' }, { criteria, sourcingSpec }).status, 'rejected');

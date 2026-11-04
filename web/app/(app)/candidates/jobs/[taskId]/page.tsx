@@ -27,6 +27,7 @@ const STATUS = {
 
 const REASON: Record<string, string> = {
   wrong_job_family: 'ประสบการณ์ยังไม่ตรงสายงานนี้',
+  off_role: 'ตำแหน่งในเรซูเม่ไม่ตรงสายงานนี้ (ไม่นับเข้าเป้า)',
   location_mismatch: 'พื้นที่ทำงานไม่ตรงเงื่อนไข',
   education_below_minimum: 'วุฒิต่ำกว่าเกณฑ์บังคับ',
   gender_mismatch: 'ข้อมูลไม่ตรงเงื่อนไขที่ใบงานระบุ',
@@ -161,7 +162,12 @@ export default async function CandidateJobDetailPage(
                           <Badge variant={state.variant}>{state.label}</Badge>
                           {candidate.matched_position === 'จากคลังผู้สมัคร' && <Badge variant="outline">จากคลังผู้สมัคร</Badge>}
                           {candidate.viewed_at && <Badge variant="outline">เปิดอ่านแล้ว</Badge>}
-                          {candidate.called_at && <Badge variant="outline">โทรแล้ว</Badge>}
+                          {/* โทรจากใบไหนก็ขึ้น — คนจากคลังส่งซ้ำได้ แต่ต้องรู้ว่ามีคนโทรไปแล้ว (เจ้าของ 4 พ.ย. 2569) */}
+                          {candidate.called_at && (
+                            <Badge variant="outline">
+                              โทรแล้ว{candidate.called_by ? ` โดย ${candidate.called_by.replace(/@.*$/, '')}` : ''} · {fmt(candidate.called_at)}
+                            </Badge>
+                          )}
                         </div>
                         <Link href={`/candidates/${candidate.id}`} className="mt-1 truncate text-lg font-semibold text-foreground hover:text-primary">{candidate.full_name || '(ไม่มีชื่อ)'}</Link>
                         <p className="text-sm text-muted-foreground">{candidate.desired_positions || candidate.matched_position || 'ไม่ระบุตำแหน่ง'} · {candidate.province || 'ไม่ระบุพื้นที่'} · {candidate.age ? `${candidate.age} ปี` : 'ไม่ระบุอายุ'}</p>

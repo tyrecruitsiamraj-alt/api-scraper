@@ -371,48 +371,8 @@ export async function listCandidateJobMatches(taskId: string): Promise<Candidate
        JOIN candidates c ON c.id=tc.candidate_id
        LEFT JOIN candidate_sources s ON s.id=tc.candidate_source_id
       WHERE tc.task_id=$1
-        -- Fail-closed desk: never show incomplete body rows (edu/work/profile).
-        AND COALESCE(NULLIF(trim(c.full_name), ''), '') <> ''
-        AND COALESCE(NULLIF(trim(c.gender), ''), '') <> ''
-        AND (
-          COALESCE(NULLIF(trim(c.age), ''), '') <> ''
-          OR COALESCE(NULLIF(trim(c.birth_date), ''), '') <> ''
-        )
-        AND (
-          COALESCE(NULLIF(trim(c.address), ''), '') <> ''
-          OR COALESCE(NULLIF(trim(c.province), ''), '') <> ''
-          OR COALESCE(NULLIF(trim(c.desired_work_area), ''), '') <> ''
-        )
-        AND EXISTS (
-          SELECT 1 FROM jsonb_array_elements(COALESCE(c.education, '[]'::jsonb)) e
-           WHERE NULLIF(trim(e->>'institution'), '') IS NOT NULL
-              OR NULLIF(trim(e->>'degree'), '') IS NOT NULL
-              OR NULLIF(trim(e->>'major'), '') IS NOT NULL
-        )
-        AND EXISTS (
-          SELECT 1 FROM jsonb_array_elements(COALESCE(c.work_experience, '[]'::jsonb)) e
-           WHERE NULLIF(trim(e->>'company'), '') IS NOT NULL
-              OR NULLIF(trim(e->>'position'), '') IS NOT NULL
-        )
-        AND (
-          EXISTS (
-            SELECT 1 FROM candidate_assets a
-             WHERE a.candidate_id=c.id
-               AND a.kind='attachment'
-               AND a.download_status IN ('success')
-               AND a.content IS NOT NULL
-          )
-          OR (
-            EXISTS (SELECT 1 FROM candidate_sources sx WHERE sx.candidate_id=c.id AND sx.platform='jobthai')
-            AND EXISTS (
-              SELECT 1 FROM candidate_assets a
-               WHERE a.candidate_id=c.id
-                 AND a.kind='profile'
-                 AND a.download_status='success'
-                 AND a.content IS NOT NULL
-            )
-          )
-        )
+        -- เดิมซ่อนคนที่เรซูเม่ไม่ครบ (ชื่อ/เพศ/อายุ/ที่อยู่/การศึกษา/ประวัติงาน/ไฟล์แนบ) ตัวเลขหัวหน้ากับรายชื่อจึงไม่ตรงกัน
+        -- ตั้งแต่ 4 พ.ย. 2569 คนพวกนี้เก็บเป็น "ต้องตรวจเพิ่ม" พร้อมบอกว่าขาดอะไร ต้องเห็นบนจอ
       ORDER BY CASE tc.qualification_status WHEN 'qualified' THEN 0 WHEN 'needs_review' THEN 1 ELSE 2 END,
                CASE WHEN (COALESCE(jsonb_array_length(tc.qualification_evidence->'passed'),0)
                             + COALESCE(jsonb_array_length(tc.qualification_evidence->'missing'),0)
