@@ -1,5 +1,6 @@
 import 'server-only';
 import { randomUUID } from 'node:crypto';
+import type { GroupSector } from './group-sectors';
 import { pool, q } from './db';
 import { getCandidateDuplicates } from './candidate-duplicates';
 import { postedOutcome } from '../../src/core/post-task-state.js';
@@ -4113,20 +4114,31 @@ export async function enqueueAssignmentPost(assignmentId: string, requestedBy: s
 // ---------------------------------------------------------------------------
 // จัดการกลุ่มโพสต์ + ผูกกลุ่มเข้าบัญชี (native — แทน iframe เดิม)
 // ---------------------------------------------------------------------------
+export { GROUP_SECTORS, isGroupSector, groupSectorLabel } from './group-sectors';
+export type { GroupSector } from './group-sectors';
+
 export type PostingGroup = {
   id: string;
   name: string;
   fb_group_id: string;
   province: string | null;
   department: string | null;
+  sector: GroupSector;
 };
+
+/** คอลัมน์ประเภทกลุ่ม (schema-031 แบบ runtime เหมือน department) — กลุ่มเดิมเป็นเอกชน */
+async function ensureGroupSectorColumn(): Promise<void> {
+  await q(`ALTER TABLE ${AP}.groups ADD COLUMN IF NOT EXISTS sector VARCHAR(16) NOT NULL DEFAULT 'private'`);
+}
 
 /** กลุ่ม Facebook ทั้งหมดในระบบ. guarded — [] ถ้า schema ไม่มี. */
 export async function listPostingGroups(): Promise<PostingGroup[]> {
   try {
+    await ensureGroupSectorColumn();
     return await q<PostingGroup>(
       `SELECT id, COALESCE(NULLIF(TRIM(name), ''), fb_group_id) AS name,
-              fb_group_id, province, department
+              fb_group_id, province, department,
+              CASE WHEN sector = 'government' THEN 'government' ELSE 'private' END AS sector
          FROM ${AP}.groups
         ORDER BY created_at DESC`,
     );
@@ -4141,15 +4153,23 @@ export async function createPostingGroup(input: {
   name?: string | null;
   province?: string | null;
   department?: string | null;
+  sector?: GroupSector | null;
 }): Promise<string> {
   const id = autopostId();
   const name = (input.name || '').trim() || `Group ${input.fbGroupId}`;
+  await ensureGroupSectorColumn();
   await q(
-    `INSERT INTO ${AP}.groups (id, name, fb_group_id, province, department)
-     VALUES ($1, $2, $3, $4, $5)`,
-    [id, name, input.fbGroupId.trim(), input.province || null, input.department || null],
+    `INSERT INTO ${AP}.groups (id, name, fb_group_id, province, department, sector)
+     VALUES ($1, $2, $3, $4, $5, $6)`,
+    [id, name, input.fbGroupId.trim(), input.province || null, input.department || null, input.sector || 'private'],
   );
   return id;
+}
+
+/** เปลี่ยนประเภทกลุ่ม ราชการ/เอกชน */
+export async function setPostingGroupSector(id: string, sector: GroupSector): Promise<void> {
+  await ensureGroupSectorColumn();
+  await q(`UPDATE ${AP}.groups SET sector = $2 WHERE id = $1`, [id, sector]);
 }
 
 /** ติดป้ายว่ากลุ่มนี้เป็นของธุรกิจไหน (LBD/LBA/LM…) — null = ไม่ระบุ */

@@ -68,13 +68,16 @@ import {
   getConnectorOption,
   enqueueFacebookPreflight,
   enqueueAssignmentPost,
+  isGroupSector,
   postJarvisOrder,
   repostJarvisOrder,
+  setPostingGroupSector,
   skippedGroupsNote,
   updateJarvisPostCaption,
   recordCandidateActivity,
   reassessCandidateJob,
 } from './repo';
+import type { GroupSector } from './group-sectors';
 
 /** ทดสอบ Web → Queue → Worker แบบไม่แตะงานจริงหรือ Facebook. */
 export async function runWorkflowSelfTestAction() {
@@ -324,9 +327,27 @@ export async function createGroupAction(formData: FormData) {
   const province = String(formData.get('province') ?? '').trim();
   const department = readBusinessUnit(formData.get('department'));
   if (!department) throw new Error('เลือกธุรกิจของกลุ่มนี้ (LBD / LBA / LM)');
-  await createPostingGroup({ fbGroupId, name: name || null, province: province || null, department });
+  const sector = readGroupSector(formData.get('sector'));
+  await createPostingGroup({ fbGroupId, name: name || null, province: province || null, department, sector });
   revalidatePath('/settings/posting');
   revalidatePath('/orchestrator');
+}
+
+/** ประเภทกลุ่มจากฟอร์ม — ว่าง = เอกชน */
+function readGroupSector(value: FormDataEntryValue | null): GroupSector {
+  const code = String(value ?? '').trim();
+  if (!code) return 'private';
+  if (!isGroupSector(code)) throw new Error(`ไม่รู้จักประเภทกลุ่ม ${code}`);
+  return code;
+}
+
+/** เปลี่ยนประเภทกลุ่ม ราชการ/เอกชน (เลือกจากรายการกลุ่ม) */
+export async function setGroupSectorAction(formData: FormData) {
+  await requireSession();
+  const id = String(formData.get('id') ?? '').trim();
+  if (!id) throw new Error('ไม่พบกลุ่ม');
+  await setPostingGroupSector(id, readGroupSector(formData.get('sector')));
+  revalidatePath('/settings/posting');
 }
 
 /** รหัสธุรกิจจากฟอร์ม — ว่าง = ไม่ระบุ, ค่าที่ไม่อยู่ในรายการถือว่าพิมพ์มั่ว */

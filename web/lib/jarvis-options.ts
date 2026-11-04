@@ -85,6 +85,8 @@ export type JarvisGroupOption = {
   stats_30d: { attempts: number; posted: number; comments: number; phone_leads: number };
   /** ธุรกิจของกลุ่ม LBD/LBA/LM — null = ยังไม่ได้เลือก */
   department: string | null;
+  /** ประเภทกลุ่ม: 'private' เอกชน (ชุดเดิม) · 'government' ราชการ (นำเข้าจากชีตทีม Online 4 พ.ย. 2569, 2,000+ กลุ่ม) — Jarvis ควรให้เลือกประเภทก่อนแล้วค่อยเลือกกลุ่ม */
+  sector: 'private' | 'government';
   /**
    * ใบขอที่ส่งมากับ ?request_no= เพิ่งลงกลุ่มนี้ไม่ถึง 2 วัน — เลือกได้แต่รอบนี้จะถูกข้าม ควรขึ้นสีเทาพร้อม available_at
    * null = ไม่ได้ส่ง request_no มา หรือใบนี้ยังไม่เคยลงกลุ่มนี้ / ลงเกิน 2 วันแล้ว
@@ -229,25 +231,39 @@ export async function getJarvisOptions(opts: { requestNo?: string | null } = {})
     ),
     q<{
       id: string; fb_group_id: string; name: string | null; account_ids: string[]; last_posted_at: string | null;
-      attempts: number; posted: number; comments: number; phone_leads: number; department: string | null;
+      attempts: number; posted: number; comments: number; phone_leads: number; department: string | null; sector: string | null;
     }>(
-      `SELECT g.id, g.fb_group_id, g.name, NULLIF(TRIM(g.department), '') AS department,
-              COALESCE((SELECT jsonb_agg(u.id) FROM ${AP}.users u WHERE COALESCE(u.group_ids::jsonb, '[]'::jsonb) ? g.id), '[]'::jsonb) AS account_ids,
-              (SELECT max(rl.created_at) FROM ${AP}.run_logs rl WHERE rl.group_id = g.fb_group_id AND rl.level = 'success') AS last_posted_at,
-              (SELECT count(*) FROM ${AP}.run_logs rl WHERE rl.group_id = g.fb_group_id AND rl.level IN ('success', 'warn', 'error')
-                  AND rl.created_at > now() - interval '30 days')::int AS attempts,
-              (SELECT count(*) FROM ${AP}.run_logs rl WHERE rl.group_id = g.fb_group_id AND rl.level = 'success'
-                  AND rl.created_at > now() - interval '30 days')::int AS posted,
-              COALESCE((SELECT sum(pl.comment_count) FROM ${AP}.post_logs pl WHERE pl.group_id = g.fb_group_id
-                  AND pl.created_at > now() - interval '30 days'), 0)::int AS comments,
-              COALESCE((SELECT count(*) FROM ${AP}.comment_leads cl WHERE cl.group_id = g.fb_group_id AND cl.phone IS NOT NULL
-                  AND cl.first_seen_at > now() - interval '30 days'), 0)::int AS phone_leads
+      // สถิติรายกลุ่มรวมครั้งเดียวต่อตาราง (กลุ่ม 2,000+ หลังนำเข้าชีตราชการ — subquery ต่อแถวช้าเกิน)
+      `WITH rl AS (
+         SELECT group_id,
+                max(created_at) FILTER (WHERE level = 'success') AS last_posted_at,
+                count(*) FILTER (WHERE level IN ('success', 'warn', 'error') AND created_at > now() - interval '30 days')::int AS attempts,
+                count(*) FILTER (WHERE level = 'success' AND created_at > now() - interval '30 days')::int AS posted
+           FROM ${AP}.run_logs WHERE group_id IS NOT NULL GROUP BY group_id),
+       pl AS (
+         SELECT group_id, COALESCE(sum(comment_count), 0)::int AS comments
+           FROM ${AP}.post_logs WHERE group_id IS NOT NULL AND created_at > now() - interval '30 days' GROUP BY group_id),
+       cl AS (
+         SELECT group_id, count(*)::int AS phone_leads
+           FROM ${AP}.comment_leads WHERE phone IS NOT NULL AND first_seen_at > now() - interval '30 days' GROUP BY group_id),
+       ua AS (
+         SELECT gid, jsonb_agg(uid) AS account_ids FROM (
+           SELECT u.id AS uid, jsonb_array_elements_text(COALESCE(u.group_ids::jsonb, '[]'::jsonb)) AS gid FROM ${AP}.users u) x GROUP BY gid)
+       SELECT g.id, g.fb_group_id, g.name, NULLIF(TRIM(g.department), '') AS department,
+              NULLIF(to_jsonb(g)->>'sector', '') AS sector,
+              COALESCE(ua.account_ids, '[]'::jsonb) AS account_ids,
+              rl.last_posted_at, COALESCE(rl.attempts, 0) AS attempts, COALESCE(rl.posted, 0) AS posted,
+              COALESCE(pl.comments, 0) AS comments, COALESCE(cl.phone_leads, 0) AS phone_leads
          FROM ${AP}.groups g
+         LEFT JOIN rl ON rl.group_id = g.fb_group_id
+         LEFT JOIN pl ON pl.group_id = g.fb_group_id
+         LEFT JOIN cl ON cl.group_id = g.fb_group_id
+         LEFT JOIN ua ON ua.gid = g.id
         ORDER BY g.name`,
     ).catch(async () =>
       // comment_leads ยังไม่ถูกสร้าง (ตัวเก็บคอมเมนต์ยังไม่เคยรัน) — ไม่นับเบอร์
-      q<{ id: string; fb_group_id: string; name: string | null; account_ids: string[]; last_posted_at: string | null; attempts: number; posted: number; comments: number; phone_leads: number; department: string | null }>(
-        `SELECT g.id, g.fb_group_id, g.name, NULLIF(TRIM(g.department), '') AS department,
+      q<{ id: string; fb_group_id: string; name: string | null; account_ids: string[]; last_posted_at: string | null; attempts: number; posted: number; comments: number; phone_leads: number; department: string | null; sector: string | null }>(
+        `SELECT g.id, g.fb_group_id, g.name, NULLIF(TRIM(g.department), '') AS department, NULLIF(to_jsonb(g)->>'sector', '') AS sector,
                 COALESCE((SELECT jsonb_agg(u.id) FROM ${AP}.users u WHERE COALESCE(u.group_ids::jsonb, '[]'::jsonb) ? g.id), '[]'::jsonb) AS account_ids,
                 NULL::timestamptz AS last_posted_at, 0 AS attempts, 0 AS posted, 0 AS comments, 0 AS phone_leads
            FROM ${AP}.groups g ORDER BY g.name`,
@@ -392,6 +408,7 @@ export async function getJarvisOptions(opts: { requestNo?: string | null } = {})
       phone_leads: Number(g.phone_leads) || 0,
     },
     department: g.department,
+    sector: g.sector === 'government' ? 'government' : 'private',
     blocked: pausedByGroup.get(String(g.id)) ?? null,
     repost_wait: (() => {
       const last = requestNo ? recentByFb.get(String(g.fb_group_id)) : null;

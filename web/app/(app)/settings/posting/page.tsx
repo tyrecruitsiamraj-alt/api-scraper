@@ -28,7 +28,8 @@ async function autopostIsReady() {
   }
 }
 
-export default async function SettingsPostingPage() {
+export default async function SettingsPostingPage({ searchParams }: { searchParams: Promise<{ sector?: string; q?: string }> }) {
+  const params = await searchParams;
   const ready = await autopostIsReady();
   return (
     <div className="flex flex-col gap-8">
@@ -37,7 +38,7 @@ export default async function SettingsPostingPage() {
         <p className="text-sm text-muted-foreground">คลังกลุ่ม Facebook ที่ใช้โพสต์ · เลือกว่าบัญชีไหนโพสต์กลุ่มไหนได้ที่ บัญชีที่ใช้งาน → แก้ไข</p>
       </div>
 
-      <PostingGroupsManager />
+      <PostingGroupsManager sector={params.sector ?? 'all'} query={params.q ?? ''} />
 
       <Collapsible asChild>
         <Card>

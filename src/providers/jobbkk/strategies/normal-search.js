@@ -555,8 +555,13 @@ async function pickInRangeSelect(page, index, labels, legacyPattern) {
     ? selects.nth(index).locator('.ant-select-selector').first()
     : await firstVisibleLocator([page.getByText(legacyPattern), page.locator('.ant-select-selector').nth(index)]);
   if (!control) return false;
-  await clickWithoutNavigationWait(control);
+  // แผงอายุถูก React วาดใหม่หลังเลือกช่องแรก ตัว element เดิมหลุดจาก DOM กลางทางคลิก (Playwright ลองใหม่จน 15 วิ — RM009 3 พ.ย. 2569)
+  // จึงคลิกตามพิกัดของกล่องแทนการเกาะ element: หาตำแหน่งครั้งเดียวแล้วคลิกด้วยเมาส์
   await sleep(300);
+  const box = await control.boundingBox().catch(() => null);
+  if (box) await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+  else await control.dispatchEvent('mousedown').catch(() => {});
+  await sleep(400);
   if (await clickMatchingOption(page, labels)) return true;
   for (const label of labels) {
     if (await pickOptionByKeyboard(page, label)) return true;
