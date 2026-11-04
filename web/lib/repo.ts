@@ -3707,8 +3707,9 @@ export async function listJarvisPostOrders(opts: { requestNos?: string[] } = {})
   const groupByFb = new Map(groupRows.map((g) => [String(g.fb_group_id), g]));
   const groupNames = new Map(groupRows.map((g) => [g.id, g.name]));
   const groupNamesByFb = new Map(groupRows.map((g) => [String(g.fb_group_id), g.name]));
-  const out: JarvisPostOrder[] = [];
-  for (const row of rows) {
+  // ทีละใบมี ~8 query ต่อกัน · 79 ใบเรียงคิวทีละใบ = 13 วิ ต่อการเปิดศูนย์งาน (4 พ.ย. 2569)
+  // ทำหลายใบพร้อมกันเท่าจำนวน connection ใน pool (5) ลำดับผลคงเดิม
+  const buildOrder = async (row: (typeof rows)[number]): Promise<JarvisPostOrder> => {
     const s = row.snapshot ?? {};
     const groupIds = Array.isArray(s.group_ids) ? s.group_ids.map(String) : [];
     const caption = String(s.caption ?? '');
@@ -3846,7 +3847,7 @@ export async function listJarvisPostOrders(opts: { requestNos?: string[] } = {})
       [jobId],
     ).catch(() => []);
     const jarvisStatus = row.status;
-    out.push({
+    return {
       request_no: row.request_no,
       created_at: row.created_at,
       requested_by_name: row.requested_by_name,
@@ -3877,8 +3878,16 @@ export async function listJarvisPostOrders(opts: { requestNos?: string[] } = {})
       repost_groups: repostGroups,
       recent_groups: recentGroups,
       group_results: groupResults,
-    });
-  }
+    };
+  };
+  const out: JarvisPostOrder[] = new Array(rows.length);
+  let next = 0;
+  await Promise.all(Array.from({ length: Math.min(5, rows.length) }, async () => {
+    while (next < rows.length) {
+      const i = next++;
+      out[i] = await buildOrder(rows[i]);
+    }
+  }));
   return out;
 }
 
