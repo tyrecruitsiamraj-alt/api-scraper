@@ -1,4 +1,3 @@
-import Link from 'next/link';
 import { ExternalLinkIcon } from 'lucide-react';
 import { createGroupAction, deleteGroupAction, setGroupDepartmentAction, setGroupProvinceAction, setGroupSectorAction } from '@/lib/actions';
 import { listPostingGroups } from '@/lib/repo';
@@ -55,11 +54,6 @@ export async function PostingGroupsManager({ sector = 'private', query = '', pro
   const mustNarrow = !provinceFilter && !needle && !jobTypeFilter && inSector.length > MAX_ROWS;
   const shown = mustNarrow ? [] : visible.slice(0, MAX_ROWS);
   const countBySector = (code: string) => groups.filter((g) => g.sector === code).length;
-  const href = (patch: Record<string, string>) => {
-    const next = new URLSearchParams({ sector: sectorFilter, province: provinceFilter, q: query, job: jobTypeFilter, ...patch });
-    for (const [k, v] of [...next.entries()]) if (!v) next.delete(k);
-    return `/settings/posting?${next.toString()}`;
-  };
 
   return (
     <section className="flex flex-col gap-3">
@@ -112,18 +106,18 @@ export async function PostingGroupsManager({ sector = 'private', query = '', pro
         </CardContent>
       </Card>
 
-      <div className="flex flex-wrap gap-2" role="group" aria-label="ประเภทกลุ่ม">
-        {GROUP_SECTORS.map((s) => (
-          <Button key={s.code} asChild size="sm" variant={sectorFilter === s.code ? 'default' : 'outline'}>
-            <Link href={href({ sector: s.code, province: '', q: '' })}>{`${s.label} ${countBySector(s.code)}`}</Link>
-          </Button>
-        ))}
-      </div>
-
       <form method="get" className="flex flex-wrap items-end gap-3">
-        <input type="hidden" name="sector" value={sectorFilter} />
+        <Field className="w-44">
+          <FieldLabel htmlFor="group-filter-sector">ราชการ / เอกชน</FieldLabel>
+          <AutoSubmitSelect
+            id="group-filter-sector"
+            name="sector"
+            defaultValue={sectorFilter}
+            options={GROUP_SECTORS.map((s) => ({ value: s.code, label: `${s.label} (${countBySector(s.code)})` }))}
+          />
+        </Field>
         <Field className="w-56">
-          <FieldLabel htmlFor="group-filter-province">จังหวัด ({groupSectorLabel(sectorFilter)})</FieldLabel>
+          <FieldLabel htmlFor="group-filter-province">จังหวัด</FieldLabel>
           <AutoSubmitSelect
             id="group-filter-province"
             name="province"
