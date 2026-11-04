@@ -8,6 +8,7 @@ import { groupByBusinessUnit } from '@/lib/business-units';
 import { BusinessUnitSection } from '@/components/BusinessUnitSection';
 import { GroupBusinessSelect } from '@/components/GroupBusinessSelect';
 import { GroupSectorSelect } from '@/components/GroupSectorSelect';
+import { AutoSubmitSelect } from '@/components/AutoSubmitSelect';
 import { GroupJobTypesDropdown, GroupJobTypesEditor } from '@/components/GroupJobTypesEditor';
 import { GROUP_JOB_TYPES, isGroupJobType } from '@/lib/group-job-types';
 import { Badge } from '@/components/ui/badge';
@@ -119,48 +120,34 @@ export async function PostingGroupsManager({ sector = 'private', query = '', pro
         ))}
       </div>
 
-      <Card size="sm">
-        <CardHeader>
-          <CardTitle>จังหวัด ({groupSectorLabel(sectorFilter)})</CardTitle>
-        </CardHeader>
-        <CardContent className="flex flex-wrap gap-2">
-          <Button asChild size="sm" variant={!provinceFilter ? 'default' : 'outline'}>
-            <Link href={href({ province: '' })}>{`ทุกจังหวัด ${inSector.length}`}</Link>
-          </Button>
-          {provinceIndex.map(([p, n]) => (
-            <Button key={p} asChild size="sm" variant={provinceFilter === p ? 'default' : 'outline'}>
-              <Link href={href({ province: p })}>{`${p} ${n}`}</Link>
-            </Button>
-          ))}
-          <Button asChild size="sm" variant={provinceFilter === '__none__' ? 'default' : 'outline'}>
-            <Link href={href({ province: '__none__' })}>{`ยังไม่ระบุจังหวัด ${noProvince}`}</Link>
-          </Button>
-        </CardContent>
-      </Card>
-
-      <Card size="sm">
-        <CardHeader>
-          <CardTitle>ประเภทงาน</CardTitle>
-        </CardHeader>
-        <CardContent className="flex flex-wrap gap-2">
-          <Button asChild size="sm" variant={!jobTypeFilter ? 'default' : 'outline'}>
-            <Link href={href({ job: '' })}>ทุกประเภท</Link>
-          </Button>
-          {GROUP_JOB_TYPES.map((t) => (
-            <Button key={t} asChild size="sm" variant={jobTypeFilter === t ? 'default' : 'outline'}>
-              <Link href={href({ job: t })}>{`${t} ${inSector.filter((g) => (g.job_types as string[]).includes(t)).length}`}</Link>
-            </Button>
-          ))}
-          <Button asChild size="sm" variant={jobTypeFilter === '__none__' ? 'default' : 'outline'}>
-            <Link href={href({ job: '__none__' })}>{`ยังไม่ระบุประเภทงาน ${inSector.filter((g) => g.job_types.length === 0).length}`}</Link>
-          </Button>
-        </CardContent>
-      </Card>
-
       <form method="get" className="flex flex-wrap items-end gap-3">
         <input type="hidden" name="sector" value={sectorFilter} />
-        {jobTypeFilter && <input type="hidden" name="job" value={jobTypeFilter} />}
-        {provinceFilter && <input type="hidden" name="province" value={provinceFilter} />}
+        <Field className="w-56">
+          <FieldLabel htmlFor="group-filter-province">จังหวัด ({groupSectorLabel(sectorFilter)})</FieldLabel>
+          <AutoSubmitSelect
+            id="group-filter-province"
+            name="province"
+            defaultValue={provinceFilter}
+            options={[
+              { value: '', label: `ทุกจังหวัด (${inSector.length})` },
+              ...provinceIndex.map(([p, n]) => ({ value: p, label: `${p} (${n})` })),
+              { value: '__none__', label: `ยังไม่ระบุจังหวัด (${noProvince})` },
+            ]}
+          />
+        </Field>
+        <Field className="w-56">
+          <FieldLabel htmlFor="group-filter-job">ประเภทงาน</FieldLabel>
+          <AutoSubmitSelect
+            id="group-filter-job"
+            name="job"
+            defaultValue={jobTypeFilter}
+            options={[
+              { value: '', label: 'ทุกประเภท' },
+              ...GROUP_JOB_TYPES.map((t) => ({ value: t, label: `${t} (${inSector.filter((g) => (g.job_types as string[]).includes(t)).length})` })),
+              { value: '__none__', label: `ยังไม่ระบุประเภทงาน (${inSector.filter((g) => g.job_types.length === 0).length})` },
+            ]}
+          />
+        </Field>
         <Field className="min-w-64 flex-1">
           <FieldLabel htmlFor="group-filter-q">ค้นหาชื่อกลุ่ม / เลขกลุ่ม</FieldLabel>
           <Input id="group-filter-q" name="q" defaultValue={query} placeholder="เช่น ขับรถ, โรงแรม, 5850142" />
