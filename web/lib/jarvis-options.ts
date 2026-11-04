@@ -2,6 +2,7 @@ import 'server-only';
 import { q } from './db';
 import { loadLatestGroupOutcomes, type GroupOutcomeState } from './post-tasks';
 import { REPOST_MIN_GAP_DAYS } from './repo';
+import { normalizeGroupJobTypes } from './group-job-types';
 import { classifyGroupOutcome, GROUP_STATE } from '../../src/core/group-outcome.js';
 
 /**
@@ -96,6 +97,8 @@ export type JarvisGroupOption = {
   provinces: string[];
   /** กลุ่มทั่วประเทศ/ทุกจังหวัด — ควรขึ้นต่อท้ายกลุ่มของจังหวัดที่เลือก */
   nationwide: boolean;
+  /** ประเภทงานที่กลุ่มรับ: ช่าง · ธุรการ · ประชาสัมพันธ์ · ขับรถนายไทย · ขับรถนายต่างชาติ · ขับรถส่วนกลาง · Valet — [] = ยังไม่ระบุ */
+  job_types: string[];
   /**
    * ใบขอที่ส่งมากับ ?request_no= เพิ่งลงกลุ่มนี้ไม่ถึง 2 วัน — เลือกได้แต่รอบนี้จะถูกข้าม ควรขึ้นสีเทาพร้อม available_at
    * null = ไม่ได้ส่ง request_no มา หรือใบนี้ยังไม่เคยลงกลุ่มนี้ / ลงเกิน 2 วันแล้ว
@@ -240,7 +243,7 @@ export async function getJarvisOptions(opts: { requestNo?: string | null } = {})
     ),
     q<{
       id: string; fb_group_id: string; name: string | null; account_ids: string[]; last_posted_at: string | null;
-      attempts: number; posted: number; comments: number; phone_leads: number; department: string | null; sector: string | null; province: string | null;
+      attempts: number; posted: number; comments: number; phone_leads: number; department: string | null; sector: string | null; province: string | null; job_positions: unknown;
     }>(
       // สถิติรายกลุ่มรวมครั้งเดียวต่อตาราง (กลุ่ม 2,000+ หลังนำเข้าชีตราชการ — subquery ต่อแถวช้าเกิน)
       `WITH rl AS (
@@ -258,7 +261,7 @@ export async function getJarvisOptions(opts: { requestNo?: string | null } = {})
        ua AS (
          SELECT gid, jsonb_agg(uid) AS account_ids FROM (
            SELECT u.id AS uid, jsonb_array_elements_text(COALESCE(u.group_ids::jsonb, '[]'::jsonb)) AS gid FROM ${AP}.users u) x GROUP BY gid)
-       SELECT g.id, g.fb_group_id, g.name, g.province, NULLIF(TRIM(g.department), '') AS department,
+       SELECT g.id, g.fb_group_id, g.name, g.province, COALESCE(g.job_positions, '[]'::jsonb) AS job_positions, NULLIF(TRIM(g.department), '') AS department,
               NULLIF(to_jsonb(g)->>'sector', '') AS sector,
               COALESCE(ua.account_ids, '[]'::jsonb) AS account_ids,
               rl.last_posted_at, COALESCE(rl.attempts, 0) AS attempts, COALESCE(rl.posted, 0) AS posted,
@@ -271,8 +274,8 @@ export async function getJarvisOptions(opts: { requestNo?: string | null } = {})
         ORDER BY g.name`,
     ).catch(async () =>
       // comment_leads ยังไม่ถูกสร้าง (ตัวเก็บคอมเมนต์ยังไม่เคยรัน) — ไม่นับเบอร์
-      q<{ id: string; fb_group_id: string; name: string | null; account_ids: string[]; last_posted_at: string | null; attempts: number; posted: number; comments: number; phone_leads: number; department: string | null; sector: string | null; province: string | null }>(
-        `SELECT g.id, g.fb_group_id, g.name, g.province, NULLIF(TRIM(g.department), '') AS department, NULLIF(to_jsonb(g)->>'sector', '') AS sector,
+      q<{ id: string; fb_group_id: string; name: string | null; account_ids: string[]; last_posted_at: string | null; attempts: number; posted: number; comments: number; phone_leads: number; department: string | null; sector: string | null; province: string | null; job_positions: unknown }>(
+        `SELECT g.id, g.fb_group_id, g.name, g.province, COALESCE(g.job_positions, '[]'::jsonb) AS job_positions, NULLIF(TRIM(g.department), '') AS department, NULLIF(to_jsonb(g)->>'sector', '') AS sector,
                 COALESCE((SELECT jsonb_agg(u.id) FROM ${AP}.users u WHERE COALESCE(u.group_ids::jsonb, '[]'::jsonb) ? g.id), '[]'::jsonb) AS account_ids,
                 NULL::timestamptz AS last_posted_at, 0 AS attempts, 0 AS posted, 0 AS comments, 0 AS phone_leads
            FROM ${AP}.groups g ORDER BY g.name`,
@@ -421,6 +424,7 @@ export async function getJarvisOptions(opts: { requestNo?: string | null } = {})
     sector: g.sector === 'government' ? 'government' : 'private',
     provinces: String(g.province ?? '').split(/[,،]/).map((v) => v.trim()).filter((v) => v && v !== 'ทั่วประเทศ'),
     nationwide: /ทั่วประเทศ/.test(String(g.province ?? '')),
+    job_types: normalizeGroupJobTypes(g.job_positions),
     blocked: pausedByGroup.get(String(g.id)) ?? null,
     repost_wait: (() => {
       const last = requestNo ? recentByFb.get(String(g.fb_group_id)) : null;

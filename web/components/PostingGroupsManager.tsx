@@ -8,6 +8,8 @@ import { groupByBusinessUnit } from '@/lib/business-units';
 import { BusinessUnitSection } from '@/components/BusinessUnitSection';
 import { GroupBusinessSelect } from '@/components/GroupBusinessSelect';
 import { GroupSectorSelect } from '@/components/GroupSectorSelect';
+import { GroupJobTypeChecks, GroupJobTypesEditor } from '@/components/GroupJobTypesEditor';
+import { GROUP_JOB_TYPES, isGroupJobType } from '@/lib/group-job-types';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -28,7 +30,7 @@ function provincesOf(group: PostingGroup): string[] {
   return String(group.province ?? '').split(/[,،]/).map((v) => v.trim()).filter(Boolean);
 }
 
-export async function PostingGroupsManager({ sector = 'private', query = '', province = '' }: { sector?: string; query?: string; province?: string }) {
+export async function PostingGroupsManager({ sector = 'private', query = '', province = '', jobType = '' }: { sector?: string; query?: string; province?: string; jobType?: string }) {
   const groups = await listPostingGroups();
   // แยกราชการ/เอกชนเสมอ ไม่ปนกัน (เจ้าของ 4 พ.ย. 2569) — ค่าเริ่มต้นเอกชน
   const sectorFilter = isGroupSector(sector) ? sector : 'private';
@@ -43,15 +45,17 @@ export async function PostingGroupsManager({ sector = 'private', query = '', pro
     for (const p of list) provinceCounts.set(p, (provinceCounts.get(p) ?? 0) + 1);
   }
   const provinceIndex = [...provinceCounts.entries()].sort((a, b) => (a[0] === 'ทั่วประเทศ' ? -1 : b[0] === 'ทั่วประเทศ' ? 1 : b[1] - a[1]));
+  const jobTypeFilter = jobType === '__none__' || isGroupJobType(jobType) ? jobType : '';
   const visible = inSector.filter((g) =>
-    (!provinceFilter || (provinceFilter === '__none__' ? provincesOf(g).length === 0 : provincesOf(g).includes(provinceFilter)))
+    (!jobTypeFilter || (jobTypeFilter === '__none__' ? g.job_types.length === 0 : (g.job_types as string[]).includes(jobTypeFilter)))
+    && (!provinceFilter || (provinceFilter === '__none__' ? provincesOf(g).length === 0 : provincesOf(g).includes(provinceFilter)))
     && (!needle || `${g.name} ${g.fb_group_id} ${g.province ?? ''}`.toLowerCase().includes(needle)));
   // ราชการมี 2,400 กลุ่ม: ต้องเลือกจังหวัดหรือค้นก่อนถึงแสดงรายการ เอกชนมีน้อยแสดงเลย
-  const mustNarrow = !provinceFilter && !needle && inSector.length > MAX_ROWS;
+  const mustNarrow = !provinceFilter && !needle && !jobTypeFilter && inSector.length > MAX_ROWS;
   const shown = mustNarrow ? [] : visible.slice(0, MAX_ROWS);
   const countBySector = (code: string) => groups.filter((g) => g.sector === code).length;
   const href = (patch: Record<string, string>) => {
-    const next = new URLSearchParams({ sector: sectorFilter, province: provinceFilter, q: query, ...patch });
+    const next = new URLSearchParams({ sector: sectorFilter, province: provinceFilter, q: query, job: jobTypeFilter, ...patch });
     for (const [k, v] of [...next.entries()]) if (!v) next.delete(k);
     return `/settings/posting?${next.toString()}`;
   };
@@ -93,11 +97,15 @@ export async function PostingGroupsManager({ sector = 'private', query = '', pro
                   <GroupBusinessSelect id="new-group-department" name="department" defaultValue={null} required />
                 </Field>
                 <Field>
-                  <FieldLabel htmlFor="new-group-sector">ประเภท</FieldLabel>
+                  <FieldLabel htmlFor="new-group-sector">ราชการ / เอกชน</FieldLabel>
                   <GroupSectorSelect id="new-group-sector" name="sector" defaultValue="private" />
                 </Field>
                 <Button>เพิ่มกลุ่ม</Button>
               </div>
+              <Field>
+                <FieldLabel>ประเภทงานที่กลุ่มนี้รับ (เลือกได้หลายอย่าง)</FieldLabel>
+                <GroupJobTypeChecks idPrefix="new-group" />
+              </Field>
             </FieldGroup>
           </form>
         </CardContent>
@@ -130,8 +138,28 @@ export async function PostingGroupsManager({ sector = 'private', query = '', pro
         </CardContent>
       </Card>
 
+      <Card size="sm">
+        <CardHeader>
+          <CardTitle>ประเภทงาน</CardTitle>
+        </CardHeader>
+        <CardContent className="flex flex-wrap gap-2">
+          <Button asChild size="sm" variant={!jobTypeFilter ? 'default' : 'outline'}>
+            <Link href={href({ job: '' })}>ทุกประเภท</Link>
+          </Button>
+          {GROUP_JOB_TYPES.map((t) => (
+            <Button key={t} asChild size="sm" variant={jobTypeFilter === t ? 'default' : 'outline'}>
+              <Link href={href({ job: t })}>{`${t} ${inSector.filter((g) => (g.job_types as string[]).includes(t)).length}`}</Link>
+            </Button>
+          ))}
+          <Button asChild size="sm" variant={jobTypeFilter === '__none__' ? 'default' : 'outline'}>
+            <Link href={href({ job: '__none__' })}>{`ยังไม่ระบุประเภทงาน ${inSector.filter((g) => g.job_types.length === 0).length}`}</Link>
+          </Button>
+        </CardContent>
+      </Card>
+
       <form method="get" className="flex flex-wrap items-end gap-3">
         <input type="hidden" name="sector" value={sectorFilter} />
+        {jobTypeFilter && <input type="hidden" name="job" value={jobTypeFilter} />}
         {provinceFilter && <input type="hidden" name="province" value={provinceFilter} />}
         <Field className="min-w-64 flex-1">
           <FieldLabel htmlFor="group-filter-q">ค้นหาชื่อกลุ่ม / เลขกลุ่ม</FieldLabel>
@@ -140,7 +168,7 @@ export async function PostingGroupsManager({ sector = 'private', query = '', pro
         <Button variant="outline" size="sm">ค้นหา</Button>
         <span className="text-xs text-muted-foreground">
           {mustNarrow
-            ? `${groupSectorLabel(sectorFilter)} มี ${inSector.length} กลุ่ม เลือกจังหวัดด้านบนหรือพิมพ์ค้นหาก่อน`
+            ? `${groupSectorLabel(sectorFilter)} มี ${inSector.length} กลุ่ม เลือกจังหวัด ประเภทงาน หรือพิมพ์ค้นหาก่อน`
             : `ตรงเงื่อนไข ${visible.length} กลุ่ม${visible.length > MAX_ROWS ? ` · แสดง ${MAX_ROWS} กลุ่มแรก พิมพ์ค้นหาให้แคบลง` : ''}`}
         </span>
       </form>
@@ -163,7 +191,8 @@ export async function PostingGroupsManager({ sector = 'private', query = '', pro
                   {group.province ? ` · ${group.province}` : ' · ยังไม่ระบุจังหวัด'}
                 </ItemDescription>
               </ItemContent>
-              <ItemActions>
+              <ItemActions className="flex-wrap justify-end">
+                <GroupJobTypesEditor groupId={group.id} groupName={group.name} value={group.job_types} />
                 <form action={setGroupProvinceAction} className="w-44">
                   <input type="hidden" name="id" value={group.id} />
                   <Input

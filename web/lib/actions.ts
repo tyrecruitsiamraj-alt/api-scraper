@@ -73,6 +73,7 @@ import {
   repostJarvisOrder,
   listPostingGroups,
   setAccountProvince,
+  setPostingGroupJobTypes,
   setPostingGroupProvince,
   setPostingGroupSector,
   skippedGroupsNote,
@@ -81,6 +82,8 @@ import {
   reassessCandidateJob,
 } from './repo';
 import type { GroupSector } from './group-sectors';
+import { isGroupJobType } from './group-job-types';
+import type { GroupJobType } from './group-job-types';
 
 /** ทดสอบ Web → Queue → Worker แบบไม่แตะงานจริงหรือ Facebook. */
 export async function runWorkflowSelfTestAction() {
@@ -331,9 +334,26 @@ export async function createGroupAction(formData: FormData) {
   const department = readBusinessUnit(formData.get('department'));
   if (!department) throw new Error('เลือกธุรกิจของกลุ่มนี้ (LBD / LBA / LM)');
   const sector = readGroupSector(formData.get('sector'));
-  await createPostingGroup({ fbGroupId, name: name || null, province: province || null, department, sector });
+  await createPostingGroup({ fbGroupId, name: name || null, province: province || null, department, sector, jobTypes: readGroupJobTypes(formData) });
   revalidatePath('/settings/posting');
   revalidatePath('/orchestrator');
+}
+
+/** ประเภทงานจากฟอร์ม (checkbox ชื่อ jobTypes หลายตัว) — ค่าที่ไม่รู้จักถือว่าพิมพ์มั่ว */
+function readGroupJobTypes(formData: FormData): GroupJobType[] {
+  const picked = formData.getAll('jobTypes').map((v) => String(v).trim()).filter(Boolean);
+  const bad = picked.filter((v) => !isGroupJobType(v));
+  if (bad.length) throw new Error(`ไม่รู้จักประเภทงาน ${bad.join(', ')}`);
+  return picked as GroupJobType[];
+}
+
+/** ตั้งประเภทงานของกลุ่ม (ติ๊กในรายการกลุ่มแล้วกดบันทึก) */
+export async function setGroupJobTypesAction(formData: FormData) {
+  await requireSession();
+  const id = String(formData.get('id') ?? '').trim();
+  if (!id) throw new Error('ไม่พบกลุ่ม');
+  await setPostingGroupJobTypes(id, readGroupJobTypes(formData));
+  revalidatePath('/settings/posting');
 }
 
 /** ประเภทกลุ่มจากฟอร์ม — ว่าง = เอกชน */

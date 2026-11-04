@@ -1,6 +1,8 @@
 import 'server-only';
 import { randomUUID } from 'node:crypto';
 import type { GroupSector } from './group-sectors';
+import { normalizeGroupJobTypes } from './group-job-types';
+import type { GroupJobType } from './group-job-types';
 import { pool, q } from './db';
 import { getCandidateDuplicates } from './candidate-duplicates';
 import { postedOutcome } from '../../src/core/post-task-state.js';
@@ -4173,6 +4175,8 @@ export type PostingGroup = {
   province: string | null;
   department: string | null;
   sector: GroupSector;
+  /** ประเภทงานที่กลุ่มนี้รับ (ช่าง ธุรการ … Valet) — [] = ยังไม่ระบุ */
+  job_types: GroupJobType[];
 };
 
 /** คอลัมน์ประเภทกลุ่ม (schema-031 แบบ runtime เหมือน department) — กลุ่มเดิมเป็นเอกชน */
@@ -4184,13 +4188,15 @@ async function ensureGroupSectorColumn(): Promise<void> {
 export async function listPostingGroups(): Promise<PostingGroup[]> {
   try {
     await ensureGroupSectorColumn();
-    return await q<PostingGroup>(
+    const rows = await q<Omit<PostingGroup, 'job_types'> & { job_positions: unknown }>(
       `SELECT id, COALESCE(NULLIF(TRIM(name), ''), fb_group_id) AS name,
               fb_group_id, province, department,
-              CASE WHEN sector = 'government' THEN 'government' ELSE 'private' END AS sector
+              CASE WHEN sector = 'government' THEN 'government' ELSE 'private' END AS sector,
+              COALESCE(job_positions, '[]'::jsonb) AS job_positions
          FROM ${AP}.groups
         ORDER BY created_at DESC`,
     );
+    return rows.map(({ job_positions, ...g }) => ({ ...g, job_types: normalizeGroupJobTypes(job_positions) }));
   } catch {
     return [];
   }
@@ -4203,16 +4209,22 @@ export async function createPostingGroup(input: {
   province?: string | null;
   department?: string | null;
   sector?: GroupSector | null;
+  jobTypes?: GroupJobType[];
 }): Promise<string> {
   const id = autopostId();
   const name = (input.name || '').trim() || `Group ${input.fbGroupId}`;
   await ensureGroupSectorColumn();
   await q(
-    `INSERT INTO ${AP}.groups (id, name, fb_group_id, province, department, sector)
-     VALUES ($1, $2, $3, $4, $5, $6)`,
-    [id, name, input.fbGroupId.trim(), input.province || null, input.department || null, input.sector || 'private'],
+    `INSERT INTO ${AP}.groups (id, name, fb_group_id, province, department, sector, job_positions)
+     VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb)`,
+    [id, name, input.fbGroupId.trim(), input.province || null, input.department || null, input.sector || 'private', JSON.stringify(input.jobTypes ?? [])],
   );
   return id;
+}
+
+/** ตั้งประเภทงานของกลุ่ม (ทับทั้งชุด) */
+export async function setPostingGroupJobTypes(id: string, jobTypes: GroupJobType[]): Promise<void> {
+  await q(`UPDATE ${AP}.groups SET job_positions = $2::jsonb WHERE id = $1`, [id, JSON.stringify(jobTypes)]);
 }
 
 /** ตั้งจังหวัดของกลุ่ม — หลายจังหวัดคั่นด้วยจุลภาค · "ทั่วประเทศ" = ทุกจังหวัด · ว่าง = ไม่ระบุ */
