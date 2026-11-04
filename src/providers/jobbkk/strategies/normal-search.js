@@ -125,19 +125,38 @@ async function readChipTags(input) {
       const t = clean(c.getAttribute('title') || c.textContent);
       if (t) tags.add(t);
     }
-    // ป้ายแดงใต้กล่อง: ปุ่มลบอยู่ข้างข้อความชิป ในพี่น้องของกล่อง
-    const around = box.parentElement || box;
-    for (const btn of around.querySelectorAll('button[aria-label="Remove keyword"], button[aria-label*="Remove"], button[aria-label*="ลบ"]')) {
-      const holder = btn.parentElement;
-      if (!holder || box.contains(holder)) continue;
-      const t = clean(holder.querySelector('p, span')?.textContent || holder.textContent);
-      if (t) tags.add(t);
+    // ตัวนับชิป "1/3" — ในกล่องเดียวกันมีตัวนับตัวอักษร "12/80" ด้วย (เลือกแล้วช่องถูกล้างเป็น 0/80)
+    // เดิมหยิบตัวแรกที่เจอ = ตัวนับตัวอักษร ตัวนับจึงไม่เคยขยับ (เห็นบนเว็บจริง 4 พ.ย. 2569)
+    const chipCounter = (root) => {
+      for (const d of root.querySelectorAll('div, span, p')) {
+        if (d.children.length) continue;
+        const m = clean(d.textContent).match(/^(\d+)\/(\d+)$/);
+        if (m && Number(m[2]) <= 10) return Number(m[1]);
+      }
+      return null;
+    };
+    let count = chipCounter(box);
+    // ชิปของ JobBKK วาดเป็นป้ายแดงข้างกล่อง (p + ปุ่ม Remove keyword) — ไล่ขึ้นทีละชั้น
+    // แต่หยุดก่อนชั้นที่มีกล่องค้นหาอื่น (ช่อง Keyword) จะได้ไม่นับชิปของช่องอื่น
+    const ownBoxes = (n) => n.querySelectorAll('.ant-select-auto-complete, .ant-select').length;
+    const limit = ownBoxes(box) + 1;
+    let around = box;
+    let beside = 0;
+    for (let up = 0, node = box.parentElement; node && up < 4; up += 1, node = node.parentElement) {
+      if (node === document.body || ownBoxes(node) > limit) break;
+      around = node;
+      const buttons = [...node.querySelectorAll('button[aria-label="Remove keyword"], button[aria-label*="Remove"], button[aria-label*="ลบ"]')]
+        .filter((btn) => !box.contains(btn));
+      beside = buttons.length;
+      for (const btn of buttons) {
+        const holder = btn.parentElement;
+        const t = clean(holder?.querySelector('p, span')?.textContent || holder?.textContent);
+        if (t) tags.add(t);
+      }
+      if (count == null) count = chipCounter(node);
+      if (buttons.length) break;
     }
-    let count = null;
-    for (const d of box.querySelectorAll('div, span')) {
-      const m = clean(d.textContent).match(/^(\d+)\/\d+$/);
-      if (m) { count = Number(m[1]); break; }
-    }
+    const nearby = around !== box ? clean(around.innerText || around.textContent).slice(0, 140) : '';
     const chain = [];
     let node = el.parentElement;
     let depth = 0;
@@ -146,8 +165,7 @@ async function readChipTags(input) {
       node = node.parentElement;
       depth += 1;
     }
-    const beside = around !== box ? around.querySelectorAll('button[aria-label]').length : 0;
-    return { tags: [...tags], count, box: `${chain.join(' > ')} · ตัวนับ ${count ?? '-'} · ปุ่มลบข้างกล่อง ${beside}` };
+    return { tags: [...tags], count, box: `${chain.join(' > ')} · ตัวนับชิป ${count ?? '-'} · ปุ่มลบข้างกล่อง ${beside} · ข้อความรอบกล่อง "${nearby}"` };
   }).catch(() => ({ tags: [], count: null, box: 'อ่านโครงกล่องไม่ได้' }));
   return info;
 }

@@ -330,3 +330,43 @@ test('Normal Search refuses to search when the position chip never appears', asy
     /JOBBKK_FILTER_NOT_APPLIED: Normal Search ไม่ยืนยันตำแหน่ง.*กล่องตำแหน่งว่าง/u,
   );
 });
+
+// 4 พ.ย. 2569 (รันจริงบน RM009): รายการแนะนำขึ้น เลือกแล้ว แต่บอทรายงาน "ตัวนับ 0 · ปุ่มลบข้างกล่อง 0"
+// สาเหตุ 1: ในกล่องมีตัวนับตัวอักษร "0/80" อยู่ก่อนตัวนับชิป "0/3" — โค้ดเดิมอ่านตัวนับตัวอักษร (ช่องถูกล้างหลังเลือก จึงเป็น 0 ตลอด)
+// สาเหตุ 2: ชิปอาจวาดไว้นอกกรอบที่ครอบกล่องชั้นเดียว — โค้ดเดิมไม่ไล่หาขึ้นไป
+test('Position chip drawn one level further out is still seen', async (t) => {
+  const browser = await chromium.launch({ headless: true });
+  t.after(async () => {
+    await browser.close().catch(() => {});
+  });
+  const page = await browser.newPage();
+  await page.setContent(FIXTURE, { waitUntil: 'domcontentloaded' });
+  await page.evaluate(() => {
+    const chips = document.getElementById('position-chips');
+    const frame = chips.parentElement;
+    const section = document.createElement('section');
+    frame.replaceWith(section);
+    section.append(frame, chips);
+  });
+
+  const result = await runNormalSearch(page, { position: 'เจ้าหน้าที่ IT', province: 'สมุทรปราการ', maxCandidates: 5 }, { need: 5 });
+  assert.ok(result.report.applied.includes('position'), result.report.positionBox);
+});
+
+test('Position counts as applied when only the chip counter moves', async (t) => {
+  const browser = await chromium.launch({ headless: true });
+  t.after(async () => {
+    await browser.close().catch(() => {});
+  });
+  const page = await browser.newPage();
+  await page.setContent(FIXTURE, { waitUntil: 'domcontentloaded' });
+  await page.evaluate(() => {
+    // ไม่มีป้ายชิปให้เห็นเลย เหลือแต่ตัวนับ "N/3" ที่ขยับ
+    const hidden = document.createElement('div');
+    const original = document.getElementById.bind(document);
+    document.getElementById = (id) => (id === 'position-chips' ? hidden : original(id));
+  });
+
+  const result = await runNormalSearch(page, { position: 'เจ้าหน้าที่ IT', province: 'สมุทรปราการ', maxCandidates: 5 }, { need: 5 });
+  assert.ok(result.report.applied.includes('position'), result.report.positionBox);
+});

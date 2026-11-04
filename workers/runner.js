@@ -42,7 +42,11 @@ const WORKER_SOURCE_SHA = (() => {
     return 'unknown';
   }
 })();
-const WORKER_BUILD_SHA = String(process.env.WORKER_BUILD_SHA || '').trim() || WORKER_SOURCE_SHA;
+// รุ่นโค้ดที่อยู่บนดิสก์จริงชนะค่าที่ตัวเปิดตั้งไว้: อัปเดตจากเว็บ (update_code) เปลี่ยนโค้ดแล้วเปิด runner ใหม่
+// แต่ env ยังเป็นรุ่นตอนเปิดเครื่อง เว็บจึงขึ้น "ยังไม่อัปเดต" ทั้งที่อัปเดตแล้ว
+const WORKER_BUILD_SHA = WORKER_SOURCE_SHA !== 'unknown'
+  ? WORKER_SOURCE_SHA
+  : String(process.env.WORKER_BUILD_SHA || '').trim() || WORKER_SOURCE_SHA;
 const CONTENT_PIPELINE_RELEASE = 'evidence-v1';
 const POLL_MS = Number.parseInt(process.env.WORKER_POLL_MS ?? '3000', 10);
 // ทุก handler ต่ออายุ lease ทุก 30 วินาทีอยู่แล้ว. ถ้า lock ไม่ขยับเกิน 2 นาที
