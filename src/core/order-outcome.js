@@ -1,6 +1,6 @@
 /**
  * ผลของคำสั่งหนึ่งใบจาก Jarvis (โพสต์ หรือ Scrap) — นิยามเดียว ใช้หน้า "คำสั่งงาน"
- * ทุกใบตกถังเดียวใน 5 ถัง: ยังไม่เริ่ม · กำลังทำ · สำเร็จ · ได้บางส่วน · ไม่สำเร็จ
+ * ทุกใบตกถังเดียวใน 6 ถัง: ยังไม่เริ่ม · กำลังทำ · สำเร็จ · ได้บางส่วน · ไม่สำเร็จ · ยกเลิก
  * ถังรวมกันต้องเท่ากับจำนวนใบทั้งหมดเสมอ
  */
 
@@ -10,6 +10,7 @@ export const OUTCOMES = [
   { key: 'done', label: 'สำเร็จ' },
   { key: 'partial', label: 'ได้บางส่วน' },
   { key: 'failed', label: 'ไม่สำเร็จ' },
+  { key: 'cancelled', label: 'ยกเลิก' },
 ];
 
 /**
@@ -21,10 +22,12 @@ export const OUTCOMES = [
  *   task_status?: string | null,    // Scrap: สถานะงานค้นหา (idle/queued/running/done/partial/error)
  *   got?: number | null,            // Scrap: ได้คนกี่คน
  * }} o
- * @returns {{ outcome: 'waiting'|'working'|'done'|'partial'|'failed', stage: string }}
+ * @returns {{ outcome: 'waiting'|'working'|'done'|'partial'|'failed'|'cancelled', stage: string }}
  */
 export function orderOutcome(o) {
   const js = String(o.jarvis_status || '');
+  // คนสั่งยกเลิกใน Jarvis (ใบค้างแล้วสั่งใหม่) — ไม่นับเป็นไม่สำเร็จ
+  if (js === 'cancelled') return { outcome: 'cancelled', stage: 'คนสั่งยกเลิกใน Jarvis' };
   if (o.type === 'scraping') return scrapeOutcome(js, o.task_status ?? null, Number(o.got ?? 0));
   return postOutcome(js, o.run_status ?? null, Number(o.posted_groups ?? 0));
 }

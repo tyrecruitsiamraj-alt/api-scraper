@@ -32,7 +32,12 @@ test('ใบ Scrap: ได้คนบางส่วนไม่นับว่
 });
 
 test('ทุกผลมีคำไทยบอก ไม่ใช้สีอย่างเดียว', () => {
-  assert.deepEqual(OUTCOMES.map((o) => o.key), ['waiting', 'working', 'done', 'partial', 'failed']);
+  assert.deepEqual(OUTCOMES.map((o) => o.key), ['waiting', 'working', 'done', 'partial', 'failed', 'cancelled']);
   assert.ok(OUTCOMES.every((o) => o.label));
   assert.ok(orderOutcome({ type: 'content', jarvis_status: 'pending' }).stage);
+});
+
+test('ใบที่ยกเลิกใน Jarvis นับแยก ไม่ปนกับไม่สำเร็จ', () => {
+  assert.equal(post('cancelled'), 'cancelled');
+  assert.equal(scrap('cancelled', 'error'), 'cancelled');
 });

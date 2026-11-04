@@ -1,4 +1,4 @@
-export type OrderOutcomeKey = 'waiting' | 'working' | 'done' | 'partial' | 'failed';
+export type OrderOutcomeKey = 'waiting' | 'working' | 'done' | 'partial' | 'failed' | 'cancelled';
 export const OUTCOMES: { key: OrderOutcomeKey; label: string }[];
 export function orderOutcome(o: {
   type: 'content' | 'scraping';
