@@ -78,7 +78,10 @@ export type JarvisGroupOption = {
   /** ชื่อกลุ่มบน Facebook — null ถ้าบอทยังไม่เคยเข้าไปอ่าน */
   name: string | null;
   url: string;
-  /** บัญชีที่เลือกกลุ่มนี้ได้ = ทุกบัญชี */
+  /**
+   * ว่างเสมอตั้งแต่ 4 พ.ย. 2569 — ทุกบัญชีเลือกได้ทุกกลุ่มอยู่แล้ว ดูจาก `accounts[].group_ids`
+   * (เดิมใส่ทุกบัญชีทุกกลุ่ม: 2,437 กลุ่ม × 34 บัญชี ≈ 2 MB ต่อการเรียกหนึ่งครั้ง)
+   */
   account_ids: string[];
   /** บัญชีที่ตั้งกลุ่มนี้ไว้ในหน้าตั้งค่า */
   home_account_ids: string[];
@@ -366,7 +369,6 @@ export async function getJarvisOptions(opts: { requestNo?: string | null } = {})
       pausedByGroup.set(groupId, { state: 'admin_paused', label: st.label, detail: st.detail, seen_at: st.seen_at });
     }
   }
-  const allAccountIds = accountRows.map((r) => String(r.id));
   const accounts: JarvisAccountOption[] = accountRows.map((r) => {
     const daily_cap = effectiveDailyCap(r.daily_cap, r.age_days, process.env, r.skip_warmup);
     const base = {
@@ -406,7 +408,7 @@ export async function getJarvisOptions(opts: { requestNo?: string | null } = {})
     fb_group_id: String(g.fb_group_id),
     name: g.name && !PLACEHOLDER_NAME.test(g.name.trim()) ? g.name.trim() : null,
     url: `https://www.facebook.com/groups/${g.fb_group_id}`,
-    account_ids: allAccountIds,
+    account_ids: [],
     home_account_ids: (g.account_ids ?? []).map(String),
     last_posted_at: g.last_posted_at,
     stats_30d: {

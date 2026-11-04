@@ -1,8 +1,8 @@
 import { Fragment } from 'react';
-import { deleteConnectorAction, deleteFacebookAccountAction, setAccountWorkerAction, toggleConnectorAction } from '@/lib/actions';
-import { facebookQuotaSummary, knownWorkerNames, listAllConnectors, listPostingGroups, listProviderLimits } from '@/lib/repo';
-import { ProviderLimitsPanel } from '@/components/ProviderLimitsPanel';
-import { FacebookQuotaPanel } from '@/components/FacebookQuotaPanel';
+import Link from 'next/link';
+import { deleteConnectorAction, deleteFacebookAccountAction, setAccountProvinceAction, setAccountWorkerAction, toggleConnectorAction } from '@/lib/actions';
+import { knownWorkerNames, listAllConnectors } from '@/lib/repo';
+import type { UnifiedConnectorRow } from '@/lib/repo';
 import { ConnectorEditButton } from '@/components/ConnectorEditButton';
 import { NewUnifiedConnectorForm } from '../NewUnifiedConnectorForm';
 import { BusinessUnitSection } from '@/components/BusinessUnitSection';
@@ -11,7 +11,9 @@ import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Field, FieldLabel } from '@/components/ui/field';
 import { Item, ItemActions, ItemContent, ItemDescription, ItemGroup, ItemMedia, ItemSeparator, ItemTitle } from '@/components/ui/item';
+import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select';
 
 export const dynamic = 'force-dynamic';
 
@@ -26,27 +28,51 @@ function fmtDate(s: string | null) {
   return new Date(s).toLocaleString('th-TH', { timeZone: 'Asia/Bangkok', dateStyle: 'medium', timeStyle: 'short' });
 }
 
-export default async function SettingsConnectorsPage() {
-  const [connectors, limits, fbQuota, workers, groups] = await Promise.all([
-    listAllConnectors(),
-    listProviderLimits(),
-    facebookQuotaSummary(),
-    knownWorkerNames(),
-    listPostingGroups(),
-  ]);
-  const scraperCount = connectors.filter((c) => c.platform !== 'facebook').length;
-  const facebookCount = connectors.filter((c) => c.platform === 'facebook').length;
+type AccountState = 'ready' | 'paused' | 'verify' | 'off';
+
+/** สถานะเป็นคำ — พร้อม / พัก / ต้องยืนยันตัวตน / ปิด */
+function accountState(c: UnifiedConnectorRow): AccountState {
+  const now = Date.now();
+  if (c.needs_verification) return 'verify';
+  if ((c.cooldown_until && new Date(c.cooldown_until).getTime() > now) || (c.paused_until && new Date(c.paused_until).getTime() > now)) return 'paused';
+  if (!c.enabled) return 'off';
+  return 'ready';
+}
+const STATE_LABEL: Record<AccountState, string> = { ready: 'พร้อม', paused: 'พัก', verify: 'ต้องยืนยันตัวตน', off: 'ปิด' };
+const STATE_RANK: Record<AccountState, number> = { ready: 0, paused: 1, verify: 2, off: 3 };
+
+function provincesOf(c: UnifiedConnectorRow): string[] {
+  return String(c.province ?? '').split(/[,،]/).map((v) => v.trim()).filter(Boolean);
+}
+
+export default async function SettingsConnectorsPage({ searchParams }: { searchParams: Promise<{ platform?: string; state?: string; province?: string }> }) {
+  const params = await searchParams;
+  const [connectors, workers] = await Promise.all([listAllConnectors(), knownWorkerNames()]);
+  const platformFilter = ['facebook', 'jobthai', 'jobbkk'].includes(String(params.platform)) ? String(params.platform) : '';
+  const stateFilter = ['ready', 'paused', 'verify', 'off'].includes(String(params.state)) ? (String(params.state) as AccountState) : '';
+  const provinceFilter = String(params.province ?? '').trim();
+  const allProvinces = [...new Set(connectors.flatMap(provincesOf))].sort((a, b) => a.localeCompare(b, 'th'));
+  // ใช้ได้ขึ้นก่อน ตัวที่ใช้ไม่ได้ตกลงล่าง (เจ้าของ 4 พ.ย. 2569: ให้โฟกัสเฉพาะที่ใช้ได้)
+  const visible = connectors
+    .filter((c) => !platformFilter || c.platform === platformFilter)
+    .filter((c) => !stateFilter || accountState(c) === stateFilter)
+    .filter((c) => !provinceFilter || (provinceFilter === '__none__' ? provincesOf(c).length === 0 : provincesOf(c).includes(provinceFilter)))
+    .sort((a, b) => STATE_RANK[accountState(a)] - STATE_RANK[accountState(b)]);
+  const countOf = (platform: string) => connectors.filter((c) => c.platform === platform).length;
+  const readyOf = (platform: string) => connectors.filter((c) => c.platform === platform && accountState(c) === 'ready').length;
+  const filterHref = (patch: Record<string, string>) => {
+    const next = new URLSearchParams({ platform: platformFilter, state: stateFilter, province: provinceFilter, ...patch });
+    for (const [k, v] of [...next.entries()]) if (!v) next.delete(k);
+    const qs = next.toString();
+    return qs ? `/settings/connectors?${qs}` : '/settings/connectors';
+  };
 
   return (
     <div className="flex flex-col gap-8">
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div className="flex flex-col gap-1">
           <h2 className="text-lg font-semibold">บัญชีที่ใช้งาน</h2>
-          <p className="text-sm text-muted-foreground">เพิ่มและดูแลบัญชีที่ใช้ค้นหาผู้สมัครและโพสต์ลง Facebook</p>
-        </div>
-        <div className="flex gap-2">
-          <Badge variant="secondary">ค้นหาผู้สมัคร {scraperCount}</Badge>
-          <Badge variant="secondary">Facebook {facebookCount}</Badge>
+          <p className="text-sm text-muted-foreground">เพิ่มและดูแลบัญชีที่ใช้ค้นหาผู้สมัครและโพสต์ลง Facebook · โควต้าย้ายไปแท็บ โควต้าการใช้งาน</p>
         </div>
       </div>
 
@@ -54,22 +80,61 @@ export default async function SettingsConnectorsPage() {
         <div className="flex items-baseline justify-between gap-4">
           <div className="flex flex-col gap-0.5">
             <h3 className="text-base font-semibold">บัญชีแยกตามธุรกิจ</h3>
-            <p className="text-sm text-muted-foreground">แต่ละบัญชีทำงานทีละงาน จะได้ไม่ล็อกอินซ้อนกัน</p>
+            <p className="text-sm text-muted-foreground">แต่ละบัญชีทำงานทีละงาน จะได้ไม่ล็อกอินซ้อนกัน · บัญชีที่พร้อมใช้ขึ้นก่อน</p>
           </div>
-          <span className="text-sm text-muted-foreground">{connectors.length} บัญชี</span>
+          <span className="text-sm text-muted-foreground">แสดง {visible.length} จาก {connectors.length} บัญชี</span>
         </div>
 
+        <div className="flex flex-wrap gap-2" role="group" aria-label="แยกตามแหล่ง">
+          {[
+            { code: '', label: `ทั้งหมด ${connectors.length}` },
+            { code: 'facebook', label: `Facebook ${countOf('facebook')} · พร้อม ${readyOf('facebook')}` },
+            { code: 'jobthai', label: `JobThai ${countOf('jobthai')} · พร้อม ${readyOf('jobthai')}` },
+            { code: 'jobbkk', label: `JobBKK ${countOf('jobbkk')} · พร้อม ${readyOf('jobbkk')}` },
+          ].map((p) => (
+            <Button key={p.code || 'all'} asChild size="sm" variant={platformFilter === p.code ? 'default' : 'outline'}>
+              <Link href={filterHref({ platform: p.code })}>{p.label}</Link>
+            </Button>
+          ))}
+        </div>
+
+        <form method="get" className="flex flex-wrap items-end gap-3">
+          {platformFilter && <input type="hidden" name="platform" value={platformFilter} />}
+          <Field className="w-44">
+            <FieldLabel htmlFor="acc-filter-state">สถานะ</FieldLabel>
+            <NativeSelect id="acc-filter-state" name="state" size="sm" defaultValue={stateFilter} className="w-full">
+              <NativeSelectOption value="">ทุกสถานะ</NativeSelectOption>
+              <NativeSelectOption value="ready">พร้อมใช้งาน</NativeSelectOption>
+              <NativeSelectOption value="paused">พัก</NativeSelectOption>
+              <NativeSelectOption value="verify">ต้องยืนยันตัวตน</NativeSelectOption>
+              <NativeSelectOption value="off">ปิด</NativeSelectOption>
+            </NativeSelect>
+          </Field>
+          <Field className="w-48">
+            <FieldLabel htmlFor="acc-filter-province">จังหวัด</FieldLabel>
+            <NativeSelect id="acc-filter-province" name="province" size="sm" defaultValue={provinceFilter} className="w-full">
+              <NativeSelectOption value="">ทุกจังหวัด</NativeSelectOption>
+              <NativeSelectOption value="__none__">ยังไม่ระบุจังหวัด</NativeSelectOption>
+              {allProvinces.map((p) => <NativeSelectOption key={p} value={p}>{p}</NativeSelectOption>)}
+            </NativeSelect>
+          </Field>
+          <Button variant="outline" size="sm">กรอง</Button>
+          {(stateFilter || provinceFilter || platformFilter) && (
+            <Button asChild variant="ghost" size="sm"><Link href="/settings/connectors">ล้างตัวกรอง</Link></Button>
+          )}
+        </form>
+
         <div className="flex flex-col gap-3">
-          {groupByBusinessUnit(connectors, (c) => c.department).map((bu) => (
+          {groupByBusinessUnit(visible, (c) => c.department).map((bu) => (
             <BusinessUnitSection key={bu.code ?? 'none'} code={bu.code} detail={bu.detail} count={bu.items.length} unit="บัญชี">
               {bu.items.length === 0 ? (
-                <p className="px-4 py-3 text-sm text-muted-foreground">ยังไม่มีบัญชีของ {bu.code} · กด เพิ่มบัญชีใหม่ ด้านล่างแล้วเลือกธุรกิจ {bu.code}</p>
+                <p className="px-4 py-3 text-sm text-muted-foreground">ไม่มีบัญชีของ {bu.code} ตามตัวกรองนี้ · เพิ่มบัญชีใหม่ได้ด้านล่าง</p>
               ) : (
             <ItemGroup className="gap-0">
               {bu.items.map((c, index) => {
                 const p = PLATFORM[c.platform] ?? { label: c.platform, letter: '?' };
-                const cooling = !!c.cooldown_until && new Date(c.cooldown_until) > new Date();
                 const paused = !!c.paused_until && new Date(c.paused_until) > new Date();
+                const state = accountState(c);
                 const id = c.key.slice(c.key.indexOf(':') + 1);
                 return (
                   <Fragment key={c.key}>
@@ -91,6 +156,7 @@ export default async function SettingsConnectorsPage() {
                           {paused && c.pause_reason ? ` · ${c.pause_reason}` : ''}
                           {c.platform === 'facebook' && ` · เครื่องประจำ: ${c.preferred_worker || 'ยังไม่ได้เลือก'}`}
                           {c.platform === 'facebook' && ` · โพสต์ ${c.group_ids.length} กลุ่ม`}
+                          {` · ${c.province || 'ยังไม่ระบุจังหวัด'}`}
                         </ItemDescription>
                       </ItemContent>
 
@@ -108,17 +174,26 @@ export default async function SettingsConnectorsPage() {
                         )}
                       </div>
 
-                      <div className="flex w-16 shrink-0 justify-center">
-                        {cooling || paused ? (
-                          <Badge variant="outline">พัก</Badge>
-                        ) : c.enabled ? (
-                          <Badge variant="secondary">พร้อม</Badge>
-                        ) : (
-                          <Badge variant="ghost" className="text-muted-foreground">ปิด</Badge>
-                        )}
+                      <div className="flex w-28 shrink-0 justify-center">
+                        <Badge
+                          variant={state === 'ready' ? 'secondary' : state === 'off' ? 'ghost' : 'outline'}
+                          className={state === 'ready' ? '' : state === 'off' ? 'text-muted-foreground' : 'text-destructive'}
+                        >
+                          {STATE_LABEL[state]}
+                        </Badge>
                       </div>
 
                       <ItemActions className="flex-wrap justify-end gap-1">
+                        <form action={setAccountProvinceAction}>
+                          <input type="hidden" name="key" value={c.key} />
+                          <Input
+                            name="province"
+                            defaultValue={c.province ?? ''}
+                            placeholder="จังหวัด แล้วกด Enter"
+                            className="h-7 w-36"
+                            aria-label={`จังหวัดของ ${c.label}`}
+                          />
+                        </form>
                         {c.platform === 'facebook' ? (
                           <>
                             <form action={setAccountWorkerAction} className="flex items-center gap-1">
@@ -133,7 +208,7 @@ export default async function SettingsConnectorsPage() {
                               />
                               <Button variant="secondary" size="sm" type="submit">บันทึกเครื่อง</Button>
                             </form>
-                            <ConnectorEditButton id={id} platform="facebook" label={c.label} username={c.username ?? ''} skipWarmup={Boolean(c.skip_warmup)} hasPassword={Boolean(c.has_password)} groups={groups} groupIds={c.group_ids} department={c.department} />
+                            <ConnectorEditButton id={id} platform="facebook" label={c.label} username={c.username ?? ''} skipWarmup={Boolean(c.skip_warmup)} hasPassword={Boolean(c.has_password)} groupIds={c.group_ids} department={c.department} />
                             <form action={deleteFacebookAccountAction}>
                               <input type="hidden" name="id" value={id} />
                               <Button variant="destructive" size="sm" type="submit" aria-label={`ลบ ${c.label}`}>ลบ</Button>
@@ -167,17 +242,9 @@ export default async function SettingsConnectorsPage() {
         <datalist id="known-facebook-workers">
           {workers.map((worker) => <option key={worker} value={worker} />)}
         </datalist>
-        <NewUnifiedConnectorForm workers={workers} groups={groups} />
+        <NewUnifiedConnectorForm workers={workers} />
       </section>
 
-      <section className="flex flex-col gap-4">
-        <div className="flex flex-col gap-0.5">
-          <h3 className="text-base font-semibold">โควต้าการใช้งาน</h3>
-          <p className="text-sm text-muted-foreground">กำหนดจำนวนค้นหาผู้สมัครรวมต่อเว็บไซต์ และจำนวนโพสต์ของแต่ละบัญชี Facebook</p>
-        </div>
-        <ProviderLimitsPanel initialLimits={limits} />
-        <FacebookQuotaPanel initialFb={fbQuota} />
-      </section>
     </div>
   );
 }

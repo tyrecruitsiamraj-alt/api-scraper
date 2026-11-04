@@ -7,7 +7,7 @@ export default function SettingsPage() {
       <EmptyHeader>
         <EmptyMedia variant="icon"><SettingsIcon /></EmptyMedia>
         <EmptyTitle>เลือกเมนูตั้งค่าด้านบน</EmptyTitle>
-        <EmptyDescription>บัญชีที่ใช้งาน · กลุ่ม Facebook · กระแสที่น่าสนใจ</EmptyDescription>
+        <EmptyDescription>บัญชีที่ใช้งาน · กลุ่ม Facebook · โควต้าการใช้งาน · กระแสที่น่าสนใจ</EmptyDescription>
       </EmptyHeader>
     </Empty>
   );

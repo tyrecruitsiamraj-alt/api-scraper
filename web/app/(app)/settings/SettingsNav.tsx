@@ -6,7 +6,8 @@ import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 
 const ITEMS = [
   { href: '/settings/connectors', label: 'บัญชีที่ใช้งาน', detail: 'JobBKK, JobThai และ Facebook' },
-  { href: '/settings/posting', label: 'กลุ่มโพสต์', detail: 'คลังกลุ่ม Facebook และธุรกิจของกลุ่ม' },
+  { href: '/settings/posting', label: 'กลุ่มโพสต์', detail: 'คลังกลุ่ม Facebook แยกราชการ/เอกชน และจังหวัด' },
+  { href: '/settings/quota', label: 'โควต้าการใช้งาน', detail: 'จำนวนค้นหาต่อเว็บไซต์ และจำนวนโพสต์ต่อบัญชี Facebook' },
   { href: '/settings/trends', label: 'กระแสที่น่าสนใจ', detail: 'หัวข้อหรือมุกที่อยากให้ประกาศนำไปใช้' },
 ];
 

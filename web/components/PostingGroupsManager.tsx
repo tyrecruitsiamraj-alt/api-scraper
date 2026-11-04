@@ -1,3 +1,4 @@
+import Link from 'next/link';
 import { ExternalLinkIcon } from 'lucide-react';
 import { createGroupAction, deleteGroupAction, setGroupDepartmentAction, setGroupProvinceAction, setGroupSectorAction } from '@/lib/actions';
 import { listPostingGroups } from '@/lib/repo';
@@ -13,7 +14,6 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Field, FieldGroup, FieldLabel } from '@/components/ui/field';
 import { Input } from '@/components/ui/input';
 import { Item, ItemActions, ItemContent, ItemDescription, ItemGroup, ItemTitle } from '@/components/ui/item';
-import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select';
 
 /** แสดงได้สูงสุดต่อหน้า — คลังมี 2,000+ กลุ่มหลังนำเข้าชีตราชการ ต้องพิมพ์ค้นหาแทนการเลื่อนดูทั้งหมด */
 const MAX_ROWS = 200;
@@ -28,26 +28,39 @@ function provincesOf(group: PostingGroup): string[] {
   return String(group.province ?? '').split(/[,،]/).map((v) => v.trim()).filter(Boolean);
 }
 
-export async function PostingGroupsManager({ sector = 'all', query = '', province = '' }: { sector?: string; query?: string; province?: string }) {
+export async function PostingGroupsManager({ sector = 'private', query = '', province = '' }: { sector?: string; query?: string; province?: string }) {
   const groups = await listPostingGroups();
-  const sectorFilter = isGroupSector(sector) ? sector : 'all';
+  // แยกราชการ/เอกชนเสมอ ไม่ปนกัน (เจ้าของ 4 พ.ย. 2569) — ค่าเริ่มต้นเอกชน
+  const sectorFilter = isGroupSector(sector) ? sector : 'private';
   const needle = query.trim().toLowerCase();
   const provinceFilter = province.trim();
-  const allProvinces = [...new Set(groups.flatMap(provincesOf))].sort((a, b) => a.localeCompare(b, 'th'));
-  const visible = groups.filter((g) =>
-    (sectorFilter === 'all' || g.sector === sectorFilter)
-    && (!provinceFilter || (provinceFilter === '__none__' ? provincesOf(g).length === 0 : provincesOf(g).includes(provinceFilter)))
+  const inSector = groups.filter((g) => g.sector === sectorFilter);
+  const provinceCounts = new Map<string, number>();
+  let noProvince = 0;
+  for (const g of inSector) {
+    const list = provincesOf(g);
+    if (!list.length) noProvince += 1;
+    for (const p of list) provinceCounts.set(p, (provinceCounts.get(p) ?? 0) + 1);
+  }
+  const provinceIndex = [...provinceCounts.entries()].sort((a, b) => (a[0] === 'ทั่วประเทศ' ? -1 : b[0] === 'ทั่วประเทศ' ? 1 : b[1] - a[1]));
+  const visible = inSector.filter((g) =>
+    (!provinceFilter || (provinceFilter === '__none__' ? provincesOf(g).length === 0 : provincesOf(g).includes(provinceFilter)))
     && (!needle || `${g.name} ${g.fb_group_id} ${g.province ?? ''}`.toLowerCase().includes(needle)));
-  const shown = visible.slice(0, MAX_ROWS);
+  // ราชการมี 2,400 กลุ่ม: ต้องเลือกจังหวัดหรือค้นก่อนถึงแสดงรายการ เอกชนมีน้อยแสดงเลย
+  const mustNarrow = !provinceFilter && !needle && inSector.length > MAX_ROWS;
+  const shown = mustNarrow ? [] : visible.slice(0, MAX_ROWS);
   const countBySector = (code: string) => groups.filter((g) => g.sector === code).length;
+  const href = (patch: Record<string, string>) => {
+    const next = new URLSearchParams({ sector: sectorFilter, province: provinceFilter, q: query, ...patch });
+    for (const [k, v] of [...next.entries()]) if (!v) next.delete(k);
+    return `/settings/posting?${next.toString()}`;
+  };
 
   return (
     <section className="flex flex-col gap-3">
       <div className="flex items-baseline justify-between gap-2">
         <h2 className="text-base font-semibold">คลังกลุ่ม Facebook</h2>
-        <span className="text-xs text-muted-foreground">
-          {groups.length} กลุ่ม · {GROUP_SECTORS.map((s) => `${s.label} ${countBySector(s.code)}`).join(' · ')}
-        </span>
+        <span className="text-xs text-muted-foreground">{groups.length} กลุ่ม</span>
       </div>
 
       <Card size="sm">
@@ -90,37 +103,49 @@ export async function PostingGroupsManager({ sector = 'all', query = '', provinc
         </CardContent>
       </Card>
 
+      <div className="flex flex-wrap gap-2" role="group" aria-label="ประเภทกลุ่ม">
+        {GROUP_SECTORS.map((s) => (
+          <Button key={s.code} asChild size="sm" variant={sectorFilter === s.code ? 'default' : 'outline'}>
+            <Link href={href({ sector: s.code, province: '', q: '' })}>{`${s.label} ${countBySector(s.code)}`}</Link>
+          </Button>
+        ))}
+      </div>
+
+      <Card size="sm">
+        <CardHeader>
+          <CardTitle>จังหวัด ({groupSectorLabel(sectorFilter)})</CardTitle>
+        </CardHeader>
+        <CardContent className="flex flex-wrap gap-2">
+          <Button asChild size="sm" variant={!provinceFilter ? 'default' : 'outline'}>
+            <Link href={href({ province: '' })}>{`ทุกจังหวัด ${inSector.length}`}</Link>
+          </Button>
+          {provinceIndex.map(([p, n]) => (
+            <Button key={p} asChild size="sm" variant={provinceFilter === p ? 'default' : 'outline'}>
+              <Link href={href({ province: p })}>{`${p} ${n}`}</Link>
+            </Button>
+          ))}
+          <Button asChild size="sm" variant={provinceFilter === '__none__' ? 'default' : 'outline'}>
+            <Link href={href({ province: '__none__' })}>{`ยังไม่ระบุจังหวัด ${noProvince}`}</Link>
+          </Button>
+        </CardContent>
+      </Card>
+
       <form method="get" className="flex flex-wrap items-end gap-3">
-        <Field className="w-40">
-          <FieldLabel htmlFor="group-filter-sector">ประเภท</FieldLabel>
-          <NativeSelect id="group-filter-sector" name="sector" size="sm" defaultValue={sectorFilter} className="w-full">
-            <NativeSelectOption value="all">ทั้งหมด</NativeSelectOption>
-            {GROUP_SECTORS.map((s) => (
-              <NativeSelectOption key={s.code} value={s.code}>{s.label}</NativeSelectOption>
-            ))}
-          </NativeSelect>
-        </Field>
-        <Field className="w-48">
-          <FieldLabel htmlFor="group-filter-province">จังหวัด</FieldLabel>
-          <NativeSelect id="group-filter-province" name="province" size="sm" defaultValue={provinceFilter} className="w-full">
-            <NativeSelectOption value="">ทุกจังหวัด</NativeSelectOption>
-            <NativeSelectOption value="__none__">ยังไม่ระบุจังหวัด</NativeSelectOption>
-            {allProvinces.map((p) => (
-              <NativeSelectOption key={p} value={p}>{p}</NativeSelectOption>
-            ))}
-          </NativeSelect>
-        </Field>
+        <input type="hidden" name="sector" value={sectorFilter} />
+        {provinceFilter && <input type="hidden" name="province" value={provinceFilter} />}
         <Field className="min-w-64 flex-1">
-          <FieldLabel htmlFor="group-filter-q">ค้นหาชื่อกลุ่ม / เลขกลุ่ม / จังหวัด</FieldLabel>
-          <Input id="group-filter-q" name="q" defaultValue={query} placeholder="เช่น ขับรถ, ภูเก็ต, 5850142" />
+          <FieldLabel htmlFor="group-filter-q">ค้นหาชื่อกลุ่ม / เลขกลุ่ม</FieldLabel>
+          <Input id="group-filter-q" name="q" defaultValue={query} placeholder="เช่น ขับรถ, โรงแรม, 5850142" />
         </Field>
         <Button variant="outline" size="sm">ค้นหา</Button>
         <span className="text-xs text-muted-foreground">
-          ตรงเงื่อนไข {visible.length} กลุ่ม{visible.length > MAX_ROWS ? ` · แสดง ${MAX_ROWS} กลุ่มแรก พิมพ์ค้นหาให้แคบลง` : ''}
+          {mustNarrow
+            ? `${groupSectorLabel(sectorFilter)} มี ${inSector.length} กลุ่ม เลือกจังหวัดด้านบนหรือพิมพ์ค้นหาก่อน`
+            : `ตรงเงื่อนไข ${visible.length} กลุ่ม${visible.length > MAX_ROWS ? ` · แสดง ${MAX_ROWS} กลุ่มแรก พิมพ์ค้นหาให้แคบลง` : ''}`}
         </span>
       </form>
 
-      {groupByBusinessUnit(shown, (g) => g.department).map((bu) => (
+      {!mustNarrow && groupByBusinessUnit(shown, (g) => g.department).map((bu) => (
         <BusinessUnitSection key={bu.code ?? 'none'} code={bu.code} detail={bu.detail} count={bu.items.length} unit="กลุ่ม">
           {bu.items.length === 0 ? (
             <p className="px-4 py-3 text-sm text-muted-foreground">ไม่มีกลุ่มของ {bu.code ?? 'ก้อนนี้'} ตามเงื่อนไขที่ค้น</p>

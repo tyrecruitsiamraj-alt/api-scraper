@@ -38,7 +38,7 @@ export default async function SettingsPostingPage({ searchParams }: { searchPara
         <p className="text-sm text-muted-foreground">คลังกลุ่ม Facebook ที่ใช้โพสต์ · เลือกว่าบัญชีไหนโพสต์กลุ่มไหนได้ที่ บัญชีที่ใช้งาน → แก้ไข</p>
       </div>
 
-      <PostingGroupsManager sector={params.sector ?? 'all'} query={params.q ?? ''} province={params.province ?? ''} />
+      <PostingGroupsManager sector={params.sector ?? 'private'} query={params.q ?? ''} province={params.province ?? ''} />
 
       <Collapsible asChild>
         <Card>

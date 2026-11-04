@@ -71,6 +71,8 @@ import {
   isGroupSector,
   postJarvisOrder,
   repostJarvisOrder,
+  listPostingGroups,
+  setAccountProvince,
   setPostingGroupProvince,
   setPostingGroupSector,
   skippedGroupsNote,
@@ -340,6 +342,22 @@ function readGroupSector(value: FormDataEntryValue | null): GroupSector {
   if (!code) return 'private';
   if (!isGroupSector(code)) throw new Error(`ไม่รู้จักประเภทกลุ่ม ${code}`);
   return code;
+}
+
+/** รายชื่อกลุ่มสำหรับช่องเลือกกลุ่มในฟอร์มบัญชี — โหลดตอนเปิดฟอร์ม ไม่ฝังในหน้า */
+export async function listPickerGroupsAction() {
+  await requireSession();
+  return listPostingGroups();
+}
+
+/** ตั้งจังหวัดของบัญชี (Facebook หรือบัญชีค้นหา) — key = '<platform>:<id>' · หลายจังหวัดคั่นจุลภาค · ว่าง = ไม่ระบุ */
+export async function setAccountProvinceAction(formData: FormData) {
+  await requireSession();
+  const key = String(formData.get('key') ?? '').trim();
+  if (!key.includes(':')) throw new Error('ไม่พบบัญชี');
+  const province = String(formData.get('province') ?? '').replace(/\s+/g, ' ').trim();
+  await setAccountProvince(key, province || null);
+  revalidatePath('/settings/connectors');
 }
 
 /** ตั้งจังหวัดของกลุ่ม (พิมพ์ในรายการกลุ่มแล้วกด Enter) — หลายจังหวัดคั่นด้วยจุลภาค · ว่าง = ไม่ระบุ */

@@ -617,9 +617,29 @@ export type UnifiedConnectorRow = {
   group_ids: string[];
   /** รหัสธุรกิจ LBD/LBA/LM — null = ไม่ระบุ */
   department: string | null;
+  /** จังหวัดที่บัญชีนี้ดูแล (คั่นจุลภาคได้) — null = ไม่ระบุ · ใช้กรองหน้าบัญชี */
+  province: string | null;
+  /** Facebook: ขอยืนยันตัวตนอยู่ (มีงานต้องทำที่เครื่อง) */
+  needs_verification: boolean | null;
 };
 
+/** คอลัมน์จังหวัดของบัญชี (runtime ALTER เหมือน department) */
+async function ensureAccountProvinceColumns(): Promise<void> {
+  await q('ALTER TABLE connectors ADD COLUMN IF NOT EXISTS province text');
+  await q(`ALTER TABLE ${AP}.users ADD COLUMN IF NOT EXISTS province VARCHAR(255)`);
+}
+
+/** ตั้งจังหวัดของบัญชี — key '<platform>:<id>' */
+export async function setAccountProvince(key: string, province: string | null): Promise<void> {
+  await ensureAccountProvinceColumns();
+  const platform = key.slice(0, key.indexOf(':'));
+  const id = key.slice(key.indexOf(':') + 1);
+  if (platform === 'facebook') await q(`UPDATE ${AP}.users SET province = $2 WHERE id = $1`, [id, province]);
+  else await q('UPDATE connectors SET province = $2 WHERE id::text = $1', [id, province]);
+}
+
 export async function listAllConnectors() {
+  await ensureAccountProvinceColumns().catch(() => {});
   // Query both schemas directly instead of v_connectors: the view belongs to an
   // older fixed autopost schema, while AUTOPOST_SCHEMA is now configurable.
   const scraper = await q<UnifiedConnectorRow>(
@@ -629,7 +649,9 @@ export async function listAllConnectors() {
             NULL::integer AS used_today, NULL::text AS preferred_worker, NULL::boolean AS skip_warmup,
             (NULLIF(password_enc, '') IS NOT NULL) AS has_password,
             '[]'::jsonb AS group_ids,
-            NULLIF(to_jsonb(connectors)->>'department', '') AS department
+            NULLIF(to_jsonb(connectors)->>'department', '') AS department,
+            NULLIF(to_jsonb(connectors)->>'province', '') AS province,
+            NULL::boolean AS needs_verification
        FROM connectors`,
   );
 
@@ -653,7 +675,9 @@ export async function listAllConnectors() {
               COALESCE((to_jsonb(u)->>'skip_warmup')::boolean, false) AS skip_warmup,
               (NULLIF(u.password, '') IS NOT NULL) AS has_password,
               CASE WHEN jsonb_typeof(u.group_ids::jsonb) = 'array' THEN u.group_ids::jsonb ELSE '[]'::jsonb END AS group_ids,
-              NULLIF(to_jsonb(u)->>'department', '') AS department
+              NULLIF(to_jsonb(u)->>'department', '') AS department,
+              NULLIF(to_jsonb(u)->>'province', '') AS province,
+              (NULLIF(to_jsonb(u)->>'needs_verification_since', '') IS NOT NULL) AS needs_verification
          FROM ${AP}.users u`,
     );
   } catch {
@@ -673,7 +697,9 @@ export async function listAllConnectors() {
                 false AS skip_warmup,
                 (NULLIF(u.password, '') IS NOT NULL) AS has_password,
                 '[]'::jsonb AS group_ids,
-                NULLIF(to_jsonb(u)->>'department', '') AS department
+                NULLIF(to_jsonb(u)->>'department', '') AS department,
+                NULLIF(to_jsonb(u)->>'province', '') AS province,
+                NULL::boolean AS needs_verification
            FROM ${AP}.users u`,
       );
     } catch {
@@ -3661,14 +3687,24 @@ export async function listJarvisPostOrders(opts: { requestNos?: string[] } = {})
   } catch {
     return [];
   }
-  const groupRows = await q<{ id: string; name: string; fb_group_id: string; account_label: string | null }>(
-    `SELECT g.id, g.name, g.fb_group_id,
-            (SELECT COALESCE(NULLIF(TRIM(u.name), ''), u.env_key, u.id) FROM ${AP}.users u
-              WHERE COALESCE(u.group_ids::jsonb, '[]'::jsonb) ? g.id
-                AND (u.paused_until IS NULL OR u.paused_until <= now())
-              ORDER BY 1 LIMIT 1) AS account_label
-       FROM ${AP}.groups g ORDER BY g.name`,
-  ).catch(() => []);
+  // ชื่อกลุ่มทั้งคลัง (2,400+ หลังนำเข้าชีตราชการ 4 พ.ย. 2569) — เดิมมี subquery หาบัญชีต่อกลุ่มทุกแถว ใช้ 0.4 วิ ต่อการโหลดหน้า
+  // ตอนนี้ดึงแค่ชื่อ แล้วหาบัญชีประจำกลุ่มใน JS เฉพาะกลุ่มที่ใบนั้นใช้จริง
+  const [groupRows, accountRows] = await Promise.all([
+    q<{ id: string; name: string; fb_group_id: string }>(
+      `SELECT g.id, g.name, g.fb_group_id FROM ${AP}.groups g ORDER BY g.name`,
+    ).catch(() => []),
+    q<{ label: string; group_ids: string[] }>(
+      `SELECT COALESCE(NULLIF(TRIM(u.name), ''), u.env_key, u.id) AS label, COALESCE(u.group_ids::jsonb, '[]'::jsonb) AS group_ids
+         FROM ${AP}.users u WHERE u.paused_until IS NULL OR u.paused_until <= now() ORDER BY 1`,
+    ).catch(() => []),
+  ]);
+  const accountLabelByGroup = new Map<string, string>();
+  for (const a of accountRows) {
+    for (const gid of Array.isArray(a.group_ids) ? a.group_ids : []) {
+      if (!accountLabelByGroup.has(String(gid))) accountLabelByGroup.set(String(gid), a.label);
+    }
+  }
+  const groupByFb = new Map(groupRows.map((g) => [String(g.fb_group_id), g]));
   const groupNames = new Map(groupRows.map((g) => [g.id, g.name]));
   const groupNamesByFb = new Map(groupRows.map((g) => [String(g.fb_group_id), g.name]));
   const out: JarvisPostOrder[] = [];
@@ -3774,16 +3810,20 @@ export async function listJarvisPostOrders(opts: { requestNos?: string[] } = {})
         collected_at: log?.last_collected_at ?? null,
       };
     });
-    const repostGroups: JarvisRepostGroup[] = groupRows.map((g) => {
-      const last = lastPostByFb.get(String(g.fb_group_id));
+    // โพสต์ซ้ำเลือกได้เฉพาะกลุ่มที่ใบนี้เคยสั่ง/เคยลง — เดิมส่งทั้งคลังทุกใบ: 79 ใบ × 2,437 กลุ่ม ≈ 31 MB ต่อการเปิดหน้า
+    // ทำให้หน้าศูนย์งาน/งานโพสต์ช้ามากหลังนำเข้ากลุ่มราชการ (4 พ.ย. 2569) · ลงกลุ่มใหม่ให้สั่งเป็นใบใหม่จาก Jarvis
+    const repostGroups: JarvisRepostGroup[] = [...plannedFb].flatMap((fb) => {
+      const g = groupByFb.get(fb);
+      if (!g) return [];
+      const last = lastPostByFb.get(fb);
       const until = last ? last + REPOST_MIN_GAP_DAYS * 86_400_000 : 0;
-      return {
+      return [{
         id: g.id,
-        fb_group_id: String(g.fb_group_id),
+        fb_group_id: fb,
         name: g.name,
-        account_label: g.account_label,
+        account_label: accountLabelByGroup.get(g.id) ?? null,
         blocked_until: until > Date.now() ? new Date(until).toISOString() : null,
-      };
+      }];
     });
     // สั่งใบใหม่ด้วยเลขใบขอเดิม: กลุ่มที่งานนี้เพิ่งโพสต์ไม่ถึง 2 วัน — ไม่ปฏิเสธทั้งใบ ตอนสั่งจะข้ามกลุ่มพวกนี้แล้วบอกคนสั่ง
     const recentGroups: JarvisRecentGroup[] = row.status === 'pending'
