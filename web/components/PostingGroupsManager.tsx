@@ -8,7 +8,7 @@ import { groupByBusinessUnit } from '@/lib/business-units';
 import { BusinessUnitSection } from '@/components/BusinessUnitSection';
 import { GroupBusinessSelect } from '@/components/GroupBusinessSelect';
 import { GroupSectorSelect } from '@/components/GroupSectorSelect';
-import { GroupJobTypeChecks, GroupJobTypesEditor } from '@/components/GroupJobTypesEditor';
+import { GroupJobTypesDropdown, GroupJobTypesEditor } from '@/components/GroupJobTypesEditor';
 import { GROUP_JOB_TYPES, isGroupJobType } from '@/lib/group-job-types';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -74,7 +74,7 @@ export async function PostingGroupsManager({ sector = 'private', query = '', pro
         <CardContent>
           <form action={createGroupAction}>
             <FieldGroup>
-              <div className="grid gap-4 sm:grid-cols-[2fr_1.5fr_1fr_1fr_1fr_auto] sm:items-end">
+              <div className="grid gap-4 sm:grid-cols-[2fr_1.5fr_1fr_1fr_1fr_1.2fr_auto] sm:items-end">
                 <Field>
                   <FieldLabel htmlFor="new-group-id">ลิงก์กลุ่ม หรือ ID กลุ่ม</FieldLabel>
                   <Input
@@ -100,12 +100,12 @@ export async function PostingGroupsManager({ sector = 'private', query = '', pro
                   <FieldLabel htmlFor="new-group-sector">ราชการ / เอกชน</FieldLabel>
                   <GroupSectorSelect id="new-group-sector" name="sector" defaultValue="private" />
                 </Field>
+                <Field>
+                  <FieldLabel htmlFor="new-group-jobtypes">ประเภทงาน</FieldLabel>
+                  <GroupJobTypesDropdown id="new-group-jobtypes" />
+                </Field>
                 <Button>เพิ่มกลุ่ม</Button>
               </div>
-              <Field>
-                <FieldLabel>ประเภทงานที่กลุ่มนี้รับ (เลือกได้หลายอย่าง)</FieldLabel>
-                <GroupJobTypeChecks idPrefix="new-group" />
-              </Field>
             </FieldGroup>
           </form>
         </CardContent>

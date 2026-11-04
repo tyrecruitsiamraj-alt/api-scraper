@@ -26,6 +26,42 @@ export function GroupJobTypeChecks({ idPrefix, defaultSelected = [] }: { idPrefi
   );
 }
 
+/**
+ * ช่องเลือกประเภทงานแบบ dropdown สำหรับฟอร์มเพิ่มกลุ่ม — หน้าตาเหมือนช่องเลือกอื่นในแถวเดียวกัน
+ * กดแล้วติ๊กได้หลายอย่าง ค่าที่เลือกส่งเป็น hidden input ชื่อ jobTypes
+ */
+export function GroupJobTypesDropdown({ id }: { id: string }) {
+  const [selected, setSelected] = useState<string[]>([]);
+  const toggle = (t: string, on: boolean) =>
+    setSelected((prev) => (on ? GROUP_JOB_TYPES.filter((x) => x === t || prev.includes(x)) : prev.filter((x) => x !== t)));
+  return (
+    <>
+      <Popover>
+        <PopoverTrigger asChild>
+          <Button id={id} type="button" variant="outline" size="sm" className="w-full justify-between font-normal">
+            <span className="truncate">{selected.length ? selected.join(', ') : 'เลือกประเภทงาน'}</span>
+            <ChevronDownIcon data-icon="inline-end" />
+          </Button>
+        </PopoverTrigger>
+        <PopoverContent className="w-56" align="start">
+          <div className="flex flex-col gap-2">
+            {GROUP_JOB_TYPES.map((t) => {
+              const cid = `${id}-${t}`;
+              return (
+                <Field key={t} orientation="horizontal">
+                  <Checkbox id={cid} checked={selected.includes(t)} onCheckedChange={(v) => toggle(t, v === true)} />
+                  <FieldLabel htmlFor={cid} className="font-normal">{t}</FieldLabel>
+                </Field>
+              );
+            })}
+          </div>
+        </PopoverContent>
+      </Popover>
+      {selected.map((t) => <input key={t} type="hidden" name="jobTypes" value={t} />)}
+    </>
+  );
+}
+
 /** ปุ่มบนแถวกลุ่ม: แสดงประเภทงานที่ตั้งไว้ กดแล้วติ๊กแก้ แล้วบันทึก */
 export function GroupJobTypesEditor({ groupId, groupName, value }: { groupId: string; groupName: string; value: string[] }) {
   const [open, setOpen] = useState(false);
