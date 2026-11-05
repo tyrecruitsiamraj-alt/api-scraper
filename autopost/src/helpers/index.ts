@@ -27,6 +27,7 @@ export {
   isAccountLimitedMessage,
   getFailStreakLimit,
   getPauseHours,
+  handoffRemainingGroups,
 } from './postPlan';
 export type { DailyPostPlan, DailyPlanItem } from './postPlan';
 export { postLog } from './postLog';

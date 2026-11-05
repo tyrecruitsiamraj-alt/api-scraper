@@ -115,6 +115,37 @@ export async function pauseUserForFacebookLimit(
   return { hours: Number(user.hours) || baseHours, strikes: Number(user.strikes) || 1, reason: user.reason };
 }
 
+export type HandoffResult = { account: { id: string; label: string }; groups: number; skipped: number } | null;
+
+/**
+ * บัญชีโพสต์ต่อไม่ได้แต่ยังเหลือกลุ่ม — ส่งกลุ่มที่เหลือให้บัญชีอื่นที่ว่างโพสต์แทน
+ * คืน null เมื่อไม่มีบัญชีว่าง (ผู้เรียกบันทึกบันทึกรอบไว้ให้คนเห็น ไม่เงียบ)
+ */
+export async function handoffRemainingGroups(
+  fromUserId: string,
+  jobIds: string[],
+  groupIds: string[],
+  requestedBy?: string
+): Promise<HandoffResult> {
+  if (!groupIds.length || !jobIds.length) return null;
+  if (process.env.DATABASE_URL) {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const db = require('../../server/db');
+    return (await db.handoffRemainingGroups({ fromUserId, jobIds, groupIds, requestedBy })) || null;
+  }
+  const base = String(process.env.RUN_LOG_API_URL || '').replace(/\/$/, '');
+  const token = String(process.env.POST_WORKER_TOKEN || '').trim();
+  if (!base) return null;
+  const res = await fetch(`${base}/api/worker/post/handoff`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'x-worker-token': token },
+    body: JSON.stringify({ from_user_id: fromUserId, job_ids: jobIds, group_ids: groupIds, requested_by: requestedBy || 'handoff' }),
+  });
+  if (!res.ok) return null;
+  const data = (await res.json().catch(() => ({}))) as { handoff?: HandoffResult };
+  return data.handoff || null;
+}
+
 export function getFailStreakLimit(): number {
   return Math.max(2, Number(process.env.POST_FAIL_STREAK_LIMIT) || 5);
 }

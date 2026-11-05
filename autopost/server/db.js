@@ -2094,6 +2094,65 @@ async function pauseUserForFacebookLimit(userId, baseHours = 24) {
   return row ? { ...row, hours, strikes, reason } : null;
 }
 
+/**
+ * บัญชีโพสต์ต่อไม่ได้ (Facebook จำกัด/พัก) แต่ยังเหลือกลุ่มที่ยังไม่ได้ลง —
+ * ส่งต่อให้บัญชีอื่นที่ว่างโพสต์แทน: สร้าง assignment ใหม่ของกลุ่มที่เหลือ + เข้าคิวให้บัญชีนั้น
+ *
+ * เลือกบัญชีสำรองเฉพาะตัวที่ว่างจริง: ไม่ถูกพัก · ไม่ติดยืนยันตัวตน · ยังไม่เต็มโควต้าวันนี้
+ * เรียงเครื่องออนไลน์ก่อน แล้วเอาตัวที่ใช้โควต้าวันนี้น้อยสุด (กระจายโหลด)
+ * คืน null เมื่อไม่มีบัญชีว่าง — ผู้เรียกบันทึกบันทึกรอบไว้ให้คนเห็น
+ */
+async function handoffRemainingGroups({ fromUserId, jobIds, groupIds, requestedBy, excludeUserIds = [] }) {
+  const jobs = normalizeIdArray(jobIds);
+  const groups = normalizeIdArray(groupIds);
+  if (!jobs.length || !groups.length) return null;
+  await ensurePostRunQueueUserColumn();
+  await ensureUsersPostControlColumns();
+
+  const skip = [String(fromUserId || ''), ...excludeUserIds.map(String)].filter(Boolean);
+  const { rows } = await query(
+    `SELECT * FROM (
+       SELECT u.id, COALESCE(NULLIF(TRIM(u.name), ''), u.env_key, u.id) AS label,
+              EXISTS (SELECT 1 FROM workers w
+                       WHERE w.name = u.preferred_worker AND w.last_seen > NOW() - INTERVAL '2 minutes') AS worker_online,
+              COALESCE(u.daily_cap, 15)::int AS cap,
+              COALESCE((SELECT COUNT(*)::int FROM post_logs pl
+                         WHERE pl.user_id = u.id
+                           AND (pl.created_at AT TIME ZONE 'Asia/Bangkok')::date
+                               = (NOW() AT TIME ZONE 'Asia/Bangkok')::date), 0) AS used_today
+         FROM users u
+        WHERE (u.paused_until IS NULL OR u.paused_until <= NOW())
+          AND u.needs_verification_since IS NULL
+          AND NOT (u.id = ANY($1::text[]))
+     ) a
+     WHERE a.used_today < a.cap
+     ORDER BY a.worker_online DESC, (a.used_today::float / NULLIF(a.cap, 0)) ASC, a.label
+     LIMIT 1`,
+    [skip]
+  );
+  const next = rows[0];
+  if (!next) return null;
+
+  // กลุ่มที่เหลือต้องไม่เกินโควต้าที่บัญชีใหม่ยังเหลือวันนี้ — ที่เกินปล่อยไว้ให้รอบหน้า
+  const room = Math.max(0, Number(next.cap) - Number(next.used_today));
+  const take = groups.slice(0, room);
+  if (!take.length) return null;
+
+  const assignmentId = generateId();
+  await query(
+    `INSERT INTO ${ASSIGNMENTS_TABLE} (id, job_ids, group_ids, user_id)
+     VALUES ($1, $2::jsonb, $3::jsonb, $4)`,
+    [assignmentId, JSON.stringify(jobs), JSON.stringify(take), next.id]
+  );
+  const queued = await enqueuePostRunJob({
+    assignment_ids: [assignmentId],
+    user_id: next.id,
+    requested_by: requestedBy || 'handoff',
+    message: `สลับบัญชีมาจากตัวที่โพสต์ต่อไม่ได้ — เหลือ ${take.length} กลุ่ม`,
+  });
+  return { account: { id: next.id, label: next.label }, groups: take.length, skipped: groups.length - take.length, queue_id: queued ? queued.id : null };
+}
+
 async function resumeUser(userId) {
   await ensureUsersPostControlColumns();
   const { rows } = await query(
@@ -2904,6 +2963,7 @@ module.exports = {
   completePostRunJob,
   pauseUser,
   pauseUserForFacebookLimit,
+  handoffRemainingGroups,
   resumeUser,
   countPostsTodayByUser,
   getUsersPostingStatus,

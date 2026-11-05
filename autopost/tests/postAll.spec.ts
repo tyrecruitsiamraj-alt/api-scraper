@@ -19,6 +19,7 @@ import {
   isAccountLimitedMessage,
   getFailStreakLimit,
   getPauseHours,
+  handoffRemainingGroups,
 } from '../src/helpers';
 import type { PostDelaySettings, DailyPlanItem } from '../src/helpers';
 
@@ -261,7 +262,37 @@ test('Dynamic Post: รันโพสต์ตาม Assignments', async ({ pag
     /** circuit breaker: fail ติดกันหลายกลุ่ม = สัญญาณบัญชีโดนจำกัด — หยุดก่อนจะเผาบัญชี */
     let failStreak = 0;
     let lastJobId: string | null = null;
-    for (const item of planItems) {
+    /** ตำแหน่งที่กำลังโพสต์ — ใช้หากลุ่มที่ยังไม่ได้ลงเมื่อบัญชีนี้ไปต่อไม่ได้ */
+    let currentIndex = 0;
+
+    /**
+     * บัญชีนี้โพสต์ต่อไม่ได้แล้ว — ส่งกลุ่มที่ "ยังไม่ได้ลง" ให้บัญชีอื่นที่ว่างโพสต์แทน
+     * (เดิมหยุดเฉย ๆ กลุ่มที่เหลือไม่ได้ลงเลยจนกว่าคนจะมาสั่งใหม่)
+     */
+    const handoffRest = async (why: string) => {
+      const rest = planItems.slice(currentIndex + 1);
+      if (!rest.length) return;
+      // assignments.group_ids เก็บ "row id" ของตาราง groups (ไม่ใช่เลขกลุ่มบน Facebook)
+      const restGroups = [...new Set(rest.map((r) => String(r.group_row_id)).filter(Boolean))];
+      const restJobs = [...new Set(rest.map((r) => String(r.job_id)).filter(Boolean))];
+      try {
+        const moved = await handoffRemainingGroups(user.id, restJobs, restGroups, `handoff:${user.id}`);
+        if (moved) {
+          const extra = moved.skipped > 0 ? ` (อีก ${moved.skipped} กลุ่มเกินโควต้าวันนี้ของบัญชีใหม่ รอรอบหน้า)` : '';
+          const msg = `${why} — ส่ง ${moved.groups} กลุ่มที่เหลือให้บัญชี ${moved.account.label} โพสต์แทน${extra}`;
+          console.log(`🔄 [${userLabel}] ${msg}`);
+          await runLog({ level: 'info', message: msg, user_id: user.id, meta: { kind: 'handoff', to: moved.account.id } });
+        } else {
+          const msg = `${why} — เหลือ ${restGroups.length} กลุ่มที่ยังไม่ได้ลง แต่ไม่มีบัญชีอื่นที่ว่างรับต่อ`;
+          console.log(`⚠️ [${userLabel}] ${msg}`);
+          await runLog({ level: 'warn', message: msg, user_id: user.id, meta: { kind: 'handoff', to: null } });
+        }
+      } catch (e) {
+        await runLog({ level: 'warn', message: `${why} — ส่งต่อบัญชีอื่นไม่สำเร็จ: ${(e as Error).message}`, user_id: user.id });
+      }
+    };
+    for (const [planIndex, item] of planItems.entries()) {
+      currentIndex = planIndex;
       const job = config.jobs.find((j) => j.id === item.job_id);
       if (!job) {
         console.log(`⏭️ ข้าม job ${item.job_id}: ไม่พบใน config`);
@@ -405,6 +436,7 @@ test('Dynamic Post: รันโพสต์ตาม Assignments', async ({ pag
               console.log(`🛑 [${userLabel}] ${reason}`);
               await runLog({ level: 'error', message: reason, user_id: user.id });
             }
+            await handoffRest('บัญชีถูก Facebook จำกัด');
             break;
           }
           const reason = `โพสต์ไม่สำเร็จติดกัน ${failStreak} กลุ่ม — circuit breaker พัก ${pauseHours} ชม. (อาจโดน Facebook จำกัดการโพสต์)`;
@@ -416,6 +448,7 @@ test('Dynamic Post: รันโพสต์ตาม Assignments', async ({ pag
             // พักไม่สำเร็จต้องเห็นในบันทึกรอบ ไม่เงียบ — บัญชีจะยังถูกสั่งโพสต์ต่อได้
             await runLog({ level: 'error', message: `พักบัญชีอัตโนมัติไม่สำเร็จ: ${(e as Error).message}`, user_id: user.id });
           }
+          await handoffRest('บัญชีถูกพักจาก circuit breaker');
           break;
         }
         // ไม่ได้โพสต์อะไรลงกลุ่มนี้ — ไปกลุ่มถัดไปเลยไม่ต้องหน่วงเวลา

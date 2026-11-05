@@ -1652,6 +1652,29 @@ app.post('/api/worker/post/pause-user', async (req, res) => {
   }
 });
 
+/**
+ * บัญชีโพสต์ต่อไม่ได้กลางรอบ — worker ส่งกลุ่มที่เหลือมาให้เซิร์ฟเวอร์หาบัญชีอื่นโพสต์แทน
+ * ไม่มีบัญชีว่าง = ตอบ ok:true, handoff:null (worker บันทึกบันทึกรอบไว้ให้คนเห็น)
+ */
+app.post('/api/worker/post/handoff', async (req, res) => {
+  try {
+    if (!requirePostWorkerToken(req, res)) return;
+    const fromUserId = String(req.body?.from_user_id || '').trim();
+    if (!fromUserId) return res.status(400).json({ error: 'from_user_id required' });
+    const handoff = await db.handoffRemainingGroups({
+      fromUserId,
+      jobIds: req.body?.job_ids,
+      groupIds: req.body?.group_ids,
+      requestedBy: req.body?.requested_by || 'handoff',
+      excludeUserIds: Array.isArray(req.body?.exclude_user_ids) ? req.body.exclude_user_ids : [],
+    });
+    if (handoff) logger.warn('post_user.handoff', { from: fromUserId, to: handoff.account.id, groups: handoff.groups });
+    res.json({ ok: true, handoff });
+  } catch (e) {
+    res.status(500).json({ error: e.message || String(e) });
+  }
+});
+
 /** ปลดพักบัญชี (จากหน้าเว็บ/มือ) */
 app.post('/api/users/:id/resume-posting', async (req, res) => {
   try {
