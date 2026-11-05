@@ -89,6 +89,14 @@ export function PendingOrderCard({ order }: { order: JarvisPostOrder }) {
             <AlertDescription>{blockers.join(' · ')}</AlertDescription>
           </Alert>
         )}
+        {order.account_switched_from && (
+          <Alert>
+            <AlertTitle>เปลี่ยนบัญชีให้แล้ว</AlertTitle>
+            <AlertDescription>
+              บัญชีที่เลือกไว้ {order.account_switched_from} ใช้ไม่ได้ ระบบสลับไปโพสต์ด้วย {order.account_label ?? '-'} แทน
+            </AlertDescription>
+          </Alert>
+        )}
         <p className="text-sm text-muted-foreground">กลุ่ม: {order.group_names.join(', ') || '-'}</p>
         {order.recent_groups.length > 0 && (
           <p className="text-sm text-muted-foreground">

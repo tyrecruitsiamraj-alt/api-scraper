@@ -3493,6 +3493,8 @@ export type JarvisPostOrder = {
   worker_problem: string | null;
   /** บัญชีที่ Jarvis เลือกไว้ (อาจถูกลบไปแล้ว ถ้า account_id เป็น null) */
   requested_account_id: string | null;
+  /** สลับมาจากบัญชีนี้เพราะตัวเดิมใช้ไม่ได้ (ถูกพัก/รอยืนยันตัวตน) — null = ใช้บัญชีที่เลือกไว้ */
+  account_switched_from: string | null;
   job_id: string | null;
   queue_status: string | null;
   queue_at: string | null;
@@ -3591,24 +3593,70 @@ function workerProblem(worker: string | null, online: boolean, lastSeen: string 
  * บัญชีที่จะโพสต์ใบนี้: ถ้า Jarvis ส่ง job_snapshot.account_id มา ใช้บัญชีนั้น (ต้องผูกทุกกลุ่มที่เลือก)
  * ไม่งั้นเลือกบัญชีที่ผูกกลุ่มให้เอง
  */
+/**
+ * บัญชีสำรองเมื่อตัวที่เลือกไว้ใช้ไม่ได้ — เอาตัวที่ "ว่างจริง" เท่านั้น:
+ * ไม่ถูกพัก · ไม่ติดยืนยันตัวตน · ยังไม่เต็มโควต้าวันนี้ แล้วเรียงเครื่องออนไลน์ก่อน
+ * และเลือกตัวที่ใช้โควต้าวันนี้น้อยสุด (กระจายโหลด ลดโอกาสโดน Facebook จำกัดซ้ำ)
+ */
+async function pickSubstituteAccount(excludeId: string | null) {
+  try {
+    const rows = await q<{ id: string; label: string; worker_online: boolean; group_ids: string[]; preferred_worker: string | null; worker_last_seen: string | null }>(
+      `SELECT * FROM (
+         SELECT u.id, COALESCE(NULLIF(TRIM(u.name), ''), u.env_key, u.id) AS label,
+                EXISTS (SELECT 1 FROM ${AP}.workers w
+                         WHERE w.name=u.preferred_worker AND w.last_seen > now() - interval '2 minutes') AS worker_online,
+                COALESCE(u.group_ids::jsonb, '[]'::jsonb) AS group_ids,
+                NULLIF(TRIM(u.preferred_worker), '') AS preferred_worker,
+                (SELECT w.last_seen FROM ${AP}.workers w WHERE w.name = u.preferred_worker) AS worker_last_seen,
+                COALESCE(u.daily_cap, 15)::int AS cap,
+                COALESCE((SELECT count(*)::int FROM ${AP}.post_logs pl
+                           WHERE pl.user_id = u.id
+                             AND (pl.created_at AT TIME ZONE 'Asia/Bangkok')::date
+                                 = (now() AT TIME ZONE 'Asia/Bangkok')::date), 0) AS used_today
+           FROM ${AP}.users u
+          WHERE (u.paused_until IS NULL OR u.paused_until <= now())
+            AND u.needs_verification_since IS NULL
+            AND ($1::text IS NULL OR u.id <> $1::text)
+       ) a
+       WHERE a.used_today < a.cap
+       ORDER BY a.worker_online DESC, (a.used_today::float / NULLIF(a.cap, 0)) ASC, a.label
+       LIMIT 1`,
+      [excludeId],
+    );
+    return rows[0] ?? null;
+  } catch {
+    return null;
+  }
+}
+
 async function resolvePostAccount(groupIds: string[], requestedAccountId: string | null) {
-  if (!requestedAccountId) return { account: await pickPostAccount(groupIds), issue: null as string | null };
-  const rows = await q<{ id: string; label: string; worker_online: boolean; group_ids: string[]; paused: boolean; preferred_worker: string | null; worker_last_seen: string | null }>(
+  if (!requestedAccountId) {
+    return { account: await pickPostAccount(groupIds), issue: null as string | null, switchedFrom: null as string | null };
+  }
+  const rows = await q<{ id: string; label: string; worker_online: boolean; group_ids: string[]; paused: boolean; needs_verification: boolean; preferred_worker: string | null; worker_last_seen: string | null }>(
     `SELECT u.id, COALESCE(NULLIF(TRIM(u.name), ''), u.env_key, u.id) AS label,
             EXISTS (SELECT 1 FROM ${AP}.workers w
                      WHERE w.name=u.preferred_worker AND w.last_seen > now() - interval '2 minutes') AS worker_online,
             COALESCE(u.group_ids::jsonb, '[]'::jsonb) AS group_ids,
             (u.paused_until IS NOT NULL AND u.paused_until > now()) AS paused,
+            (u.needs_verification_since IS NOT NULL) AS needs_verification,
             NULLIF(TRIM(u.preferred_worker), '') AS preferred_worker,
             (SELECT w.last_seen FROM ${AP}.workers w WHERE w.name = u.preferred_worker) AS worker_last_seen
        FROM ${AP}.users u WHERE u.id = $1`,
     [requestedAccountId],
   );
   const account = rows[0];
-  if (!account) return { account: null, issue: 'บัญชี Facebook ที่เลือกใน Jarvis ไม่มีในระบบ' };
-  if (account.paused) return { account, issue: `บัญชี ${account.label} ถูกพักอยู่` };
+  if (!account) return { account: null, issue: 'บัญชี Facebook ที่เลือกใน Jarvis ไม่มีในระบบ', switchedFrom: null };
+  // บัญชีที่เลือกไว้ใช้ไม่ได้ (Facebook พัก หรือ ขอยืนยันตัวตน) → สลับไปบัญชีที่ว่างให้เลย
+  // ไม่ปล่อยให้งานค้างรอคนมากดเอง; UI บอกว่าสลับมาจากใบไหนเสมอ
+  if (account.paused || account.needs_verification) {
+    const why = account.paused ? 'ถูก Facebook พัก' : 'รอยืนยันตัวตน';
+    const sub = await pickSubstituteAccount(account.id);
+    if (sub) return { account: sub, issue: null, switchedFrom: `${account.label} (${why})` };
+    return { account, issue: `บัญชี ${account.label} ${why} และยังไม่มีบัญชีอื่นที่ว่าง`, switchedFrom: null };
+  }
   // กลุ่มไม่ได้ผูกกับบัญชี: บัญชีที่ Jarvis เลือกโพสต์ได้ทุกกลุ่ม (worker กดเข้าร่วมกลุ่มที่ยังไม่ได้เป็นสมาชิกให้)
-  return { account, issue: null };
+  return { account, issue: null, switchedFrom: null };
 }
 
 async function pickPostAccount(groupIds: string[]) {
@@ -3623,6 +3671,7 @@ async function pickPostAccount(groupIds: string[]) {
        FROM ${AP}.users u
       WHERE COALESCE(u.group_ids::jsonb, '[]'::jsonb) ?| $1::text[]
         AND (u.paused_until IS NULL OR u.paused_until <= now())
+        AND u.needs_verification_since IS NULL
       ORDER BY 3 DESC, label`,
     [groupIds],
   );
@@ -3746,7 +3795,7 @@ export async function listJarvisPostOrders(opts: { requestNos?: string[]; skipSy
         )[0]
       : null;
     const targetOnline = Boolean(targetSeen?.online);
-    const { account, issue: accountIssue } = await resolvePostAccount(groupIds, requestedAccountId);
+    const { account, issue: accountIssue, switchedFrom } = await resolvePostAccount(groupIds, requestedAccountId);
     if (accountIssue) issues.push(accountIssue);
     else if (groupIds.length && !account) issues.push('ไม่มีบัญชี Facebook ที่ผูกกับกลุ่มนี้');
     // รวมรอบโพสต์ซ้ำ (assignment jv-…-rN) ด้วย
@@ -3881,6 +3930,7 @@ export async function listJarvisPostOrders(opts: { requestNos?: string[]; skipSy
         targetWorker ? targetSeen?.last_seen ?? null : account?.worker_last_seen ?? null,
       ),
       requested_account_id: requestedAccountId,
+      account_switched_from: switchedFrom,
       job_id: queue[0] ? jobId : null,
       queue_status: queue[0]?.status ?? null,
       queue_at: queue[0]?.created_at ?? null,
