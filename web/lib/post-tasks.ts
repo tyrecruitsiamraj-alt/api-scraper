@@ -168,13 +168,17 @@ export async function getPostTask(id: string): Promise<PostTask | null> {
 /** log ทั้งหมดของรอบ (ล่าสุดก่อน) สำหรับหน้า task */
 export async function getPostTaskLogs(runId: string): Promise<PostTaskLog[]> {
   try {
-    const [rows, groups] = await Promise.all([
-      q<{ at: string; level: string; message: string; group_id: string | null }>(
-        `SELECT created_at AS at, level, message, group_id FROM ${AP}.run_logs WHERE run_id = $1 ORDER BY created_at DESC LIMIT 200`,
-        [runId],
-      ),
-      q<{ name: string; fb_group_id: string }>(`SELECT name, fb_group_id FROM ${AP}.groups`).catch(() => []),
-    ]);
+    const rows = await q<{ at: string; level: string; message: string; group_id: string | null }>(
+      `SELECT created_at AS at, level, message, group_id FROM ${AP}.run_logs WHERE run_id = $1 ORDER BY created_at DESC LIMIT 200`,
+      [runId],
+    );
+    const fbIds = [...new Set(rows.map((r) => r.group_id).filter(Boolean).map(String))];
+    const groups = fbIds.length
+      ? await q<{ name: string; fb_group_id: string }>(
+          `SELECT name, fb_group_id FROM ${AP}.groups WHERE fb_group_id = ANY($1::text[])`,
+          [fbIds],
+        ).catch(() => [])
+      : [];
     const nameByFb = new Map(groups.map((g) => [String(g.fb_group_id), g.name]));
     return rows.map((r) => ({ ...r, group_name: r.group_id ? nameByFb.get(String(r.group_id)) ?? r.group_id : null }));
   } catch {

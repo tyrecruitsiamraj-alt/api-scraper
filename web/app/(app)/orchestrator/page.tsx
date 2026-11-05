@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { ChevronDownIcon, ChevronRightIcon, CircleAlertIcon } from 'lucide-react';
-import { listJarvisPostOrders, listSoRecruitPostingRequests, listTasks } from '@/lib/repo';
+import { Suspense } from 'react';
+import { listJarvisPostOrderSummaries, listSoRecruitPostingRequests, listTasks } from '@/lib/repo';
 import { listPostTasks } from '@/lib/post-tasks';
 import type { PostTask } from '@/lib/post-tasks';
 import { listJarvisScrapRequests, scrapTaskUpdatedAt, toScrapTaskRow } from '@/lib/scrap-tasks';
@@ -22,6 +23,8 @@ import { Empty, EmptyHeader, EmptyTitle } from '@/components/ui/empty';
 import { Item, ItemActions, ItemContent, ItemDescription, ItemGroup, ItemTitle } from '@/components/ui/item';
 
 export const dynamic = 'force-dynamic';
+/** ให้ Vercel รอได้พอถ้า DB ช้า — แต่หน้านี้ต้องเบา ไม่ดึงคลังกลุ่มทั้งก้อน */
+export const maxDuration = 30;
 
 function Count({ label, value, href, tone }: { label: string; value: number; href: string; tone?: 'destructive' | 'warning' }) {
   return (
@@ -80,10 +83,11 @@ function PostRow({ task }: { task: PostTask }) {
 // ศูนย์งาน = หน้าสรุปของงาน Scrap และงานโพสต์ ตัวงานจริงอยู่ในหน้าของแต่ละฝั่ง
 export default async function OrchestratorPage(props: { searchParams?: Promise<{ notice?: string }> }) {
   const searchParams = await props.searchParams;
+  // ห้ามเรียก listJarvisPostOrders() เต็ม ๆ ที่นี่ — ดึงกลุ่ม 2,400+ และ ~8 query/ใบ จนหน้าเว็บ 504
   const [jarvisScrap, tasks, postOrders, postTasks, reqs] = await Promise.all([
     listJarvisScrapRequests(),
     listTasks(),
-    listJarvisPostOrders(),
+    listJarvisPostOrderSummaries(),
     listPostTasks(),
     listSoRecruitPostingRequests(),
   ]);
@@ -265,7 +269,9 @@ export default async function OrchestratorPage(props: { searchParams?: Promise<{
         </Alert>
       )}
 
-      <MachineStatus back="/orchestrator" />
+      <Suspense fallback={<p className="text-sm text-muted-foreground">กำลังโหลดสถานะเครื่อง…</p>}>
+        <MachineStatus back="/orchestrator" />
+      </Suspense>
 
       <Collapsible className="rounded-lg border bg-card px-4 py-2">
         <CollapsibleTrigger asChild>
@@ -275,7 +281,9 @@ export default async function OrchestratorPage(props: { searchParams?: Promise<{
           </Button>
         </CollapsibleTrigger>
         <CollapsibleContent className="pt-3 pb-2">
-          <WorkerStatus />
+          <Suspense fallback={<p className="text-sm text-muted-foreground">กำลังตรวจความพร้อม…</p>}>
+            <WorkerStatus />
+          </Suspense>
         </CollapsibleContent>
       </Collapsible>
     </div>

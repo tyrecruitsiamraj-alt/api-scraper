@@ -46,7 +46,9 @@ export default async function PostTaskPage(props: { params: Promise<{ id: string
   if (!task) notFound();
   const [logs, orders] = await Promise.all([
     task.run_id ? getPostTaskLogs(task.run_id) : Promise.resolve([]),
-    task.request_no ? listJarvisPostOrders() : Promise.resolve([]),
+    task.request_no
+      ? listJarvisPostOrders({ requestNos: [task.request_no], skipSync: true })
+      : Promise.resolve([]),
   ]);
   const order = task.request_no ? orders.find((o) => o.request_no === task.request_no) ?? null : null;
   const live = task.status === 'queued' || task.status === 'running';

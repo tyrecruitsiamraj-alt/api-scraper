@@ -3630,14 +3630,40 @@ async function pickPostAccount(groupIds: string[]) {
 }
 
 /**
+ * สรุปใบสั่งโพสต์สำหรับหน้าศูนย์งาน — ไม่ดึงคลังกลุ่ม 2,400+ และไม่ยิง ~8 query ต่อใบ
+ * (listJarvisPostOrders เต็ม ๆ ทำให้หน้าเว็บค้างแล้วขึ้น 504)
+ */
+export async function listJarvisPostOrderSummaries(): Promise<
+  { request_no: string; jarvis_status: string; created_at: string }[]
+> {
+  try {
+    return await q<{ request_no: string; jarvis_status: string; created_at: string }>(
+      `SELECT r.request_no, r.status AS jarvis_status, r.created_at
+         FROM "jarvis_rm".job_posting_requests r
+        WHERE COALESCE(NULLIF(to_jsonb(r)->>'request_type', ''), 'content') = 'content'
+          AND to_jsonb(r)->'job_snapshot' ? 'caption'
+          AND r.status IN ('pending', 'in_progress', 'posted')
+          AND r.created_at > now() - interval '30 days'
+        ORDER BY r.created_at DESC
+        LIMIT 200`,
+    );
+  } catch {
+    return [];
+  }
+}
+
+/**
  * @param opts.requestNos โหลดเฉพาะใบเหล่านี้ — เส้นที่ Jarvis รอคำตอบ (start/status) ต้องใช้ ไม่งั้นทุกใบ × ~8 query
  *   เกิน 10 วิที่ Jarvis รอ แล้ว Jarvis บอกคนสั่งว่า "ติดต่อ So Scraping ไม่ได้" ทั้งที่ฝั่งเราทำต่อจนจบ (3 พ.ย. 2569)
+ * @param opts.skipSync ข้าม sync สถานะ (worker ทำทุก 5 นาทีอยู่แล้ว) — หน้าเว็บควรส่ง true เพื่อไม่ให้ค้างถึง 504
  */
-export async function listJarvisPostOrders(opts: { requestNos?: string[] } = {}): Promise<JarvisPostOrder[]> {
-  // ใบที่จบรอบแล้ว: เปลี่ยนเป็นโพสต์แล้ว/ตีกลับก่อนแสดง (เครื่อง worker ก็เรียกทุก 5 นาที)
-  await syncJarvisPostOrders(q, { autopostSchema: AP_SCHEMA }).catch((e) =>
-    console.warn(`[jarvis] อัปเดตสถานะใบสั่งโพสต์ไม่สำเร็จ: ${(e as Error).message}`),
-  );
+export async function listJarvisPostOrders(opts: { requestNos?: string[]; skipSync?: boolean } = {}): Promise<JarvisPostOrder[]> {
+  // ใบที่จบรอบแล้ว: เปลี่ยนเป็นโพสต์แล้ว/ตีกลับ — หน้าเว็บข้ามได้; เครื่อง worker เรียกทุก 5 นาที
+  if (!opts.skipSync) {
+    await syncJarvisPostOrders(q, { autopostSchema: AP_SCHEMA }).catch((e) =>
+      console.warn(`[jarvis] อัปเดตสถานะใบสั่งโพสต์ไม่สำเร็จ: ${(e as Error).message}`),
+    );
+  }
   const onlyNos = opts.requestNos ? [...new Set(opts.requestNos.map((r) => r.trim()).filter(Boolean))] : null;
   if (onlyNos && !onlyNos.length) return [];
   let rows: JarvisPostRow[];
@@ -3656,12 +3682,29 @@ export async function listJarvisPostOrders(opts: { requestNos?: string[] } = {})
   } catch {
     return [];
   }
-  // ชื่อกลุ่มทั้งคลัง (2,400+ หลังนำเข้าชีตราชการ 4 พ.ย. 2569) — เดิมมี subquery หาบัญชีต่อกลุ่มทุกแถว ใช้ 0.4 วิ ต่อการโหลดหน้า
-  // ตอนนี้ดึงแค่ชื่อ แล้วหาบัญชีประจำกลุ่มใน JS เฉพาะกลุ่มที่ใบนั้นใช้จริง
+  // ดึงเฉพาะกลุ่มที่ใบเหล่านี้ใช้ — ไม่ดึงคลัง 2,400+ ทั้งก้อนทุกครั้ง (ทำให้หน้าเว็บ 504)
+  const snapshotGroupIds = [
+    ...new Set(
+      rows.flatMap((row) => {
+        const s = row.snapshot ?? {};
+        return Array.isArray(s.group_ids) ? s.group_ids.map(String) : [];
+      }),
+    ),
+  ];
   const [groupRows, accountRows] = await Promise.all([
-    q<{ id: string; name: string; fb_group_id: string }>(
-      `SELECT g.id, g.name, g.fb_group_id FROM ${AP}.groups g ORDER BY g.name`,
-    ).catch(() => []),
+    (snapshotGroupIds.length
+      ? q<{ id: string; name: string; fb_group_id: string }>(
+          `SELECT g.id, g.name, g.fb_group_id FROM ${AP}.groups g
+            WHERE g.id = ANY($1::text[]) OR g.fb_group_id = ANY($1::text[])
+            ORDER BY g.name`,
+          [snapshotGroupIds],
+        )
+      : onlyNos
+        ? Promise.resolve([])
+        : q<{ id: string; name: string; fb_group_id: string }>(
+            `SELECT g.id, g.name, g.fb_group_id FROM ${AP}.groups g ORDER BY g.name`,
+          )
+    ).catch(() => [] as { id: string; name: string; fb_group_id: string }[]),
     q<{ label: string; group_ids: string[] }>(
       `SELECT COALESCE(NULLIF(TRIM(u.name), ''), u.env_key, u.id) AS label, COALESCE(u.group_ids::jsonb, '[]'::jsonb) AS group_ids
          FROM ${AP}.users u WHERE u.paused_until IS NULL OR u.paused_until <= now() ORDER BY 1`,

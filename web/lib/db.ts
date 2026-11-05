@@ -15,8 +15,10 @@ export function pool(): Pool {
       password: process.env.PGPASSWORD,
       database: process.env.PGDATABASE,
       max: 5,
+      // Vercel serverless: fail fast instead of hanging until the gateway returns 504.
+      connectionTimeoutMillis: 8_000,
       idleTimeoutMillis: 30_000,
-      options: `-c search_path="${DB_SCHEMA}",public`,
+      options: `-c search_path="${DB_SCHEMA}",public -c statement_timeout=15000`,
     });
   }
   return globalForPg._pgPool;

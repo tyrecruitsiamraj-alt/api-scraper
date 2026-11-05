@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { ChevronDownIcon, ChevronRightIcon, ExternalLinkIcon } from 'lucide-react';
-import { listJarvisPostOrders, listPostAssignments } from '@/lib/repo';
+import { Suspense } from 'react';
+import { listJarvisPostOrderSummaries, listJarvisPostOrders, listPostAssignments } from '@/lib/repo';
 import { listAccountsNeedingVerification, listManualJoinGroups, listPostTasks } from '@/lib/post-tasks';
 import type { AccountNeedingVerification, ManualJoinGroup, PostTask } from '@/lib/post-tasks';
 import { clearAccountVerificationAction, postAssignmentNowAction, runFacebookPreflightAction } from '@/lib/actions';
@@ -20,6 +21,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 
 export const dynamic = 'force-dynamic';
+export const maxDuration = 30;
 
 const QUEUE_LABEL: Record<string, string> = {
   queued: 'รอคิว',
@@ -76,8 +78,13 @@ function TaskList({ tasks, empty }: { tasks: PostTask[]; empty: string }) {
 export default async function AutopostJobsPage(props: { searchParams?: Promise<{ notice?: string }> }) {
   const searchParams = await props.searchParams;
   const notice = typeof searchParams?.notice === 'string' ? searchParams.notice : null;
+  // สรุปก่อน แล้วโหลดรายละเอียดเฉพาะใบ pending — ห้าม listJarvisPostOrders() ทั้งคลัง (504)
+  const summaries = await listJarvisPostOrderSummaries();
+  const pendingNos = summaries.filter((o) => o.jarvis_status === 'pending').map((o) => o.request_no);
   const [orders, tasks, assignments, manualJoin, needVerify] = await Promise.all([
-    listJarvisPostOrders(),
+    pendingNos.length
+      ? listJarvisPostOrders({ requestNos: pendingNos, skipSync: true })
+      : Promise.resolve([]),
     listPostTasks(),
     listPostAssignments(),
     listManualJoinGroups(),
@@ -103,7 +110,9 @@ export default async function AutopostJobsPage(props: { searchParams?: Promise<{
 
       <AutopostNav />
 
-      <MachineStatus kind="autopost" back="/autopost/jobs" />
+      <Suspense fallback={<p className="text-sm text-muted-foreground">กำลังโหลดสถานะเครื่อง…</p>}>
+        <MachineStatus kind="autopost" back="/autopost/jobs" />
+      </Suspense>
 
       {needVerify.length > 0 && <VerificationSection accounts={needVerify} />}
 
