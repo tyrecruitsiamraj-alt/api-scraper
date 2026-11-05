@@ -24,6 +24,10 @@ export interface DailyPostPlan {
   budget: number;
   items: DailyPlanItem[];
   reason?: 'paused' | 'daily_cap_reached' | 'no_candidates';
+  /** คู่งาน+กลุ่มที่เหลือเพราะโควต้าวันนี้เต็ม — ส่งให้บัญชีอื่นโพสต์แทนได้ */
+  cap_skipped?: DailyPlanItem[];
+  /** กลุ่ม/งานทั้งหมดของบัญชีนี้ (มาเมื่อแผนว่างเพราะเต็มโควต้า/ถูกพัก) */
+  all_groups?: { groups: string[]; jobs: string[] };
   cap?: number;
   posted_today?: number;
   candidates?: number;

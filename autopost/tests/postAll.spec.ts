@@ -168,6 +168,32 @@ test('Dynamic Post: รันโพสต์ตาม Assignments', async ({ pag
     }
     const userLabel = user.name || user.id;
 
+    /**
+     * บัญชีนี้โพสต์ต่อไม่ได้/ถึงข้อจำกัดแล้ว — ส่งงาน+กลุ่มที่ยังไม่ได้ลงให้บัญชีอื่นที่ว่างโพสต์แทน
+     * บัญชีที่รับไปจะกรอง cooldown + โควต้าของตัวเองอีกชั้นตอนวางแผน จึงไม่โพสต์ซ้ำกลุ่มที่เพิ่งลง
+     * บันทึกรอบบอกเสมอว่าส่งให้ใครกี่กลุ่ม หรือไม่มีใครว่างรับต่อ (ไม่สลับเงียบ)
+     */
+    const handoffGroups = async (jobIds: string[], groupIds: string[], why: string) => {
+      const jobs = [...new Set(jobIds.filter(Boolean))];
+      const groups = [...new Set(groupIds.filter(Boolean))];
+      if (!jobs.length || !groups.length) return;
+      try {
+        const moved = await handoffRemainingGroups(user.id, jobs, groups, `handoff:${user.id}`);
+        if (moved) {
+          const extra = moved.skipped > 0 ? ` (อีก ${moved.skipped} กลุ่มเกินโควต้าวันนี้ของบัญชีใหม่ รอรอบหน้า)` : '';
+          const msg = `${why} — ส่ง ${moved.groups} กลุ่มให้บัญชี ${moved.account.label} โพสต์แทน${extra}`;
+          console.log(`🔄 [${userLabel}] ${msg}`);
+          await runLog({ level: 'info', message: msg, user_id: user.id, meta: { kind: 'handoff', to: moved.account.id } });
+        } else {
+          const msg = `${why} — เหลือ ${groups.length} กลุ่มที่ยังไม่ได้ลง แต่ไม่มีบัญชีอื่นที่ว่างรับต่อ`;
+          console.log(`⚠️ [${userLabel}] ${msg}`);
+          await runLog({ level: 'warn', message: msg, user_id: user.id, meta: { kind: 'handoff', to: null } });
+        }
+      } catch (e) {
+        await runLog({ level: 'warn', message: `${why} — ส่งต่อบัญชีอื่นไม่สำเร็จ: ${(e as Error).message}`, user_id: user.id });
+      }
+    };
+
     /** แผนวันนี้ของบัญชีนี้: cap/วัน + วอร์มบัญชีใหม่ + cooldown คู่ซ้ำ + เรียงกลุ่มที่เคยได้เบอร์ก่อน */
     const assignmentIds = userAssignments.map((a) => String(a.id));
     let planItems: DailyPlanItem[] = [];
@@ -189,9 +215,22 @@ test('Dynamic Post: รันโพสต์ตาม Assignments', async ({ pag
               : 'คู่ที่เหลือติด cooldown หรือถูกบัญชีอื่นจองไปแล้ววันนี้';
         console.log(`⏸️ [${userLabel}] ไม่โพสต์วันนี้ — ${detail}`);
         await runLog({ level: 'info', message: `ข้ามการโพสต์: ${detail}`, user_id: user.id });
+        // บัญชีนี้ถึงข้อจำกัดแล้ว (เต็มโควต้า/ถูกพัก) — ส่งงานให้บัญชีอื่นโพสต์แทนทันที ไม่ต้องรอพรุ่งนี้
+        // บัญชีที่รับไปจะกรอง cooldown/โควต้าของตัวเองอีกชั้นตอนวางแผน จึงไม่โพสต์ซ้ำกลุ่มที่เพิ่งลง
+        if (plan.reason === 'daily_cap_reached' || plan.reason === 'paused') {
+          await handoffGroups(plan.all_groups?.jobs ?? [], plan.all_groups?.groups ?? [], detail);
+        }
         continue;
       }
       anyUserPlanned = true;
+      // แผนถูกตัดเพราะโควต้าวันนี้เหลือไม่พอ — ส่วนที่เกินส่งให้บัญชีอื่นโพสต์แทนเลย
+      if (plan.cap_skipped?.length) {
+        await handoffGroups(
+          [...new Set(plan.cap_skipped.map((c) => String(c.job_id)))],
+          [...new Set(plan.cap_skipped.map((c) => String(c.group_row_id)))],
+          `เกินโควต้าวันนี้ของบัญชีนี้ (${plan.cap}/วัน)`,
+        );
+      }
       if (plan.over_cap_override) {
         console.log(
           `⚠️ [${userLabel}] เกินโควต้าวันนี้แล้ว (${plan.posted_today}/${plan.cap}) — โพสต์ต่อเพราะสั่งเอง (override) เสี่ยงโดน Facebook จำกัดเพิ่ม`
@@ -273,23 +312,7 @@ test('Dynamic Post: รันโพสต์ตาม Assignments', async ({ pag
       const rest = planItems.slice(currentIndex + 1);
       if (!rest.length) return;
       // assignments.group_ids เก็บ "row id" ของตาราง groups (ไม่ใช่เลขกลุ่มบน Facebook)
-      const restGroups = [...new Set(rest.map((r) => String(r.group_row_id)).filter(Boolean))];
-      const restJobs = [...new Set(rest.map((r) => String(r.job_id)).filter(Boolean))];
-      try {
-        const moved = await handoffRemainingGroups(user.id, restJobs, restGroups, `handoff:${user.id}`);
-        if (moved) {
-          const extra = moved.skipped > 0 ? ` (อีก ${moved.skipped} กลุ่มเกินโควต้าวันนี้ของบัญชีใหม่ รอรอบหน้า)` : '';
-          const msg = `${why} — ส่ง ${moved.groups} กลุ่มที่เหลือให้บัญชี ${moved.account.label} โพสต์แทน${extra}`;
-          console.log(`🔄 [${userLabel}] ${msg}`);
-          await runLog({ level: 'info', message: msg, user_id: user.id, meta: { kind: 'handoff', to: moved.account.id } });
-        } else {
-          const msg = `${why} — เหลือ ${restGroups.length} กลุ่มที่ยังไม่ได้ลง แต่ไม่มีบัญชีอื่นที่ว่างรับต่อ`;
-          console.log(`⚠️ [${userLabel}] ${msg}`);
-          await runLog({ level: 'warn', message: msg, user_id: user.id, meta: { kind: 'handoff', to: null } });
-        }
-      } catch (e) {
-        await runLog({ level: 'warn', message: `${why} — ส่งต่อบัญชีอื่นไม่สำเร็จ: ${(e as Error).message}`, user_id: user.id });
-      }
+      await handoffGroups(rest.map((r) => String(r.job_id)), rest.map((r) => String(r.group_row_id)), why);
     };
     for (const [planIndex, item] of planItems.entries()) {
       currentIndex = planIndex;

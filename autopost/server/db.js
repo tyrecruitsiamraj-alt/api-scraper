@@ -2276,6 +2276,30 @@ async function reserveDailyPostPair(jobId, fbGroupId, userId) {
  * 2. ตัดคู่ job+group ที่เพิ่งโพสต์ภายใน POST_REPOST_MIN_GAP_DAYS (default 2 วัน — ทุกบัญชีนับรวมกัน)
  * 3. เรียง: คู่เคยได้เบอร์/คอมเมนต์ก่อน (score = phones*3 + comments) → กันงบ ~20% ให้คู่ที่ไม่เคยลอง → คู่เคยโพสต์แต่เงียบ
  */
+/** กลุ่ม (row id) + งาน ทั้งหมดที่บัญชีนี้รับผิดชอบ — ใช้ส่งต่อให้บัญชีอื่นเมื่อบัญชีนี้โพสต์ไม่ได้เลย */
+async function groupRowIdsForUser(user, assignmentIds) {
+  try {
+    const ids = normalizeIdArray(assignmentIds);
+    if (!ids.length) return { groups: [], jobs: [] };
+    const { rows } = await query(
+      `SELECT COALESCE(job_ids::jsonb, '[]'::jsonb) AS job_ids, COALESCE(group_ids::jsonb, '[]'::jsonb) AS group_ids
+         FROM ${ASSIGNMENTS_TABLE} WHERE id = ANY($1::text[])`,
+      [ids]
+    );
+    const groups = new Set();
+    const jobs = new Set();
+    for (const r of rows) {
+      for (const g of Array.isArray(r.group_ids) && r.group_ids.length ? r.group_ids : user.group_ids || []) {
+        if (g) groups.add(String(g));
+      }
+      for (const j of Array.isArray(r.job_ids) ? r.job_ids : []) if (j) jobs.add(String(j));
+    }
+    return { groups: [...groups], jobs: [...jobs] };
+  } catch {
+    return { groups: [], jobs: [] };
+  }
+}
+
 async function buildDailyPostPlan(userId, opts = {}) {
   await ensureUsersPostControlColumns();
   await ensurePostPlanReservationsTable();
@@ -2292,7 +2316,11 @@ async function buildDailyPostPlan(userId, opts = {}) {
 
   // pause = circuit breaker (fail จริง) — คงเป็น guard เสมอ (ต่างจาก cap ที่ override ได้)
   if (user.paused_until && new Date(user.paused_until).getTime() > Date.now()) {
-    return empty('paused', { paused_until: user.paused_until, pause_reason: user.pause_reason || null });
+    return empty('paused', {
+      paused_until: user.paused_until,
+      pause_reason: user.pause_reason || null,
+      all_groups: await groupRowIdsForUser(user, opts.assignment_ids),
+    });
   }
 
   const capEffective = await getEffectiveDailyCap(user);
@@ -2301,7 +2329,11 @@ async function buildDailyPostPlan(userId, opts = {}) {
   // ignoreCap (manual + ยืนยัน): เกิน cap ก็โพสต์ได้อีก 1 ชุด (สูงสุด = cap) แค่ติดธงเตือน ไม่ข้ามบัญชี
   const budget = opts.ignoreCap ? capEffective : Math.max(0, capEffective - postedToday);
   if (budget === 0) {
-    return empty('daily_cap_reached', { cap: capEffective, posted_today: postedToday });
+    return empty('daily_cap_reached', {
+      cap: capEffective,
+      posted_today: postedToday,
+      all_groups: await groupRowIdsForUser(user, opts.assignment_ids),
+    });
   }
 
   const wanted = normalizeIdArray(opts.assignment_ids);
@@ -2425,9 +2457,14 @@ async function buildDailyPostPlan(userId, opts = {}) {
    * แล้วโพสต์เนื้อหาเดิมลงกลุ่มเดียวกันวันเดียวกัน. จองซ้ำโดยบัญชีเดิมได้ (กรณี retry หลัง Chrome เด้ง)
    */
   const items = [];
+  /** คู่ที่เหลือเพราะ "โควต้าวันนี้เต็ม" (ไม่ใช่เพราะถูกบัญชีอื่นจอง) — ส่งให้บัญชีอื่นโพสต์แทนได้ */
+  const capSkipped = [];
   let reservedByOthers = 0;
   for (const c of pool) {
-    if (items.length >= budget) break;
+    if (items.length >= budget) {
+      capSkipped.push(c);
+      continue;
+    }
     const ok = await reserveDailyPostPair(c.job_id, c.fb_group_id, userId);
     if (ok) items.push(c);
     else reservedByOthers += 1;
@@ -2435,6 +2472,7 @@ async function buildDailyPostPlan(userId, opts = {}) {
 
   return {
     reserved_by_others: reservedByOthers,
+    cap_skipped: capSkipped,
     user_id: String(userId),
     cap: capEffective,
     posted_today: postedToday,
