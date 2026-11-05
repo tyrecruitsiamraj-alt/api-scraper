@@ -62,6 +62,30 @@ export default async function PostTaskPage(props: { params: Promise<{ id: string
     `สั่งเมื่อ ${thaiTime(task.created_at)}`,
   ].filter(Boolean).join(' · ');
 
+  // รอบที่ยังโพสต์ไม่ครบ ให้ปุ่มสั่งใหม่อยู่ติดกับข้อความแจ้งปัญหาเลย ไม่ต้องเลื่อนลงไปหาท้ายหน้า
+  const unfinished = task.groups.filter((g) => !PRESSED.has(g.status));
+  const showRepostAtBottom = unfinished.length === 0 && !task.error;
+  const repostCard =
+    order && order.jarvis_status !== 'pending' && !live ? (
+      <Card>
+        <CardHeader>
+          <CardTitle>สั่งโพสต์ใบนี้ใหม่</CardTitle>
+          <CardDescription>
+            {unfinished.length
+              ? `ยังไม่ได้โพสต์ ${unfinished.length} กลุ่ม — กด "เลือกกลุ่มที่ยังไม่สำเร็จ" แล้วติ๊กยืนยัน เพื่อสั่งรอบใหม่`
+              : `สร้างงานโพสต์รอบใหม่จาก ${order.request_no} ลงกลุ่มที่เลือก`}
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <RepostForm
+            order={order}
+            defaultOpen={unfinished.length > 0}
+            unfinishedFbIds={unfinished.map((g) => g.group_id)}
+          />
+        </CardContent>
+      </Card>
+    ) : null;
+
   return (
     <div className="flex flex-col gap-6">
       {live && <AutoRefresh seconds={8} />}
@@ -137,6 +161,8 @@ export default async function PostTaskPage(props: { params: Promise<{ id: string
         </Alert>
       )}
 
+      {!showRepostAtBottom && repostCard}
+
       <Card>
         <CardHeader>
           <CardTitle>ผลรายกลุ่ม</CardTitle>
@@ -205,21 +231,7 @@ export default async function PostTaskPage(props: { params: Promise<{ id: string
         </CardContent>
       </Card>
 
-      {order && order.jarvis_status !== 'pending' && !live && (
-        <Card>
-          <CardHeader>
-            <CardTitle>โพสต์ใบนี้ซ้ำ</CardTitle>
-            <CardDescription>สร้างงานโพสต์รอบใหม่จาก {order.request_no} ลงกลุ่มที่เลือก</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <RepostForm
-              order={order}
-              defaultOpen={task.groups.some((g) => !PRESSED.has(g.status))}
-              unfinishedFbIds={task.groups.filter((g) => !PRESSED.has(g.status)).map((g) => g.group_id)}
-            />
-          </CardContent>
-        </Card>
-      )}
+      {showRepostAtBottom && repostCard}
 
       {logs.length > 0 && (
         <Collapsible>
