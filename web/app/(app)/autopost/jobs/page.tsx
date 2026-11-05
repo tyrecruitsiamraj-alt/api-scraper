@@ -75,32 +75,17 @@ function TaskList({ tasks, empty }: { tasks: PostTask[]; empty: string }) {
   );
 }
 
+/**
+ * หน้านี้เคยขึ้น 504: เดิมรวม await ทุกก้อนไว้ก่อน render ทำให้ Vercel ไม่ได้ byte แรกทัน 30 วิ
+ * (ยิง DB หลายสิบรอบจากสิงคโปร์มาไทย) ตอนนี้แต่ละส่วนโหลดเองใน Suspense — โครงหน้าขึ้นทันที
+ * แล้วแต่ละก้อนไหลตามเมื่อพร้อม ก้อนไหนช้าก็เห็น "กำลังโหลด" แทนที่จะพังทั้งหน้า
+ */
 export default async function AutopostJobsPage(props: { searchParams?: Promise<{ notice?: string }> }) {
   const searchParams = await props.searchParams;
   const notice = typeof searchParams?.notice === 'string' ? searchParams.notice : null;
-  // สรุปก่อน แล้วโหลดรายละเอียดเฉพาะใบ pending — ห้าม listJarvisPostOrders() ทั้งคลัง (504)
-  const summaries = await listJarvisPostOrderSummaries();
-  const pendingNos = summaries.filter((o) => o.jarvis_status === 'pending').map((o) => o.request_no);
-  const [orders, tasks, assignments, manualJoin, needVerify] = await Promise.all([
-    pendingNos.length
-      ? listJarvisPostOrders({ requestNos: pendingNos, skipSync: true })
-      : Promise.resolve([]),
-    listPostTasks(),
-    listPostAssignments(),
-    listManualJoinGroups(),
-    listAccountsNeedingVerification(),
-  ]);
-  const pendingOrders = orders.filter((o) => o.jarvis_status === 'pending');
-  const legacy = assignments.filter((row) => !row.id.startsWith('jv-'));
-
-  const live = tasks.filter((t) => t.status === 'queued' || t.status === 'running');
-  const problem = tasks.filter((t) => !live.includes(t) && (t.stage.state === 'failed' || t.counts.failed > 0 || t.counts.not_member > 0));
-  const done = tasks.filter((t) => !live.includes(t) && !problem.includes(t));
-  const defaultTab = live.length ? 'live' : problem.length ? 'problem' : 'done';
 
   return (
     <div className="flex flex-col gap-6">
-      <AutoRefresh seconds={live.length > 0 ? 10 : 30} />
       <div className="flex flex-col gap-1">
         <h1 className="text-2xl font-semibold">งานโพสต์</h1>
         <p className="text-sm text-muted-foreground">
@@ -114,7 +99,9 @@ export default async function AutopostJobsPage(props: { searchParams?: Promise<{
         <MachineStatus kind="autopost" back="/autopost/jobs" />
       </Suspense>
 
-      {needVerify.length > 0 && <VerificationSection accounts={needVerify} />}
+      <Suspense fallback={null}>
+        <VerificationLoader />
+      </Suspense>
 
       {notice && (
         <Alert>
@@ -122,112 +109,182 @@ export default async function AutopostJobsPage(props: { searchParams?: Promise<{
         </Alert>
       )}
 
-      {pendingOrders.length > 0 && (
-        <section className="flex flex-col gap-3">
-          <h2 className="flex items-center gap-2 text-base font-semibold">
-            คำสั่งจาก Jarvis รอโพสต์
-            <Badge variant="secondary">{pendingOrders.length}</Badge>
-          </h2>
-          {pendingOrders.map((order) => (
-            <PendingOrderCard key={order.request_no} order={order} />
-          ))}
-        </section>
-      )}
+      <Suspense fallback={null}>
+        <PendingOrdersSection />
+      </Suspense>
 
-      <section className="flex flex-col gap-3">
-        <h2 className="text-base font-semibold">งานโพสต์ (รายรอบ)</h2>
-        <Tabs defaultValue={defaultTab}>
-          <TabsList>
-            <TabsTrigger value="live">กำลังทำ {live.length}</TabsTrigger>
-            <TabsTrigger value="problem">ติดปัญหา {problem.length}</TabsTrigger>
-            <TabsTrigger value="done">เสร็จแล้ว {done.length}</TabsTrigger>
-            <TabsTrigger value="all">ทั้งหมด {tasks.length}</TabsTrigger>
-          </TabsList>
-          <TabsContent value="live" className="mt-3">
-            <TaskList tasks={live} empty="ไม่มีงานที่กำลังโพสต์" />
-          </TabsContent>
-          <TabsContent value="problem" className="mt-3">
-            <TaskList tasks={problem} empty="ไม่มีงานที่ติดปัญหา" />
-          </TabsContent>
-          <TabsContent value="done" className="mt-3">
-            <TaskList tasks={done} empty="ยังไม่มีงานที่เสร็จ" />
-          </TabsContent>
-          <TabsContent value="all" className="mt-3">
-            <TaskList tasks={tasks} empty="ยังไม่มีงานโพสต์" />
-          </TabsContent>
-        </Tabs>
-      </section>
+      <Suspense fallback={<SectionLoading title="งานโพสต์ (รายรอบ)" />}>
+        <TasksSection />
+      </Suspense>
 
-      <ManualJoinSection groups={manualJoin} />
+      <Suspense fallback={<SectionLoading title="กลุ่มที่ต้องจัดการเอง" />}>
+        <ManualJoinLoader />
+      </Suspense>
 
-      {legacy.length > 0 && (
-        <Collapsible>
-          <CollapsibleTrigger asChild>
-            <Button variant="ghost" size="sm" className="-ml-2">
-              งานโพสต์ที่ผูกไว้ในระบบเดิม ({legacy.length})
-              <ChevronDownIcon data-icon="inline-end" />
-            </Button>
-          </CollapsibleTrigger>
-          <CollapsibleContent className="mt-3 flex flex-col gap-3">
-            {legacy.map((row) => {
-              const busy = row.last_queue_status === 'queued' || row.last_queue_status === 'running';
-              const blocker = !row.account_id
-                ? 'ยังไม่ผูกบัญชี Facebook'
-                : row.group_count <= 0
-                  ? 'ยังไม่เลือกกลุ่ม'
-                  : row.paused
-                    ? 'บัญชีถูกพักชั่วคราว'
-                    : !row.worker_online
-                      ? `เครื่อง ${row.preferred_worker ?? '-'} ออฟไลน์`
-                      : busy
-                        ? 'มีงานโพสต์รอคิวอยู่แล้ว'
-                        : null;
-              return (
-                <Card key={row.id}>
-                  <CardHeader>
-                    <CardTitle>{row.job_titles}</CardTitle>
-                    <CardDescription>
-                      {row.account_label ?? 'ไม่มีบัญชี'} · {row.group_count} กลุ่ม · {row.has_image ? 'caption + รูป' : 'caption อย่างเดียว'}
-                    </CardDescription>
-                    <CardAction>
-                      <Badge variant="outline">
-                        {row.last_queue_status
-                          ? `${QUEUE_LABEL[row.last_queue_status] ?? row.last_queue_status} · ${thaiTime(row.last_queue_at)}`
-                          : 'ยังไม่เคยโพสต์'}
-                      </Badge>
-                    </CardAction>
-                  </CardHeader>
-                  {(row.caption_preview || blocker) && (
-                    <CardContent className="flex flex-col gap-3">
-                      {row.caption_preview && (
-                        <p className="line-clamp-3 text-sm whitespace-pre-line text-muted-foreground">{row.caption_preview}</p>
-                      )}
-                      {blocker && (
-                        <Alert>
-                          <AlertDescription>โพสต์ไม่ได้ตอนนี้: {blocker}</AlertDescription>
-                        </Alert>
-                      )}
-                    </CardContent>
-                  )}
-                  <CardFooter className="flex flex-wrap gap-4">
-                    <form action={postAssignmentNowAction}>
-                      <input type="hidden" name="assignmentId" value={row.id} />
-                      <ConfirmAndSubmit id={`assignment-confirm-${row.id}`} label="โพสต์ตอนนี้" disabled={Boolean(blocker)} />
-                    </form>
-                    {row.account_id && (
-                      <form action={runFacebookPreflightAction}>
-                        <input type="hidden" name="fbAccountId" value={row.account_id} />
-                        <Button variant="outline" size="sm" disabled={!row.worker_online}>ทดสอบแบบไม่โพสต์จริง</Button>
-                      </form>
-                    )}
-                  </CardFooter>
-                </Card>
-              );
-            })}
-          </CollapsibleContent>
-        </Collapsible>
-      )}
+      <Suspense fallback={null}>
+        <LegacyAssignmentsSection />
+      </Suspense>
     </div>
+  );
+}
+
+/** โครงว่างระหว่างรอข้อมูลก้อนนั้น — คนเห็นว่ากำลังโหลดอะไรอยู่ ไม่ใช่หน้าค้าง */
+function SectionLoading({ title }: { title: string }) {
+  return (
+    <section className="flex flex-col gap-3">
+      <h2 className="text-base font-semibold">{title}</h2>
+      <Empty className="border">
+        <EmptyHeader>
+          <EmptyDescription>กำลังโหลด…</EmptyDescription>
+        </EmptyHeader>
+      </Empty>
+    </section>
+  );
+}
+
+/** บัญชีที่ Facebook ขอยืนยันตัวตน (โหลดแยก) */
+async function VerificationLoader() {
+  const needVerify = await listAccountsNeedingVerification();
+  if (!needVerify.length) return null;
+  return <VerificationSection accounts={needVerify} />;
+}
+
+/** คำสั่งจาก Jarvis ที่ยังรอโพสต์ — สรุปก่อน แล้วโหลดรายละเอียดเฉพาะใบ pending */
+async function PendingOrdersSection() {
+  const summaries = await listJarvisPostOrderSummaries();
+  const pendingNos = summaries.filter((o) => o.jarvis_status === 'pending').map((o) => o.request_no);
+  if (!pendingNos.length) return null;
+  const orders = await listJarvisPostOrders({ requestNos: pendingNos, skipSync: true });
+  const pendingOrders = orders.filter((o) => o.jarvis_status === 'pending');
+  if (!pendingOrders.length) return null;
+  return (
+    <section className="flex flex-col gap-3">
+      <h2 className="flex items-center gap-2 text-base font-semibold">
+        คำสั่งจาก Jarvis รอโพสต์
+        <Badge variant="secondary">{pendingOrders.length}</Badge>
+      </h2>
+      {pendingOrders.map((order) => (
+        <PendingOrderCard key={order.request_no} order={order} />
+      ))}
+    </section>
+  );
+}
+
+/** งานโพสต์รายรอบ + ตัวรีเฟรชอัตโนมัติ (รู้จำนวนงานที่กำลังวิ่งจากก้อนนี้) */
+async function TasksSection() {
+  const tasks = await listPostTasks();
+  const live = tasks.filter((t) => t.status === 'queued' || t.status === 'running');
+  const problem = tasks.filter(
+    (t) => !live.includes(t) && (t.stage.state === 'failed' || t.counts.failed > 0 || t.counts.not_member > 0),
+  );
+  const done = tasks.filter((t) => !live.includes(t) && !problem.includes(t));
+  const defaultTab = live.length ? 'live' : problem.length ? 'problem' : 'done';
+  return (
+    <section className="flex flex-col gap-3">
+      {/* รีเฟรชถี่เฉพาะตอนมีงานวิ่ง — ถี่เกินไปทำให้หน้าโหลดทับกันจนช้า */}
+      <AutoRefresh seconds={live.length > 0 ? 15 : 60} />
+      <h2 className="text-base font-semibold">งานโพสต์ (รายรอบ)</h2>
+      <Tabs defaultValue={defaultTab}>
+        <TabsList>
+          <TabsTrigger value="live">กำลังทำ {live.length}</TabsTrigger>
+          <TabsTrigger value="problem">ติดปัญหา {problem.length}</TabsTrigger>
+          <TabsTrigger value="done">เสร็จแล้ว {done.length}</TabsTrigger>
+          <TabsTrigger value="all">ทั้งหมด {tasks.length}</TabsTrigger>
+        </TabsList>
+        <TabsContent value="live" className="mt-3">
+          <TaskList tasks={live} empty="ไม่มีงานที่กำลังโพสต์" />
+        </TabsContent>
+        <TabsContent value="problem" className="mt-3">
+          <TaskList tasks={problem} empty="ไม่มีงานที่ติดปัญหา" />
+        </TabsContent>
+        <TabsContent value="done" className="mt-3">
+          <TaskList tasks={done} empty="ยังไม่มีงานที่เสร็จ" />
+        </TabsContent>
+        <TabsContent value="all" className="mt-3">
+          <TaskList tasks={tasks} empty="ยังไม่มีงานโพสต์" />
+        </TabsContent>
+      </Tabs>
+    </section>
+  );
+}
+
+/** กลุ่มที่ต้องจัดการเอง (โหลดแยก — query ก้อนใหญ่สุดของหน้านี้) */
+async function ManualJoinLoader() {
+  const groups = await listManualJoinGroups();
+  return <ManualJoinSection groups={groups} />;
+}
+
+/** งานโพสต์ที่ผูกไว้ในระบบเดิม (โหลดแยก ย่อเก็บไว้) */
+async function LegacyAssignmentsSection() {
+  const assignments = await listPostAssignments();
+  const legacy = assignments.filter((row) => !row.id.startsWith('jv-'));
+  if (!legacy.length) return null;
+  return (
+    <Collapsible>
+      <CollapsibleTrigger asChild>
+        <Button variant="ghost" size="sm" className="-ml-2">
+          งานโพสต์ที่ผูกไว้ในระบบเดิม ({legacy.length})
+          <ChevronDownIcon data-icon="inline-end" />
+        </Button>
+      </CollapsibleTrigger>
+      <CollapsibleContent className="mt-3 flex flex-col gap-3">
+        {legacy.map((row) => {
+          const busy = row.last_queue_status === 'queued' || row.last_queue_status === 'running';
+          const blocker = !row.account_id
+            ? 'ยังไม่ผูกบัญชี Facebook'
+            : row.group_count <= 0
+              ? 'ยังไม่เลือกกลุ่ม'
+              : row.paused
+                ? 'บัญชีถูกพักชั่วคราว'
+                : !row.worker_online
+                  ? `เครื่อง ${row.preferred_worker ?? '-'} ออฟไลน์`
+                  : busy
+                    ? 'มีงานโพสต์รอคิวอยู่แล้ว'
+                    : null;
+          return (
+            <Card key={row.id}>
+              <CardHeader>
+                <CardTitle>{row.job_titles}</CardTitle>
+                <CardDescription>
+                  {row.account_label ?? 'ไม่มีบัญชี'} · {row.group_count} กลุ่ม · {row.has_image ? 'caption + รูป' : 'caption อย่างเดียว'}
+                </CardDescription>
+                <CardAction>
+                  <Badge variant="outline">
+                    {row.last_queue_status
+                      ? `${QUEUE_LABEL[row.last_queue_status] ?? row.last_queue_status} · ${thaiTime(row.last_queue_at)}`
+                      : 'ยังไม่เคยโพสต์'}
+                  </Badge>
+                </CardAction>
+              </CardHeader>
+              {(row.caption_preview || blocker) && (
+                <CardContent className="flex flex-col gap-3">
+                  {row.caption_preview && (
+                    <p className="line-clamp-3 text-sm whitespace-pre-line text-muted-foreground">{row.caption_preview}</p>
+                  )}
+                  {blocker && (
+                    <Alert>
+                      <AlertDescription>โพสต์ไม่ได้ตอนนี้: {blocker}</AlertDescription>
+                    </Alert>
+                  )}
+                </CardContent>
+              )}
+              <CardFooter className="flex flex-wrap gap-4">
+                <form action={postAssignmentNowAction}>
+                  <input type="hidden" name="assignmentId" value={row.id} />
+                  <ConfirmAndSubmit id={`assignment-confirm-${row.id}`} label="โพสต์ตอนนี้" disabled={Boolean(blocker)} />
+                </form>
+                {row.account_id && (
+                  <form action={runFacebookPreflightAction}>
+                    <input type="hidden" name="fbAccountId" value={row.account_id} />
+                    <Button variant="outline" size="sm" disabled={!row.worker_online}>ทดสอบแบบไม่โพสต์จริง</Button>
+                  </form>
+                )}
+              </CardFooter>
+            </Card>
+          );
+        })}
+      </CollapsibleContent>
+    </Collapsible>
   );
 }
 
