@@ -150,6 +150,9 @@ export function postTaskStage(runStatus, counts = { planned: 0, posted: 0, faile
     }
     case 'cancelled':
       return { step: 1, state: 'failed', label: 'ยกเลิก' };
+    /** บัญชีเดิมใช้ไม่ได้ ระบบย้ายกลุ่มไปให้บัญชีที่ว่างแล้ว — ไม่ใช่งานล้ม ไปดูต่อที่รอบของบัญชีใหม่ */
+    case 'handed_off':
+      return { step: 3, state: 'done', label: 'สลับบัญชีให้ตัวอื่นแล้ว' };
     default:
       return { step: 0, state: 'active', label: String(runStatus || '-') };
   }

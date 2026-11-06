@@ -2227,8 +2227,9 @@ async function reassignStuckPostJobs({ requestedBy = 'auto-switch', limit = 20 }
     });
     if (!handoff) continue; // ไม่มีบัญชีว่างรับต่อ — ปล่อยค้างไว้ก่อน รอบหน้าค่อยลองใหม่
     await query(
+      // handed_off ≠ failed: งานไม่ได้ล้ม แค่ย้ายไปอยู่รอบของบัญชีใหม่ (หน้าเว็บจะไม่นับเป็น "ติดปัญหา")
       `UPDATE post_run_queue
-          SET status = 'failed', finished_at = NOW(), updated_at = NOW(),
+          SET status = 'handed_off', finished_at = NOW(), updated_at = NOW(),
               message = $2, error = $3
         WHERE id = $1 AND status = 'queued'`,
       [
