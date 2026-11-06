@@ -28,18 +28,36 @@ function fmtDate(s: string | null) {
   return new Date(s).toLocaleString('th-TH', { timeZone: 'Asia/Bangkok', dateStyle: 'medium', timeStyle: 'short' });
 }
 
-type AccountState = 'ready' | 'paused' | 'verify' | 'off';
+type AccountState = 'ready' | 'full' | 'offline' | 'paused' | 'verify' | 'off';
 
-/** สถานะเป็นคำ — พร้อม / พัก / ต้องยืนยันตัวตน / ปิด */
+/**
+ * สถานะเป็นคำ — เรียงจากเหตุที่หนักสุดลงมา
+ * "พร้อม" ต้องโพสต์ได้จริงตอนนี้: ไม่ติดยืนยันตัวตน ไม่ถูกพัก ยังไม่เต็มโควต้าวันนี้ และเครื่องที่ผูกไว้ยังออนไลน์
+ */
 function accountState(c: UnifiedConnectorRow): AccountState {
   const now = Date.now();
   if (c.needs_verification) return 'verify';
   if ((c.cooldown_until && new Date(c.cooldown_until).getTime() > now) || (c.paused_until && new Date(c.paused_until).getTime() > now)) return 'paused';
   if (!c.enabled) return 'off';
+  if (c.daily_cap !== null && c.used_today !== null && c.used_today >= c.daily_cap) return 'full';
+  if (c.platform === 'facebook' && c.worker_online === false) return 'offline';
   return 'ready';
 }
-const STATE_LABEL: Record<AccountState, string> = { ready: 'พร้อม', paused: 'พัก', verify: 'ต้องยืนยันตัวตน', off: 'ปิด' };
-const STATE_RANK: Record<AccountState, number> = { ready: 0, paused: 1, verify: 2, off: 3 };
+const STATE_LABEL: Record<AccountState, string> = {
+  ready: 'พร้อม',
+  full: 'เต็มโควต้าวันนี้',
+  offline: 'เครื่องออฟไลน์',
+  paused: 'พัก',
+  verify: 'ต้องยืนยันตัวตน',
+  off: 'ปิด',
+};
+const STATE_RANK: Record<AccountState, number> = { ready: 0, full: 1, offline: 2, paused: 3, verify: 4, off: 5 };
+
+/** โควต้าที่เหลือวันนี้ — บัญชีที่ไม่คุมโควต้าถือว่าเหลือ 0 เพื่อไม่ให้แซงบัญชีโพสต์ */
+function roomLeft(c: UnifiedConnectorRow): number {
+  if (c.daily_cap === null || c.used_today === null) return 0;
+  return Math.max(0, c.daily_cap - c.used_today);
+}
 
 function provincesOf(c: UnifiedConnectorRow): string[] {
   return String(c.province ?? '').split(/[,،]/).map((v) => v.trim()).filter(Boolean);
@@ -49,7 +67,7 @@ export default async function SettingsConnectorsPage({ searchParams }: { searchP
   const params = await searchParams;
   const [connectors, workers] = await Promise.all([listAllConnectors(), knownWorkerNames()]);
   const platformFilter = ['facebook', 'jobthai', 'jobbkk'].includes(String(params.platform)) ? String(params.platform) : '';
-  const stateFilter = ['ready', 'paused', 'verify', 'off'].includes(String(params.state)) ? (String(params.state) as AccountState) : '';
+  const stateFilter = ['ready', 'full', 'offline', 'paused', 'verify', 'off'].includes(String(params.state)) ? (String(params.state) as AccountState) : '';
   const provinceFilter = String(params.province ?? '').trim();
   const allProvinces = [...new Set(connectors.flatMap(provincesOf))].sort((a, b) => a.localeCompare(b, 'th'));
   // ใช้ได้ขึ้นก่อน ตัวที่ใช้ไม่ได้ตกลงล่าง (เจ้าของ 4 พ.ย. 2569: ให้โฟกัสเฉพาะที่ใช้ได้)
@@ -57,7 +75,8 @@ export default async function SettingsConnectorsPage({ searchParams }: { searchP
     .filter((c) => !platformFilter || c.platform === platformFilter)
     .filter((c) => !stateFilter || accountState(c) === stateFilter)
     .filter((c) => !provinceFilter || (provinceFilter === '__none__' ? provincesOf(c).length === 0 : provincesOf(c).includes(provinceFilter)))
-    .sort((a, b) => STATE_RANK[accountState(a)] - STATE_RANK[accountState(b)]);
+    // ใช้ได้ขึ้นก่อน และในกลุ่มที่ใช้ได้ ตัวที่เหลือโควต้าวันนี้มากสุดขึ้นก่อน (ตัวที่ควรรันก่อน)
+    .sort((a, b) => STATE_RANK[accountState(a)] - STATE_RANK[accountState(b)] || roomLeft(b) - roomLeft(a));
   const countOf = (platform: string) => connectors.filter((c) => c.platform === platform).length;
   const readyOf = (platform: string) => connectors.filter((c) => c.platform === platform && accountState(c) === 'ready').length;
   const filterHref = (patch: Record<string, string>) => {
@@ -105,6 +124,8 @@ export default async function SettingsConnectorsPage({ searchParams }: { searchP
             <NativeSelect id="acc-filter-state" name="state" size="sm" defaultValue={stateFilter} className="w-full">
               <NativeSelectOption value="">ทุกสถานะ</NativeSelectOption>
               <NativeSelectOption value="ready">พร้อมใช้งาน</NativeSelectOption>
+              <NativeSelectOption value="full">เต็มโควต้าวันนี้</NativeSelectOption>
+              <NativeSelectOption value="offline">เครื่องออฟไลน์</NativeSelectOption>
               <NativeSelectOption value="paused">พัก</NativeSelectOption>
               <NativeSelectOption value="verify">ต้องยืนยันตัวตน</NativeSelectOption>
               <NativeSelectOption value="off">ปิด</NativeSelectOption>
@@ -154,7 +175,7 @@ export default async function SettingsConnectorsPage({ searchParams }: { searchP
                           {c.username || 'ไม่ระบุผู้ใช้'}
                           {c.platform !== 'facebook' && ` · ล็อกอินล่าสุด ${fmtDate(c.last_login_at)}`}
                           {paused && c.pause_reason ? ` · ${c.pause_reason}` : ''}
-                          {c.platform === 'facebook' && ` · เครื่องประจำ: ${c.preferred_worker || 'ยังไม่ได้เลือก'}`}
+                          {c.platform === 'facebook' && ` · เครื่องประจำ: ${c.preferred_worker || 'ยังไม่ได้เลือก'}${c.preferred_worker && c.worker_online === false ? ' (ออฟไลน์)' : ''}`}
                           {c.platform === 'facebook' && ` · โพสต์ ${c.group_ids.length} กลุ่ม`}
                           {` · ${c.province || 'ยังไม่ระบุจังหวัด'}`}
                         </ItemDescription>

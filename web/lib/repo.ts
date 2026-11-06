@@ -583,6 +583,8 @@ export type UnifiedConnectorRow = {
   province: string | null;
   /** Facebook: ขอยืนยันตัวตนอยู่ (มีงานต้องทำที่เครื่อง) */
   needs_verification: boolean | null;
+  /** Facebook: เครื่องที่ผูกไว้ยังส่งสัญญาณอยู่ — null = ไม่เกี่ยว (บัญชีค้นหา) */
+  worker_online: boolean | null;
 };
 
 /** คอลัมน์จังหวัดของบัญชี (runtime ALTER เหมือน department) */
@@ -613,7 +615,8 @@ export async function listAllConnectors() {
             '[]'::jsonb AS group_ids,
             NULLIF(to_jsonb(connectors)->>'department', '') AS department,
             NULLIF(to_jsonb(connectors)->>'province', '') AS province,
-            NULL::boolean AS needs_verification
+            NULL::boolean AS needs_verification,
+            NULL::boolean AS worker_online
        FROM connectors`,
   );
 
@@ -639,7 +642,11 @@ export async function listAllConnectors() {
               CASE WHEN jsonb_typeof(u.group_ids::jsonb) = 'array' THEN u.group_ids::jsonb ELSE '[]'::jsonb END AS group_ids,
               NULLIF(to_jsonb(u)->>'department', '') AS department,
               NULLIF(to_jsonb(u)->>'province', '') AS province,
-              (NULLIF(to_jsonb(u)->>'needs_verification_since', '') IS NOT NULL) AS needs_verification
+              (NULLIF(to_jsonb(u)->>'needs_verification_since', '') IS NOT NULL) AS needs_verification,
+              EXISTS (
+                SELECT 1 FROM ${AP}.workers w
+                 WHERE w.name = u.preferred_worker AND w.last_seen > now() - interval '2 minutes'
+              ) AS worker_online
          FROM ${AP}.users u`,
     );
   } catch {
@@ -661,7 +668,8 @@ export async function listAllConnectors() {
                 '[]'::jsonb AS group_ids,
                 NULLIF(to_jsonb(u)->>'department', '') AS department,
                 NULLIF(to_jsonb(u)->>'province', '') AS province,
-                NULL::boolean AS needs_verification
+                NULL::boolean AS needs_verification,
+                NULL::boolean AS worker_online
            FROM ${AP}.users u`,
       );
     } catch {

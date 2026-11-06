@@ -1982,10 +1982,25 @@ async function touchWorkerHeartbeat(name, meta = {}) {
   }
 }
 
+/** กวาดงานที่ค้างกับบัญชีใช้ไม่ได้ — ทำตอนคิวว่างเท่านั้น และไม่ถี่กว่านาทีละครั้ง */
+let lastStuckSweepAt = 0;
+async function maybeReassignStuckJobs() {
+  if (Date.now() - lastStuckSweepAt < 60_000) return 0;
+  lastStuckSweepAt = Date.now();
+  try {
+    return await reassignStuckPostJobs();
+  } catch (e) {
+    console.error('[autopost] สลับบัญชีให้งานที่ค้างไม่สำเร็จ:', e && e.message);
+    return 0;
+  }
+}
+
 async function claimNextPostRunJob(workerId, runId, workerName, capabilities = [], buildSha = null) {
   await ensurePostRunQueueUserColumn();
   await ensureUsersPostControlColumns();
   await ensureUsersPreferredWorkerColumn();
+  // ใช้ใน ORDER BY ของ claim — บัญชีที่ติดยืนยันตัวตนต้องลงท้ายคิว
+  await ensureVerificationColumns();
   const wid = String(workerId || '').trim() || 'worker';
   const rid = String(runId || '').trim() || null;
   /** ชื่อเครื่องสำหรับเทียบ pin (WORKER_NAME/hostname — ไม่มี pid ต่อท้าย ต่างจาก worker_id) */
@@ -2034,7 +2049,17 @@ async function claimNextPostRunJob(workerId, runId, workerName, capabilities = [
              WHERE c.status = 'running' AND c.user_id = q.user_id
                AND COALESCE(c.started_at, c.created_at) > NOW() - INTERVAL '45 minutes'
            )
-         ORDER BY q.created_at ASC
+         /** บัญชีที่ใช้ได้รันก่อน: ติดยืนยันตัวตนหรือเต็มโควต้าวันนี้ = ลงท้ายคิว
+             (ไม่ตัดทิ้ง เพราะพอยืนยันเสร็จ/ข้ามวัน ก็กลับมารันได้เอง) */
+         ORDER BY
+           (CASE WHEN u.needs_verification_since IS NOT NULL THEN 2 ELSE 0 END)
+           + (CASE WHEN COALESCE((
+                 SELECT count(*)::int FROM post_logs pl
+                  WHERE pl.user_id = q.user_id
+                    AND (pl.created_at AT TIME ZONE 'Asia/Bangkok')::date
+                        = (NOW() AT TIME ZONE 'Asia/Bangkok')::date
+               ), 0) >= COALESCE(u.daily_cap, 15) THEN 1 ELSE 0 END) ASC,
+           q.created_at ASC
          LIMIT 1
          FOR UPDATE OF q SKIP LOCKED
        )
@@ -2056,7 +2081,13 @@ async function claimNextPostRunJob(workerId, runId, workerName, capabilities = [
     if (e && e.code === '23505') return null;
     throw e;
   }
-  if (rows.length === 0) return null;
+  if (rows.length === 0) {
+    // ไม่มีงานให้หยิบ — อาจเพราะงานค้างอยู่กับบัญชีที่ถูกพัก/ติดยืนยันตัวตน ลองสลับให้บัญชีที่ว่างก่อน
+    if (await maybeReassignStuckJobs()) {
+      return claimNextPostRunJob(workerId, runId, workerName, capabilities, buildSha);
+    }
+    return null;
+  }
   return rows[0];
 }
 
@@ -2151,6 +2182,64 @@ async function handoffRemainingGroups({ fromUserId, jobIds, groupIds, requestedB
     message: `สลับบัญชีมาจากตัวที่โพสต์ต่อไม่ได้ — เหลือ ${take.length} กลุ่ม`,
   });
   return { account: { id: next.id, label: next.label }, groups: take.length, skipped: groups.length - take.length, queue_id: queued ? queued.id : null };
+}
+
+/**
+ * งานที่ยังไม่ได้เริ่ม แต่บัญชีเจ้าของถูกพัก/ติดยืนยันตัวตน — claim จะข้ามตลอดจนกว่าจะหมดพัก
+ * (เคยค้าง 7 วันเพราะโดนพักยาว) ย้ายกลุ่มไปให้บัญชีที่ว่างรับแทน แล้วปิดคิวเดิมทิ้ง
+ * คืนค่า: จำนวนงานที่ย้ายสำเร็จ
+ */
+async function reassignStuckPostJobs({ requestedBy = 'auto-switch', limit = 20 } = {}) {
+  await ensurePostRunQueueUserColumn();
+  await ensureUsersPostControlColumns();
+  await ensureVerificationColumns();
+  const { rows: stuck } = await query(
+    `SELECT q.id, q.user_id, q.assignment_ids,
+            COALESCE(NULLIF(TRIM(u.name), ''), u.env_key, u.id) AS label,
+            (u.needs_verification_since IS NOT NULL) AS needs_verify
+       FROM post_run_queue q
+       JOIN users u ON u.id = q.user_id
+      WHERE q.status = 'queued'
+        AND COALESCE(q.mode, 'post') = 'post'
+        AND (u.needs_verification_since IS NOT NULL
+             OR (u.paused_until IS NOT NULL AND u.paused_until > NOW()))
+      ORDER BY q.created_at ASC
+      LIMIT $1`,
+    [limit]
+  );
+  let moved = 0;
+  for (const row of stuck) {
+    const assignmentIds = normalizeIdArray(row.assignment_ids);
+    if (!assignmentIds.length) continue;
+    const { rows: assignments } = await query(
+      `SELECT job_ids, group_ids FROM ${ASSIGNMENTS_TABLE} WHERE id = ANY($1::text[])`,
+      [assignmentIds]
+    );
+    const jobIds = [...new Set(assignments.flatMap((a) => normalizeIdArray(a.job_ids)))];
+    const groupIds = [...new Set(assignments.flatMap((a) => normalizeIdArray(a.group_ids)))];
+    if (!jobIds.length || !groupIds.length) continue;
+    const handoff = await handoffRemainingGroups({
+      fromUserId: row.user_id,
+      jobIds,
+      groupIds,
+      requestedBy,
+      excludeUserIds: [],
+    });
+    if (!handoff) continue; // ไม่มีบัญชีว่างรับต่อ — ปล่อยค้างไว้ก่อน รอบหน้าค่อยลองใหม่
+    await query(
+      `UPDATE post_run_queue
+          SET status = 'failed', finished_at = NOW(), updated_at = NOW(),
+              message = $2, error = $3
+        WHERE id = $1 AND status = 'queued'`,
+      [
+        row.id,
+        `สลับไปให้ ${handoff.account.label} โพสต์แทน (${handoff.groups} กลุ่ม)`,
+        `บัญชี ${row.label} ${row.needs_verify ? 'ติดยืนยันตัวตน' : 'ถูกพัก'} — ย้ายงานให้บัญชีที่ว่างแล้ว`,
+      ]
+    );
+    moved += 1;
+  }
+  return moved;
 }
 
 async function resumeUser(userId) {
@@ -3002,6 +3091,7 @@ module.exports = {
   pauseUser,
   pauseUserForFacebookLimit,
   handoffRemainingGroups,
+  reassignStuckPostJobs,
   resumeUser,
   countPostsTodayByUser,
   getUsersPostingStatus,
