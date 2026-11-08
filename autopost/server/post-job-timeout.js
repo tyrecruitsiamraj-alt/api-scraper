@@ -8,6 +8,7 @@
  */
 
 const MIN = 60 * 1000;
+const { postGapRangeSec } = require('./post-pacing');
 
 function num(value, fallback) {
   const n = Number(value);
@@ -17,7 +18,9 @@ function num(value, fallback) {
 /** @returns {number} ms */
 function postJobTimeoutMs(groupCount, env = process.env) {
   const floorMs = Math.max(5 * MIN, num(env.WORKER_POST_JOB_MAX_MS, 25 * MIN));
-  const perGroupMs = num(env.WORKER_POST_JOB_MS_PER_GROUP, 6 * MIN);
+  // กลุ่มละ ~5 นาที (โพสต์ + เก็บลิงก์) + ช่วงเว้นยาวสุด (post-pacing: 10–12 นาที ตั้งแต่ 8 พ.ย. 2569)
+  // ไม่บวกช่วงเว้น งานจะถูกตัดกลางทาง ("ใช้เวลานานเกินกำหนด")
+  const perGroupMs = num(env.WORKER_POST_JOB_MS_PER_GROUP, 5 * MIN + postGapRangeSec(env).max * 1000);
   const setupMs = num(env.WORKER_POST_JOB_SETUP_MS, 10 * MIN);
   const staleMin = Math.min(24 * 60, Math.max(15, num(env.POST_RUN_STALE_MINUTES, 180)));
   // ให้งานจบหรือโดนตัดก่อน sweep-stale ของ server จะปิดว่าค้าง

@@ -120,18 +120,25 @@ export async function humanReviewBeforePost(page: Page): Promise<void> {
   }
 }
 
-/** วินาที — จาก post_settings ของ User หรือ env */
+/**
+ * วินาที — จาก post_settings ของ User หรือ env แต่ไม่สั้นกว่าขั้นต่ำของระบบ (10 นาที, server/post-pacing.js)
+ * เดิมเว้น 1–2.5 นาที เฉลี่ยห่าง 4 นาที — Facebook จำกัดบัญชีวันละ 7–16 ครั้ง (2–6 พ.ย. 2569)
+ */
 export function getBetweenPostsDelaySec(settings?: PostDelaySettings): number {
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const { clampGapSec } = require('../../server/post-pacing');
   const userMin = settings?.delay_between_posts_min;
   const userMax = settings?.delay_between_posts_max;
   if (userMin != null && userMax != null && userMax >= userMin && userMin > 0) {
-    return randomInt(userMin, userMax);
+    return clampGapSec(randomInt(userMin, userMax));
   }
   const envMin = Number(process.env.HUMAN_POST_DELAY_MIN_SEC);
   const envMax = Number(process.env.HUMAN_POST_DELAY_MAX_SEC);
-  const min = Number.isFinite(envMin) && envMin > 0 ? envMin : 60;
-  const max = Number.isFinite(envMax) && envMax >= min ? envMax : 150;
-  return randomInt(min, max);
+  if (Number.isFinite(envMin) && envMin > 0) {
+    const max = Number.isFinite(envMax) && envMax >= envMin ? envMax : envMin;
+    return clampGapSec(randomInt(envMin, max));
+  }
+  return clampGapSec(0);
 }
 
 /** วินาทีพักหลังโพสต์ครบ batch_size กลุ่ม */

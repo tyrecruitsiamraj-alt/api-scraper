@@ -7,6 +7,7 @@ import { authOptions } from './auth';
 import { encryptFacebookPassword, encryptSecret } from './crypto';
 import { kickWorker } from './worker-kick';
 import { postCaptionIssues } from '../../src/core/post-caption-check.js';
+import { dailyCapCeiling } from '../../autopost/server/post-pacing.js';
 import { dismissCommentLead, jarvisLeadsConfigured, requestAiCall, saveManualReply } from './comment-leads';
 import { q } from './db';
 import { clearAccountVerification } from './post-tasks';
@@ -1215,8 +1216,8 @@ export async function setProviderCapAction(formData: FormData) {
 export async function setFacebookDailyCapAction(formData: FormData) {
   await requireSession();
   const cap = Number.parseInt(String(formData.get('dailyCap') ?? ''), 10);
-  // เพดานต่อบัญชี — จำกัด 1..50 กันตั้งพลาดจนโดน block (แนะนำ 15)
-  if (Number.isFinite(cap) && cap >= 1 && cap <= 50) await setFacebookDailyCapForAll(cap);
+  // เพดานต่อบัญชี — 1..เพดานระบบ (8) ตั้งเกินไม่ได้ (Facebook จำกัดบัญชีวันละ 7–16 ครั้ง 2–6 พ.ย. 2569)
+  if (Number.isFinite(cap) && cap >= 1 && cap <= dailyCapCeiling()) await setFacebookDailyCapForAll(cap);
   revalidatePath('/connectors');
   revalidatePath('/settings');
   revalidatePath('/settings/connectors');

@@ -96,7 +96,7 @@ export function FacebookQuotaPanel({ initialFb }: { initialFb: FacebookQuotaSumm
               name="dailyCap"
               type="number"
               min={1}
-              max={50}
+              max={fb.cap_max}
               defaultValue={fb.cap_default}
               className="w-24"
             />
@@ -104,7 +104,7 @@ export function FacebookQuotaPanel({ initialFb }: { initialFb: FacebookQuotaSumm
               ใช้กับทุกบัญชี
             </Button>
             <FieldDescription className="basis-full text-xs">
-              บัญชีที่เต็มโควต้าวันนี้จะถูกข้ามตอนโพสต์อัตโนมัติ แนะนำ 15 โพสต์ต่อบัญชี เพื่อลดโอกาสโดน Facebook บล็อก
+              ตั้งได้ไม่เกิน {fb.cap_max} โพสต์ต่อบัญชีต่อวัน นับรวมใบจาก Jarvis และเว้นห่างกันอย่างน้อย 10 นาที เพื่อลดโอกาสโดน Facebook จำกัด
             </FieldDescription>
           </Field>
         </form>

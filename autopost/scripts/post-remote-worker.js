@@ -89,7 +89,24 @@ if (WORKER_CAPABILITIES.length === 0) {
 let activeJobs = 0;
 let claiming = false;
 
+// เครื่องที่มี DATABASE_URL คุยกับฐานตรง ไม่โพลเว็บ so-autopost ทุก 5 วิ (Vercel ปิดทั้งทีม 6 พ.ย. 2569 เพราะการโพลนี้)
+const { shouldUseLocalWorkerApi, createLocalWorkerApi } = require('../server/worker-local-api');
+const localApi = shouldUseLocalWorkerApi()
+  ? createLocalWorkerApi({
+    db: require('../server/db'),
+    workerId,
+    workerName: typeof workerName === 'string' ? workerName : null,
+    sendAlert: require('../server/alert').sendAlert,
+  })
+  : null;
+console.log(`[post-worker] ${localApi ? 'คุยกับฐานข้อมูลตรง (ไม่ผ่านเว็บ)' : `คุยผ่านเว็บ ${API_BASE}`}`);
+
 async function callApi(pathname, body) {
+  if (localApi) {
+    const data = await localApi(pathname, body);
+    markAlive();
+    return data;
+  }
   const res = await fetch(`${API_BASE}${pathname}`, {
     method: 'POST',
     headers: {
@@ -152,8 +169,9 @@ async function runPlaywrightForJob(job) {
     const env = { ...process.env, FORCE_COLOR: '1', RUN_ID: String(job.run_id || ''), RUN_LOG_API_URL: API_BASE };
     if (assignmentIds.length > 0) env.ASSIGNMENT_IDS = assignmentIds.join(',');
     if (String(job.mode || 'post') === 'preflight') env.PREFLIGHT_USER_ID = String(job.user_id || '');
-    // งานที่คนกดเอง (ไม่ใช่รอบ 8:00 'auto-daily') = อนุญาต override cap/pause ถ้าบัญชีเกินโควต้า
-    if (String(job.requested_by || '') !== 'auto-daily') env.IGNORE_DAILY_CAP = '1';
+    // ทุกงานนับเพดานต่อวัน (เจ้าของ 8 พ.ย. 2569) — เดิมงานที่ไม่ใช่รอบ 8:00 ตั้ง IGNORE_DAILY_CAP=1
+    // ใบจาก Jarvis ทุกใบจึงโพสต์ได้เต็มเพดานใหม่ บางบัญชีโพสต์ 25 กลุ่ม/วัน แล้ว Facebook จำกัดบัญชี
+    delete env.IGNORE_DAILY_CAP;
     const testName = String(job.mode || 'post') === 'preflight' ? 'facebookPreflight' : 'postAll';
     const args = ['playwright', 'test', testName, '--headed', '--project=GoogleChrome'];
     const isWin = process.platform === 'win32';

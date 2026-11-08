@@ -20,6 +20,7 @@ import { normalizePosterLayout, normalizePosterStandard, posterFieldsForQuality,
 import type { PosterLayout, PosterStandard } from '../../src/core/poster-template.js';
 import { evaluateResumeQualification } from '../../src/core/resume-qualification.js';
 import { selectPreferredScrapeWorker } from '../../src/core/worker-selection.js';
+import { dailyCapCeiling } from '../../autopost/server/post-pacing.js';
 import { assertAgeRange, buildScrapeCriteria, hydrateJobSnapshot, jobDescriptionFromJarvis, scrapeRequestProblems } from './scrape-intake.js';
 
 // schema ของ autopost — แยกต่อ project ได้ผ่าน env (ไม่ตั้ง = so_autopost_jobs เดิม)
@@ -29,6 +30,8 @@ if (!/^[A-Za-z_][A-Za-z0-9_-]*$/.test(AP_SCHEMA)) {
   throw new Error(`AUTOPOST_SCHEMA ไม่ถูกต้อง: ${AP_SCHEMA}`);
 }
 const AP = `"${AP_SCHEMA}"`;
+/** เพดานโพสต์ต่อบัญชีต่อวันของทั้งระบบ (8) — ค่าที่ตั้งรายบัญชีเกินนี้ แสดงและใช้เป็น 8 (autopost/server/post-pacing.js) */
+const FB_CAP = dailyCapCeiling();
 // Worker compatibility is a semantic contract, not a stale Git SHA baked into
 // the Web bundle. A UI-only deploy must not turn an already compatible worker
 // offline. content_pipeline + declared capabilities below are the enforceable
@@ -626,7 +629,7 @@ export async function listAllConnectors() {
       `SELECT 'facebook:' || u.id::text AS key, 'facebook'::text AS platform,
               COALESCE(NULLIF(TRIM(u.name), ''), u.email, u.env_key, u.id) AS label,
               COALESCE(u.email, u.env_key) AS username,
-              NULL::integer AS scrape_limit, COALESCE(u.daily_cap, 15)::integer AS daily_cap,
+              NULL::integer AS scrape_limit, LEAST(COALESCE(u.daily_cap, ${FB_CAP}), ${FB_CAP})::integer AS daily_cap,
               true AS enabled, NULL::timestamptz AS cooldown_until,
               NULL::timestamptz AS last_login_at, u.created_at,
               u.paused_until, u.pause_reason,
@@ -657,7 +660,7 @@ export async function listAllConnectors() {
         `SELECT 'facebook:' || u.id::text AS key, 'facebook'::text AS platform,
                 COALESCE(NULLIF(TRIM(u.name), ''), u.email, u.env_key, u.id) AS label,
                 COALESCE(u.email, u.env_key) AS username,
-                NULL::integer AS scrape_limit, 15::integer AS daily_cap,
+                NULL::integer AS scrape_limit, ${FB_CAP}::integer AS daily_cap,
                 true AS enabled, NULL::timestamptz AS cooldown_until,
                 NULL::timestamptz AS last_login_at, u.created_at,
                 NULL::timestamptz AS paused_until, NULL::text AS pause_reason,
@@ -897,6 +900,8 @@ export type FacebookQuotaSummary = {
   posts_today: number;
   capacity: number;
   cap_default: number;
+  /** เพดานสูงสุดของระบบ — ตั้งต่อบัญชีเกินนี้ไม่ได้ */
+  cap_max: number;
   /** รายบัญชี เรียงใช้เยอะสุดก่อน (ตัวเสี่ยงโดน block อยู่บนสุด) */
   list: FacebookAccountQuota[];
 };
@@ -907,7 +912,7 @@ export async function facebookQuotaSummary(): Promise<FacebookQuotaSummary | nul
       `SELECT
          u.id AS id,
          COALESCE(NULLIF(TRIM(u.name), ''), u.email, u.id) AS label,
-         COALESCE(u.daily_cap, 15)::int AS cap,
+         LEAST(COALESCE(u.daily_cap, ${FB_CAP}), ${FB_CAP})::int AS cap,
          (u.paused_until IS NOT NULL AND u.paused_until > now()) AS paused,
          COALESCE((
            SELECT count(*)::int FROM ${AP}.post_logs pl
@@ -929,13 +934,14 @@ export async function facebookQuotaSummary(): Promise<FacebookQuotaSummary | nul
     // cap ที่พบบ่อยสุด — เป็นค่า prefill ของช่องปรับ cap
     const capCounts = new Map<number, number>();
     for (const a of list) capCounts.set(a.cap, (capCounts.get(a.cap) ?? 0) + 1);
-    const cap_default = [...capCounts.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? 15;
+    const cap_default = [...capCounts.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? FB_CAP;
     return {
       accounts: list.length,
       paused: list.filter((a) => a.paused).length,
       posts_today: list.reduce((s, a) => s + a.used_today, 0),
       capacity: list.reduce((s, a) => s + a.cap, 0),
       cap_default,
+      cap_max: FB_CAP,
       list,
     };
   } catch {
@@ -1151,7 +1157,7 @@ export async function autopostOverview(): Promise<AutopostOverview | null> {
     const acc = await q<{ accounts: number; paused: number; over_cap: number; posts_today: number; capacity: number }>(
       `WITH t AS (
          SELECT u.id,
-                COALESCE(u.daily_cap, 15) AS cap,
+                LEAST(COALESCE(u.daily_cap, ${FB_CAP}), ${FB_CAP}) AS cap,
                 (u.paused_until IS NOT NULL AND u.paused_until > now()) AS paused,
                 COALESCE((
                   SELECT count(*)::int FROM ${AP}.post_logs pl

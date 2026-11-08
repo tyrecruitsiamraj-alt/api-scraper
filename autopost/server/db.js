@@ -5,6 +5,7 @@ require('dotenv').config();
 const { Pool } = require('pg');
 const { classifyPostFailure } = require('./failure-learning');
 const { FB_LIMIT_LOG_PREFIX, STRIKE_WINDOW_DAYS, facebookLimitPauseHours, facebookLimitReason } = require('./fb-limit-pause');
+const { baseDailyCapFor } = require('./post-pacing');
 
 const DATABASE_URL = process.env.DATABASE_URL;
 const SCHEMA = process.env.DB_SCHEMA || 'so_autopost_apiscraper';
@@ -2277,11 +2278,12 @@ function warmupCap(capBase, ageDays) {
 }
 
 function baseDailyCap(user) {
-  return Math.max(1, Number(user?.daily_cap) || Number(process.env.POST_DAILY_CAP) || 15);
+  // เพดานระบบ 8 กลุ่ม/บัญชี/วัน ชนะค่าที่ตั้งรายบัญชี (post-pacing.js · เจ้าของ 8 พ.ย. 2569)
+  return baseDailyCapFor(user?.daily_cap, process.env);
 }
 
 /**
- * เพดานโพสต์/วันของบัญชี — daily_cap ของ user > env POST_DAILY_CAP > 15
+ * เพดานโพสต์/วันของบัญชี — daily_cap ของ user > env POST_DAILY_CAP > 8 และไม่เกินเพดานระบบ (POST_DAILY_CAP_MAX, 8)
  * บัญชีใหม่วอร์มก่อน: อิงอายุจากโพสต์แรกใน post_logs (ไม่เคยโพสต์/<7วัน=5, <14วัน=8, <21วัน=12)
  */
 async function getEffectiveDailyCap(user) {

@@ -71,7 +71,23 @@ const workerId = `${os.hostname()}-${process.pid}`;
 let activeJobs = 0;
 let claiming = false;
 
+// เครื่องที่มี DATABASE_URL คุยกับฐานตรง ไม่โพลเว็บ so-autopost ทุก 5 วิ (Vercel ปิดทั้งทีม 6 พ.ย. 2569 เพราะการโพลนี้)
+const { shouldUseLocalWorkerApi, createLocalWorkerApi } = require('../server/worker-local-api');
+const localApi = shouldUseLocalWorkerApi()
+  ? createLocalWorkerApi({
+    db: require('../server/db'),
+    workerId,
+    sendAlert: require('../server/alert').sendAlert,
+  })
+  : null;
+console.log(`[collect-worker] ${localApi ? 'คุยกับฐานข้อมูลตรง (ไม่ผ่านเว็บ)' : `คุยผ่านเว็บ ${API_BASE}`}`);
+
 async function callApi(pathname, body) {
+  if (localApi) {
+    const data = await localApi(pathname, body);
+    markAlive();
+    return data;
+  }
   const res = await fetch(`${API_BASE}${pathname}`, {
     method: 'POST',
     headers: {

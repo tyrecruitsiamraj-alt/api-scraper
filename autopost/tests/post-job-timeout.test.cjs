@@ -4,21 +4,24 @@ const { postJobTimeoutMs, countJobGroups } = require('../server/post-job-timeout
 
 const MIN = 60 * 1000;
 
-test('few groups keep the old 25-minute floor', () => {
-  assert.equal(postJobTimeoutMs(1, {}), 25 * MIN);
-  assert.equal(postJobTimeoutMs(2, {}), 25 * MIN);
+// 8 พ.ย. 2569: เว้นระหว่างโพสต์ 10–12 นาที → กลุ่มละ 5 + 12 = 17 นาที (เดิม 6)
+test('one group already needs more than the old 25-minute floor', () => {
+  assert.equal(postJobTimeoutMs(1, {}), (10 + 17) * MIN);
+  assert.equal(postJobTimeoutMs(2, {}), (10 + 2 * 17) * MIN);
 });
 
-test('time grows by about 6 minutes per group plus setup and batch breaks', () => {
+test('time grows by the per-group post time plus the longest gap, plus batch breaks', () => {
   // 5 กลุ่ม = ยังไม่พัก (พักหลังครบ 5 แล้วมีกลุ่มต่อเท่านั้น)
-  assert.equal(postJobTimeoutMs(5, {}), (10 + 5 * 6) * MIN);
-  // 11 กลุ่ม = พัก 2 ครั้ง ครั้งละไม่เกิน 15 นาที (เคสจริง OPL6906091)
-  assert.equal(postJobTimeoutMs(11, {}), (10 + 11 * 6 + 2 * 15) * MIN);
-  assert.equal(postJobTimeoutMs(15, {}), (10 + 15 * 6 + 2 * 15) * MIN);
+  assert.equal(postJobTimeoutMs(5, {}), (10 + 5 * 17) * MIN);
+  // เพดาน 8 กลุ่ม/บัญชี/วัน = พัก 1 ครั้ง ต้องจบก่อนเครื่องตัดงานค้าง (175 นาที)
+  assert.equal(postJobTimeoutMs(8, {}), (10 + 8 * 17 + 15) * MIN);
+  assert.ok(postJobTimeoutMs(8, {}) < 175 * MIN);
 });
 
-test('batch size and break length follow the worker env', () => {
-  assert.equal(postJobTimeoutMs(11, { HUMAN_BATCH_SIZE: '10', HUMAN_BATCH_BREAK_MAX_SEC: '600' }), (10 + 11 * 6 + 1 * 10) * MIN);
+test('batch size, break length and gap follow the worker env', () => {
+  assert.equal(postJobTimeoutMs(6, { HUMAN_BATCH_SIZE: '10' }), (10 + 6 * 17) * MIN);
+  assert.equal(postJobTimeoutMs(6, { HUMAN_BATCH_BREAK_MAX_SEC: '600' }), (10 + 6 * 17 + 10) * MIN);
+  assert.equal(postJobTimeoutMs(2, { POST_MAX_GAP_SEC: '900' }), (10 + 2 * 20) * MIN);
 });
 
 test('never past the stale-job sweep (POST_RUN_STALE_MINUTES - 5)', () => {

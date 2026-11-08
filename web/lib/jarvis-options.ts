@@ -5,6 +5,7 @@ import { REPOST_MIN_GAP_DAYS } from './repo';
 import { normalizeGroupJobTypes } from './group-job-types';
 import { classifyGroupOutcome, GROUP_STATE } from '../../src/core/group-outcome.js';
 import { SCRAPE_RULES } from './scrape-intake.js';
+import { baseDailyCapFor } from '../../autopost/server/post-pacing.js';
 
 /**
  * ข้อมูลให้ Jarvis ใช้ตอนพนักงานเลือก บัญชี Facebook / กลุ่ม / เครื่อง / บัญชี Scrap ก่อนสั่งงาน
@@ -154,9 +155,9 @@ export type JarvisOptions = {
   scrape_rules: typeof SCRAPE_RULES;
 };
 
-/** เพดานโพสต์/วัน: daily_cap > POST_DAILY_CAP > 15 แล้ววอร์มตามอายุบัญชี (เหมือน worker) */
+/** เพดานโพสต์/วัน: daily_cap > POST_DAILY_CAP > 8 ไม่เกินเพดานระบบ 8 แล้ววอร์มตามอายุบัญชี (นิยามเดียวกับ worker: autopost/server/post-pacing.js) */
 export function effectiveDailyCap(dailyCap: number | null, ageDays: number | null, env = process.env, skipWarmup = false): number {
-  const base = Math.max(1, Number(dailyCap) || Number(env.POST_DAILY_CAP) || 15);
+  const base = baseDailyCapFor(dailyCap, env);
   if (skipWarmup || String(env.POST_WARMUP_DISABLED || '') === '1') return base;
   const age = ageDays == null ? NaN : Number(ageDays);
   const ramp = !Number.isFinite(age) || age < 7 ? 5 : age < 14 ? 8 : age < 21 ? 12 : base;
