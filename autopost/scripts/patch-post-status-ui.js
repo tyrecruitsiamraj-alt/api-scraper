@@ -5,9 +5,9 @@ let s = fs.readFileSync(p, 'utf8');
 s = s.replace('    el.textContent = `สถานะ: ${parts.join(\' \')}`;\n  } catch {', '    el.textContent = `สถานะ: ${parts.join(\' \')}`;\n    renderPostStatusCards(s);\n  } catch {');
 
 if (!s.includes('function renderPostStatusCards(status)')) {
-  const insertAfter = '}
+  const insertAfter = `}
 setInterval(refreshRunStatusBanner, 4000);
-refreshRunStatusBanner();';
+refreshRunStatusBanner();`;
   const block = `}
 
 const hiddenPostStatusUsers = new Set();
