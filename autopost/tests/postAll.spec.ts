@@ -197,7 +197,7 @@ test('Dynamic Post: รันโพสต์ตาม Assignments', async ({ pag
     /** แผนวันนี้ของบัญชีนี้: cap/วัน + วอร์มบัญชีใหม่ + cooldown คู่ซ้ำ + เรียงกลุ่มที่เคยได้เบอร์ก่อน */
     const assignmentIds = userAssignments.map((a) => String(a.id));
     let planItems: DailyPlanItem[] = [];
-    // manual + ยืนยัน (worker ตั้ง IGNORE_DAILY_CAP=1 ให้เฉพาะ run ที่คนกด ไม่ใช่รอบ 8:00) → เกิน cap ก็โพสต์ต่อได้
+    // ตั้งแต่ 8 พ.ย. 2569 worker ไม่ส่ง IGNORE_DAILY_CAP ให้งานไหนแล้ว (ทุกงานนับเพดาน) — เหลือไว้ใช้รันมือเท่านั้น
     const ignoreCap = String(process.env.IGNORE_DAILY_CAP || '') === '1';
     const plan = await buildDailyPostPlanForUser(user.id, assignmentIds, { ignoreCap });
     if (plan) {

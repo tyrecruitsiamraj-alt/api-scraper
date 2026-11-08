@@ -5,7 +5,9 @@ require('dotenv').config();
 const { Pool } = require('pg');
 const { classifyPostFailure } = require('./failure-learning');
 const { FB_LIMIT_LOG_PREFIX, STRIKE_WINDOW_DAYS, facebookLimitPauseHours, facebookLimitReason } = require('./fb-limit-pause');
-const { baseDailyCapFor } = require('./post-pacing');
+const { baseDailyCapFor, dailyCapCeiling } = require('./post-pacing');
+/** เพดานระบบ 8 กลุ่ม/บัญชี/วัน ใน SQL (ตัวเลข ไม่ใช่ข้อความจากผู้ใช้) — ตัวเลือกบัญชีสำรองต้องเห็นเพดานเดียวกับตอนโพสต์ */
+const DAILY_CAP_MAX_SQL = Number(dailyCapCeiling());
 
 const DATABASE_URL = process.env.DATABASE_URL;
 const SCHEMA = process.env.DB_SCHEMA || 'so_autopost_apiscraper';
@@ -2059,7 +2061,7 @@ async function claimNextPostRunJob(workerId, runId, workerName, capabilities = [
                   WHERE pl.user_id = q.user_id
                     AND (pl.created_at AT TIME ZONE 'Asia/Bangkok')::date
                         = (NOW() AT TIME ZONE 'Asia/Bangkok')::date
-               ), 0) >= COALESCE(u.daily_cap, 15) THEN 1 ELSE 0 END) ASC,
+               ), 0) >= LEAST(COALESCE(u.daily_cap, ${DAILY_CAP_MAX_SQL}), ${DAILY_CAP_MAX_SQL}) THEN 1 ELSE 0 END) ASC,
            q.created_at ASC
          LIMIT 1
          FOR UPDATE OF q SKIP LOCKED
@@ -2147,7 +2149,7 @@ async function handoffRemainingGroups({ fromUserId, jobIds, groupIds, requestedB
        SELECT u.id, COALESCE(NULLIF(TRIM(u.name), ''), u.env_key, u.id) AS label,
               EXISTS (SELECT 1 FROM workers w
                        WHERE w.name = u.preferred_worker AND w.last_seen > NOW() - INTERVAL '2 minutes') AS worker_online,
-              COALESCE(u.daily_cap, 15)::int AS cap,
+              LEAST(COALESCE(u.daily_cap, ${DAILY_CAP_MAX_SQL}), ${DAILY_CAP_MAX_SQL})::int AS cap,
               COALESCE((SELECT COUNT(*)::int FROM post_logs pl
                          WHERE pl.user_id = u.id
                            AND (pl.created_at AT TIME ZONE 'Asia/Bangkok')::date

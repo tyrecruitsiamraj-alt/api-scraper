@@ -3622,7 +3622,7 @@ async function pickSubstituteAccount(excludeId: string | null) {
                 COALESCE(u.group_ids::jsonb, '[]'::jsonb) AS group_ids,
                 NULLIF(TRIM(u.preferred_worker), '') AS preferred_worker,
                 (SELECT w.last_seen FROM ${AP}.workers w WHERE w.name = u.preferred_worker) AS worker_last_seen,
-                COALESCE(u.daily_cap, 15)::int AS cap,
+                LEAST(COALESCE(u.daily_cap, ${FB_CAP}), ${FB_CAP})::int AS cap,
                 COALESCE((SELECT count(*)::int FROM ${AP}.post_logs pl
                            WHERE pl.user_id = u.id
                              AND (pl.created_at AT TIME ZONE 'Asia/Bangkok')::date
@@ -4463,7 +4463,7 @@ export async function enqueueApprovedPost(opts: {
        VALUES ($1, $2::jsonb, $3::jsonb, $4)`,
       [assignmentId, JSON.stringify([jobId]), JSON.stringify(selectedGroupIds), userId],
     );
-    // requested_by ≠ 'auto-daily' → worker ตั้ง IGNORE_DAILY_CAP=1 (โพสต์แบบสั่งเองข้าม cap ได้)
+    // ทุกงานนับเพดานต่อวัน (8 กลุ่ม/บัญชี) ไม่มีงานไหนข้ามเพดาน — autopost/server/post-pacing.js
     await client.query(
       `INSERT INTO ${AP}.post_run_queue (id, assignment_ids, user_id, status, requested_by, message)
        VALUES ($1, $2::jsonb, $3, 'queued', $4, $5)`,
