@@ -8,13 +8,14 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/component
 
 /**
  * ก้อนธุรกิจ (LBD / LBA / LM) บนหน้าตั้งค่า — ปิดไว้ตอนเปิดหน้า กดหัวการ์ดเพื่อกางดูรายการข้างใน
- * ก้อนว่างยังขึ้นพร้อมเลข 0 ไม่หาย
+ * ก้อนว่างยังขึ้นพร้อมเลข 0 ไม่หาย · defaultOpen = กางไว้ตั้งแต่แรก (ใช้ตอนค้นหา: 9 พ.ย. 2569 ค้นเจอ 1 กลุ่มแต่ซ่อนในก้อนที่พับ เจ้าของหาไม่เจอ)
  */
 export function BusinessUnitSection({
   code,
   detail,
   count,
   unit,
+  defaultOpen = false,
   children,
 }: {
   /** null = ก้อน "ยังไม่ได้เลือกธุรกิจ" */
@@ -23,11 +24,12 @@ export function BusinessUnitSection({
   count: number;
   /** หน่วยของสิ่งที่นับ เช่น "บัญชี" "กลุ่ม" */
   unit: string;
+  defaultOpen?: boolean;
   children: ReactNode;
 }) {
   const title = code ?? 'ยังไม่ได้เลือกธุรกิจ';
   return (
-    <Collapsible asChild>
+    <Collapsible asChild defaultOpen={defaultOpen}>
       <Card size="sm" className="gap-0 py-0">
         <CollapsibleTrigger asChild>
           <CardHeader

@@ -35,6 +35,7 @@ export async function PostingGroupsManager({ sector = 'private', query = '', pro
   // แยกราชการ/เอกชนเสมอ ไม่ปนกัน (เจ้าของ 4 พ.ย. 2569) — ค่าเริ่มต้นเอกชน
   const sectorFilter = isGroupSector(sector) ? sector : 'private';
   const needle = query.trim().toLowerCase();
+  const filtering = Boolean(needle || province.trim() || jobType.trim());
   const provinceFilter = province.trim();
   const inSector = groups.filter((g) => g.sector === sectorFilter);
   const provinceCounts = new Map<string, number>();
@@ -155,7 +156,15 @@ export async function PostingGroupsManager({ sector = 'private', query = '', pro
       </form>
 
       {!mustNarrow && groupByBusinessUnit(shown, (g) => g.department).map((bu) => (
-        <BusinessUnitSection key={bu.code ?? 'none'} code={bu.code} detail={bu.detail} count={bu.items.length} unit="กลุ่ม">
+        <BusinessUnitSection
+          key={`${bu.code ?? 'none'}-${filtering ? 'open' : 'closed'}`}
+          code={bu.code}
+          detail={bu.detail}
+          count={bu.items.length}
+          unit="กลุ่ม"
+          // ค้นหา/กรองแล้ว กางก้อนที่มีผลให้เลย ไม่ต้องกดหาเอง
+          defaultOpen={filtering && bu.items.length > 0}
+        >
           {bu.items.length === 0 ? (
             <p className="px-4 py-3 text-sm text-muted-foreground">ไม่มีกลุ่มของ {bu.code ?? 'ก้อนนี้'} ตามเงื่อนไขที่ค้น</p>
           ) : (
