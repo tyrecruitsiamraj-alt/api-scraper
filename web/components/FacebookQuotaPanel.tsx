@@ -11,6 +11,11 @@ import { Field, FieldDescription, FieldLabel } from '@/components/ui/field';
 import { Input } from '@/components/ui/input';
 import { Progress } from '@/components/ui/progress';
 
+/** วันเวลาที่บัญชีกลับมาโพสต์ได้ (เวลาไทย) เช่น "12 พ.ย. 08:20" */
+function backDate(iso: string) {
+  return new Intl.DateTimeFormat('th-TH', { timeZone: 'Asia/Bangkok', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }).format(new Date(iso));
+}
+
 /**
  * โควต้าโพสต์ Facebook รายบัญชี (โหมด Auto-Post) — เรียงบัญชีใช้เยอะสุดก่อน
  * เห็นทันทีว่าบัญชีไหนเต็ม/ใกล้เต็ม = ตัวเสี่ยงโดน block. โพลทุก 4 วิ
@@ -69,11 +74,11 @@ export function FacebookQuotaPanel({ initialFb }: { initialFb: FacebookQuotaSumm
               <li key={a.id} className="grid grid-cols-[minmax(0,11rem)_1fr_auto] items-center gap-3 text-sm">
                 <div className="flex min-w-0 items-center gap-1.5" title={a.label}>
                   <span className="truncate">{a.label}</span>
-                  {a.paused && <Badge variant="outline">พัก</Badge>}
                   {a.warming_up && !a.paused && <Badge variant="secondary">อุ่นเครื่อง {a.warmup_days} วัน</Badge>}
                 </div>
                 <Progress value={pct} aria-label={`${a.label} ใช้ไป ${a.used_today} จาก ${a.cap}`} />
                 <div className="flex items-center justify-end gap-1.5 tabular-nums">
+                  {a.paused && <Badge variant="outline">{a.paused_until ? `พักถึง ${backDate(a.paused_until)}` : 'พัก'}</Badge>}
                   {full && <Badge variant="destructive">เต็ม</Badge>}
                   <span className={cn(full ? 'font-semibold text-destructive' : 'text-muted-foreground')}>
                     {a.used_today}/{a.cap}

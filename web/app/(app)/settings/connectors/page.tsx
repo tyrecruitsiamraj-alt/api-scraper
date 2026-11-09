@@ -51,6 +51,11 @@ const STATE_LABEL: Record<AccountState, string> = {
   verify: 'ต้องยืนยันตัวตน',
   off: 'ปิด',
 };
+/** วันเวลาที่บัญชีกลับมาโพสต์ได้ (เวลาไทย) เช่น "12 พ.ย. 08:20" — เจ้าของ 9 พ.ย. 2569: บัญชีที่พักต้องบอกว่ากลับมาเมื่อไร */
+function backDate(iso: string) {
+  return new Intl.DateTimeFormat('th-TH', { timeZone: 'Asia/Bangkok', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }).format(new Date(iso));
+}
+
 const STATE_RANK: Record<AccountState, number> = { ready: 0, full: 1, offline: 2, paused: 3, verify: 4, off: 5 };
 
 /** โควต้าที่เหลือวันนี้ — บัญชีที่ไม่คุมโควต้าถือว่าเหลือ 0 เพื่อไม่ให้แซงบัญชีโพสต์ */
@@ -195,12 +200,12 @@ export default async function SettingsConnectorsPage({ searchParams }: { searchP
                         )}
                       </div>
 
-                      <div className="flex w-28 shrink-0 justify-center">
+                      <div className="flex w-40 shrink-0 justify-center">
                         <Badge
                           variant={state === 'ready' ? 'secondary' : state === 'off' ? 'ghost' : 'outline'}
                           className={state === 'ready' ? '' : state === 'off' ? 'text-muted-foreground' : 'text-destructive'}
                         >
-                          {STATE_LABEL[state]}
+                          {state === 'paused' && paused ? `พักถึง ${backDate(c.paused_until!)}` : STATE_LABEL[state]}
                         </Badge>
                       </div>
 

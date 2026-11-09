@@ -177,6 +177,10 @@ function thaiDateTime(value: string | null): string {
   });
 }
 
+function thaiTime(value: string): string {
+  return new Date(value).toLocaleTimeString('th-TH', { timeZone: 'Asia/Bangkok', hour: '2-digit', minute: '2-digit' });
+}
+
 export function accountStatus(a: {
   worker: string | null;
   worker_online: boolean;
@@ -187,6 +191,8 @@ export function accountStatus(a: {
   needs_verification_since?: string | null;
   needs_verification_note?: string | null;
   queue: { running: number; queued: number };
+  /** เริ่มอุ่นเครื่องเมื่อไร (งานโหมด warmup ที่กำลังรัน — เลื่อนฟีด ไม่โพสต์) · null = ไม่ได้อุ่นเครื่องอยู่ */
+  warming_since?: string | null;
 }): { status: AccountStatus; warning: string | null } {
   if (a.paused_until && new Date(a.paused_until).getTime() > Date.now()) {
     return {
@@ -205,8 +211,19 @@ export function accountStatus(a: {
   }
   // บัญชีที่ยังไม่มีเครื่องประจำเลือกได้ — Jarvis เลือกเครื่องในขั้นถัดไป (worker)
   if (a.worker && !a.worker_online) return { status: 'worker_offline', warning: `เครื่อง ${a.worker} ออฟไลน์อยู่` };
+  // บอกตามที่บัญชีทำอยู่จริง: อุ่นเครื่อง (ไม่โพสต์) / กำลังโพสต์งานอื่น / มีงานรอคิว — เจ้าของ 9 พ.ย. 2569 "ทุกอย่างตอบตามจริง"
   if (a.queue.running + a.queue.queued > 0) {
-    return { status: 'busy', warning: 'บัญชีนี้มีงานโพสต์ค้างอยู่ งานใหม่จะต่อคิวหลังงานนั้น' };
+    const waiting = a.queue.queued > 0 ? ` และมีงานโพสต์รอคิวอยู่ ${a.queue.queued} งาน` : '';
+    if (a.warming_since) {
+      return {
+        status: 'busy',
+        warning: `บัญชีนี้กำลังอุ่นเครื่อง (เลื่อนฟีดและดูกลุ่ม ไม่โพสต์) เริ่ม ${thaiTime(a.warming_since)} ปกติใช้ 6–12 นาที${waiting} งานใหม่จะเริ่มต่อจากนั้น`,
+      };
+    }
+    if (a.queue.running > 0) {
+      return { status: 'busy', warning: `บัญชีนี้กำลังโพสต์งานอื่นอยู่${waiting} งานใหม่จะต่อคิวหลังงานนั้น` };
+    }
+    return { status: 'busy', warning: `บัญชีนี้มีงานโพสต์รอคิวอยู่ ${a.queue.queued} งาน งานใหม่จะต่อคิวหลังงานนั้น` };
   }
   if (!a.worker) return { status: 'ready', warning: 'บัญชีนี้ยังไม่มีเครื่องประจำ เลือกเครื่องที่จะใช้โพสต์' };
   return { status: 'ready', warning: null };
@@ -224,7 +241,7 @@ export async function getJarvisOptions(opts: { requestNo?: string | null } = {})
       id: string; env_key: string | null; email: string | null; skip_warmup: boolean; name: string; worker: string | null; worker_online: boolean; daily_cap: number | null;
       paused_until: string | null; pause_reason: string | null; group_ids: string[];
       needs_verification_since: string | null; needs_verification_note: string | null;
-      posted_today: number; age_days: number | null; running: number; queued: number; pending_groups: number; department: string | null;
+      posted_today: number; age_days: number | null; running: number; queued: number; warming_since: string | null; pending_groups: number; department: string | null;
     }>(
       `SELECT u.id, u.env_key, u.email, COALESCE((to_jsonb(u)->>'skip_warmup')::boolean, false) AS skip_warmup,
               NULLIF(to_jsonb(u)->>'department', '') AS department,
@@ -247,6 +264,7 @@ export async function getJarvisOptions(opts: { requestNo?: string | null } = {})
                  SELECT MIN(created_at) FROM ${AP}.run_logs WHERE user_id = u.id AND level = 'success'
                ) t) AS age_days,
               (SELECT count(*) FROM ${AP}.post_run_queue p WHERE p.user_id = u.id AND p.status = 'running')::int AS running,
+              (SELECT min(p.started_at) FROM ${AP}.post_run_queue p WHERE p.user_id = u.id AND p.status = 'running' AND p.mode = 'warmup') AS warming_since,
               -- งานอุ่นเครื่องที่รอเวลา (โหมด warmup) ไม่นับเป็นงานโพสต์ที่รอคิว — ตอนกำลังอุ่นเครื่องนับเป็น running (บัญชีใช้อยู่)
               (SELECT count(*) FROM ${AP}.post_run_queue p WHERE p.user_id = u.id AND p.status = 'queued' AND COALESCE(p.mode, 'post') = 'post')::int AS queued,
               -- กลุ่มที่รอโพสต์อยู่แล้ว (งานรอคิว + ส่วนที่ยังไม่ถึงของงานที่กำลังทำ) — กินโควต้าวันนี้ไปแล้ว
@@ -405,6 +423,7 @@ export async function getJarvisOptions(opts: { requestNo?: string | null } = {})
       needs_verification_since: r.needs_verification_since,
       needs_verification_note: r.needs_verification_note,
       queue: { running: r.running, queued: r.queued },
+      warming_since: r.warming_since,
     };
     const status = accountStatus(base);
     const session_workers = sessionWorkers.get(sessionKey(r)) ?? [];

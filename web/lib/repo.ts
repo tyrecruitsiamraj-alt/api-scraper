@@ -639,6 +639,12 @@ export async function listAllConnectors() {
                    AND (pl.created_at AT TIME ZONE 'Asia/Bangkok')::date
                        = (now() AT TIME ZONE 'Asia/Bangkok')::date
               ), 0) AS used_today,
+              (SELECT EXTRACT(EPOCH FROM (now() - MIN(first_at))) / 86400.0 FROM (
+                 SELECT MIN(created_at) AS first_at FROM ${AP}.post_logs WHERE user_id = u.id
+                 UNION ALL
+                 SELECT MIN(created_at) FROM ${AP}.run_logs WHERE user_id = u.id AND level = 'success'
+               ) t) AS age_days,
+              u.id AS user_id, u.daily_cap AS daily_cap_setting,
               NULLIF(to_jsonb(u)->>'preferred_worker', '') AS preferred_worker,
               COALESCE((to_jsonb(u)->>'skip_warmup')::boolean, false) AS skip_warmup,
               (NULLIF(u.password, '') IS NOT NULL) AS has_password,
@@ -652,6 +658,15 @@ export async function listAllConnectors() {
               ) AS worker_online
          FROM ${AP}.users u`,
     );
+    // เพดานที่โพสต์ได้จริงวันนี้ — นิยามเดียวกับ worker/หน้าโควต้า (ค่าตั้งดิบ 4 แต่บัญชีใหม่ได้จริง 2)
+    facebook = facebook.map((row) => {
+      const r = row as UnifiedConnectorRow & { user_id?: string; daily_cap_setting?: number | null; age_days?: number | null };
+      const cap = effectiveDailyCapFor(
+        { id: String(r.user_id), daily_cap: r.daily_cap_setting ?? null, skip_warmup: r.skip_warmup, paused_until: r.paused_until, pause_reason: r.pause_reason },
+        r.age_days == null ? null : Number(r.age_days),
+      );
+      return { ...row, daily_cap: cap };
+    });
   } catch {
     // Schema รุ่นแรกอาจยังไม่มี daily_cap/paused columns หรือ post_logs.
     // ยังแสดงบัญชีพื้นฐานได้ เพื่อให้ Settings ไม่ล่มทั้งหน้า.
@@ -893,6 +908,8 @@ export type FacebookAccountQuota = {
   used_today: number;
   cap: number;
   paused: boolean;
+  /** พักถึงเมื่อไร (มีค่าเมื่อ paused) */
+  paused_until: string | null;
   /** บัญชีใหม่ที่ระบบอุ่นเครื่องให้วันละรอบ (autopost/server/post-pacing.js: needsWarmup) */
   warming_up: boolean;
   /** อุ่นเครื่องสำเร็จมาแล้วกี่วัน */
@@ -951,6 +968,7 @@ export async function facebookQuotaSummary(): Promise<FacebookQuotaSummary | nul
       used_today: Number(r.used_today),
       cap: Number(r.cap),
       paused: r.paused,
+      paused_until: r.paused ? r.paused_until : null,
       warming_up: r.warming_up,
       warmup_days: Number(r.warmup_days) || 0,
     }));
