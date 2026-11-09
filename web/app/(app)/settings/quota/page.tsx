@@ -1,4 +1,6 @@
 import { facebookQuotaSummary, listProviderLimits } from '@/lib/repo';
+import { facebookLimitStats } from '@/lib/fb-limit-stats';
+import { FbLimitStatsCard } from '@/components/FbLimitStatsCard';
 import { ProviderLimitsPanel } from '@/components/ProviderLimitsPanel';
 import { FacebookQuotaPanel } from '@/components/FacebookQuotaPanel';
 
@@ -6,7 +8,7 @@ export const dynamic = 'force-dynamic';
 
 /** โควต้าการใช้งาน — แยกออกมาจากหน้าบัญชี (เจ้าของสั่ง 4 พ.ย. 2569) */
 export default async function SettingsQuotaPage() {
-  const [limits, fbQuota] = await Promise.all([listProviderLimits(), facebookQuotaSummary()]);
+  const [limits, fbQuota, limitStats] = await Promise.all([listProviderLimits(), facebookQuotaSummary(), facebookLimitStats(30)]);
   return (
     <div className="flex flex-col gap-4">
       <div className="flex flex-col gap-1">
@@ -15,6 +17,7 @@ export default async function SettingsQuotaPage() {
       </div>
       <ProviderLimitsPanel initialLimits={limits} />
       <FacebookQuotaPanel initialFb={fbQuota} />
+      <FbLimitStatsCard stats={limitStats} />
     </div>
   );
 }

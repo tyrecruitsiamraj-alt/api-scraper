@@ -4,8 +4,8 @@
 require('dotenv').config();
 const { Pool } = require('pg');
 const { classifyPostFailure } = require('./failure-learning');
-const { FB_LIMIT_LOG_PREFIX, STRIKE_WINDOW_DAYS, facebookLimitPauseHours, facebookLimitReason } = require('./fb-limit-pause');
-const { baseDailyCapFor, dailyCapCeiling } = require('./post-pacing');
+const { FB_LIMIT_LOG_PREFIX, STRIKE_WINDOW_DAYS, MAX_PAUSE_HOURS, facebookLimitPauseHours, facebookLimitReason } = require('./fb-limit-pause');
+const { dailyCapCeiling, effectiveDailyCapFor } = require('./post-pacing');
 /** เพดานระบบ 8 กลุ่ม/บัญชี/วัน ใน SQL (ตัวเลข ไม่ใช่ข้อความจากผู้ใช้) — ตัวเลือกบัญชีสำรองต้องเห็นเพดานเดียวกับตอนโพสต์ */
 const DAILY_CAP_MAX_SQL = Number(dailyCapCeiling());
 
@@ -2097,7 +2097,7 @@ async function claimNextPostRunJob(workerId, runId, workerName, capabilities = [
 /** พักบัญชีชั่วคราว (circuit breaker: โพสต์ fail ติดกัน / โดน checkpoint) */
 async function pauseUser(userId, hours, reason) {
   await ensureUsersPostControlColumns();
-  const h = Math.min(7 * 24, Math.max(1, Number(hours) || 24));
+  const h = Math.min(MAX_PAUSE_HOURS, Math.max(1, Number(hours) || 24));
   const { rows } = await query(
     `UPDATE users
      SET paused_until = NOW() + ($2::int * INTERVAL '1 hour'),
@@ -2114,7 +2114,7 @@ async function pauseUser(userId, hours, reason) {
  * Facebook จำกัดการโพสต์ของบัญชี — นับครั้งที่โดนใน 7 วันจากบันทึกรอบ แล้วพักตามขั้น (fb-limit-pause.js)
  * เรียกก่อนเขียนบันทึกของครั้งนี้ จึงบวก 1 ให้ครั้งนี้เอง
  */
-async function pauseUserForFacebookLimit(userId, baseHours = 24) {
+async function pauseUserForFacebookLimit(userId, baseHours = 72) {
   const { rows } = await query(
     `SELECT count(*)::int AS n FROM run_logs
       WHERE user_id::text = $1 AND message LIKE $2
@@ -2268,33 +2268,13 @@ async function countPostsTodayByUser(userId) {
   return Number(rows[0]?.c) || 0;
 }
 
-/** เพดานวอร์มบัญชีใหม่ (source of truth เดียว): ไม่เคยโพสต์/<7วัน=5, <14=8, <21=12, ≥21=เต็ม */
-function warmupCap(capBase, ageDays) {
-  if (String(process.env.POST_WARMUP_DISABLED || '') === '1') return capBase;
-  let ramp;
-  if (!Number.isFinite(ageDays)) ramp = 5;
-  else if (ageDays < 7) ramp = 5;
-  else if (ageDays < 14) ramp = 8;
-  else if (ageDays < 21) ramp = 12;
-  else ramp = capBase;
-  return Math.min(capBase, ramp);
-}
-
-function baseDailyCap(user) {
-  // เพดานระบบ 8 กลุ่ม/บัญชี/วัน ชนะค่าที่ตั้งรายบัญชี (post-pacing.js · เจ้าของ 8 พ.ย. 2569)
-  return baseDailyCapFor(user?.daily_cap, process.env);
-}
-
 /**
- * เพดานโพสต์/วันของบัญชี — daily_cap ของ user > env POST_DAILY_CAP > 8 และไม่เกินเพดานระบบ (POST_DAILY_CAP_MAX, 8)
- * บัญชีใหม่วอร์มก่อน: อิงอายุจากโพสต์แรกใน post_logs (ไม่เคยโพสต์/<7วัน=5, <14วัน=8, <21วัน=12)
+ * เพดานโพสต์/วันของบัญชี — คิดที่เดียวใน post-pacing.js (effectiveDailyCapFor):
+ * ค่าบัญชี → เพดานระบบ 8 → วอร์มบัญชีใหม่ → กลับมาทีละน้อยหลังโดน Facebook จำกัด → สุ่มรายวัน 3..เพดาน
+ * อายุบัญชีนับจากโพสต์สำเร็จครั้งแรก: post_logs (มีลิงก์) หรือ run_logs success
+ * (เดิมนับแค่ post_logs ซึ่งเพิ่งเริ่มเก็บได้ — บัญชีที่โพสต์มานานเลยโดนวอร์มเป็นบัญชีใหม่ 5 กลุ่ม/วัน)
  */
 async function getEffectiveDailyCap(user) {
-  const capBase = baseDailyCap(user);
-  /** บัญชีที่ใช้งานมานานแล้ว (ติ๊กในหน้าตั้งค่า) ไม่ต้องวอร์ม */
-  if (user?.skip_warmup === true || String(process.env.POST_WARMUP_DISABLED || '') === '1') return capBase;
-  // อายุบัญชีนับจากโพสต์สำเร็จครั้งแรก: post_logs (มีลิงก์) หรือ run_logs success
-  // เดิมนับแค่ post_logs ซึ่งเพิ่งเริ่มเก็บได้ — บัญชีที่โพสต์มานานเลยโดนวอร์มเป็นบัญชีใหม่ (5 กลุ่ม/วัน)
   const { rows } = await query(
     `SELECT EXTRACT(EPOCH FROM (NOW() - MIN(first_at))) / 86400.0 AS age_days
      FROM (
@@ -2304,7 +2284,7 @@ async function getEffectiveDailyCap(user) {
      ) t`,
     [String(user.id)]
   );
-  return warmupCap(capBase, Number(rows[0]?.age_days));
+  return effectiveDailyCapFor(user, rows[0]?.age_days == null ? null : Number(rows[0].age_days));
 }
 
 /**
@@ -2328,9 +2308,7 @@ async function getUsersPostingStatus() {
   const ageMap = new Map(ageRows.rows.map((r) => [String(r.user_id), Number(r.age_days)]));
   const now = Date.now();
   return users.map((u) => {
-    const cap = u.skip_warmup === true
-      ? baseDailyCap(u)
-      : warmupCap(baseDailyCap(u), ageMap.has(String(u.id)) ? ageMap.get(String(u.id)) : NaN);
+    const cap = effectiveDailyCapFor(u, ageMap.has(String(u.id)) ? ageMap.get(String(u.id)) : null);
     const posted = todayMap.get(String(u.id)) || 0;
     const isPaused = !!(u.paused_until && new Date(u.paused_until).getTime() > now);
     return { ...u, posted_today: posted, effective_cap: cap, is_full: posted >= cap, is_paused: isPaused };

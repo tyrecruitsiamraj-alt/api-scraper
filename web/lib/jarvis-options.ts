@@ -5,7 +5,7 @@ import { REPOST_MIN_GAP_DAYS } from './repo';
 import { normalizeGroupJobTypes } from './group-job-types';
 import { classifyGroupOutcome, GROUP_STATE } from '../../src/core/group-outcome.js';
 import { SCRAPE_RULES } from './scrape-intake.js';
-import { baseDailyCapFor } from '../../autopost/server/post-pacing.js';
+import { effectiveDailyCapFor } from '../../autopost/server/post-pacing.js';
 
 /**
  * ข้อมูลให้ Jarvis ใช้ตอนพนักงานเลือก บัญชี Facebook / กลุ่ม / เครื่อง / บัญชี Scrap ก่อนสั่งงาน
@@ -155,13 +155,13 @@ export type JarvisOptions = {
   scrape_rules: typeof SCRAPE_RULES;
 };
 
-/** เพดานโพสต์/วัน: daily_cap > POST_DAILY_CAP > 8 ไม่เกินเพดานระบบ 8 แล้ววอร์มตามอายุบัญชี (นิยามเดียวกับ worker: autopost/server/post-pacing.js) */
-export function effectiveDailyCap(dailyCap: number | null, ageDays: number | null, env = process.env, skipWarmup = false): number {
-  const base = baseDailyCapFor(dailyCap, env);
-  if (skipWarmup || String(env.POST_WARMUP_DISABLED || '') === '1') return base;
-  const age = ageDays == null ? NaN : Number(ageDays);
-  const ramp = !Number.isFinite(age) || age < 7 ? 5 : age < 14 ? 8 : age < 21 ? 12 : base;
-  return Math.min(base, ramp);
+/** เพดานโพสต์วันนี้ของบัญชี — นิยามเดียวกับ worker และหน้าโควต้า (autopost/server/post-pacing.js) */
+export function effectiveDailyCap(
+  user: { id: string; daily_cap: number | null; skip_warmup?: boolean | null; paused_until?: string | null; pause_reason?: string | null },
+  ageDays: number | null,
+  env = process.env,
+): number {
+  return effectiveDailyCapFor(user, ageDays, { env });
 }
 
 function thaiDateTime(value: string | null): string {
@@ -377,7 +377,7 @@ export async function getJarvisOptions(opts: { requestNo?: string | null } = {})
     }
   }
   const accounts: JarvisAccountOption[] = accountRows.map((r) => {
-    const daily_cap = effectiveDailyCap(r.daily_cap, r.age_days, process.env, r.skip_warmup);
+    const daily_cap = effectiveDailyCap(r, r.age_days);
     const base = {
       worker: r.worker,
       worker_online: r.worker_online,

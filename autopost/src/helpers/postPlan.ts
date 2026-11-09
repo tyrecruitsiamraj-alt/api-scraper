@@ -90,7 +90,7 @@ export async function pauseUserPosting(
 }
 
 /**
- * Facebook จำกัดการโพสต์ของบัญชี — พักตามจำนวนครั้งที่โดนใน 7 วัน (ครั้งแรก 24 ชม. · ครั้งที่ 2 72 ชม. · 3 ขึ้นไป 7 วัน)
+ * Facebook จำกัดการโพสต์ของบัญชี — พักตามจำนวนครั้งที่โดนใน 7 วัน (ครั้งแรก 3 วัน · ครั้งที่ 2 7 วัน · 3 ขึ้นไป 14 วัน — autopost/server/fb-limit-pause.js)
  * คืนข้อความเหตุที่ใช้บันทึกรอบ (ขึ้นต้นด้วยคำเดียวกับที่ตัวนับใช้)
  */
 export async function pauseUserForFacebookLimit(

@@ -20,7 +20,7 @@ import { normalizePosterLayout, normalizePosterStandard, posterFieldsForQuality,
 import type { PosterLayout, PosterStandard } from '../../src/core/poster-template.js';
 import { evaluateResumeQualification } from '../../src/core/resume-qualification.js';
 import { selectPreferredScrapeWorker } from '../../src/core/worker-selection.js';
-import { dailyCapCeiling } from '../../autopost/server/post-pacing.js';
+import { dailyCapCeiling, effectiveDailyCapFor } from '../../autopost/server/post-pacing.js';
 import { assertAgeRange, buildScrapeCriteria, hydrateJobSnapshot, jobDescriptionFromJarvis, scrapeRequestProblems } from './scrape-intake.js';
 
 // schema ของ autopost — แยกต่อ project ได้ผ่าน env (ไม่ตั้ง = so_autopost_jobs เดิม)
@@ -908,11 +908,21 @@ export type FacebookQuotaSummary = {
 
 export async function facebookQuotaSummary(): Promise<FacebookQuotaSummary | null> {
   try {
-    const rows = await q<{ id: string; label: string; cap: number; paused: boolean; used_today: number }>(
+    // เพดานคิดด้วยนิยามเดียวกับ worker (วอร์ม · กลับมาทีละน้อยหลังโดนจำกัด · สุ่มรายวัน) ไม่ใช่ค่าตั้งดิบ
+    const raw = await q<{
+      id: string; label: string; daily_cap: number | null; skip_warmup: boolean; paused_until: string | null; pause_reason: string | null;
+      age_days: number | null; paused: boolean; used_today: number;
+    }>(
       `SELECT
          u.id AS id,
          COALESCE(NULLIF(TRIM(u.name), ''), u.email, u.id) AS label,
-         LEAST(COALESCE(u.daily_cap, ${FB_CAP}), ${FB_CAP})::int AS cap,
+         u.daily_cap, COALESCE((to_jsonb(u)->>'skip_warmup')::boolean, false) AS skip_warmup,
+         u.paused_until, u.pause_reason,
+         (SELECT EXTRACT(EPOCH FROM (now() - MIN(first_at))) / 86400.0 FROM (
+            SELECT MIN(created_at) AS first_at FROM ${AP}.post_logs WHERE user_id = u.id
+            UNION ALL
+            SELECT MIN(created_at) FROM ${AP}.run_logs WHERE user_id = u.id AND level = 'success'
+          ) t) AS age_days,
          (u.paused_until IS NOT NULL AND u.paused_until > now()) AS paused,
          COALESCE((
            SELECT count(*)::int FROM ${AP}.post_logs pl
@@ -920,9 +930,11 @@ export async function facebookQuotaSummary(): Promise<FacebookQuotaSummary | nul
               AND (pl.created_at AT TIME ZONE 'Asia/Bangkok')::date
                   = (now() AT TIME ZONE 'Asia/Bangkok')::date
          ), 0) AS used_today
-       FROM ${AP}.users u
-       ORDER BY used_today DESC, label`,
+       FROM ${AP}.users u`,
     );
+    const rows = raw
+      .map((r) => ({ ...r, cap: effectiveDailyCapFor(r, r.age_days == null ? null : Number(r.age_days)) }))
+      .sort((a, b) => Number(b.used_today) - Number(a.used_today) || a.label.localeCompare(b.label, 'th'));
     if (rows.length === 0) return null;
     const list: FacebookAccountQuota[] = rows.map((r) => ({
       id: r.id,
@@ -944,8 +956,9 @@ export async function facebookQuotaSummary(): Promise<FacebookQuotaSummary | nul
       cap_max: FB_CAP,
       list,
     };
-  } catch {
-    return null; // autopost schema not present
+  } catch (e) {
+    console.warn(`[quota] อ่านโควต้า Facebook ไม่ได้: ${(e as Error).message}`);
+    return null;
   }
 }
 
