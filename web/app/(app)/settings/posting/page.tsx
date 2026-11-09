@@ -1,5 +1,6 @@
 import { ChevronsUpDownIcon } from 'lucide-react';
 import { AutopostFrame } from '@/components/AutopostFrame';
+import { NoticeDialog } from '@/components/NoticeDialog';
 import { PostingGroupsManager } from '@/components/PostingGroupsManager';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
@@ -28,7 +29,7 @@ async function autopostIsReady() {
   }
 }
 
-export default async function SettingsPostingPage({ searchParams }: { searchParams: Promise<{ sector?: string; q?: string; province?: string; job?: string }> }) {
+export default async function SettingsPostingPage({ searchParams }: { searchParams: Promise<{ sector?: string; q?: string; province?: string; job?: string; notice?: string }> }) {
   const params = await searchParams;
   const ready = await autopostIsReady();
   return (
@@ -37,6 +38,8 @@ export default async function SettingsPostingPage({ searchParams }: { searchPara
         <h2 className="text-lg font-semibold">ตั้งค่าการโพสต์</h2>
         <p className="text-sm text-muted-foreground">คลังกลุ่ม Facebook ที่ใช้โพสต์ · เลือกว่าบัญชีไหนโพสต์กลุ่มไหนได้ที่ บัญชีที่ใช้งาน → แก้ไข</p>
       </div>
+
+      {params.notice && <NoticeDialog key={params.notice} title="เพิ่มกลุ่มไม่ได้" notice={params.notice} />}
 
       <PostingGroupsManager sector={params.sector ?? 'private'} query={params.q ?? ''} province={params.province ?? ''} jobType={params.job ?? ''} />
 

@@ -58,6 +58,7 @@ import {
   setSoRecruitRequestStatus,
   rejectSoRecruitRequest,
   createPostingGroup,
+  findPostingGroupByFbId,
   deletePostingGroup,
   setPostingGroupDepartment,
   setAccountGroups,
@@ -351,16 +352,33 @@ export async function deleteTrendAction(formData: FormData) {
 /** เพิ่มกลุ่มใหม่จาก URL หรือ ID กลุ่ม Facebook. */
 export async function createGroupAction(formData: FormData) {
   await requireSession();
+  // ข้อผิดพลาดที่ผู้ใช้แก้เองได้ ขึ้นเป็นข้อความบนหน้า — throw ใน production กลายเป็นจอ "Application error"
+  // (9 พ.ย. 2569: เพิ่มกลุ่มที่มีอยู่แล้ว ชน unique fb_group_id จอขาวทั้งหน้า)
+  const back: (notice: string) => never = (notice) => redirect(`/settings/posting?notice=${encodeURIComponent(notice)}`);
   const raw = String(formData.get('fbGroupId') ?? '').trim();
   // รับได้ทั้ง ID ล้วน หรือ URL — ดึงเลขกลุ่มออกมา
   const fbGroupId = (raw.match(/(?:groups\/)?(\d{6,})/)?.[1] ?? raw).trim();
-  if (!/^\d{6,}$/.test(fbGroupId)) throw new Error('ใส่ ID กลุ่ม (ตัวเลข) หรือลิงก์กลุ่ม Facebook ที่ถูกต้อง');
+  if (!/^\d{6,}$/.test(fbGroupId)) back('ใส่ ID กลุ่ม (ตัวเลข) หรือลิงก์กลุ่ม Facebook ที่ถูกต้อง');
   const name = String(formData.get('name') ?? '').trim();
   const province = String(formData.get('province') ?? '').trim();
   const department = readBusinessUnit(formData.get('department'));
-  if (!department) throw new Error('เลือกธุรกิจของกลุ่มนี้ (LBD / LBA / LM)');
+  if (!department) back('เลือกธุรกิจของกลุ่มนี้ (LBD / LBA / LM)');
   const sector = readGroupSector(formData.get('sector'));
-  await createPostingGroup({ fbGroupId, name: name || null, province: province || null, department, sector, jobTypes: readGroupJobTypes(formData) });
+  const existing = await findPostingGroupByFbId(fbGroupId);
+  if (existing) back(`กลุ่มนี้มีในระบบแล้ว ชื่อ "${existing.name}" (เลขกลุ่ม ${fbGroupId}) ไม่ต้องเพิ่มซ้ำ`);
+  let jobTypes: GroupJobType[] = [];
+  try {
+    jobTypes = readGroupJobTypes(formData);
+  } catch (e) {
+    back((e as Error).message);
+  }
+  try {
+    await createPostingGroup({ fbGroupId, name: name || null, province: province || null, department, sector, jobTypes });
+  } catch (e) {
+    // มีคนเพิ่มกลุ่มเดียวกันพร้อมกัน
+    if ((e as { code?: string }).code === '23505') back(`กลุ่มนี้มีในระบบแล้ว (เลขกลุ่ม ${fbGroupId}) ไม่ต้องเพิ่มซ้ำ`);
+    throw e;
+  }
   revalidatePath('/settings/posting');
   revalidatePath('/orchestrator');
 }

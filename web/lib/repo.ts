@@ -4276,6 +4276,15 @@ export async function listPostingGroups(): Promise<PostingGroup[]> {
   }
 }
 
+/** กลุ่มที่มีเลข Facebook นี้อยู่แล้ว — เลขกลุ่มซ้ำไม่ได้ (unique) */
+export async function findPostingGroupByFbId(fbGroupId: string): Promise<{ id: string; name: string } | null> {
+  const rows = await q<{ id: string; name: string }>(
+    `SELECT id, COALESCE(NULLIF(TRIM(name), ''), fb_group_id) AS name FROM ${AP}.groups WHERE fb_group_id = $1 LIMIT 1`,
+    [fbGroupId.trim()],
+  );
+  return rows[0] ?? null;
+}
+
 /** เพิ่มกลุ่มใหม่. คืน id กลุ่ม. */
 export async function createPostingGroup(input: {
   fbGroupId: string;
