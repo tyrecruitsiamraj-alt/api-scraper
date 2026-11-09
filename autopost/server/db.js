@@ -1872,7 +1872,7 @@ async function enqueuePostRunJob(data = {}) {
   const assignmentIds = normalizeIdArray(data.assignment_ids);
   await query(
     `INSERT INTO post_run_queue (id, assignment_ids, user_id, status, requested_by, message, not_before, mode)
-     VALUES ($1, $2::jsonb, $3, 'queued', $4, $5, NOW() + ($6::int * INTERVAL '1 minute'), $7)`,
+     VALUES ($1, $2::jsonb, $3, 'queued', $4, $5, COALESCE($8::timestamptz, NOW() + ($6::int * INTERVAL '1 minute')), $7)`,
     [
       id,
       JSON.stringify(assignmentIds),
@@ -1881,6 +1881,7 @@ async function enqueuePostRunJob(data = {}) {
       data.message || 'queued from web',
       Math.max(0, Math.floor(Number(data.delay_minutes) || 0)),
       data.mode === 'warmup' ? 'warmup' : 'post',
+      data.not_before || null,
     ]
   );
   const { rows } = await query(`SELECT * FROM post_run_queue WHERE id = $1`, [id]);
@@ -1947,25 +1948,28 @@ async function enqueueDailyPostRunJobs() {
      WHERE requested_by = 'auto-daily' AND user_id IS NOT NULL
        AND (created_at AT TIME ZONE 'Asia/Bangkok')::date = (NOW() AT TIME ZONE 'Asia/Bangkok')::date`
   );
-  const out = await enqueuePostRunJobsPerUser({
+  return enqueuePostRunJobsPerUser({
     assignment_ids: [],
     requested_by: 'auto-daily',
     message: 'daily 8:00 auto run',
     exclude_user_ids: rows.map((r) => String(r.user_id)),
     spread_start: true,
   });
-  const warmup = await enqueueDailyWarmupJobs().catch((e) => {
-    console.error('[autopost] เข้าคิวอุ่นเครื่องบัญชีไม่สำเร็จ:', e && e.message);
-    return [];
-  });
-  return { ...out, warmup };
 }
 
 /**
- * อุ่นเครื่องบัญชีใหม่ วันละ 1 รอบ (เจ้าของเคาะ 9 พ.ย. 2569) — เรียกพร้อมรอบเช้า 8:00
+ * อุ่นเครื่องบัญชีใหม่ วันละ 1 รอบ (เจ้าของเคาะ 9 พ.ย. 2569) — เครื่องที่รับงาน warmup เรียกเองวันละครั้ง
+ * แยกจากรอบโพสต์ 8:00 เพราะเครื่อง Windows ปิดรอบนั้นไว้ (AUTO_POST_DAILY_ENABLED=0) อุ่นเครื่องจึงไม่เคยเข้าคิว
  * บัญชีที่อายุไม่ถึง 14 วัน (post-pacing: needsWarmup) ไม่ถูกพัก ไม่ติดยืนยันตัวตน → งานโหมด warmup เวลาสุ่ม 09:00–17:00
+ * (เรียกหลังเวลาที่สุ่มได้ไปแล้ว = เริ่มภายในครึ่งชั่วโมง)
  * idempotent ต่อวัน · งานอุ่นเครื่องของวันก่อนที่ยังไม่ได้ทำ ยกเลิกทิ้ง (ไม่ทำย้อนหลังรวดเดียว)
  */
+/** เวลาเริ่มอุ่นเครื่องของบัญชีนี้วันนี้: 08:00 (เวลาไทย) + 60–539 นาที · เลยเวลานั้นแล้ว = ภายใน 30 นาทีจากตอนนี้ */
+function warmupStartAt(userId, day, now = Date.now()) {
+  const at = Date.parse(`${day}T08:00:00+07:00`) + warmupStartOffsetMin(userId, day) * 60_000;
+  return new Date(at > now ? at : now + Math.floor(Math.random() * 30) * 60_000).toISOString();
+}
+
 async function enqueueDailyWarmupJobs() {
   await ensurePostRunQueueUserColumn();
   await ensureUsersPostControlColumns();
@@ -1998,7 +2002,7 @@ async function enqueueDailyWarmupJobs() {
       mode: 'warmup',
       requested_by: 'auto-warmup',
       message: 'อุ่นเครื่องบัญชีใหม่ (ไม่โพสต์)',
-      delay_minutes: warmupStartOffsetMin(u.id, day),
+      not_before: warmupStartAt(u.id, day),
     });
     if (row) created.push(row);
   }
@@ -3158,6 +3162,7 @@ module.exports = {
   enqueuePostRunJob,
   enqueuePostRunJobsPerUser,
   enqueueDailyPostRunJobs,
+  enqueueDailyWarmupJobs,
   claimNextPostRunJob,
   touchWorkerHeartbeat,
   completePostRunJob,

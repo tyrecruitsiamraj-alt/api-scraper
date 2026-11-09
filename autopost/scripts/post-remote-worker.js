@@ -418,9 +418,8 @@ async function autoEnqueueDaily() {
     lastAutoEnqueueDate = now.date;
     const created = Array.isArray(out.created) ? out.created.length : 0;
     const skipped = Array.isArray(out.skipped) ? out.skipped.length : 0;
-    const warmup = Array.isArray(out.warmup) ? out.warmup.length : 0;
     console.log(
-      `[post-worker] รอบอัตโนมัติ ${now.date} ${String(AUTO_POST_HOUR).padStart(2, '0')}:${String(AUTO_POST_MINUTE).padStart(2, '0')} — เข้าคิว ${created} บัญชี (ข้าม ${skipped}: เข้าคิวแล้ว/ไม่มีงาน) · อุ่นเครื่องบัญชีใหม่ ${warmup} บัญชี`
+      `[post-worker] รอบอัตโนมัติ ${now.date} ${String(AUTO_POST_HOUR).padStart(2, '0')}:${String(AUTO_POST_MINUTE).padStart(2, '0')} — เข้าคิว ${created} บัญชี (ข้าม ${skipped}: เข้าคิวแล้ว/ไม่มีงาน)`
     );
   } catch (e) {
     /** ไม่ตั้ง lastAutoEnqueueDate — รอบถัดไปลองใหม่จนกว่าจะสำเร็จ (ฝั่ง server กันซ้ำให้แล้ว) */
@@ -434,6 +433,31 @@ if (AUTO_POST_DAILY_ENABLED) {
     `[post-worker] รอบโพสต์อัตโนมัติทุกวันเวลา ${String(AUTO_POST_HOUR).padStart(2, '0')}:${String(AUTO_POST_MINUTE).padStart(2, '0')} (${AUTO_POST_TZ}) — ปิดด้วย AUTO_POST_DAILY_ENABLED=0`
   );
 }
+
+/**
+ * อุ่นเครื่องบัญชีใหม่วันละรอบ (เจ้าของเคาะ 9 พ.ย. 2569) — แยกจากรอบโพสต์ 8:00
+ * เครื่อง Windows ปิดรอบโพสต์ 8:00 ไว้ (AUTO_POST_DAILY_ENABLED=0) ถ้าผูกกันไว้ อุ่นเครื่องจะไม่เคยเข้าคิว
+ * เครื่องที่รับงาน warmup เรียกเองวันละครั้งหลัง 08:00 · ฝั่งเซิร์ฟเวอร์กันซ้ำต่อวัน · ปิดด้วย AUTO_WARMUP_ENABLED=0
+ */
+const AUTO_WARMUP_ENABLED = WORKER_CAPABILITIES.includes('warmup')
+  && String(process.env.AUTO_WARMUP_ENABLED ?? '1').trim() !== '0';
+let lastWarmupEnqueueDate = '';
+
+async function autoEnqueueWarmup() {
+  if (!AUTO_WARMUP_ENABLED) return;
+  const now = bangkokNow();
+  if (now.date === lastWarmupEnqueueDate || now.minutes < 8 * 60) return;
+  try {
+    const out = await callApi('/api/worker/post/enqueue-warmup', {});
+    lastWarmupEnqueueDate = now.date;
+    const n = Array.isArray(out.created) ? out.created.length : 0;
+    console.log(`[post-worker] อุ่นเครื่องบัญชีใหม่ ${now.date} — เข้าคิว ${n} บัญชี (เวลาสุ่ม 09:00–17:00)`);
+  } catch (e) {
+    console.error(`[post-worker] เข้าคิวอุ่นเครื่องไม่สำเร็จ จะลองใหม่: ${e.message || e}`);
+  }
+}
+setInterval(autoEnqueueWarmup, 60_000);
+autoEnqueueWarmup();
 
 setInterval(tick, INTERVAL_MS);
 releaseOrphansOnce().then(() => tick());

@@ -97,8 +97,13 @@ function createLocalWorkerApi({ db, workerId, workerName = null, env = process.e
         ok: true,
         created: out.created.map((r) => ({ id: r.id, user_id: r.user_id })),
         skipped: out.skipped,
-        warmup: (out.warmup || []).map((r) => ({ id: r.id, user_id: r.user_id })),
       };
+    },
+
+    // = POST /api/worker/post/enqueue-warmup — อุ่นเครื่องบัญชีใหม่วันละรอบ (idempotent ต่อวัน)
+    async '/api/worker/post/enqueue-warmup'() {
+      const rows = await db.enqueueDailyWarmupJobs();
+      return { ok: true, created: rows.map((r) => ({ id: r.id, user_id: r.user_id })) };
     },
 
     // = POST /api/worker/release-orphans
@@ -198,7 +203,7 @@ function createLocalWorkerApi({ db, workerId, workerName = null, env = process.e
 
 const LOCAL_WORKER_PATHS = [
   '/api/worker/post/claim', '/api/worker/post/complete', '/api/worker/post/heartbeat', '/api/worker/post/sweep-stale',
-  '/api/worker/post/enqueue-daily', '/api/worker/release-orphans', '/api/worker/collect/claim',
+  '/api/worker/post/enqueue-daily', '/api/worker/post/enqueue-warmup', '/api/worker/release-orphans', '/api/worker/collect/claim',
   '/api/worker/collect/complete', '/api/worker/collect/sweep-stale', '/api/worker/collect/enqueue-recent',
 ];
 

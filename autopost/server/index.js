@@ -1614,6 +1614,17 @@ app.get('/api/worker/post/queue-status', async (req, res) => {
  * รอบโพสต์อัตโนมัติประจำวัน — worker บนเครื่องจริงเรียกตอน 8:00 (Vercel ไม่มี process ค้างไว้ยิงเอง)
  * idempotent ต่อวัน: บัญชีที่มีงาน auto-daily ของวันนี้แล้วจะไม่ถูกเข้าคิวซ้ำ
  */
+/** อุ่นเครื่องบัญชีใหม่วันละรอบ — เครื่องที่รับงาน warmup เรียกเอง (เครื่องที่ไม่มี DATABASE_URL) */
+app.post('/api/worker/post/enqueue-warmup', async (req, res) => {
+  try {
+    if (!requirePostWorkerToken(req, res)) return;
+    const rows = await db.enqueueDailyWarmupJobs();
+    res.json({ ok: true, created: rows.map((r) => ({ id: r.id, user_id: r.user_id })) });
+  } catch (e) {
+    res.status(500).json({ error: e.message || String(e) });
+  }
+});
+
 app.post('/api/worker/post/enqueue-daily', async (req, res) => {
   try {
     if (!requirePostWorkerToken(req, res)) return;
@@ -1628,7 +1639,6 @@ app.post('/api/worker/post/enqueue-daily', async (req, res) => {
       ok: true,
       created: out.created.map((r) => ({ id: r.id, user_id: r.user_id })),
       skipped: out.skipped,
-      warmup: (out.warmup || []).map((r) => ({ id: r.id, user_id: r.user_id })),
     });
   } catch (e) {
     res.status(500).json({ error: e.message || String(e) });

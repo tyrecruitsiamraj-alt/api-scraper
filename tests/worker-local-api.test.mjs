@@ -60,15 +60,15 @@ test('ปิดงานโพสต์ที่ล้ม แจ้งเตื�
   await assert.rejects(api('/api/worker/post/complete', {}), /job_id required/);
 });
 
-test('สร้างคิวรายวันคืนแค่ id กับบัญชี (รวมงานอุ่นเครื่อง) · กวาดงานค้างไม่ต่ำกว่า 15 นาที', async () => {
+test('สร้างคิวรายวันคืนแค่ id กับบัญชี · อุ่นเครื่องแยกเส้นของตัวเอง · กวาดงานค้างไม่ต่ำกว่า 15 นาที', async () => {
   const api = createLocalWorkerApi({ db: fakeDb(), workerId: 'w', env: {} });
-  assert.deepEqual(await api('/api/worker/post/enqueue-daily'), { ok: true, created: [{ id: 'a', user_id: 'u1' }], skipped: ['u2'], warmup: [] });
+  assert.deepEqual(await api('/api/worker/post/enqueue-daily'), { ok: true, created: [{ id: 'a', user_id: 'u1' }], skipped: ['u2'] });
   const withWarmup = createLocalWorkerApi({
-    db: fakeDb({ enqueueDailyPostRunJobs: async () => ({ created: [], skipped: [], warmup: [{ id: 'w1', user_id: 'u3', mode: 'warmup' }] }) }),
+    db: fakeDb({ enqueueDailyWarmupJobs: async () => [{ id: 'w1', user_id: 'u3', mode: 'warmup' }] }),
     workerId: 'w',
     env: {},
   });
-  assert.deepEqual((await withWarmup('/api/worker/post/enqueue-daily')).warmup, [{ id: 'w1', user_id: 'u3' }]);
+  assert.deepEqual(await withWarmup('/api/worker/post/enqueue-warmup'), { ok: true, created: [{ id: 'w1', user_id: 'u3' }] });
   assert.equal((await api('/api/worker/post/sweep-stale', { max_age_minutes: 1 })).max_age_minutes, 15);
 });
 
@@ -81,6 +81,7 @@ test('รับงานเก็บคอมเมนต์ที่ไม่�
 
 test('ครบทุกคำสั่งที่เครื่องเรียก และคำสั่งที่ไม่รู้จักต้องล้ม ไม่เงียบ', async () => {
   const api = createLocalWorkerApi({ db: fakeDb(), workerId: 'w', env: {} });
-  assert.equal(LOCAL_WORKER_PATHS.length, 10);
+  assert.equal(LOCAL_WORKER_PATHS.length, 11);
+  assert.ok(LOCAL_WORKER_PATHS.includes('/api/worker/post/enqueue-warmup'));
   await assert.rejects(api('/api/worker/post/unknown', {}), /ไม่รู้จักคำสั่ง/);
 });

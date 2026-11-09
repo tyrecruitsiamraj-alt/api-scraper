@@ -263,7 +263,8 @@ function Start-WorkerWindow([string]$Title, [string]$WorkDir, [string]$NpmScript
     "set WORKER_BUILD_SHA=$sha"
     # worker เขียน alive-*.txt ที่นี่ทุกครั้งที่คุยกับเซิร์ฟเวอร์ได้ ให้ตัวเฝ้าดู
     "set `"WORKER_ALIVE_DIR=$LogDir`""
-    'set WORKER_CAPABILITIES=post,preflight'
+    # warmup = อุ่นเครื่องบัญชีใหม่วันละรอบ (9 พ.ย. 2569) — รอบโพสต์ 8:00 ยังปิดไว้ตามเดิม
+    'set WORKER_CAPABILITIES=post,preflight,warmup'
     'set AUTO_POST_DAILY_ENABLED=0'
     'set AUTO_COLLECT_ENABLED=1'
     'set AUTO_COLLECT_EVERY_MINUTES=120'
