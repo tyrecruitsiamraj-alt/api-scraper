@@ -2,6 +2,8 @@ import 'server-only';
 import { q } from './db';
 import { OUTCOMES, orderOutcome } from '../../src/core/order-outcome.js';
 import type { OrderOutcomeKey } from '../../src/core/order-outcome.js';
+import { countGroupStatuses, linkedCount, orderGroupResults } from '../../src/core/order-groups.js';
+import type { GroupStatusKey, OrderGroupResult } from '../../src/core/order-groups.js';
 
 const AP_SCHEMA = process.env.AUTOPOST_SCHEMA || 'so_autopost_apiscraper';
 if (!/^[A-Za-z_][A-Za-z0-9_-]*$/.test(AP_SCHEMA)) throw new Error(`AUTOPOST_SCHEMA ไม่ถูกต้อง: ${AP_SCHEMA}`);
@@ -36,6 +38,10 @@ export type OrderLogRow = {
   /** Scrap: เป้าหมายจำนวนคน */
   target: number | null;
   task_id: string | null;
+  /** โพสต์: จำนวนกลุ่มแยกสถานะ (ผลรวม = total) · Scrap: null */
+  group_counts: ({ total: number } & Record<GroupStatusKey, number>) | null;
+  /** โพสต์: ผลทีละกลุ่ม · Scrap: [] */
+  groups: OrderGroupResult[];
 };
 
 export type OrderPersonSummary = {
@@ -46,60 +52,71 @@ export type OrderPersonSummary = {
   candidates: number;
 };
 
-/**
- * คำสั่งจาก Jarvis ทุกใบในช่วงเวลา (1 แถวใน Jarvis = 1 ใบ สั่งซ้ำเลขเดิมนับแยกใบ)
- * ใบโพสต์: จับรอบโพสต์ที่สร้างหลังใบนี้และก่อนใบถัดไปของเลขเดียวกัน · ใบ Scrap: งานค้นหาของเลขนี้ในช่วงเดียวกัน
- */
+/** คำสั่งจาก Jarvis ทุกใบในช่วงเวลา */
 export async function listOrderLog(range: OrderRange, type: string): Promise<OrderLogRow[]> {
   const since =
     range === 'today'
       ? `date_trunc('day', now() AT TIME ZONE 'Asia/Bangkok') AT TIME ZONE 'Asia/Bangkok'`
       : `now() - interval '${range === '7d' ? 7 : 30} days'`;
-  const rows = await q<{
-    id: string; request_no: string; type: 'content' | 'scraping'; who: string; created_at: string;
-    position: string | null; account: string | null; notes: string | null; jarvis_status: string;
-    run_status: string | null; posted_groups: number; task_id: string | null; task_status: string | null;
-    got: number | null; target: number | null;
-  }>(
+  return loadOrders(`req.created_at >= ${since}`, `${since} - interval '1 day'`, [type === 'content' || type === 'scraping' ? type : ''], `($1 = '' OR req.type = $1)`);
+}
+
+/** ใบเดียว (id แถวใน Jarvis) พร้อมผลทีละกลุ่ม — หน้ารายละเอียด */
+export async function getOrder(id: string): Promise<OrderLogRow | null> {
+  const rows = await loadOrders(`req.id = $1`, `now() - interval '60 days'`, [id], 'true');
+  return rows[0] ?? null;
+}
+
+type RawOrder = {
+  id: string; request_no: string; type: 'content' | 'scraping'; who: string; created_at: string; next_at: string | null;
+  position: string | null; account: string | null; notes: string | null; jarvis_status: string;
+  run_status: string | null; active: boolean; run_error: string | null; group_ids: unknown; task_id: string | null; task_status: string | null;
+  got: number | null; target: number | null;
+};
+
+/**
+ * คำสั่งจาก Jarvis (1 แถวใน Jarvis = 1 ใบ สั่งซ้ำเลขเดิมนับแยกใบ)
+ * ใบโพสต์: รอบโพสต์ของ job ใบนี้ (jv-<เลข>) ที่สร้างหลังใบนี้และก่อนใบถัดไปของเลขเดียวกัน
+ *   ดูจาก job ไม่ใช่เลข assignment — รอบที่สลับบัญชีมาโพสต์แทนได้ assignment เลขใหม่ (เดิมนับตกไป)
+ * ใบ Scrap: งานค้นหาของเลขนี้ในช่วงเดียวกัน
+ */
+async function loadOrders(where: string, runsSince: string, params: unknown[], typeFilter: string): Promise<OrderLogRow[]> {
+  const rows = await q<RawOrder>(
     `WITH req AS (
        SELECT r.id::text AS id, r.request_no, r.created_at, r.status AS jarvis_status, r.notes,
               COALESCE(NULLIF(to_jsonb(r)->>'request_type', ''), 'content') AS type,
               lower(COALESCE(NULLIF(TRIM(r.requested_by_name), ''), 'ไม่ระบุ')) AS who,
               NULLIF(TRIM(r.job_snapshot->>'position'), '') AS position,
               NULLIF(TRIM(r.job_snapshot->>'account_name'), '') AS account,
+              r.job_snapshot->'group_ids' AS group_ids,
               LEAD(r.created_at) OVER (
                 PARTITION BY r.request_no, COALESCE(NULLIF(to_jsonb(r)->>'request_type', ''), 'content')
                 ORDER BY r.created_at) AS next_at
          FROM "jarvis_rm".job_posting_requests r
      ),
      runs AS (
-       SELECT p.run_id, p.status, p.created_at, a AS assignment
-         FROM ${AP}.post_run_queue p, jsonb_array_elements_text(p.assignment_ids::jsonb) a
-        WHERE p.created_at >= ${since} - interval '1 day'
+       SELECT DISTINCT p.id, p.status, p.created_at, NULLIF(TRIM(COALESCE(p.error, '')), '') AS error, jid AS job_id
+         FROM ${AP}.post_run_queue p
+         CROSS JOIN LATERAL jsonb_array_elements_text(p.assignment_ids::jsonb) a
+         JOIN ${AP}.assignments asg ON asg.id = a
+         CROSS JOIN LATERAL jsonb_array_elements_text(COALESCE(asg.job_ids, '[]'::jsonb)) jid
+        WHERE p.created_at >= ${runsSince}
      )
-     SELECT req.id, req.request_no, req.type, req.who, req.created_at, req.position, req.account, req.notes, req.jarvis_status,
-            lastrun.status AS run_status,
-            COALESCE(posted.n, 0)::int AS posted_groups,
+     SELECT req.id, req.request_no, req.type, req.who, req.created_at, req.next_at, req.position, req.account, req.notes,
+            req.jarvis_status, req.group_ids,
+            lastrun.status AS run_status, COALESCE(lastrun.active, false) AS active, lastrun.error AS run_error,
             t.id::text AS task_id, t.status AS task_status, t.progress_got AS got, t.progress_target AS target
        FROM req
        LEFT JOIN LATERAL (
-         SELECT ru.status FROM runs ru
+         SELECT (array_agg(ru.status ORDER BY ru.created_at DESC))[1] AS status,
+                bool_or(ru.status IN ('queued', 'running')) AS active,
+                (array_agg(ru.error ORDER BY ru.created_at DESC) FILTER (WHERE ru.error IS NOT NULL))[1] AS error
+           FROM runs ru
           WHERE req.type = 'content'
-            AND (ru.assignment = 'jv-' || lower(req.request_no) OR ru.assignment LIKE 'jv-' || lower(req.request_no) || '-r%')
+            AND ru.job_id = 'jv-' || lower(req.request_no)
             AND ru.created_at >= req.created_at - interval '1 minute'
             AND (req.next_at IS NULL OR ru.created_at < req.next_at)
-          ORDER BY ru.created_at DESC LIMIT 1
        ) lastrun ON true
-       LEFT JOIN LATERAL (
-         SELECT count(DISTINCT pl.id)::int AS n FROM ${AP}.post_logs pl
-          WHERE COALESCE(pl.post_link, '') <> ''
-            AND pl.run_id IN (
-              SELECT ru.run_id FROM runs ru
-               WHERE req.type = 'content'
-                 AND (ru.assignment = 'jv-' || lower(req.request_no) OR ru.assignment LIKE 'jv-' || lower(req.request_no) || '-r%')
-                 AND ru.created_at >= req.created_at - interval '1 minute'
-                 AND (req.next_at IS NULL OR ru.created_at < req.next_at))
-       ) posted ON true
        LEFT JOIN LATERAL (
          SELECT st.id, st.status, st.progress_got, st.progress_target FROM scrape_tasks st
           WHERE req.type = 'scraping'
@@ -108,17 +125,20 @@ export async function listOrderLog(range: OrderRange, type: string): Promise<Ord
             AND (req.next_at IS NULL OR st.created_at < req.next_at)
           ORDER BY st.created_at DESC LIMIT 1
        ) t ON true
-      WHERE req.created_at >= ${since}
-        AND ($1 = '' OR req.type = $1)
+      WHERE ${where}
+        AND ${typeFilter}
       ORDER BY req.created_at DESC`,
-    [type === 'content' || type === 'scraping' ? type : ''],
+    params,
   );
+  const groupsByOrder = await loadPostGroups(rows.filter((r) => r.type === 'content'));
   return rows.map((r) => {
+    const groups = groupsByOrder.get(r.id) ?? [];
+    const linked = linkedCount(groups);
     const { outcome, stage } = orderOutcome({
       type: r.type,
       jarvis_status: r.jarvis_status,
       run_status: r.run_status,
-      posted_groups: r.posted_groups,
+      posted_groups: linked,
       task_status: r.task_status,
       got: r.got,
     });
@@ -133,11 +153,78 @@ export async function listOrderLog(range: OrderRange, type: string): Promise<Ord
       notes: r.jarvis_status === 'rejected' ? r.notes : null,
       outcome,
       stage,
-      got: r.type === 'content' ? r.posted_groups : Number(r.got ?? 0),
+      got: r.type === 'content' ? linked : Number(r.got ?? 0),
       target: r.type === 'scraping' ? r.target : null,
       task_id: r.task_id,
+      group_counts: r.type === 'content' ? countGroupStatuses(groups) : null,
+      groups,
     };
   });
+}
+
+/** ผลรายกลุ่มของทุกใบโพสต์ในชุดเดียว — 3 query รวม ไม่ยิงทีละใบ */
+async function loadPostGroups(orders: RawOrder[]): Promise<Map<string, OrderGroupResult[]>> {
+  const out = new Map<string, OrderGroupResult[]>();
+  if (!orders.length) return out;
+  const jobIds = [...new Set(orders.map((o) => `jv-${o.request_no.toLowerCase()}`))];
+  const from = new Date(Math.min(...orders.map((o) => new Date(o.created_at).getTime())) - 60_000).toISOString();
+  const plannedRaw = [...new Set(orders.flatMap((o) => (Array.isArray(o.group_ids) ? o.group_ids.map(String) : [])))];
+  const [attempts, logs, groupRows] = await Promise.all([
+    q<{ job_id: string; group_id: string | null; level: string; message: string | null; at: string; account: string | null }>(
+      `SELECT l.job_id, l.group_id, l.level, l.message, l.created_at AS at,
+              COALESCE(NULLIF(TRIM(u.name), ''), u.env_key, l.user_id) AS account
+         FROM ${AP}.run_logs l LEFT JOIN ${AP}.users u ON u.id = l.user_id
+        WHERE l.job_id = ANY($1::text[]) AND l.created_at >= $2
+          AND l.group_id IS NOT NULL AND l.level IN ('success', 'warn', 'error')`,
+      [jobIds, from],
+    ),
+    q<{ job_id: string; group_id: string | null; post_link: string | null; post_status: string | null; at: string; account: string | null }>(
+      `SELECT pl.job_id, pl.group_id, pl.post_link, pl.post_status, pl.created_at AS at,
+              COALESCE(NULLIF(TRIM(u.name), ''), u.env_key, pl.user_id) AS account
+         FROM ${AP}.post_logs pl LEFT JOIN ${AP}.users u ON u.id = pl.user_id
+        WHERE pl.job_id = ANY($1::text[]) AND pl.created_at >= $2`,
+      [jobIds, from],
+    ),
+    // Jarvis ส่งกลุ่มมาเป็น id แถวในคลัง หรือเลขกลุ่ม Facebook — แปลงเป็นเลขกลุ่มพร้อมชื่อ
+    q<{ id: string; fb_group_id: string; name: string }>(
+      `SELECT id, fb_group_id, COALESCE(NULLIF(TRIM(name), ''), fb_group_id) AS name FROM ${AP}.groups
+        WHERE id = ANY($1::text[]) OR fb_group_id = ANY($1::text[])`,
+      [plannedRaw],
+    ),
+  ]);
+  const fbOf = new Map<string, string>();
+  const nameOf = new Map<string, string>();
+  for (const g of groupRows) {
+    fbOf.set(g.id, String(g.fb_group_id));
+    fbOf.set(String(g.fb_group_id), String(g.fb_group_id));
+    nameOf.set(String(g.fb_group_id), g.name);
+  }
+  const missingNames = [...new Set([...attempts, ...logs].map((a) => String(a.group_id ?? '')).filter((fb) => fb && !nameOf.has(fb)))];
+  if (missingNames.length) {
+    for (const g of await q<{ fb_group_id: string; name: string }>(
+      `SELECT fb_group_id, COALESCE(NULLIF(TRIM(name), ''), fb_group_id) AS name FROM ${AP}.groups WHERE fb_group_id = ANY($1::text[])`,
+      [missingNames],
+    )) nameOf.set(String(g.fb_group_id), g.name);
+  }
+  for (const o of orders) {
+    const jobId = `jv-${o.request_no.toLowerCase()}`;
+    const start = new Date(o.created_at).getTime() - 60_000;
+    const end = o.next_at ? new Date(o.next_at).getTime() : Infinity;
+    const inWindow = (r: { job_id: string; at: string }) => {
+      const t = new Date(r.at).getTime();
+      return r.job_id === jobId && t >= start && t < end;
+    };
+    const planned = (Array.isArray(o.group_ids) ? o.group_ids.map(String) : []).map((id) => fbOf.get(id) ?? id);
+    out.set(o.id, orderGroupResults({
+      planned,
+      attempts: attempts.filter(inWindow),
+      postLogs: logs.filter(inWindow),
+      active: o.active || o.jarvis_status === 'pending' || (o.jarvis_status === 'in_progress' && !o.run_status),
+      stopReason: o.run_error,
+      groupName: (fb) => nameOf.get(fb) ?? fb,
+    }));
+  }
+  return out;
 }
 
 /** สรุปรายคน + แถวรวม — แต่ละคน: ทั้งหมด = ผลรวมทุกถัง */

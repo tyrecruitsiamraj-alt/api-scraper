@@ -1,14 +1,14 @@
 import Link from 'next/link';
 import { AutoSubmitSelect } from '@/components/AutoSubmitSelect';
-import { Badge } from '@/components/ui/badge';
+import { OutcomeBadge } from '@/components/OrderOutcomeBadge';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Field, FieldLabel } from '@/components/ui/field';
 import { Table, TableBody, TableCell, TableFooter, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { cn } from '@/lib/utils';
 import { ORDER_RANGES, ORDER_TYPES, listOrderLog, summarizeOrders } from '@/lib/order-log';
 import type { OrderLogRow, OrderRange } from '@/lib/order-log';
 import { OUTCOMES } from '../../../../src/core/order-outcome.js';
 import type { OrderOutcomeKey } from '../../../../src/core/order-outcome.js';
+import { GROUP_STATUSES } from '../../../../src/core/order-groups.js';
 
 export const dynamic = 'force-dynamic';
 
@@ -28,24 +28,16 @@ function when(iso: string) {
   }).format(new Date(iso));
 }
 
-function OutcomeBadge({ outcome }: { outcome: OrderOutcomeKey }) {
-  const label = OUTCOMES.find((o) => o.key === outcome)?.label ?? outcome;
-  return (
-    <Badge
-      variant={outcome === 'failed' ? 'destructive' : outcome === 'working' ? 'secondary' : 'outline'}
-      className={cn(
-        outcome === 'done' && 'border-success/30 bg-success/10 text-success',
-        (outcome === 'partial' || outcome === 'waiting') && 'border-warning/30 bg-warning/10 text-warning',
-      )}
-    >
-      {label}
-    </Badge>
-  );
+function gotText(r: OrderLogRow) {
+  if (r.type === 'content') return r.group_counts ? `${r.got}/${r.group_counts.total} กลุ่ม` : `${r.got} กลุ่ม`;
+  return r.target ? `${r.got}/${r.target} คน` : `${r.got} คน`;
 }
 
-function gotText(r: OrderLogRow) {
-  if (r.type === 'content') return `${r.got} กลุ่ม`;
-  return r.target ? `${r.got}/${r.target} คน` : `${r.got} คน`;
+/** ใบโพสต์: แยกทุกสถานะ โชว์ 0 ด้วย — "ได้" นับเฉพาะกลุ่มที่มีลิงก์ */
+function groupBreakdown(r: OrderLogRow) {
+  if (!r.group_counts) return null;
+  const c = r.group_counts;
+  return GROUP_STATUSES.map((s) => `${s.label} ${c[s.key]}`).join(' · ');
 }
 
 export default async function OrdersPage(props: {
@@ -193,7 +185,7 @@ export default async function OrdersPage(props: {
                   <TableCell>{shortName(r.who)}</TableCell>
                   <TableCell className="whitespace-nowrap">
                     <Link
-                      href={r.type === 'scraping' && r.task_id ? `/scraping/${r.task_id}` : '/autopost/jobs'}
+                      href={r.type === 'scraping' ? (r.task_id ? `/scraping/${r.task_id}` : '/scraping') : `/orders/${r.id}`}
                       className="font-mono text-xs underline-offset-4 hover:underline"
                     >
                       {r.request_no}
@@ -209,7 +201,10 @@ export default async function OrdersPage(props: {
                     {r.notes && <div className="text-xs text-muted-foreground">{r.notes.slice(0, 160)}</div>}
                   </TableCell>
                   <TableCell><OutcomeBadge outcome={r.outcome} /></TableCell>
-                  <TableCell className="text-right whitespace-nowrap">{gotText(r)}</TableCell>
+                  <TableCell className="text-right">
+                    <div className="whitespace-nowrap">{gotText(r)}</div>
+                    {groupBreakdown(r) && <div className="min-w-56 text-xs text-muted-foreground">{groupBreakdown(r)}</div>}
+                  </TableCell>
                 </TableRow>
               ))}
             </TableBody>

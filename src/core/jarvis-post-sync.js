@@ -1,7 +1,9 @@
 /**
  * ใบสั่งโพสต์ใน Jarvis ที่ยัง "กำลังดำเนินการ" — ดูผลของรอบโพสต์ที่สั่งหลังใบนั้น แล้วเปลี่ยนสถานะใน Jarvis
- * - มีกลุ่มที่โพสต์สำเร็จหรือได้ลิงก์ → posted
+ * - มีกลุ่มที่ได้ลิงก์โพสต์ → posted (เจ้าของ 9 พ.ย. 2569: สำเร็จ = มีลิงก์ให้กดดูได้ · เดิมนับแค่ "กดโพสต์สำเร็จ" ก็ posted)
+ * - กดโพสต์แล้วแต่ยังหาโพสต์ในกลุ่มไม่เจอ → รอ 24 ชม. หลังรอบสุดท้ายจบ (เก็บคอมเมนต์รอบถัดไปอาจหาลิงก์เจอ) แล้วค่อยตีกลับ
  * - ทุกรอบจบแล้วไม่สำเร็จสักกลุ่ม → rejected พร้อม notes "ตีกลับ: เหตุ" ให้คนสั่งแก้แล้วสั่งใหม่
+ * รอบของใบ = รอบโพสต์ของ job jv-<เลข> รวมรอบที่สลับบัญชีมาโพสต์แทน (assignment เลขใหม่ แต่ job เดิม)
  *
  * นิยามเดียว ใช้สองที่: หน้าเว็บ (ตอนเปิดหน้า) และเครื่อง worker (ทุก 5 นาที) — Jarvis ไม่ได้ถามสถานะเอง
  * ใบขอเดียวกันมีได้หลายแถวใน Jarvis จึงแก้ทีละแถวด้วย id เท่านั้น
@@ -9,6 +11,9 @@
  * @param {(sql: string, params?: unknown[]) => Promise<any[]>} rowsOf คืน rows ของ query
  * @param {{ autopostSchema: string }} opts
  */
+const UNCONFIRMED_GRACE_MS = 24 * 3_600_000;
+const NO_GROUP_POSTED = 'ไม่มีกลุ่มที่โพสต์ได้ในรอบนี้';
+
 export async function syncJarvisPostOrders(rowsOf, { autopostSchema }) {
   if (!/^[A-Za-z0-9_-]+$/.test(autopostSchema)) throw new Error(`autopost schema ไม่ถูกต้อง: ${autopostSchema}`);
   const AP = `"${autopostSchema}"`;
@@ -24,27 +29,31 @@ export async function syncJarvisPostOrders(rowsOf, { autopostSchema }) {
   for (const row of rows) {
     const jobId = `jv-${String(row.request_no).toLowerCase()}`;
     const runs = await rowsOf(
-      `SELECT run_id, status, error FROM ${AP}.post_run_queue
-        WHERE created_at >= $2
-          AND EXISTS (SELECT 1 FROM jsonb_array_elements_text(assignment_ids::jsonb) a
-                       WHERE a = $1 OR a LIKE $1 || '-r%')
-        ORDER BY created_at DESC`,
+      `SELECT q.run_id, q.status, q.error, q.finished_at FROM ${AP}.post_run_queue q
+        WHERE q.created_at >= $2
+          AND EXISTS (SELECT 1 FROM jsonb_array_elements_text(q.assignment_ids::jsonb) a
+                        JOIN ${AP}.assignments asg ON asg.id = a
+                       WHERE asg.job_ids ? $1)
+        ORDER BY q.created_at DESC`,
       [jobId, row.created_at],
     );
     if (!runs.length) continue;
     const runIds = runs.map((r) => r.run_id).filter(Boolean);
-    const evidence = runIds.length
-      ? await rowsOf(
-        `SELECT (SELECT count(*) FROM ${AP}.run_logs WHERE run_id = ANY($1::text[]) AND level = 'success')
-              + (SELECT count(*) FROM ${AP}.post_logs WHERE run_id = ANY($1::text[]) AND COALESCE(post_link, '') <> '') AS n`,
-        [runIds],
-      )
-      : [{ n: 0 }];
+    const evidence = await rowsOf(
+      `SELECT (SELECT count(*) FROM ${AP}.post_logs
+                WHERE job_id = $1 AND created_at >= $2 AND COALESCE(post_link, '') <> '') AS n,
+              (SELECT count(DISTINCT group_id) FROM ${AP}.run_logs
+                WHERE job_id = $1 AND created_at >= $2 AND level = 'success') AS clicked`,
+      [jobId, row.created_at],
+    );
     if (Number(evidence[0]?.n ?? 0) > 0) {
       if (await setRowStatus(rowsOf, row.id, 'posted', null)) result.posted.push(row.request_no);
       continue;
     }
     if (runs.some((r) => r.status === 'queued' || r.status === 'running')) continue;
+    const clicked = Number(evidence[0]?.clicked ?? 0);
+    const lastFinished = Math.max(0, ...runs.map((r) => (r.finished_at ? new Date(r.finished_at).getTime() : 0)));
+    if (clicked > 0 && Date.now() - lastFinished < UNCONFIRMED_GRACE_MS) continue;
     const attempts = runIds.length
       ? await rowsOf(
         `SELECT l.group_id, g.name AS group_name, l.level, l.message
@@ -55,7 +64,11 @@ export async function syncJarvisPostOrders(rowsOf, { autopostSchema }) {
         [runIds],
       )
       : [];
-    const note = `ตีกลับ: ${postRoundFailureReason(runs[0], attempts)}`;
+    const parts = [];
+    if (clicked > 0) parts.push(`กดโพสต์แล้ว ${clicked} กลุ่ม แต่หาโพสต์ในกลุ่มไม่เจอภายใน 24 ชม. (แอดมินอาจยังไม่อนุมัติหรือลบไปแล้ว)`);
+    const reason = postRoundFailureReason(runs[0], attempts);
+    if (!(clicked > 0 && reason === NO_GROUP_POSTED)) parts.push(reason);
+    const note = `ตีกลับ: ${parts.join(' · ')}`;
     if (await setRowStatus(rowsOf, row.id, 'rejected', note)) result.rejected.push(row.request_no);
   }
   return result;
@@ -100,5 +113,5 @@ export function postRoundFailureReason(latestRun, attempts) {
     const more = failed.size > 3 ? ` และอีก ${failed.size - 3} กลุ่ม` : '';
     parts.push(`ไม่สำเร็จ ${failed.size} กลุ่ม · ${lines.join(' · ')}${more}`);
   }
-  return parts.length ? parts.join(' · ') : 'ไม่มีกลุ่มที่โพสต์ได้ในรอบนี้';
+  return parts.length ? parts.join(' · ') : NO_GROUP_POSTED;
 }

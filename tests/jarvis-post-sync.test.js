@@ -66,3 +66,40 @@ test('ทุกรอบจบแล้วไม่สำเร็จสัก�
   assert.equal(db.updates[0].status, 'rejected');
   assert.equal(db.updates[0].note, 'ตีกลับ: ไม่สำเร็จ 1 กลุ่ม · กลุ่ม Z: Facebook ไม่รับโพสต์: คุณไม่สามารถโพสต์ได้ในขณะนี้');
 });
+
+/** เจ้าของ 9 พ.ย. 2569: สำเร็จ = มีลิงก์ · กดโพสต์แล้วหาลิงก์ไม่เจอ ไม่ใช่สำเร็จ */
+function fakeDbClicked({ finishedAt, clicked = 1 }) {
+  const updates = [];
+  const rowsOf = async (sql, params = []) => {
+    if (sql.includes('FROM "jarvis_rm".job_posting_requests r')) {
+      return [{ id: 'row-3', request_no: 'OPL6905033', created_at: '2026-11-09T01:59:00Z' }];
+    }
+    if (sql.includes('FROM "so_autopost_apiscraper".post_run_queue')) {
+      return [{ run_id: 'run_mw8mww7rw2jnjc', status: 'completed', error: null, finished_at: finishedAt }];
+    }
+    if (sql.includes('AS n')) return [{ n: 0, clicked }];
+    if (sql.includes('FROM "so_autopost_apiscraper".run_logs l')) {
+      return [{ group_id: '433203029287064', group_name: 'หางานขับรถ', level: 'success', message: 'โพสต์สำเร็จ' }];
+    }
+    if (sql.startsWith('UPDATE')) {
+      updates.push({ id: params[0], status: params[1], note: params[2] });
+      return [{ id: params[0] }];
+    }
+    throw new Error(`unexpected sql: ${sql.slice(0, 60)}`);
+  };
+  return { rowsOf, updates };
+}
+
+test('กดโพสต์แล้วแต่ยังไม่มีลิงก์ ภายใน 24 ชม. → ยังไม่เปลี่ยน (ไม่นับสำเร็จ ไม่ตีกลับ)', async () => {
+  const db = fakeDbClicked({ finishedAt: new Date(Date.now() - 3_600_000).toISOString() });
+  const r = await syncJarvisPostOrders(db.rowsOf, { autopostSchema: 'so_autopost_apiscraper' });
+  assert.deepEqual(r, { posted: [], rejected: [] });
+  assert.equal(db.updates.length, 0);
+});
+
+test('กดโพสต์แล้วหาลิงก์ไม่เจอเกิน 24 ชม. → ตีกลับ บอกว่ากดโพสต์แล้วกี่กลุ่ม', async () => {
+  const db = fakeDbClicked({ finishedAt: new Date(Date.now() - 25 * 3_600_000).toISOString() });
+  const r = await syncJarvisPostOrders(db.rowsOf, { autopostSchema: 'so_autopost_apiscraper' });
+  assert.deepEqual(r.rejected, ['OPL6905033']);
+  assert.equal(db.updates[0].note, 'ตีกลับ: กดโพสต์แล้ว 1 กลุ่ม แต่หาโพสต์ในกลุ่มไม่เจอภายใน 24 ชม. (แอดมินอาจยังไม่อนุมัติหรือลบไปแล้ว)');
+});

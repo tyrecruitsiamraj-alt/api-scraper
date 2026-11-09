@@ -2188,8 +2188,10 @@ async function handoffRemainingGroups({ fromUserId, jobIds, groupIds, requestedB
 }
 
 /**
- * งานที่ยังไม่ได้เริ่ม แต่บัญชีเจ้าของถูกพัก/ติดยืนยันตัวตน — claim จะข้ามตลอดจนกว่าจะหมดพัก
+ * งานที่ยังไม่ได้เริ่ม แต่บัญชีเจ้าของถูกพัก — claim จะข้ามตลอดจนกว่าจะหมดพัก
  * (เคยค้าง 7 วันเพราะโดนพักยาว) ย้ายกลุ่มไปให้บัญชีที่ว่างรับแทน แล้วปิดคิวเดิมทิ้ง
+ * บัญชีที่ติดยืนยันตัวตนไม่ย้าย: claim ยังหยิบงานให้ (แค่ลงท้ายคิว) และคนสั่งเลือกบัญชีนี้มาเพื่อไปยืนยันที่เครื่อง
+ * (เจ้าของ 9 พ.ย. 2569 — ฝั่งเว็บตอนรับใบจาก Jarvis ก็ไม่สลับแล้ว)
  * คืนค่า: จำนวนงานที่ย้ายสำเร็จ
  */
 async function reassignStuckPostJobs({ requestedBy = 'auto-switch', limit = 20 } = {}) {
@@ -2204,8 +2206,7 @@ async function reassignStuckPostJobs({ requestedBy = 'auto-switch', limit = 20 }
        JOIN users u ON u.id = q.user_id
       WHERE q.status = 'queued'
         AND COALESCE(q.mode, 'post') = 'post'
-        AND (u.needs_verification_since IS NOT NULL
-             OR (u.paused_until IS NOT NULL AND u.paused_until > NOW()))
+        AND u.paused_until IS NOT NULL AND u.paused_until > NOW()
       ORDER BY q.created_at ASC
       LIMIT $1`,
     [limit]
