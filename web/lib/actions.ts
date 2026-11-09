@@ -85,6 +85,7 @@ import {
   reassessCandidateJob,
 } from './repo';
 import type { GroupSector } from './group-sectors';
+import { groupSectorLabel } from './group-sectors';
 import { isGroupJobType } from './group-job-types';
 import type { GroupJobType } from './group-job-types';
 
@@ -354,7 +355,8 @@ export async function createGroupAction(formData: FormData) {
   await requireSession();
   // ข้อผิดพลาดที่ผู้ใช้แก้เองได้ ขึ้นเป็นข้อความบนหน้า — throw ใน production กลายเป็นจอ "Application error"
   // (9 พ.ย. 2569: เพิ่มกลุ่มที่มีอยู่แล้ว ชน unique fb_group_id จอขาวทั้งหน้า)
-  const back: (notice: string) => never = (notice) => redirect(`/settings/posting?notice=${encodeURIComponent(notice)}`);
+  const back: (notice: string, list?: string) => never = (notice, list = '') =>
+    redirect(`/settings/posting?notice=${encodeURIComponent(notice)}${list}`);
   const raw = String(formData.get('fbGroupId') ?? '').trim();
   // รับได้ทั้ง ID ล้วน หรือ URL — ดึงเลขกลุ่มออกมา
   const fbGroupId = (raw.match(/(?:groups\/)?(\d{6,})/)?.[1] ?? raw).trim();
@@ -365,7 +367,16 @@ export async function createGroupAction(formData: FormData) {
   if (!department) back('เลือกธุรกิจของกลุ่มนี้ (LBD / LBA / LM)');
   const sector = readGroupSector(formData.get('sector'));
   const existing = await findPostingGroupByFbId(fbGroupId);
-  if (existing) back(`กลุ่มนี้มีในระบบแล้ว ชื่อ "${existing.name}" (เลขกลุ่ม ${fbGroupId}) ไม่ต้องเพิ่มซ้ำ`);
+  // รายการด้านล่างเปิดที่หมวดของกลุ่มนั้นพร้อมค้นเลขกลุ่มให้ — เดิมรายการเปิดที่ "เอกชน" เสมอ
+  // กลุ่มที่นำเข้าจากชีตราชการเลยดูเหมือนไม่มี (9 พ.ย. 2569: 1481054599057270 อยู่หมวดราชการ)
+  if (existing) {
+    back(
+      `กลุ่มนี้มีในระบบแล้ว ชื่อ "${existing.name}" อยู่หมวด${groupSectorLabel(existing.sector)}` +
+        `${existing.department ? ` · ${existing.department}` : ''} (เลขกลุ่ม ${fbGroupId}) ไม่ต้องเพิ่มซ้ำ ` +
+        `ถ้าจะใช้เป็นกลุ่ม${groupSectorLabel(sector)} ให้เปลี่ยนหมวดที่กลุ่มนี้ในรายการด้านล่าง`,
+      `&sector=${existing.sector}&q=${fbGroupId}`,
+    );
+  }
   let jobTypes: GroupJobType[] = [];
   try {
     jobTypes = readGroupJobTypes(formData);
