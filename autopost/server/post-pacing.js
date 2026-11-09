@@ -97,6 +97,37 @@ function dailyStartOffsetMin(userId, day, env = process.env) {
 }
 
 /**
+ * อุ่นเครื่องบัญชีใหม่ (เจ้าของเคาะ 9 พ.ย. 2569): บัญชีอายุไม่ถึง 14 วัน (นับจากโพสต์แรก) วันละ 1 รอบ
+ * เลื่อนฟีด เข้าดูกลุ่ม กดถูกใจบ้าง — ไม่โพสต์ ไม่คอมเมนต์ · บัญชีที่ติ๊ก "ใช้งานมานานแล้ว" ไม่ต้องอุ่น
+ * เหตุ: บัญชีชุด 28 ต.ค. ไม่เคยทำอะไรนอกจากโพสต์ แล้วโดนจำกัด 29 จาก 34 บัญชีในสัปดาห์แรก
+ */
+function needsWarmup(user, ageDays, env = process.env) {
+  if (String(env.WARMUP_DISABLED || '') === '1') return false;
+  if (user?.skip_warmup === true) return false;
+  return isNewAccount(ageDays);
+}
+
+/** รอบอุ่นเครื่องเริ่มช้ากว่าเวลาเข้าคิว (08:00) 60–539 นาที = ระหว่าง 09:00–17:00 · ค่าเดิมทั้งวัน */
+function warmupStartOffsetMin(userId, day) {
+  return 60 + (hash32(`warmup|${userId}|${day}`) % 480);
+}
+
+/**
+ * แผนของรอบอุ่นเครื่อง 1 รอบ: เลื่อนฟีด 3–5 นาที · เข้าดู 2–3 กลุ่ม กลุ่มละ 1–2 นาที · กดถูกใจ 0–2 โพสต์บนฟีด
+ * WARMUP_LIKES_MAX=0 ปิดการกดถูกใจ
+ */
+function warmupSessionPlan(env = process.env, rand = Math.random) {
+  const between = (min, max) => min + Math.floor(rand() * (max - min + 1));
+  const likesMax = Math.max(0, Math.floor(Number(env.WARMUP_LIKES_MAX ?? 2)));
+  return {
+    feed_sec: between(180, 300),
+    groups: between(2, 3),
+    group_sec: between(60, 120),
+    likes: likesMax === 0 ? 0 : between(0, likesMax),
+  };
+}
+
+/**
  * เพดานโพสต์วันนี้ของบัญชี — ที่เดียวที่คิด: ค่าบัญชี → เพดานระบบ → วอร์มบัญชีใหม่ → กลับมาทีละน้อยหลังโดนจำกัด → สุ่มรายวัน
  * @param {{ id: string, daily_cap?: number|null, skip_warmup?: boolean|null, paused_until?: string|null, pause_reason?: string|null }} user
  * @param {number|null} ageDays อายุบัญชีเป็นวันนับจากโพสต์แรก (null = ไม่เคยโพสต์)
@@ -139,5 +170,6 @@ function clampGapSec(seconds, env = process.env, ageDays = undefined) {
 
 module.exports = {
   dailyCapCeiling, baseDailyCapFor, isNewAccount, warmupCapFor, recoveryCapAfterLimit, dailyCapForDay, dailyStartOffsetMin, bangkokDay, effectiveDailyCapFor,
+  needsWarmup, warmupStartOffsetMin, warmupSessionPlan,
   postGapRangeSec, postGapRangeSecFor, clampGapSec,
 };

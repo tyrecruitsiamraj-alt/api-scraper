@@ -20,7 +20,7 @@ import { normalizePosterLayout, normalizePosterStandard, posterFieldsForQuality,
 import type { PosterLayout, PosterStandard } from '../../src/core/poster-template.js';
 import { evaluateResumeQualification } from '../../src/core/resume-qualification.js';
 import { selectPreferredScrapeWorker } from '../../src/core/worker-selection.js';
-import { dailyCapCeiling, effectiveDailyCapFor } from '../../autopost/server/post-pacing.js';
+import { dailyCapCeiling, effectiveDailyCapFor, needsWarmup } from '../../autopost/server/post-pacing.js';
 import { assertAgeRange, buildScrapeCriteria, hydrateJobSnapshot, jobDescriptionFromJarvis, scrapeRequestProblems } from './scrape-intake.js';
 
 // schema ของ autopost — แยกต่อ project ได้ผ่าน env (ไม่ตั้ง = so_autopost_jobs เดิม)
@@ -893,6 +893,10 @@ export type FacebookAccountQuota = {
   used_today: number;
   cap: number;
   paused: boolean;
+  /** บัญชีใหม่ที่ระบบอุ่นเครื่องให้วันละรอบ (autopost/server/post-pacing.js: needsWarmup) */
+  warming_up: boolean;
+  /** อุ่นเครื่องสำเร็จมาแล้วกี่วัน */
+  warmup_days: number;
 };
 export type FacebookQuotaSummary = {
   accounts: number;
@@ -911,7 +915,7 @@ export async function facebookQuotaSummary(): Promise<FacebookQuotaSummary | nul
     // เพดานคิดด้วยนิยามเดียวกับ worker (วอร์ม · กลับมาทีละน้อยหลังโดนจำกัด · สุ่มรายวัน) ไม่ใช่ค่าตั้งดิบ
     const raw = await q<{
       id: string; label: string; daily_cap: number | null; skip_warmup: boolean; paused_until: string | null; pause_reason: string | null;
-      age_days: number | null; paused: boolean; used_today: number;
+      age_days: number | null; paused: boolean; used_today: number; warmup_days: number;
     }>(
       `SELECT
          u.id AS id,
@@ -929,11 +933,16 @@ export async function facebookQuotaSummary(): Promise<FacebookQuotaSummary | nul
             WHERE pl.user_id = u.id
               AND (pl.created_at AT TIME ZONE 'Asia/Bangkok')::date
                   = (now() AT TIME ZONE 'Asia/Bangkok')::date
-         ), 0) AS used_today
+         ), 0) AS used_today,
+         (SELECT count(DISTINCT (w.finished_at AT TIME ZONE 'Asia/Bangkok')::date)::int FROM ${AP}.post_run_queue w
+           WHERE w.user_id = u.id AND w.mode = 'warmup' AND w.status = 'completed') AS warmup_days
        FROM ${AP}.users u`,
     );
     const rows = raw
-      .map((r) => ({ ...r, cap: effectiveDailyCapFor(r, r.age_days == null ? null : Number(r.age_days)) }))
+      .map((r) => {
+        const age = r.age_days == null ? null : Number(r.age_days);
+        return { ...r, cap: effectiveDailyCapFor(r, age), warming_up: needsWarmup(r, age) };
+      })
       .sort((a, b) => Number(b.used_today) - Number(a.used_today) || a.label.localeCompare(b.label, 'th'));
     if (rows.length === 0) return null;
     const list: FacebookAccountQuota[] = rows.map((r) => ({
@@ -942,6 +951,8 @@ export async function facebookQuotaSummary(): Promise<FacebookQuotaSummary | nul
       used_today: Number(r.used_today),
       cap: Number(r.cap),
       paused: r.paused,
+      warming_up: r.warming_up,
+      warmup_days: Number(r.warmup_days) || 0,
     }));
     // cap ที่พบบ่อยสุด — เป็นค่า prefill ของช่องปรับ cap
     const capCounts = new Map<number, number>();

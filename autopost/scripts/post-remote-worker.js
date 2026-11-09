@@ -76,11 +76,12 @@ const workerBuildSha = String(process.env.WORKER_BUILD_SHA || '').trim() || work
 // Server จะส่งเฉพาะงานที่อยู่ใน capability นี้เท่านั้น. จึงเปิด Worker
 // แบบ `WORKER_CAPABILITIES=preflight` ได้อย่างปลอดภัยเพื่อทดสอบ session/group
 // โดยไม่ claim งาน post จริง. ค่า default รักษาพฤติกรรม production เดิม.
+// warmup = อุ่นเครื่องบัญชีใหม่ (เลื่อนฟีด/ดูกลุ่ม/กดถูกใจ ไม่โพสต์) — เจ้าของเคาะ 9 พ.ย. 2569
 const WORKER_CAPABILITIES = [...new Set(
-  String(process.env.WORKER_CAPABILITIES || 'post,preflight')
+  String(process.env.WORKER_CAPABILITIES || 'post,preflight,warmup')
     .split(',')
     .map((item) => item.trim())
-    .filter((item) => ['post', 'preflight'].includes(item))
+    .filter((item) => ['post', 'preflight', 'warmup'].includes(item))
 )];
 if (WORKER_CAPABILITIES.length === 0) {
   console.error('[post-worker] WORKER_CAPABILITIES ต้องมี post หรือ preflight อย่างน้อยหนึ่งรายการ');
@@ -168,11 +169,13 @@ async function runPlaywrightForJob(job) {
     const assignmentIds = Array.isArray(job.assignment_ids) ? job.assignment_ids.map(String).filter(Boolean) : [];
     const env = { ...process.env, FORCE_COLOR: '1', RUN_ID: String(job.run_id || ''), RUN_LOG_API_URL: API_BASE };
     if (assignmentIds.length > 0) env.ASSIGNMENT_IDS = assignmentIds.join(',');
-    if (String(job.mode || 'post') === 'preflight') env.PREFLIGHT_USER_ID = String(job.user_id || '');
+    const mode = String(job.mode || 'post');
+    if (mode === 'preflight') env.PREFLIGHT_USER_ID = String(job.user_id || '');
+    if (mode === 'warmup') env.WARMUP_USER_ID = String(job.user_id || '');
     // ทุกงานนับเพดานต่อวัน (เจ้าของ 8 พ.ย. 2569) — เดิมงานที่ไม่ใช่รอบ 8:00 ตั้ง IGNORE_DAILY_CAP=1
     // ใบจาก Jarvis ทุกใบจึงโพสต์ได้เต็มเพดานใหม่ บางบัญชีโพสต์ 25 กลุ่ม/วัน แล้ว Facebook จำกัดบัญชี
     delete env.IGNORE_DAILY_CAP;
-    const testName = String(job.mode || 'post') === 'preflight' ? 'facebookPreflight' : 'postAll';
+    const testName = { preflight: 'facebookPreflight', warmup: 'facebookWarmup' }[mode] || 'postAll';
     const args = ['playwright', 'test', testName, '--headed', '--project=GoogleChrome'];
     const isWin = process.platform === 'win32';
     let outputTail = '';
@@ -247,7 +250,7 @@ async function processJob(job) {
         job_id: job.id,
         run_id: job.run_id,
         ok: true,
-        message: String(job.mode || 'post') === 'preflight' ? 'Facebook preflight completed (no post)' : 'Worker run completed',
+        message: { preflight: 'Facebook preflight completed (no post)', warmup: 'อุ่นเครื่องบัญชีเสร็จ (ไม่โพสต์)' }[String(job.mode || 'post')] || 'Worker run completed',
       });
       console.log(`[post-worker] job ${job.id} completed`);
     } catch (e) {
@@ -415,8 +418,9 @@ async function autoEnqueueDaily() {
     lastAutoEnqueueDate = now.date;
     const created = Array.isArray(out.created) ? out.created.length : 0;
     const skipped = Array.isArray(out.skipped) ? out.skipped.length : 0;
+    const warmup = Array.isArray(out.warmup) ? out.warmup.length : 0;
     console.log(
-      `[post-worker] รอบอัตโนมัติ ${now.date} ${String(AUTO_POST_HOUR).padStart(2, '0')}:${String(AUTO_POST_MINUTE).padStart(2, '0')} — เข้าคิว ${created} บัญชี (ข้าม ${skipped}: เข้าคิวแล้ว/ไม่มีงาน)`
+      `[post-worker] รอบอัตโนมัติ ${now.date} ${String(AUTO_POST_HOUR).padStart(2, '0')}:${String(AUTO_POST_MINUTE).padStart(2, '0')} — เข้าคิว ${created} บัญชี (ข้าม ${skipped}: เข้าคิวแล้ว/ไม่มีงาน) · อุ่นเครื่องบัญชีใหม่ ${warmup} บัญชี`
     );
   } catch (e) {
     /** ไม่ตั้ง lastAutoEnqueueDate — รอบถัดไปลองใหม่จนกว่าจะสำเร็จ (ฝั่ง server กันซ้ำให้แล้ว) */

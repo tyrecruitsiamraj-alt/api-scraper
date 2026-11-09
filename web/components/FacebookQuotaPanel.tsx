@@ -70,6 +70,7 @@ export function FacebookQuotaPanel({ initialFb }: { initialFb: FacebookQuotaSumm
                 <div className="flex min-w-0 items-center gap-1.5" title={a.label}>
                   <span className="truncate">{a.label}</span>
                   {a.paused && <Badge variant="outline">พัก</Badge>}
+                  {a.warming_up && <Badge variant="secondary">อุ่นเครื่อง {a.warmup_days} วัน</Badge>}
                 </div>
                 <Progress value={pct} aria-label={`${a.label} ใช้ไป ${a.used_today} จาก ${a.cap}`} />
                 <div className="flex items-center justify-end gap-1.5 tabular-nums">
@@ -104,7 +105,7 @@ export function FacebookQuotaPanel({ initialFb }: { initialFb: FacebookQuotaSumm
               ใช้กับทุกบัญชี
             </Button>
             <FieldDescription className="basis-full text-xs">
-              ตั้งได้ไม่เกิน {fb.cap_max} โพสต์ต่อบัญชีต่อวัน นับรวมใบจาก Jarvis และเว้นห่างกันอย่างน้อย 10 นาที เพื่อลดโอกาสโดน Facebook จำกัด
+              ตั้งได้ไม่เกิน {fb.cap_max} โพสต์ต่อบัญชีต่อวัน นับรวมใบจาก Jarvis และเว้นห่างกันอย่างน้อย 10 นาที (บัญชีใหม่ 20 นาที) เพื่อลดโอกาสโดน Facebook จำกัด · บัญชีใหม่ 2 สัปดาห์แรกระบบเลื่อนฟีดและดูกลุ่มให้วันละรอบ ไม่โพสต์
             </FieldDescription>
           </Field>
         </form>

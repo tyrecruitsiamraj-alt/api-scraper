@@ -247,7 +247,8 @@ export async function getJarvisOptions(opts: { requestNo?: string | null } = {})
                  SELECT MIN(created_at) FROM ${AP}.run_logs WHERE user_id = u.id AND level = 'success'
                ) t) AS age_days,
               (SELECT count(*) FROM ${AP}.post_run_queue p WHERE p.user_id = u.id AND p.status = 'running')::int AS running,
-              (SELECT count(*) FROM ${AP}.post_run_queue p WHERE p.user_id = u.id AND p.status = 'queued')::int AS queued,
+              -- งานอุ่นเครื่องที่รอเวลา (โหมด warmup) ไม่นับเป็นงานโพสต์ที่รอคิว — ตอนกำลังอุ่นเครื่องนับเป็น running (บัญชีใช้อยู่)
+              (SELECT count(*) FROM ${AP}.post_run_queue p WHERE p.user_id = u.id AND p.status = 'queued' AND COALESCE(p.mode, 'post') = 'post')::int AS queued,
               -- กลุ่มที่รอโพสต์อยู่แล้ว (งานรอคิว + ส่วนที่ยังไม่ถึงของงานที่กำลังทำ) — กินโควต้าวันนี้ไปแล้ว
               (SELECT COALESCE(sum(GREATEST(0, jsonb_array_length(COALESCE(asg.group_ids, '[]'::jsonb))
                         - CASE WHEN p.status = 'running' THEN (
@@ -305,7 +306,7 @@ export async function getJarvisOptions(opts: { requestNo?: string | null } = {})
     q<{ worker: string | null; status: string; n: number }>(
       `SELECT COALESCE(p.worker_id, u.preferred_worker) AS worker, p.status, count(*)::int AS n
          FROM ${AP}.post_run_queue p LEFT JOIN ${AP}.users u ON u.id = p.user_id
-        WHERE p.status IN ('queued', 'running')
+        WHERE p.status IN ('queued', 'running') AND (p.status = 'running' OR COALESCE(p.mode, 'post') = 'post')
         GROUP BY 1, 2`,
     ),
     q<{ name: string; last_seen: string; online: boolean; build: string | null; fb_sessions: string[] | null }>(

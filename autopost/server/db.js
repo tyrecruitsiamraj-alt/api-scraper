@@ -5,7 +5,7 @@ require('dotenv').config();
 const { Pool } = require('pg');
 const { classifyPostFailure } = require('./failure-learning');
 const { FB_LIMIT_LOG_PREFIX, STRIKE_WINDOW_DAYS, MAX_PAUSE_HOURS, facebookLimitPauseHours, facebookLimitReason } = require('./fb-limit-pause');
-const { dailyCapCeiling, effectiveDailyCapFor, dailyStartOffsetMin, bangkokDay } = require('./post-pacing');
+const { dailyCapCeiling, effectiveDailyCapFor, dailyStartOffsetMin, bangkokDay, needsWarmup, warmupStartOffsetMin } = require('./post-pacing');
 /** เพดานระบบ 8 กลุ่ม/บัญชี/วัน ใน SQL (ตัวเลข ไม่ใช่ข้อความจากผู้ใช้) — ตัวเลือกบัญชีสำรองต้องเห็นเพดานเดียวกับตอนโพสต์ */
 const DAILY_CAP_MAX_SQL = Number(dailyCapCeiling());
 
@@ -1871,8 +1871,8 @@ async function enqueuePostRunJob(data = {}) {
   const id = generateId();
   const assignmentIds = normalizeIdArray(data.assignment_ids);
   await query(
-    `INSERT INTO post_run_queue (id, assignment_ids, user_id, status, requested_by, message, not_before)
-     VALUES ($1, $2::jsonb, $3, 'queued', $4, $5, NOW() + ($6::int * INTERVAL '1 minute'))`,
+    `INSERT INTO post_run_queue (id, assignment_ids, user_id, status, requested_by, message, not_before, mode)
+     VALUES ($1, $2::jsonb, $3, 'queued', $4, $5, NOW() + ($6::int * INTERVAL '1 minute'), $7)`,
     [
       id,
       JSON.stringify(assignmentIds),
@@ -1880,6 +1880,7 @@ async function enqueuePostRunJob(data = {}) {
       data.requested_by || null,
       data.message || 'queued from web',
       Math.max(0, Math.floor(Number(data.delay_minutes) || 0)),
+      data.mode === 'warmup' ? 'warmup' : 'post',
     ]
   );
   const { rows } = await query(`SELECT * FROM post_run_queue WHERE id = $1`, [id]);
@@ -1915,7 +1916,7 @@ async function enqueuePostRunJobsPerUser(data = {}) {
       continue;
     }
     const { rows } = await query(
-      `SELECT 1 FROM post_run_queue WHERE user_id = $1 AND status = 'queued' LIMIT 1`,
+      `SELECT 1 FROM post_run_queue WHERE user_id = $1 AND status = 'queued' AND COALESCE(mode, 'post') = 'post' LIMIT 1`,
       [userId]
     );
     if (rows.length > 0) {
@@ -1946,13 +1947,62 @@ async function enqueueDailyPostRunJobs() {
      WHERE requested_by = 'auto-daily' AND user_id IS NOT NULL
        AND (created_at AT TIME ZONE 'Asia/Bangkok')::date = (NOW() AT TIME ZONE 'Asia/Bangkok')::date`
   );
-  return enqueuePostRunJobsPerUser({
+  const out = await enqueuePostRunJobsPerUser({
     assignment_ids: [],
     requested_by: 'auto-daily',
     message: 'daily 8:00 auto run',
     exclude_user_ids: rows.map((r) => String(r.user_id)),
     spread_start: true,
   });
+  const warmup = await enqueueDailyWarmupJobs().catch((e) => {
+    console.error('[autopost] เข้าคิวอุ่นเครื่องบัญชีไม่สำเร็จ:', e && e.message);
+    return [];
+  });
+  return { ...out, warmup };
+}
+
+/**
+ * อุ่นเครื่องบัญชีใหม่ วันละ 1 รอบ (เจ้าของเคาะ 9 พ.ย. 2569) — เรียกพร้อมรอบเช้า 8:00
+ * บัญชีที่อายุไม่ถึง 14 วัน (post-pacing: needsWarmup) ไม่ถูกพัก ไม่ติดยืนยันตัวตน → งานโหมด warmup เวลาสุ่ม 09:00–17:00
+ * idempotent ต่อวัน · งานอุ่นเครื่องของวันก่อนที่ยังไม่ได้ทำ ยกเลิกทิ้ง (ไม่ทำย้อนหลังรวดเดียว)
+ */
+async function enqueueDailyWarmupJobs() {
+  await ensurePostRunQueueUserColumn();
+  await ensureUsersPostControlColumns();
+  await ensureVerificationColumns();
+  await query(
+    `UPDATE post_run_queue
+        SET status = 'cancelled', finished_at = NOW(), updated_at = NOW(),
+            message = 'ไม่ได้อุ่นเครื่องในวันนั้น (เครื่องไม่ได้หยิบงาน)'
+      WHERE mode = 'warmup' AND status = 'queued'
+        AND (created_at AT TIME ZONE 'Asia/Bangkok')::date < (NOW() AT TIME ZONE 'Asia/Bangkok')::date`
+  );
+  const { rows } = await query(
+    `SELECT u.*, COALESCE((to_jsonb(u)->>'skip_warmup')::boolean, false) AS skip_warmup
+       FROM users u
+      WHERE (u.paused_until IS NULL OR u.paused_until <= NOW())
+        AND u.needs_verification_since IS NULL
+        AND NOT EXISTS (
+          SELECT 1 FROM post_run_queue q
+           WHERE q.user_id = u.id AND q.mode = 'warmup'
+             AND (q.created_at AT TIME ZONE 'Asia/Bangkok')::date = (NOW() AT TIME ZONE 'Asia/Bangkok')::date
+        )`
+  );
+  const day = bangkokDay();
+  const created = [];
+  for (const u of rows) {
+    if (!needsWarmup(u, await getAccountAgeDays(u.id))) continue;
+    const row = await enqueuePostRunJob({
+      assignment_ids: [],
+      user_id: u.id,
+      mode: 'warmup',
+      requested_by: 'auto-warmup',
+      message: 'อุ่นเครื่องบัญชีใหม่ (ไม่โพสต์)',
+      delay_minutes: warmupStartOffsetMin(u.id, day),
+    });
+    if (row) created.push(row);
+  }
+  return created;
 }
 
 /**
@@ -2034,6 +2084,7 @@ async function claimNextPostRunJob(workerId, runId, workerName, capabilities = [
            AND (
              (COALESCE(q.mode, 'post') = 'preflight' AND $4::jsonb ? 'preflight')
              OR (COALESCE(q.mode, 'post') = 'post' AND $4::jsonb ? 'post')
+             OR (COALESCE(q.mode, 'post') = 'warmup' AND $4::jsonb ? 'warmup')
            )
            /** งานโพสต์จริงไม่ต้องรอผลทดสอบแบบไม่โพสต์ (preflight) แล้ว — เจ้าของสั่งเอาออก 28 ต.ค. 2569
                ถ้าบัญชีล็อกอินไม่ได้ จะรู้จากผลรอบโพสต์ */
@@ -2644,7 +2695,8 @@ async function completePostRunJob(id, data = {}) {
     [String(id || ''), status, data.run_id || null, data.message || null, data.error || null]
   );
   const completed = rows[0] || null;
-  if (completed && String(completed.mode || 'post') === 'post') {
+  // อุ่นเครื่องก็ล็อกอินบัญชีจริง — ติดยืนยันตัวตนให้รู้เหมือนรอบโพสต์
+  if (completed && ['post', 'warmup'].includes(String(completed.mode || 'post'))) {
     await rememberLoginState(completed.user_id, ok, data.error).catch((e) => {
       console.warn('[verify] จำสถานะยืนยันตัวตนไม่สำเร็จ:', e.message);
     });

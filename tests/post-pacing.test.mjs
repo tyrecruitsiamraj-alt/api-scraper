@@ -100,3 +100,28 @@ test('รอบเช้า: แต่ละบัญชีเริ่มช้
   assert.ok([...offsets].every((m) => m >= 0 && m < 120));
   assert.equal(dailyStartOffsetMin('fb_abc', '2026-11-10', { AUTO_POST_SPREAD_MINUTES: '0' }), 0);
 });
+
+const { needsWarmup, warmupStartOffsetMin, warmupSessionPlan } = require('../autopost/server/post-pacing.js');
+// เจ้าของ 9 พ.ย. 2569: อุ่นเครื่องบัญชีใหม่ วันละรอบ ไม่โพสต์
+test('อุ่นเครื่อง: เฉพาะบัญชีใหม่ (<14 วันหรือยังไม่เคยโพสต์) ที่ไม่ได้ติ๊กใช้งานมานาน', () => {
+  assert.equal(needsWarmup({ id: 'u' }, null, {}), true);
+  assert.equal(needsWarmup({ id: 'u' }, 5, {}), true);
+  assert.equal(needsWarmup({ id: 'u' }, 14, {}), false);
+  assert.equal(needsWarmup({ id: 'u', skip_warmup: true }, 2, {}), false);
+  assert.equal(needsWarmup({ id: 'u' }, 2, { WARMUP_DISABLED: '1' }), false);
+});
+
+test('อุ่นเครื่องเริ่มระหว่าง 09:00–17:00 (60–539 นาทีหลัง 08:00) ค่าเดิมทั้งวัน', () => {
+  const a = warmupStartOffsetMin('fb_abc', '2026-11-10');
+  assert.equal(warmupStartOffsetMin('fb_abc', '2026-11-10'), a);
+  for (let i = 0; i < 40; i += 1) {
+    const m = warmupStartOffsetMin(`fb_${i}`, '2026-11-10');
+    assert.ok(m >= 60 && m < 540, String(m));
+  }
+});
+
+test('แผนรอบอุ่นเครื่อง: ฟีด 3–5 นาที · 2–3 กลุ่ม · ถูกใจไม่เกิน 2 · ปิดถูกใจได้', () => {
+  assert.deepEqual(warmupSessionPlan({}, () => 0), { feed_sec: 180, groups: 2, group_sec: 60, likes: 0 });
+  assert.deepEqual(warmupSessionPlan({}, () => 0.999), { feed_sec: 300, groups: 3, group_sec: 120, likes: 2 });
+  assert.equal(warmupSessionPlan({ WARMUP_LIKES_MAX: '0' }, () => 0.999).likes, 0);
+});

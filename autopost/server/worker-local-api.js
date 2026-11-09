@@ -61,7 +61,8 @@ function createLocalWorkerApi({ db, workerId, workerName = null, env = process.e
       });
       if (!row) throw new Error('job not found');
       if (row.status === 'failed' && sendAlert) {
-        sendAlert(`❌ โพสต์ Facebook ไม่สำเร็จ (คิว ${row.id})\nบัญชี: ${row.user_id || '-'}\nสาเหตุ: ${row.error || '-'}`).catch(() => {});
+        const what = String(row.mode || 'post') === 'warmup' ? 'อุ่นเครื่องบัญชี Facebook ไม่สำเร็จ' : 'โพสต์ Facebook ไม่สำเร็จ';
+        sendAlert(`❌ ${what} (คิว ${row.id})\nบัญชี: ${row.user_id || '-'}\nสาเหตุ: ${row.error || '-'}`).catch(() => {});
       }
       return { ok: true, job: row };
     },
@@ -96,6 +97,7 @@ function createLocalWorkerApi({ db, workerId, workerName = null, env = process.e
         ok: true,
         created: out.created.map((r) => ({ id: r.id, user_id: r.user_id })),
         skipped: out.skipped,
+        warmup: (out.warmup || []).map((r) => ({ id: r.id, user_id: r.user_id })),
       };
     },
 

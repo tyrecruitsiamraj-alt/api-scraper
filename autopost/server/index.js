@@ -1578,7 +1578,7 @@ app.post('/api/worker/post/complete', async (req, res) => {
     };
     // แจ้งเตือนทันทีที่โพสต์ fail (fail-soft — ไม่มี ALERT_WEBHOOK_URL = เงียบ)
     if (row.status === 'failed') {
-      sendAlert(`❌ โพสต์ Facebook ไม่สำเร็จ (คิว ${row.id})\nบัญชี: ${row.user_id || '-'}\nสาเหตุ: ${row.error || 'ไม่ทราบ'}`)
+      sendAlert(`❌ ${String(row.mode || 'post') === 'warmup' ? 'อุ่นเครื่องบัญชี Facebook ไม่สำเร็จ' : 'โพสต์ Facebook ไม่สำเร็จ'} (คิว ${row.id})\nบัญชี: ${row.user_id || '-'}\nสาเหตุ: ${row.error || 'ไม่ทราบ'}`)
         .catch(() => {});
     }
     return res.json({ ok: true, job: row });
@@ -1628,6 +1628,7 @@ app.post('/api/worker/post/enqueue-daily', async (req, res) => {
       ok: true,
       created: out.created.map((r) => ({ id: r.id, user_id: r.user_id })),
       skipped: out.skipped,
+      warmup: (out.warmup || []).map((r) => ({ id: r.id, user_id: r.user_id })),
     });
   } catch (e) {
     res.status(500).json({ error: e.message || String(e) });
