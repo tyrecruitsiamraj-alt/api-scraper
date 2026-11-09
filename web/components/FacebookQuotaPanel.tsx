@@ -70,7 +70,7 @@ export function FacebookQuotaPanel({ initialFb }: { initialFb: FacebookQuotaSumm
                 <div className="flex min-w-0 items-center gap-1.5" title={a.label}>
                   <span className="truncate">{a.label}</span>
                   {a.paused && <Badge variant="outline">พัก</Badge>}
-                  {a.warming_up && <Badge variant="secondary">อุ่นเครื่อง {a.warmup_days} วัน</Badge>}
+                  {a.warming_up && !a.paused && <Badge variant="secondary">อุ่นเครื่อง {a.warmup_days} วัน</Badge>}
                 </div>
                 <Progress value={pct} aria-label={`${a.label} ใช้ไป ${a.used_today} จาก ${a.cap}`} />
                 <div className="flex items-center justify-end gap-1.5 tabular-nums">

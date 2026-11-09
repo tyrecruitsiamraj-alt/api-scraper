@@ -954,9 +954,13 @@ export async function facebookQuotaSummary(): Promise<FacebookQuotaSummary | nul
       warming_up: r.warming_up,
       warmup_days: Number(r.warmup_days) || 0,
     }));
-    // cap ที่พบบ่อยสุด — เป็นค่า prefill ของช่องปรับ cap
+    // ค่าที่ตั้งไว้ (daily_cap) ที่พบบ่อยสุด — เป็นค่า prefill ของช่องปรับ cap
+    // ไม่ใช้เพดานวันนี้ (หลังวอร์ม/สุ่ม) ไม่งั้นช่องขึ้น 2 แล้วกด "ใช้กับทุกบัญชี" จะลดบัญชีเก่าเหลือ 2 ไปด้วย
     const capCounts = new Map<number, number>();
-    for (const a of list) capCounts.set(a.cap, (capCounts.get(a.cap) ?? 0) + 1);
+    for (const r of rows) {
+      const set = Math.min(FB_CAP, Number(r.daily_cap) || FB_CAP);
+      capCounts.set(set, (capCounts.get(set) ?? 0) + 1);
+    }
     const cap_default = [...capCounts.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? FB_CAP;
     return {
       accounts: list.length,
