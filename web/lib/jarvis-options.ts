@@ -6,6 +6,8 @@ import { normalizeGroupJobTypes } from './group-job-types';
 import { classifyGroupOutcome, GROUP_STATE } from '../../src/core/group-outcome.js';
 import { SCRAPE_RULES } from './scrape-intake.js';
 import { effectiveDailyCapFor } from '../../autopost/server/post-pacing.js';
+import { postingAvailability } from '../../src/core/posting-availability.js';
+import type { PostingAvailability } from '../../src/core/posting-availability.js';
 
 /**
  * ข้อมูลให้ Jarvis ใช้ตอนพนักงานเลือก บัญชี Facebook / กลุ่ม / เครื่อง / บัญชี Scrap ก่อนสั่งงาน
@@ -31,6 +33,8 @@ export type JarvisAccountOption = {
   posted_today: number;
   daily_cap: number;
   remaining_today: number;
+  /** กลุ่มที่รอโพสต์อยู่แล้วในคิวของบัญชีนี้ — remaining_today ลบค่านี้ = ที่สั่งเพิ่มได้จริงวันนี้ */
+  pending_groups: number;
   paused_until: string | null;
   pause_reason: string | null;
   /** Facebook ขอยืนยันตัวตนตั้งแต่เมื่อไร — null = ไม่ติด */
@@ -153,6 +157,8 @@ export type JarvisOptions = {
   scrape_accounts: JarvisScrapeAccountOption[];
   /** กติกาใบขอ Scrap ที่สั่งไม่ได้ (นิยามเดียวกับที่ /start ตีกลับ) — Jarvis ใช้ปิดปุ่มสั่งตั้งแต่แรก */
   scrape_rules: typeof SCRAPE_RULES;
+  /** ตอนนี้สั่งโพสต์ได้ไหม · ไม่ได้ = message บอกเหตุเป็นคำ ให้ Jarvis แสดงตรง ๆ (src/core/posting-availability.js) */
+  posting_availability: PostingAvailability;
 };
 
 /** เพดานโพสต์วันนี้ของบัญชี — นิยามเดียวกับ worker และหน้าโควต้า (autopost/server/post-pacing.js) */
@@ -218,7 +224,7 @@ export async function getJarvisOptions(opts: { requestNo?: string | null } = {})
       id: string; env_key: string | null; email: string | null; skip_warmup: boolean; name: string; worker: string | null; worker_online: boolean; daily_cap: number | null;
       paused_until: string | null; pause_reason: string | null; group_ids: string[];
       needs_verification_since: string | null; needs_verification_note: string | null;
-      posted_today: number; age_days: number | null; running: number; queued: number; department: string | null;
+      posted_today: number; age_days: number | null; running: number; queued: number; pending_groups: number; department: string | null;
     }>(
       `SELECT u.id, u.env_key, u.email, COALESCE((to_jsonb(u)->>'skip_warmup')::boolean, false) AS skip_warmup,
               NULLIF(to_jsonb(u)->>'department', '') AS department,
@@ -241,7 +247,17 @@ export async function getJarvisOptions(opts: { requestNo?: string | null } = {})
                  SELECT MIN(created_at) FROM ${AP}.run_logs WHERE user_id = u.id AND level = 'success'
                ) t) AS age_days,
               (SELECT count(*) FROM ${AP}.post_run_queue p WHERE p.user_id = u.id AND p.status = 'running')::int AS running,
-              (SELECT count(*) FROM ${AP}.post_run_queue p WHERE p.user_id = u.id AND p.status = 'queued')::int AS queued
+              (SELECT count(*) FROM ${AP}.post_run_queue p WHERE p.user_id = u.id AND p.status = 'queued')::int AS queued,
+              -- กลุ่มที่รอโพสต์อยู่แล้ว (งานรอคิว + ส่วนที่ยังไม่ถึงของงานที่กำลังทำ) — กินโควต้าวันนี้ไปแล้ว
+              (SELECT COALESCE(sum(GREATEST(0, jsonb_array_length(COALESCE(asg.group_ids, '[]'::jsonb))
+                        - CASE WHEN p.status = 'running' THEN (
+                            SELECT count(*) FROM ${AP}.run_logs rl
+                             WHERE rl.run_id = p.run_id AND rl.group_id IS NOT NULL AND rl.level IN ('success', 'warn', 'error'))
+                          ELSE 0 END)), 0)
+                 FROM ${AP}.post_run_queue p
+                 CROSS JOIN LATERAL jsonb_array_elements_text(p.assignment_ids::jsonb) a
+                 JOIN ${AP}.assignments asg ON asg.id = a
+                WHERE p.user_id = u.id AND p.status IN ('queued', 'running'))::int AS pending_groups
          FROM ${AP}.users u
         ORDER BY 2`,
     ),
@@ -397,6 +413,7 @@ export async function getJarvisOptions(opts: { requestNo?: string | null } = {})
       name: r.name,
       ...base,
       remaining_today: Math.max(0, daily_cap - base.posted_today),
+      pending_groups: Number(r.pending_groups) || 0,
       ...status,
       // ใช้ได้ = พร้อมโพสต์ (เจ้าของ 4 พ.ย. 2569: บัญชีที่ยังไม่เคยล็อกอินก็ใช้ได้ แค่ยังไม่เคยถูกใช้ ให้ขึ้นบน ๆ เหมือนกัน)
       // บัญชีที่มี session บนเครื่องออนไลน์มาก่อน (sort_rank 0) บัญชีใหม่ตามมา (1) ตัวที่ใช้ไม่ได้อยู่ล่างสุด
@@ -522,5 +539,16 @@ export async function getJarvisOptions(opts: { requestNo?: string | null } = {})
     };
   });
 
-  return { generated_at: new Date().toISOString(), request_no: requestNo, accounts, groups, workers, scrape_accounts, scrape_rules: SCRAPE_RULES };
+  return {
+    generated_at: new Date().toISOString(),
+    request_no: requestNo,
+    accounts,
+    groups,
+    workers,
+    scrape_accounts,
+    scrape_rules: SCRAPE_RULES,
+    posting_availability: postingAvailability(
+      accounts.map((a) => ({ ...a, remaining_today: Math.max(0, a.remaining_today - a.pending_groups) })),
+    ),
+  };
 }
