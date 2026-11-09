@@ -5,7 +5,7 @@ require('dotenv').config();
 const { Pool } = require('pg');
 const { classifyPostFailure } = require('./failure-learning');
 const { FB_LIMIT_LOG_PREFIX, STRIKE_WINDOW_DAYS, MAX_PAUSE_HOURS, facebookLimitPauseHours, facebookLimitReason } = require('./fb-limit-pause');
-const { dailyCapCeiling, effectiveDailyCapFor } = require('./post-pacing');
+const { dailyCapCeiling, effectiveDailyCapFor, dailyStartOffsetMin, bangkokDay } = require('./post-pacing');
 /** เพดานระบบ 8 กลุ่ม/บัญชี/วัน ใน SQL (ตัวเลข ไม่ใช่ข้อความจากผู้ใช้) — ตัวเลือกบัญชีสำรองต้องเห็นเพดานเดียวกับตอนโพสต์ */
 const DAILY_CAP_MAX_SQL = Number(dailyCapCeiling());
 
@@ -1841,6 +1841,8 @@ async function ensurePostRunQueueUserColumn() {
   await query(`ALTER TABLE post_run_queue ADD COLUMN IF NOT EXISTS user_id VARCHAR(50)`);
   /** เครื่องที่พนักงานเลือกจาก Jarvis — ถ้ามี ให้เครื่องนี้หยิบงานเท่านั้น (ทับ pin ของบัญชี) */
   await query(`ALTER TABLE post_run_queue ADD COLUMN IF NOT EXISTS target_worker VARCHAR(255)`);
+  /** ห้ามหยิบก่อนเวลานี้ — รอบเช้ากระจายเวลาเริ่มของแต่ละบัญชี (post-pacing: dailyStartOffsetMin) */
+  await query(`ALTER TABLE post_run_queue ADD COLUMN IF NOT EXISTS not_before TIMESTAMPTZ`);
   /** DB บังคับ: บัญชีเดียวมีงาน running ได้แถวเดียว (กัน 2 Chrome ใช้บัญชีเดียวพร้อมกัน) */
   await query(
     `CREATE UNIQUE INDEX IF NOT EXISTS post_run_queue_one_running_per_user
@@ -1869,14 +1871,15 @@ async function enqueuePostRunJob(data = {}) {
   const id = generateId();
   const assignmentIds = normalizeIdArray(data.assignment_ids);
   await query(
-    `INSERT INTO post_run_queue (id, assignment_ids, user_id, status, requested_by, message)
-     VALUES ($1, $2::jsonb, $3, 'queued', $4, $5)`,
+    `INSERT INTO post_run_queue (id, assignment_ids, user_id, status, requested_by, message, not_before)
+     VALUES ($1, $2::jsonb, $3, 'queued', $4, $5, NOW() + ($6::int * INTERVAL '1 minute'))`,
     [
       id,
       JSON.stringify(assignmentIds),
       data.user_id ? String(data.user_id) : null,
       data.requested_by || null,
       data.message || 'queued from web',
+      Math.max(0, Math.floor(Number(data.delay_minutes) || 0)),
     ]
   );
   const { rows } = await query(`SELECT * FROM post_run_queue WHERE id = $1`, [id]);
@@ -1919,11 +1922,13 @@ async function enqueuePostRunJobsPerUser(data = {}) {
       skipped.push({ user_id: userId, reason: 'already_queued' });
       continue;
     }
+    const delay = data.spread_start ? dailyStartOffsetMin(userId, bangkokDay()) : 0;
     const row = await enqueuePostRunJob({
       assignment_ids: ids,
       user_id: userId,
       requested_by: data.requested_by || null,
       message: data.message || `queued ${ids.length} assignments (per-user)`,
+      delay_minutes: delay,
     });
     created.push(row);
   }
@@ -1931,7 +1936,7 @@ async function enqueuePostRunJobsPerUser(data = {}) {
 }
 
 /**
- * รอบโพสต์อัตโนมัติประจำวัน (worker เรียกตอน 8:00) — idempotent:
+ * รอบโพสต์อัตโนมัติประจำวัน (worker เรียกตอน 8:00) — แต่ละบัญชีเริ่มไม่พร้อมกัน (not_before สุ่ม 0–120 นาที) · idempotent:
  * user ที่มีงาน auto-daily ของวันนี้แล้ว (สถานะใดก็ตาม) จะไม่ถูกเข้าคิวซ้ำ
  */
 async function enqueueDailyPostRunJobs() {
@@ -1946,6 +1951,7 @@ async function enqueueDailyPostRunJobs() {
     requested_by: 'auto-daily',
     message: 'daily 8:00 auto run',
     exclude_user_ids: rows.map((r) => String(r.user_id)),
+    spread_start: true,
   });
 }
 
@@ -2020,6 +2026,8 @@ async function claimNextPostRunJob(workerId, runId, workerName, capabilities = [
          FROM post_run_queue q
          LEFT JOIN users u ON u.id = q.user_id
          WHERE q.status = 'queued'
+           /** รอบเช้าที่ยังไม่ถึงเวลาเริ่มของบัญชีนี้ */
+           AND (q.not_before IS NULL OR q.not_before <= NOW())
            /** Capability gate: Worker รับได้เฉพาะ mode ที่ประกาศไว้เท่านั้น.
                 สำคัญสำหรับการเปิด Worker แบบ preflight-only เพื่อทดสอบ session
                 โดยไม่มีโอกาส claim งาน post จริง. */
@@ -2111,10 +2119,10 @@ async function pauseUser(userId, hours, reason) {
 }
 
 /**
- * Facebook จำกัดการโพสต์ของบัญชี — นับครั้งที่โดนใน 7 วันจากบันทึกรอบ แล้วพักตามขั้น (fb-limit-pause.js)
+ * Facebook จำกัดการโพสต์ของบัญชี — นับครั้งที่โดนใน 30 วันจากบันทึกรอบ แล้วพักตามขั้น (fb-limit-pause.js)
  * เรียกก่อนเขียนบันทึกของครั้งนี้ จึงบวก 1 ให้ครั้งนี้เอง
  */
-async function pauseUserForFacebookLimit(userId, baseHours = 72) {
+async function pauseUserForFacebookLimit(userId, baseHours = 7 * 24) {
   const { rows } = await query(
     `SELECT count(*)::int AS n FROM run_logs
       WHERE user_id::text = $1 AND message LIKE $2
@@ -2129,10 +2137,13 @@ async function pauseUserForFacebookLimit(userId, baseHours = 72) {
 }
 
 /**
- * บัญชีโพสต์ต่อไม่ได้ (Facebook จำกัด/พัก) แต่ยังเหลือกลุ่มที่ยังไม่ได้ลง —
+ * บัญชีโพสต์ต่อไม่ได้ (ถูกพัก/เต็มโควต้า) แต่ยังเหลือกลุ่มที่ยังไม่ได้ลง —
  * ส่งต่อให้บัญชีอื่นที่ว่างโพสต์แทน: สร้าง assignment ใหม่ของกลุ่มที่เหลือ + เข้าคิวให้บัญชีนั้น
  *
- * เลือกบัญชีสำรองเฉพาะตัวที่ว่างจริง: ไม่ถูกพัก · ไม่ติดยืนยันตัวตน · ยังไม่เต็มโควต้าวันนี้
+ * เลือกบัญชีสำรองเฉพาะตัวที่ว่างจริง: ไม่ถูกพัก · ไม่ติดยืนยันตัวตน · ยังเหลือโควต้าวันนี้
+ * โควต้าคิดจากเพดานจริงของบัญชีรับ (effectiveDailyCapFor: วอร์มบัญชีใหม่ / กลับมาทีละน้อยหลังโดนจำกัด / สุ่มรายวัน)
+ * และแบ่งกลุ่มให้หลายบัญชีตามที่แต่ละบัญชีเหลือ — เจ้าของ 9 พ.ย. 2569: เดิมคิดเพดานแค่ min(daily_cap, 8)
+ * บัญชีใหม่ (เพดานจริง 5) รับไป 14 + 12 กลุ่มแล้วโดนจำกัดที่กลุ่มที่ 9
  * เรียงเครื่องออนไลน์ก่อน แล้วเอาตัวที่ใช้โควต้าวันนี้น้อยสุด (กระจายโหลด)
  * คืน null เมื่อไม่มีบัญชีว่าง — ผู้เรียกบันทึกบันทึกรอบไว้ให้คนเห็น
  */
@@ -2142,49 +2153,66 @@ async function handoffRemainingGroups({ fromUserId, jobIds, groupIds, requestedB
   if (!jobs.length || !groups.length) return null;
   await ensurePostRunQueueUserColumn();
   await ensureUsersPostControlColumns();
+  await ensureVerificationColumns();
 
   const skip = [String(fromUserId || ''), ...excludeUserIds.map(String)].filter(Boolean);
   const { rows } = await query(
-    `SELECT * FROM (
-       SELECT u.id, COALESCE(NULLIF(TRIM(u.name), ''), u.env_key, u.id) AS label,
-              EXISTS (SELECT 1 FROM workers w
-                       WHERE w.name = u.preferred_worker AND w.last_seen > NOW() - INTERVAL '2 minutes') AS worker_online,
-              LEAST(COALESCE(u.daily_cap, ${DAILY_CAP_MAX_SQL}), ${DAILY_CAP_MAX_SQL})::int AS cap,
-              COALESCE((SELECT COUNT(*)::int FROM post_logs pl
-                         WHERE pl.user_id = u.id
-                           AND (pl.created_at AT TIME ZONE 'Asia/Bangkok')::date
-                               = (NOW() AT TIME ZONE 'Asia/Bangkok')::date), 0) AS used_today
-         FROM users u
-        WHERE (u.paused_until IS NULL OR u.paused_until <= NOW())
-          AND u.needs_verification_since IS NULL
-          AND NOT (u.id = ANY($1::text[]))
-     ) a
-     WHERE a.used_today < a.cap
-     ORDER BY a.worker_online DESC, (a.used_today::float / NULLIF(a.cap, 0)) ASC, a.label
-     LIMIT 1`,
+    `SELECT u.*, COALESCE(NULLIF(TRIM(u.name), ''), u.env_key, u.id) AS label,
+            EXISTS (SELECT 1 FROM workers w
+                     WHERE w.name = u.preferred_worker AND w.last_seen > NOW() - INTERVAL '2 minutes') AS worker_online,
+            COALESCE((SELECT COUNT(*)::int FROM post_logs pl
+                       WHERE pl.user_id = u.id
+                         AND (pl.created_at AT TIME ZONE 'Asia/Bangkok')::date
+                             = (NOW() AT TIME ZONE 'Asia/Bangkok')::date), 0) AS used_today
+       FROM users u
+      WHERE (u.paused_until IS NULL OR u.paused_until <= NOW())
+        AND u.needs_verification_since IS NULL
+        AND NOT (u.id = ANY($1::text[]))`,
     [skip]
   );
-  const next = rows[0];
-  if (!next) return null;
-
-  // กลุ่มที่เหลือต้องไม่เกินโควต้าที่บัญชีใหม่ยังเหลือวันนี้ — ที่เกินปล่อยไว้ให้รอบหน้า
-  const room = Math.max(0, Number(next.cap) - Number(next.used_today));
-  const take = groups.slice(0, room);
-  if (!take.length) return null;
-
-  const assignmentId = generateId();
-  await query(
-    `INSERT INTO ${ASSIGNMENTS_TABLE} (id, job_ids, group_ids, user_id)
-     VALUES ($1, $2::jsonb, $3::jsonb, $4)`,
-    [assignmentId, JSON.stringify(jobs), JSON.stringify(take), next.id]
+  const candidates = [];
+  for (const u of rows) {
+    const cap = await getEffectiveDailyCap(u);
+    const room = Math.max(0, cap - Number(u.used_today));
+    if (room > 0) candidates.push({ ...u, cap, room });
+  }
+  candidates.sort(
+    (a, b) =>
+      Number(b.worker_online) - Number(a.worker_online) ||
+      Number(a.used_today) / a.cap - Number(b.used_today) / b.cap ||
+      String(a.label).localeCompare(String(b.label))
   );
-  const queued = await enqueuePostRunJob({
-    assignment_ids: [assignmentId],
-    user_id: next.id,
-    requested_by: requestedBy || 'handoff',
-    message: `สลับบัญชีมาจากตัวที่โพสต์ต่อไม่ได้ — เหลือ ${take.length} กลุ่ม`,
-  });
-  return { account: { id: next.id, label: next.label }, groups: take.length, skipped: groups.length - take.length, queue_id: queued ? queued.id : null };
+
+  // แบ่งกลุ่มที่เหลือตามโควต้าที่แต่ละบัญชีเหลือวันนี้ — ที่เกินทุกบัญชีปล่อยไว้ให้รอบหน้า
+  const given = [];
+  let next = 0;
+  for (const c of candidates) {
+    if (next >= groups.length) break;
+    const take = groups.slice(next, next + c.room);
+    next += take.length;
+    const assignmentId = generateId();
+    await query(
+      `INSERT INTO ${ASSIGNMENTS_TABLE} (id, job_ids, group_ids, user_id)
+       VALUES ($1, $2::jsonb, $3::jsonb, $4)`,
+      [assignmentId, JSON.stringify(jobs), JSON.stringify(take), c.id]
+    );
+    const queued = await enqueuePostRunJob({
+      assignment_ids: [assignmentId],
+      user_id: c.id,
+      requested_by: requestedBy || 'handoff',
+      message: `สลับบัญชีมาจากตัวที่โพสต์ต่อไม่ได้ — ${take.length} กลุ่ม`,
+    });
+    given.push({ id: c.id, label: c.label, groups: take.length, queue_id: queued ? queued.id : null });
+  }
+  if (!given.length) return null;
+  const moved = given.reduce((n, g) => n + g.groups, 0);
+  return {
+    account: { id: given[0].id, label: given.map((g) => `${g.label} ${g.groups} กลุ่ม`).join(', ') },
+    accounts: given,
+    groups: moved,
+    skipped: groups.length - moved,
+    queue_id: given[0].queue_id,
+  };
 }
 
 /**
@@ -2274,7 +2302,7 @@ async function countPostsTodayByUser(userId) {
  * อายุบัญชีนับจากโพสต์สำเร็จครั้งแรก: post_logs (มีลิงก์) หรือ run_logs success
  * (เดิมนับแค่ post_logs ซึ่งเพิ่งเริ่มเก็บได้ — บัญชีที่โพสต์มานานเลยโดนวอร์มเป็นบัญชีใหม่ 5 กลุ่ม/วัน)
  */
-async function getEffectiveDailyCap(user) {
+async function getAccountAgeDays(userId) {
   const { rows } = await query(
     `SELECT EXTRACT(EPOCH FROM (NOW() - MIN(first_at))) / 86400.0 AS age_days
      FROM (
@@ -2282,9 +2310,13 @@ async function getEffectiveDailyCap(user) {
        UNION ALL
        SELECT MIN(created_at) FROM run_logs WHERE user_id = $1 AND level = 'success'
      ) t`,
-    [String(user.id)]
+    [String(userId)]
   );
-  return effectiveDailyCapFor(user, rows[0]?.age_days == null ? null : Number(rows[0].age_days));
+  return rows[0]?.age_days == null ? null : Number(rows[0].age_days);
+}
+
+async function getEffectiveDailyCap(user, ageDays) {
+  return effectiveDailyCapFor(user, ageDays === undefined ? await getAccountAgeDays(user.id) : ageDays);
 }
 
 /**
@@ -2396,7 +2428,8 @@ async function buildDailyPostPlan(userId, opts = {}) {
     });
   }
 
-  const capEffective = await getEffectiveDailyCap(user);
+  const ageDays = await getAccountAgeDays(userId);
+  const capEffective = await getEffectiveDailyCap(user, ageDays);
   const postedToday = await countPostsTodayByUser(userId);
   const overCap = postedToday >= capEffective;
   // ignoreCap (manual + ยืนยัน): เกิน cap ก็โพสต์ได้อีก 1 ชุด (สูงสุด = cap) แค่ติดธงเตือน ไม่ข้ามบัญชี
@@ -2547,6 +2580,10 @@ async function buildDailyPostPlan(userId, opts = {}) {
     reserved_by_others: reservedByOthers,
     cap_skipped: capSkipped,
     user_id: String(userId),
+    /** อายุบัญชี (วัน) — worker ใช้เลือกช่วงเว้นระหว่างโพสต์ (บัญชีใหม่เว้นนานกว่า) · null = ยังไม่เคยโพสต์ */
+    age_days: ageDays,
+    /** ติ๊ก "บัญชีนี้ใช้งานมานานแล้ว" — ไม่วอร์มทั้งเพดานและช่วงเว้น */
+    skip_warmup: user.skip_warmup === true,
     cap: capEffective,
     posted_today: postedToday,
     over_cap_override: !!(opts.ignoreCap && overCap), // โพสต์ทั้งที่เกิน cap เพราะผู้ใช้ยืนยัน

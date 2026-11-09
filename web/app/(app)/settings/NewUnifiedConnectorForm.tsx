@@ -170,7 +170,7 @@ export function NewUnifiedConnectorForm({ workers = [], groups = [] }: { workers
                 <FieldContent>
                   <FieldLabel htmlFor="new-connector-skip-warmup">บัญชีนี้ใช้งานมานานแล้ว</FieldLabel>
                   <FieldDescription>
-                    ไม่ติ๊ก = บัญชีใหม่ ระบบโพสต์ได้แค่ 5 กลุ่มต่อวันในสัปดาห์แรก แล้วเพิ่มเป็น 8 และ 12 จนครบโควต้าในสัปดาห์ที่ 4 ติ๊กเฉพาะบัญชีที่สร้างมานานและใช้งานจริงอยู่แล้ว
+                    ไม่ติ๊ก = บัญชีใหม่ 2 สัปดาห์แรกโพสต์ได้วันละ 2 กลุ่ม เว้นครั้งละ 20–30 นาที สัปดาห์ที่ 3 วันละ 4 แล้วครบโควต้า ติ๊กเฉพาะบัญชีที่สร้างมานานและใช้งานจริงอยู่แล้ว
                   </FieldDescription>
                 </FieldContent>
               </Field>

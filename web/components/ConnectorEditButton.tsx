@@ -98,7 +98,7 @@ export function ConnectorEditButton({
                 <Checkbox id={`${fieldId}-skip-warmup`} name="skipWarmup" value="1" defaultChecked={skipWarmup} />
                 <FieldContent>
                   <FieldLabel htmlFor={`${fieldId}-skip-warmup`}>บัญชีนี้ใช้งานมานานแล้ว</FieldLabel>
-                  <FieldDescription>ติ๊กแล้วจะไม่จำกัดโพสต์ช่วงวอร์มบัญชีใหม่ (5–12 กลุ่มต่อวันใน 3 สัปดาห์แรก)</FieldDescription>
+                  <FieldDescription>ติ๊กแล้วจะไม่จำกัดโพสต์ช่วงวอร์มบัญชีใหม่ (2 สัปดาห์แรกวันละ 2 กลุ่ม เว้นครั้งละ 20–30 นาที · สัปดาห์ที่ 3 วันละ 4)</FieldDescription>
                 </FieldContent>
               </Field>
             )}

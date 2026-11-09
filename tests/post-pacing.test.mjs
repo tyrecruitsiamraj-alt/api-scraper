@@ -30,19 +30,34 @@ const PREFIX = 'Facebook จำกัดการโพสต์ของบั�
 const DAY = 86_400_000;
 const NO_RANDOM = { POST_DAILY_CAP_RANDOM: '0' };
 
-test('วอร์มบัญชีใหม่: ไม่เคยโพสต์/สัปดาห์แรก 5 · สัปดาห์ 2 = 8 · ครบ 3 สัปดาห์เต็ม', () => {
-  assert.equal(warmupCapFor(8, null, {}), 5);
-  assert.equal(warmupCapFor(8, 3, {}), 5);
-  assert.equal(warmupCapFor(8, 10, {}), 8);
+// เจ้าของ 9 พ.ย. 2569: บัญชีชุด 28 ต.ค. วันแรกโพสต์ 13–22 กลุ่ม ห่างกัน 4 นาที แล้วโดนทั้งชุด
+test('วอร์มบัญชีใหม่: ไม่เคยโพสต์/2 สัปดาห์แรก 2 · สัปดาห์ที่ 3 = 4 · ครบ 3 สัปดาห์เต็ม', () => {
+  assert.equal(warmupCapFor(8, null, {}), 2);
+  assert.equal(warmupCapFor(8, 3, {}), 2);
+  assert.equal(warmupCapFor(8, 13.9, {}), 2);
+  assert.equal(warmupCapFor(8, 14, {}), 4);
   assert.equal(warmupCapFor(8, 30, {}), 8);
   assert.equal(warmupCapFor(8, 3, { POST_WARMUP_DISABLED: '1' }), 8);
 });
 
+const { postGapRangeSecFor } = require('../autopost/server/post-pacing.js');
+test('บัญชีใหม่เว้น 20–30 นาที · บัญชีเกิน 14 วันเว้นตามปกติ', () => {
+  assert.deepEqual(postGapRangeSecFor(null, {}), { min: 1200, max: 1800 });
+  assert.deepEqual(postGapRangeSecFor(5, {}), { min: 1200, max: 1800 });
+  assert.deepEqual(postGapRangeSecFor(20, {}), { min: 600, max: 720 });
+  for (let i = 0; i < 50; i += 1) {
+    const s = clampGapSec(90, {}, 3);
+    assert.ok(s >= 1200 && s <= 1800, String(s));
+  }
+  assert.equal(clampGapSec(700, {}, 30), 700);
+});
+
 // เจ้าของ 9 พ.ย. 2569: พ้นพักแล้วกลับมาทีละน้อย ไม่ใช่กลับมาเต็มทันที
-test('หลังพ้นพักจากโดนจำกัด: 3 วันแรก 2 กลุ่ม · 3 วันถัดไป 4 · แล้วปกติ', () => {
+test('หลังพ้นพักจากโดนจำกัด: วันแรก 1 กลุ่ม (หยั่ง) · วันที่ 2–3 2 กลุ่ม · วันที่ 4–6 4 · แล้วปกติ', () => {
   const now = Date.parse('2026-11-12T03:00:00Z');
-  const limited = (daysAgo) => ({ pauseReason: `${PREFIX} (ครั้งที่ 1 ใน 7 วัน) — พัก 3 วัน`, pausedUntil: new Date(now - daysAgo * DAY).toISOString() });
-  assert.equal(recoveryCapAfterLimit(8, limited(0.5), now), 2);
+  const limited = (daysAgo) => ({ pauseReason: `${PREFIX} (ครั้งที่ 1 ใน 30 วัน) — พัก 7 วัน`, pausedUntil: new Date(now - daysAgo * DAY).toISOString() });
+  assert.equal(recoveryCapAfterLimit(8, limited(0.5), now), 1);
+  assert.equal(recoveryCapAfterLimit(8, limited(1.1), now), 2);
   assert.equal(recoveryCapAfterLimit(8, limited(2.9), now), 2);
   assert.equal(recoveryCapAfterLimit(8, limited(3.1), now), 4);
   assert.equal(recoveryCapAfterLimit(8, limited(5.9), now), 4);
@@ -64,12 +79,24 @@ test('สุ่มเพดานรายวัน 3..เพดาน: ค่�
   assert.equal(dailyCapForDay(8, 'fb_abc', '2026-11-09', NO_RANDOM), 8);
 });
 
-test('เพดานวันนี้ของบัญชี: บัญชีเก่า 8 · ใหม่ 5 · เพิ่งพ้นพัก 2 · รวมแล้วไม่เกินเพดานระบบ', () => {
+test('เพดานวันนี้ของบัญชี: บัญชีเก่า 8 · ใหม่ 2 · พ้นพักวันที่ 2 ได้ 2 · รวมแล้วไม่เกินเพดานระบบ', () => {
   const now = Date.parse('2026-11-12T03:00:00Z');
   const opts = { env: NO_RANDOM, now };
   assert.equal(effectiveDailyCapFor({ id: 'u', daily_cap: 15, skip_warmup: true }, 40, opts), 8);
-  assert.equal(effectiveDailyCapFor({ id: 'u', daily_cap: 15 }, 2, opts), 5);
-  assert.equal(effectiveDailyCapFor({ id: 'u', daily_cap: 15, skip_warmup: true, pause_reason: `${PREFIX} x`, paused_until: new Date(now - DAY).toISOString() }, 40, opts), 2);
+  assert.equal(effectiveDailyCapFor({ id: 'u', daily_cap: 15 }, 2, opts), 2);
+  assert.equal(effectiveDailyCapFor({ id: 'u', daily_cap: 15, skip_warmup: true, pause_reason: `${PREFIX} x`, paused_until: new Date(now - 1.5 * DAY).toISOString() }, 40, opts), 2);
+  assert.equal(effectiveDailyCapFor({ id: 'u', daily_cap: 15, skip_warmup: true, pause_reason: `${PREFIX} x`, paused_until: new Date(now - 0.2 * DAY).toISOString() }, 40, opts), 1);
   const random = effectiveDailyCapFor({ id: 'u', daily_cap: 15, skip_warmup: true }, 40, { now });
   assert.ok(random >= 3 && random <= 8, String(random));
+});
+
+const { dailyStartOffsetMin } = require('../autopost/server/post-pacing.js');
+// เจ้าของ 9 พ.ย. 2569: รอบเช้าเดิมทุกบัญชีเริ่มพร้อมกัน 08:00 จากเครื่องเดียว
+test('รอบเช้า: แต่ละบัญชีเริ่มช้ากว่า 08:00 ไม่เท่ากัน 0–119 นาที ค่าเดิมทั้งวัน ปิดได้', () => {
+  const a = dailyStartOffsetMin('fb_abc', '2026-11-10', {});
+  assert.equal(dailyStartOffsetMin('fb_abc', '2026-11-10', {}), a);
+  const offsets = new Set(Array.from({ length: 30 }, (_, i) => dailyStartOffsetMin(`fb_${i}`, '2026-11-10', {})));
+  assert.ok(offsets.size >= 15, `30 บัญชีควรกระจาย ได้ ${offsets.size} ค่า`);
+  assert.ok([...offsets].every((m) => m >= 0 && m < 120));
+  assert.equal(dailyStartOffsetMin('fb_abc', '2026-11-10', { AUTO_POST_SPREAD_MINUTES: '0' }), 0);
 });

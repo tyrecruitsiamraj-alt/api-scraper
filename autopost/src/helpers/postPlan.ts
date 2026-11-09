@@ -29,6 +29,10 @@ export interface DailyPostPlan {
   /** กลุ่ม/งานทั้งหมดของบัญชีนี้ (มาเมื่อแผนว่างเพราะเต็มโควต้า/ถูกพัก) */
   all_groups?: { groups: string[]; jobs: string[] };
   cap?: number;
+  /** อายุบัญชี (วัน) นับจากโพสต์แรก · null = ยังไม่เคยโพสต์ */
+  age_days?: number | null;
+  /** บัญชีที่ติ๊กว่าใช้งานมานานแล้ว — ไม่วอร์ม */
+  skip_warmup?: boolean;
   posted_today?: number;
   candidates?: number;
   cooldown_skipped?: number;
@@ -90,7 +94,7 @@ export async function pauseUserPosting(
 }
 
 /**
- * Facebook จำกัดการโพสต์ของบัญชี — พักตามจำนวนครั้งที่โดนใน 7 วัน (ครั้งแรก 3 วัน · ครั้งที่ 2 7 วัน · 3 ขึ้นไป 14 วัน — autopost/server/fb-limit-pause.js)
+ * Facebook จำกัดการโพสต์ของบัญชี — พักตามจำนวนครั้งที่โดนใน 30 วัน (ครั้งแรก 7 วัน · ครั้งที่ 2 14 วัน · 3 ขึ้นไป 28 วัน — autopost/server/fb-limit-pause.js)
  * คืนข้อความเหตุที่ใช้บันทึกรอบ (ขึ้นต้นด้วยคำเดียวกับที่ตัวนับใช้)
  */
 export async function pauseUserForFacebookLimit(

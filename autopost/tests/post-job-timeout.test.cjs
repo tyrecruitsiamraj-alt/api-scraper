@@ -4,24 +4,21 @@ const { postJobTimeoutMs, countJobGroups } = require('../server/post-job-timeout
 
 const MIN = 60 * 1000;
 
-// 8 พ.ย. 2569: เว้นระหว่างโพสต์ 10–12 นาที → กลุ่มละ 5 + 12 = 17 นาที (เดิม 6)
+// 9 พ.ย. 2569: บัญชีใหม่เว้นระหว่างโพสต์ 20–30 นาที → เผื่อกลุ่มละ 5 + 30 = 35 นาที (ตัวคิดเวลาไม่รู้อายุบัญชี)
 test('one group already needs more than the old 25-minute floor', () => {
-  assert.equal(postJobTimeoutMs(1, {}), (10 + 17) * MIN);
-  assert.equal(postJobTimeoutMs(2, {}), (10 + 2 * 17) * MIN);
+  assert.equal(postJobTimeoutMs(1, {}), (10 + 35) * MIN);
+  assert.equal(postJobTimeoutMs(2, {}), (10 + 2 * 35) * MIN);
 });
 
 test('time grows by the per-group post time plus the longest gap, plus batch breaks', () => {
-  // 5 กลุ่ม = ยังไม่พัก (พักหลังครบ 5 แล้วมีกลุ่มต่อเท่านั้น)
-  assert.equal(postJobTimeoutMs(5, {}), (10 + 5 * 17) * MIN);
-  // เพดาน 8 กลุ่ม/บัญชี/วัน = พัก 1 ครั้ง ต้องจบก่อนเครื่องตัดงานค้าง (175 นาที)
-  assert.equal(postJobTimeoutMs(8, {}), (10 + 8 * 17 + 15) * MIN);
-  assert.ok(postJobTimeoutMs(8, {}) < 175 * MIN);
+  assert.equal(postJobTimeoutMs(4, {}), (10 + 4 * 35) * MIN);
+  // บัญชีเก่า 8 กลุ่มใช้จริง ~150 นาที ยังจบก่อนเครื่องตัดงานค้าง (175 นาที)
+  assert.equal(postJobTimeoutMs(8, {}), 175 * MIN);
 });
 
 test('batch size, break length and gap follow the worker env', () => {
-  assert.equal(postJobTimeoutMs(6, { HUMAN_BATCH_SIZE: '10' }), (10 + 6 * 17) * MIN);
-  assert.equal(postJobTimeoutMs(6, { HUMAN_BATCH_BREAK_MAX_SEC: '600' }), (10 + 6 * 17 + 10) * MIN);
-  assert.equal(postJobTimeoutMs(2, { POST_MAX_GAP_SEC: '900' }), (10 + 2 * 20) * MIN);
+  assert.equal(postJobTimeoutMs(6, { HUMAN_BATCH_SIZE: '2', POST_RUN_STALE_MINUTES: '600', POST_NEW_ACCOUNT_MAX_GAP_SEC: '1200' }), (10 + 6 * 25 + 2 * 15) * MIN);
+  assert.equal(postJobTimeoutMs(2, { POST_NEW_ACCOUNT_MAX_GAP_SEC: '2400' }), (10 + 2 * 45) * MIN);
 });
 
 test('never past the stale-job sweep (POST_RUN_STALE_MINUTES - 5)', () => {
@@ -30,7 +27,7 @@ test('never past the stale-job sweep (POST_RUN_STALE_MINUTES - 5)', () => {
 });
 
 test('env overrides for floor and per-group minutes', () => {
-  assert.equal(postJobTimeoutMs(1, { WORKER_POST_JOB_MAX_MS: String(40 * MIN) }), 40 * MIN);
+  assert.equal(postJobTimeoutMs(1, { WORKER_POST_JOB_MAX_MS: String(60 * MIN) }), 60 * MIN);
   // 10 กลุ่ม = พัก 1 ครั้ง (15 นาที)
   assert.equal(postJobTimeoutMs(10, { WORKER_POST_JOB_MS_PER_GROUP: String(3 * MIN) }), (10 + 30 + 15) * MIN);
 });

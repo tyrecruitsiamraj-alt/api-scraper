@@ -272,6 +272,8 @@ test('Dynamic Post: รันโพสต์ตาม Assignments', async ({ pag
       anyUserPlanned = true;
     }
     if (plan) planItems = plan.items;
+    /** อายุบัญชีจากแผน — บัญชีใหม่ (<14 วัน) เว้นระหว่างโพสต์นานกว่า · ไม่มีแผน (โหมด json) หรือติ๊กใช้งานมานาน = ช่วงปกติ */
+    const accountAgeDays = plan && !plan.skip_warmup ? (plan.age_days ?? null) : undefined;
 
     if (currentUserId !== user.id) {
       activePage = await facebookLogin(activePage, user.email, user.password, {
@@ -301,18 +303,20 @@ test('Dynamic Post: รันโพสต์ตาม Assignments', async ({ pag
     /** circuit breaker: fail ติดกันหลายกลุ่ม = สัญญาณบัญชีโดนจำกัด — หยุดก่อนจะเผาบัญชี */
     let failStreak = 0;
     let lastJobId: string | null = null;
-    /** ตำแหน่งที่กำลังโพสต์ — ใช้หากลุ่มที่ยังไม่ได้ลงเมื่อบัญชีนี้ไปต่อไม่ได้ */
+    /** ตำแหน่งที่กำลังโพสต์ — ใช้นับกลุ่มที่ยังไม่ได้ลงเมื่อบัญชีนี้ไปต่อไม่ได้ */
     let currentIndex = 0;
 
     /**
-     * บัญชีนี้โพสต์ต่อไม่ได้แล้ว — ส่งกลุ่มที่ "ยังไม่ได้ลง" ให้บัญชีอื่นที่ว่างโพสต์แทน
-     * (เดิมหยุดเฉย ๆ กลุ่มที่เหลือไม่ได้ลงเลยจนกว่าคนจะมาสั่งใหม่)
+     * บัญชีนี้โพสต์ต่อไม่ได้แล้ว — กลุ่มที่ยังไม่ได้ลง "ไม่" ส่งให้บัญชีอื่นวันนี้ (เจ้าของเคาะ 9 พ.ย. 2569)
+     * เหตุ: ส่งต่อทันทีแล้วบัญชีที่รับโดนตามเป็นทอด ๆ (Burkhart Debe รับ 26 กลุ่ม โดนที่กลุ่มที่ 9)
+     * งานยังอยู่ใน assignment เดิม — รอบเช้าวันถัดไปย้ายให้บัญชีที่ว่างตามโควต้าของบัญชีนั้น (db.reassignStuckPostJobs)
      */
-    const handoffRest = async (why: string) => {
-      const rest = planItems.slice(currentIndex + 1);
-      if (!rest.length) return;
-      // assignments.group_ids เก็บ "row id" ของตาราง groups (ไม่ใช่เลขกลุ่มบน Facebook)
-      await handoffGroups(rest.map((r) => String(r.job_id)), rest.map((r) => String(r.group_row_id)), why);
+    const deferRest = async (why: string) => {
+      const rest = planItems.length - (currentIndex + 1);
+      if (rest <= 0) return;
+      const msg = `${why} — ยังเหลือ ${rest} กลุ่มที่ไม่ได้ลง รอรอบวันถัดไป (ไม่ส่งให้บัญชีอื่นวันนี้ กันโดนจำกัดตามกัน)`;
+      console.log(`⏸️ [${userLabel}] ${msg}`);
+      await runLog({ level: 'warn', message: msg, user_id: user.id, meta: { kind: 'deferred', groups: rest } });
     };
     for (const [planIndex, item] of planItems.entries()) {
       currentIndex = planIndex;
@@ -448,7 +452,7 @@ test('Dynamic Post: รันโพสต์ตาม Assignments', async ({ pag
         if (failStreak >= streakLimit || accountLimited) {
           const pauseHours = getPauseHours();
           if (accountLimited) {
-            // โดนซ้ำพักนานขึ้น: เซิร์ฟเวอร์นับครั้งจากบันทึกรอบ 7 วัน (ต้องพักก่อนเขียนบันทึกครั้งนี้ ไม่งั้นนับซ้ำ)
+            // โดนซ้ำพักนานขึ้น: เซิร์ฟเวอร์นับครั้งจากบันทึกรอบ 30 วัน (ต้องพักก่อนเขียนบันทึกครั้งนี้ ไม่งั้นนับซ้ำ)
             try {
               const paused = await pauseUserForFacebookLimit(user.id, pauseHours);
               console.log(`🛑 [${userLabel}] ${paused.reason}`);
@@ -459,7 +463,7 @@ test('Dynamic Post: รันโพสต์ตาม Assignments', async ({ pag
               console.log(`🛑 [${userLabel}] ${reason}`);
               await runLog({ level: 'error', message: reason, user_id: user.id });
             }
-            await handoffRest('บัญชีถูก Facebook จำกัด');
+            await deferRest('บัญชีถูก Facebook จำกัด');
             break;
           }
           const reason = `โพสต์ไม่สำเร็จติดกัน ${failStreak} กลุ่ม — circuit breaker พัก ${pauseHours} ชม. (อาจโดน Facebook จำกัดการโพสต์)`;
@@ -471,26 +475,31 @@ test('Dynamic Post: รันโพสต์ตาม Assignments', async ({ pag
             // พักไม่สำเร็จต้องเห็นในบันทึกรอบ ไม่เงียบ — บัญชีจะยังถูกสั่งโพสต์ต่อได้
             await runLog({ level: 'error', message: `พักบัญชีอัตโนมัติไม่สำเร็จ: ${(e as Error).message}`, user_id: user.id });
           }
-          await handoffRest('บัญชีถูกพักจาก circuit breaker');
+          await deferRest('บัญชีถูกพักจาก circuit breaker');
           break;
         }
-        // ไม่ได้โพสต์อะไรลงกลุ่มนี้ — ไปกลุ่มถัดไปเลยไม่ต้องหน่วงเวลา
-        if (membershipSkip) continue;
+        // ไม่ได้โพสต์อะไรลงกลุ่มนี้ — ไม่ต้องรอเต็มช่วง แต่ไม่ข้ามรัว ๆ (หน่วง 30–60 วิ)
+        if (membershipSkip) {
+          await activePage.waitForTimeout((30 + Math.floor(Math.random() * 31)) * 1000);
+          continue;
+        }
       }
       postsSinceBreak += 1;
+      // กลุ่มสุดท้ายของแผนแล้ว ไม่ต้องรอ (บัญชีใหม่เว้น 30 นาที รอเปล่า ๆ จนงานโดนตัดว่าเกินเวลา)
+      if (planIndex === planItems.length - 1) continue;
       const batchSize =
         Number(activePostSettings?.batch_size) ||
         Number(process.env.HUMAN_BATCH_SIZE) ||
         5;
       if (batchSize > 0 && postsSinceBreak >= batchSize) {
-        const breakSec = getBatchBreakSec(activePostSettings);
+        const breakSec = getBatchBreakSec(activePostSettings, accountAgeDays);
         console.log(
           `☕ [${userLabel}] พักหลังโพสต์ ${postsSinceBreak} กลุ่ม (~${breakSec}s) ตาม batch_size`
         );
         await activePage.waitForTimeout(breakSec * 1000);
         postsSinceBreak = 0;
       } else {
-        const delaySec = getBetweenPostsDelaySec(activePostSettings);
+        const delaySec = getBetweenPostsDelaySec(activePostSettings, accountAgeDays);
         console.log(`⏳ [${userLabel}] รอ ~${delaySec}s ก่อนกลุ่มถัดไป`);
         await activePage.waitForTimeout(delaySec * 1000);
       }

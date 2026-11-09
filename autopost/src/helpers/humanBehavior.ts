@@ -121,36 +121,42 @@ export async function humanReviewBeforePost(page: Page): Promise<void> {
 }
 
 /**
- * วินาที — จาก post_settings ของ User หรือ env แต่ไม่สั้นกว่าขั้นต่ำของระบบ (10 นาที, server/post-pacing.js)
+ * วินาที — จาก post_settings ของ User หรือ env แต่ไม่สั้นกว่าขั้นต่ำของระบบ (10 นาที · บัญชีใหม่ 20 นาที, server/post-pacing.js)
  * เดิมเว้น 1–2.5 นาที เฉลี่ยห่าง 4 นาที — Facebook จำกัดบัญชีวันละ 7–16 ครั้ง (2–6 พ.ย. 2569)
+ * ageDays = อายุบัญชีจากแผนรายวัน (null = ยังไม่เคยโพสต์ · undefined = ไม่รู้ ใช้ช่วงปกติ)
  */
-export function getBetweenPostsDelaySec(settings?: PostDelaySettings): number {
+export function getBetweenPostsDelaySec(settings?: PostDelaySettings, ageDays?: number | null): number {
   // eslint-disable-next-line @typescript-eslint/no-var-requires
   const { clampGapSec } = require('../../server/post-pacing');
   const userMin = settings?.delay_between_posts_min;
   const userMax = settings?.delay_between_posts_max;
   if (userMin != null && userMax != null && userMax >= userMin && userMin > 0) {
-    return clampGapSec(randomInt(userMin, userMax));
+    return clampGapSec(randomInt(userMin, userMax), process.env, ageDays);
   }
   const envMin = Number(process.env.HUMAN_POST_DELAY_MIN_SEC);
   const envMax = Number(process.env.HUMAN_POST_DELAY_MAX_SEC);
   if (Number.isFinite(envMin) && envMin > 0) {
     const max = Number.isFinite(envMax) && envMax >= envMin ? envMax : envMin;
-    return clampGapSec(randomInt(envMin, max));
+    return clampGapSec(randomInt(envMin, max), process.env, ageDays);
   }
-  return clampGapSec(0);
+  return clampGapSec(0, process.env, ageDays);
 }
 
-/** วินาทีพักหลังโพสต์ครบ batch_size กลุ่ม */
-export function getBatchBreakSec(settings?: PostDelaySettings): number {
+/**
+ * วินาทีพักหลังโพสต์ครบ batch_size กลุ่ม — ไม่สั้นกว่าช่วงเว้นปกติ (เดิมพักได้สั้นสุด 5 นาที สั้นกว่าเว้นปกติ 10 นาที)
+ */
+export function getBatchBreakSec(settings?: PostDelaySettings, ageDays?: number | null): number {
   const bmin = settings?.break_time_min;
   const bmax = settings?.break_time_max;
+  let sec: number;
   if (bmin != null && bmax != null && bmax >= bmin && bmin > 0) {
-    return randomInt(bmin, bmax);
+    sec = randomInt(bmin, bmax);
+  } else {
+    const envMin = Number(process.env.HUMAN_BATCH_BREAK_MIN_SEC);
+    const envMax = Number(process.env.HUMAN_BATCH_BREAK_MAX_SEC);
+    const min = Number.isFinite(envMin) && envMin > 0 ? envMin : 300;
+    const max = Number.isFinite(envMax) && envMax >= min ? envMax : 900;
+    sec = randomInt(min, max);
   }
-  const envMin = Number(process.env.HUMAN_BATCH_BREAK_MIN_SEC);
-  const envMax = Number(process.env.HUMAN_BATCH_BREAK_MAX_SEC);
-  const min = Number.isFinite(envMin) && envMin > 0 ? envMin : 300;
-  const max = Number.isFinite(envMax) && envMax >= min ? envMax : 900;
-  return randomInt(min, max);
+  return Math.max(sec, getBetweenPostsDelaySec(settings, ageDays));
 }
