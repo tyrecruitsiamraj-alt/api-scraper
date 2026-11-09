@@ -3661,10 +3661,12 @@ async function resolvePostAccount(groupIds: string[], requestedAccountId: string
   );
   const account = rows[0];
   if (!account) return { account: null, issue: 'บัญชี Facebook ที่เลือกใน Jarvis ไม่มีในระบบ', switchedFrom: null };
-  // บัญชีที่เลือกไว้ใช้ไม่ได้ (Facebook พัก หรือ ขอยืนยันตัวตน) → สลับไปบัญชีที่ว่างให้เลย
+  // บัญชีที่เลือกไว้ถูก Facebook พัก → สลับไปบัญชีที่ว่างให้เลย
   // ไม่ปล่อยให้งานค้างรอคนมากดเอง; UI บอกว่าสลับมาจากใบไหนเสมอ
-  if (account.paused || account.needs_verification) {
-    const why = account.paused ? 'ถูก Facebook พัก' : 'รอยืนยันตัวตน';
+  // บัญชีที่รอยืนยันตัวตน "ไม่สลับ" — คนเลือกมาเพื่อไปยืนยันที่เครื่อง (เจ้าของ 9 พ.ย. 2569: เขียว/เหลือง/แดง
+  // เหลือง = เลือกได้) · เดิมสลับทุกใบ 11 ใบที่สั่งไปยืนยันเลยไปกองที่บัญชีเดียว (Diermeier Debi)
+  if (account.paused) {
+    const why = 'ถูก Facebook พัก';
     const sub = await pickSubstituteAccount(account.id);
     if (sub) return { account: sub, issue: null, switchedFrom: `${account.label} (${why})` };
     return { account, issue: `บัญชี ${account.label} ${why} และยังไม่มีบัญชีอื่นที่ว่าง`, switchedFrom: null };
