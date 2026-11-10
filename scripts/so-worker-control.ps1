@@ -53,6 +53,8 @@ $Patterns = @{
   Collect  = @('collect-remote-worker\.js', 'npm.*worker:collect', 'start-collect\.cmd')
   # ตัวโพสต์อย่างเดียว ให้ตัวเฝ้าเปิดใหม่ได้โดยไม่ตัดงานเก็บคอมเมนต์
   Post     = @('post-remote-worker-supervisor\.js', 'post-remote-worker\.js', 'npm.*worker:post', 'start-autopost\.cmd')
+  # เว็บ So Scraping + หน้าจอ Autopost ที่ย้ายจาก Vercel มาเปิดบนเครื่องนี้ (scripts/web-host.mjs)
+  Web      = @('web-host\.mjs', 'npm.*web:host', 'start-web\.cmd')
 }
 
 function Get-MatchingProcesses([string[]]$Patterns) {
@@ -91,6 +93,8 @@ function Stop-WorkerGroup([string]$Group) {
     & taskkill.exe /F /T /FI "WINDOWTITLE eq SO AutoPost Worker (worker:post)*" 2>$null | Out-Null
   } elseif ($Group -eq 'Collect') {
     & taskkill.exe /F /T /FI "WINDOWTITLE eq SO AutoPost Worker (worker:collect)*" 2>$null | Out-Null
+  } elseif ($Group -eq 'Web') {
+    & taskkill.exe /F /T /FI "WINDOWTITLE eq SO Web*" 2>$null | Out-Null
   } else {
     & taskkill.exe /F /T /FI "WINDOWTITLE eq SO AutoPost Worker*" 2>$null | Out-Null
     & taskkill.exe /F /T /FI "WINDOWTITLE eq SO Hidden Autopost*" 2>$null | Out-Null
@@ -245,7 +249,7 @@ function Start-WorkerWindow([string]$Title, [string]$WorkDir, [string]$NpmScript
   $nodeDir = Split-Path -Parent (Resolve-NodeExe)
   $npmDir = Split-Path -Parent $npm
   $sha = Get-WorkerBuildSha
-  $logPath = Join-Path $LogDir ($(if ($Group -eq 'Scrape') { 'scrape-pool.log' } else { 'autopost.log' }))
+  $logPath = Join-Path $LogDir ($(if ($Group -eq 'Scrape') { 'scrape-pool.log' } elseif ($Group -eq 'Web') { 'web-host-window.log' } else { 'autopost.log' }))
   $outLogPath = Join-Path $LogDir ("$($NpmScript -replace '[^A-Za-z0-9_-]', '-').out.log")
   # เริ่มไฟล์ output ใหม่ทุกครั้งที่กดเปิด ไม่ให้ไฟล์โตไม่จบ (เก็บรอบก่อนไว้ 1 รอบ)
   if (Test-Path -LiteralPath $outLogPath) { Move-Item -LiteralPath $outLogPath -Destination "$outLogPath.prev" -Force -ErrorAction SilentlyContinue }
@@ -339,6 +343,12 @@ function Start-CollectWorker {
   $script:WatchSince['collect'] = Get-Date
 }
 
+function Start-WebHost {
+  # เว็บ build รุ่นใหม่เองเมื่อโค้ดเปลี่ยน — ไม่ต้องดึงโค้ดตรงนี้
+  Start-WorkerWindow -Title 'SO Web (web:host)' -WorkDir $Root -NpmScript 'web:host' -Group 'Web'
+  $script:WatchSince['web'] = Get-Date
+}
+
 function Start-AutopostWorker {
   Start-PostWorker
   try {
@@ -351,13 +361,14 @@ function Start-AutopostWorker {
 # ตัวเฝ้า: worker เขียน alive-*.txt ทุกครั้งที่คุยกับเซิร์ฟเวอร์ได้
 # สวิตช์เปิดอยู่แต่ไฟล์ไม่ขยับเกิน 10 นาที = ค้างเงียบ (เคยเกิดหลังอัปเดตโค้ด 30 ต.ค. 2569) → ปิดแล้วเปิดใหม่เอง
 $WatchStaleMinutes = 10
-$WatchSince = @{ scrape = Get-Date; post = Get-Date; collect = Get-Date }
+$WatchSince = @{ scrape = Get-Date; post = Get-Date; collect = Get-Date; web = Get-Date }
 $WatchNote = ''
 $LastWatch = Get-Date
 $WatchUnits = @(
   @{ Unit = 'scrape'; Group = 'Scrape'; Label = 'Scrap' }
   @{ Unit = 'post'; Group = 'Post'; Label = 'Autopost' }
   @{ Unit = 'collect'; Group = 'Collect'; Label = 'ตัวเก็บคอมเมนต์' }
+  @{ Unit = 'web'; Group = 'Web'; Label = 'เว็บ' }
 )
 
 function Get-SilentMinutes([string]$Unit) {
@@ -384,6 +395,7 @@ function Restart-SilentWorker($Item, [int]$Minutes) {
       'scrape' { Start-ScrapeWorker }
       'post' { Start-PostWorker }
       'collect' { Start-CollectWorker }
+      'web' { Start-WebHost }
     }
     $script:WatchNote = "$(Get-Date -Format 'HH:mm') เปิด $($Item.Label) ใหม่เอง (เงียบ $Minutes นาที)"
   } catch {
@@ -454,7 +466,7 @@ function Resume-AfterUpdateIfNeeded {
 # ---- UI ----
 $form = New-Object System.Windows.Forms.Form
 $form.Text = 'SO Workers'
-$form.Size = New-Object System.Drawing.Size(460, 460)
+$form.Size = New-Object System.Drawing.Size(460, 560)
 $form.StartPosition = 'CenterScreen'
 $form.FormBorderStyle = 'FixedSingle'
 $form.MaximizeBox = $false
@@ -551,36 +563,38 @@ function New-SwitchRow([string]$LabelText, [int]$Top) {
 
 $scrapeRow = New-SwitchRow 'ค้นหาผู้สมัคร (Scrap)' 78
 $autoRow = New-SwitchRow 'โพสต์ Facebook (Autopost)' 178
+$webRow = New-SwitchRow 'เว็บ So Scraping' 278
 $form.Controls.Add($scrapeRow.Panel)
 $form.Controls.Add($autoRow.Panel)
+$form.Controls.Add($webRow.Panel)
 
 $updateBtn = New-Object System.Windows.Forms.Button
 $updateBtn.Text = 'อัปเดตโค้ด'
 $updateBtn.Size = New-Object System.Drawing.Size(120, 34)
-$updateBtn.Location = New-Object System.Drawing.Point(24, 286)
+$updateBtn.Location = New-Object System.Drawing.Point(24, 386)
 $form.Controls.Add($updateBtn)
 
 $logBtn = New-Object System.Windows.Forms.Button
 $logBtn.Text = 'เปิดไฟล์ log'
 $logBtn.Size = New-Object System.Drawing.Size(120, 34)
-$logBtn.Location = New-Object System.Drawing.Point(158, 286)
+$logBtn.Location = New-Object System.Drawing.Point(158, 386)
 $form.Controls.Add($logBtn)
 
 $refreshBtn = New-Object System.Windows.Forms.Button
 $refreshBtn.Text = 'รีเฟรช'
 $refreshBtn.Size = New-Object System.Drawing.Size(120, 34)
-$refreshBtn.Location = New-Object System.Drawing.Point(292, 286)
+$refreshBtn.Location = New-Object System.Drawing.Point(292, 386)
 $form.Controls.Add($refreshBtn)
 
 $legacyBtn = New-Object System.Windows.Forms.Button
 $legacyBtn.Text = 'เปิดแบบเดิม (มีหน้าต่าง)'
 $legacyBtn.Size = New-Object System.Drawing.Size(400, 30)
-$legacyBtn.Location = New-Object System.Drawing.Point(24, 326)
+$legacyBtn.Location = New-Object System.Drawing.Point(24, 426)
 $form.Controls.Add($legacyBtn)
 
 
 $footer = New-Object System.Windows.Forms.Label
-$footer.Location = New-Object System.Drawing.Point(26, 364)
+$footer.Location = New-Object System.Drawing.Point(26, 464)
 $footer.Size = New-Object System.Drawing.Size(400, 36)
 $footer.ForeColor = [System.Drawing.Color]::FromArgb(100, 110, 120)
 $footer.Text = "โค้ด: $(Get-WorkerBuildSha)"
@@ -591,6 +605,7 @@ function Set-Busy([bool]$Value) {
   $script:busy = $Value
   $scrapeRow.Enabled = -not $Value
   $autoRow.Enabled = -not $Value
+  $webRow.Enabled = -not $Value
   $updateBtn.Enabled = -not $Value
   $refreshBtn.Enabled = -not $Value
   $cursor = if ($Value) {
@@ -600,6 +615,7 @@ function Set-Busy([bool]$Value) {
   }
   $scrapeRow.Panel.Cursor = $cursor
   $autoRow.Panel.Cursor = $cursor
+  $webRow.Panel.Cursor = $cursor
 }
 
 function Update-ToggleVisual($Row, [bool]$On) {
@@ -630,6 +646,7 @@ function Refresh-Status {
   try {
     Update-ToggleVisual $scrapeRow (Test-WorkerRunning 'Scrape')
     Update-ToggleVisual $autoRow (Test-WorkerRunning 'Autopost')
+    Update-ToggleVisual $webRow (Test-WorkerRunning 'Web')
     $footer.Text = "โค้ด: $(Get-WorkerBuildSha)  |  log: output\worker-logs"
     if ($WatchNote) { $footer.Text += "`n$WatchNote" }
   } catch {
@@ -648,14 +665,14 @@ function Invoke-RowToggle($Row, [string]$GroupName) {
       $Row.Status.Text = 'กำลังเปิด...'
       $Row.Status.ForeColor = [System.Drawing.Color]::FromArgb(37, 99, 235)
       [System.Windows.Forms.Application]::DoEvents()
-      if ($GroupName -eq 'Scrap') { Start-ScrapeWorker } else { Start-AutopostWorker }
+      if ($GroupName -eq 'Scrap') { Start-ScrapeWorker } elseif ($GroupName -eq 'เว็บ') { Start-WebHost } else { Start-AutopostWorker }
       $footer.Text = "เปิด $GroupName แล้ว"
     } else {
       $footer.Text = "กำลังปิด $GroupName..."
       $Row.Status.Text = 'กำลังปิด...'
       $Row.Status.ForeColor = [System.Drawing.Color]::FromArgb(37, 99, 235)
       [System.Windows.Forms.Application]::DoEvents()
-      Stop-WorkerGroup $(if ($GroupName -eq 'Scrap') { 'Scrape' } else { 'Autopost' }) | Out-Null
+      Stop-WorkerGroup $(if ($GroupName -eq 'Scrap') { 'Scrape' } elseif ($GroupName -eq 'เว็บ') { 'Web' } else { 'Autopost' }) | Out-Null
       Start-Sleep -Milliseconds 800
       $footer.Text = "ปิด $GroupName แล้ว"
     }
@@ -670,11 +687,15 @@ function Invoke-RowToggle($Row, [string]$GroupName) {
 # ผูกคลิกทั้งแถว + สวิตช์
 $scrapeClick = { if (-not $busy) { Invoke-RowToggle $scrapeRow 'Scrap' } }
 $autoClick = { if (-not $busy) { Invoke-RowToggle $autoRow 'Autopost' } }
+$webClick = { if (-not $busy) { Invoke-RowToggle $webRow 'เว็บ' } }
 foreach ($ctrl in @($scrapeRow.Panel, $scrapeRow.Title, $scrapeRow.Status, $scrapeRow.Hint, $scrapeRow.Track, $scrapeRow.Thumb, $scrapeRow.SwitchText)) {
   $ctrl.Add_Click($scrapeClick)
 }
 foreach ($ctrl in @($autoRow.Panel, $autoRow.Title, $autoRow.Status, $autoRow.Hint, $autoRow.Track, $autoRow.Thumb, $autoRow.SwitchText)) {
   $ctrl.Add_Click($autoClick)
+}
+foreach ($ctrl in @($webRow.Panel, $webRow.Title, $webRow.Status, $webRow.Hint, $webRow.Track, $webRow.Thumb, $webRow.SwitchText)) {
+  $ctrl.Add_Click($webClick)
 }
 
 $legacyBtn.Add_Click({

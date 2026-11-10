@@ -22,3 +22,7 @@ logs/
 .codex-tmp/
 .vercel
 .env*
+
+# เว็บที่ build บน RM009 (scripts/web-host.mjs)
+web/.next-slot-a/
+web/.next-slot-b/

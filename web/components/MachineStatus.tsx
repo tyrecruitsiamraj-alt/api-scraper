@@ -30,8 +30,8 @@ function silentFor(lastSeen: string): string {
 export async function MachineStatus({ kind, back }: { kind?: 'autopost' | 'scraper'; back: string }) {
   const { machines, retired } = await listMachineStatus();
   const rows = kind ? machines.filter((m) => m.kind === kind) : machines;
-  // โค้ดล่าสุด = commit ที่เว็บนี้ deploy (Vercel ใส่ให้) · ไม่มีค่า = ไม่บอกว่าเก่า
-  const latest = process.env.VERCEL_GIT_COMMIT_SHA?.trim() || '';
+  // โค้ดล่าสุด = commit ที่เว็บนี้ build (Vercel ใส่ให้ / RM009 ใส่ผ่าน scripts/web-host.mjs) · ไม่มีค่า = ไม่บอกว่าเก่า
+  const latest = (process.env.VERCEL_GIT_COMMIT_SHA || process.env.APP_BUILD_SHA || '').trim();
   const canUpdate = machines.some((m) => m.kind === 'scraper' && m.online);
   const hidden = (kind ? retired.filter((r) => r.kind === kind) : retired).length;
   return (

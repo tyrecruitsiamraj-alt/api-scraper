@@ -5,6 +5,9 @@ const require = createRequire(import.meta.url);
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
+  // RM009 build เว็บใหม่ลงอีกช่อง (.next-slot-a / -b) ระหว่างตัวเดิมยังเปิดอยู่ แล้วค่อยสลับ (scripts/web-host.mjs)
+  // ไม่ตั้ง = .next ตามเดิม
+  distDir: process.env.NEXT_DIST_DIR || '.next',
   // Next 15: ย้าย 2 ค่านี้ออกจาก experimental
   serverExternalPackages: [
     'pg',

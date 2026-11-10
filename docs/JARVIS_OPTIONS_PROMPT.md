@@ -20,7 +20,7 @@
 ## 1. ดึงตัวเลือก
 
 ```
-GET https://so-scraping.vercel.app/api/integrations/jarvis/options
+GET https://api-scraper.sosiamraj.com/api/integrations/jarvis/options
 x-api-key: <JARVIS_INTEGRATION_KEY>
 ```
 
@@ -172,7 +172,7 @@ x-api-key: <JARVIS_INTEGRATION_KEY>
 หลังบันทึก `job_posting_requests` (status = `pending`) แล้ว ให้เรียก:
 
 ```
-POST https://so-scraping.vercel.app/api/integrations/jarvis/start
+POST https://api-scraper.sosiamraj.com/api/integrations/jarvis/start
 x-api-key: <JARVIS_INTEGRATION_KEY>
 Content-Type: application/json
 
@@ -208,7 +208,7 @@ Content-Type: application/json
 ## 4. ดูผลงาน
 
 ```
-GET https://so-scraping.vercel.app/api/integrations/jarvis/status?request_no=OPL6905114
+GET https://api-scraper.sosiamraj.com/api/integrations/jarvis/status?request_no=OPL6905114
 x-api-key: <JARVIS_INTEGRATION_KEY>
 ```
 
@@ -246,7 +246,7 @@ x-api-key: <JARVIS_INTEGRATION_KEY>
         }
       ],
       "issues": [],
-      "detail_url": "https://so-scraping.vercel.app/autopost/jobs"
+      "detail_url": "https://api-scraper.sosiamraj.com/autopost/jobs"
     }
   ]
 }
@@ -284,7 +284,7 @@ x-api-key: <JARVIS_INTEGRATION_KEY>
           "rejected": 6,
           "last_error": "ยังไม่ครบเป้า: ...",
           "last_run_at": "2026-10-26T02:17:21.888Z",
-          "detail_url": "https://so-scraping.vercel.app/scraping/7d976c2b-2598-42e4-aa5a-1d1c08442de4"
+          "detail_url": "https://api-scraper.sosiamraj.com/scraping/7d976c2b-2598-42e4-aa5a-1d1c08442de4"
         }
       ]
     }
@@ -312,7 +312,7 @@ x-api-key: <JARVIS_INTEGRATION_KEY>
 ## ทดสอบ
 
 ```
-curl -H "x-api-key: <key>" https://so-scraping.vercel.app/api/integrations/jarvis/options
+curl -H "x-api-key: <key>" https://api-scraper.sosiamraj.com/api/integrations/jarvis/options
 ```
 
 ต้องได้ HTTP 200 และมี `accounts`, `groups`, `workers`, `scrape_accounts`
@@ -375,7 +375,7 @@ So Scraping ส่งข้อมูลครบแล้ว (ขึ้นเว
 3. สั่งใบเดิมซ้ำวันถัดไป → กลุ่มที่เพิ่งลงขึ้น "โพสต์ได้อีก <วัน เวลา>" และไม่ถูกติ๊กให้ตั้งแต่แรก
 4. กดสั่งแล้วมีกลุ่มถูกข้าม → เห็นข้อความ "ข้าม N กลุ่ม…" บนจอทันที และหน้าใบงานก็เห็น
 
-ทดสอบ: `curl -H "x-api-key: <key>" "https://so-scraping.vercel.app/api/integrations/jarvis/options?request_no=LBM6903001"` ต้องมี `accounts[].recommended`, `accounts[].needs_verification_since`, `workers[].recommended`, `groups[].repost_wait`
+ทดสอบ: `curl -H "x-api-key: <key>" "https://api-scraper.sosiamraj.com/api/integrations/jarvis/options?request_no=LBM6903001"` ต้องมี `accounts[].recommended`, `accounts[].needs_verification_since`, `workers[].recommended`, `groups[].repost_wait`
 
 ## 7. ฉบับ 4 พ.ย. 2569: กลุ่มมี 2,000+ แล้ว แยกประเภท ราชการ / เอกชน
 

@@ -88,6 +88,8 @@ async function drain() {
 /** Fire-and-forget: start the worker without blocking the server action. */
 export function kickWorker() {
   if (process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME) return;
+  // เว็บบน RM009 อยู่โฟลเดอร์เดียวกับ worker — เปิด/ปิด worker ด้วยสวิตช์บนแผงเท่านั้น ห้ามเว็บแอบเปิดเอง
+  if (process.env.WEB_KICK_WORKER === '0') return;
   void drain();
 }
 
