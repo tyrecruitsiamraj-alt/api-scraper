@@ -245,7 +245,9 @@ async function runPlaywrightForJob(job) {
   };
   fs.writeFileSync(planPath, JSON.stringify(plan), 'utf8');
 
-  const forceHeaded = process.env.COLLECT_FORCE_HEADED === '1';
+  // เจ้าของเคาะ 10 พ.ย. 2569: เลิก Chrome ซ่อนหน้าต่าง — เป็นเบราว์เซอร์คนละแบบกับตอนโพสต์แต่ใช้ล็อกอินเดียวกัน Facebook จับได้ง่าย
+  // ค่าเริ่ม = เห็นหน้าต่าง ใช้โปรไฟล์ Chrome เดียวกับตอนโพสต์ · COLLECT_FORCE_HEADED=0 กลับไปซ่อนหน้าต่าง
+  const forceHeaded = process.env.COLLECT_FORCE_HEADED !== '0';
   const args = forceHeaded
     ? ['playwright', 'test', 'collectComments', '--headed', '--project=GoogleChrome']
     : ['playwright', 'test', 'collectComments', '--project=ChromiumCollect'];
@@ -257,6 +259,7 @@ async function runPlaywrightForJob(job) {
     COLLECT_PLAN_PATH: planPath,
     COLLECT_WORKER_TOKEN: TOKEN,
     COLLECT_USE_HEADED: forceHeaded ? '1' : '0',
+    ...(forceHeaded && plan.user_id ? { FB_PROFILE_ID: plan.user_id } : {}),
   };
   const isWin = process.platform === 'win32';
   return await new Promise((resolve, reject) => {

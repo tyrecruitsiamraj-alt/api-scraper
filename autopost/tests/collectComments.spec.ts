@@ -1,7 +1,7 @@
 /**
- * เก็บเบอร์จาก Comment — มี session แล้วรัน headless; ยังไม่มี session เปิด Chrome (headed)
+ * เก็บเบอร์จาก Comment — เปิด Chrome เห็นหน้าต่าง ใช้โปรไฟล์ถาวรเดียวกับตอนโพสต์ (ตั้งแต่ 10 พ.ย. 2569)
  */
-import { test } from '@playwright/test';
+import { test } from './humanBrowser.fixture';
 import * as fs from 'fs';
 import {
   loadDynamicConfig,
@@ -94,8 +94,7 @@ test('collectComments', async ({ page }) => {
   if (process.env.COLLECT_USE_HEADED === '1') {
     await runLog({
       level: 'info',
-      message:
-        'โหมดเปิด Chrome — ยังไม่มีไฟล์ session ใน .auth ให้ล็อกอิน/ยืนยันตัวตนในหน้าต่างนี้',
+      message: 'เปิด Chrome ของบัญชีนี้ (เห็นหน้าต่าง ใช้โปรไฟล์เดียวกับตอนโพสต์)',
       user_id: plan.user_id,
     });
   } else {
@@ -122,7 +121,7 @@ test('collectComments', async ({ page }) => {
 
   await runLog({
     level: 'info',
-    message: `เริ่มเก็บ Comment (Headless) ${plan.posts.length} โพสต์ — ${user.poster_name || user.name || user.id}`,
+    message: `เริ่มเก็บ Comment ${plan.posts.length} โพสต์ — ${user.poster_name || user.name || user.id}`,
     user_id: user.id,
   });
 

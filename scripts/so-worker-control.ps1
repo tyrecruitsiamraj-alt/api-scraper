@@ -267,7 +267,8 @@ function Start-WorkerWindow([string]$Title, [string]$WorkDir, [string]$NpmScript
     'set WORKER_CAPABILITIES=post,preflight,warmup'
     'set AUTO_POST_DAILY_ENABLED=0'
     'set AUTO_COLLECT_ENABLED=1'
-    'set AUTO_COLLECT_EVERY_MINUTES=120'
+    # เก็บคอมเมนต์ทุก 4 ชม. (เดิม 2 ชม.) — เปิดดูโพสต์ถี่ ๆ ทุกบัญชีเป็นพฤติกรรมบอท (10 พ.ย. 2569)
+    'set AUTO_COLLECT_EVERY_MINUTES=240'
     # ตัวโพสต์: รันพร้อมกันได้ 5 บัญชี (Chrome 5 หน้าต่าง ใช้ RAM ราว 1–1.5 GB ต่อบัญชี) — ตัวเก็บคอมเมนต์ใช้ WORKER_COLLECT_CONCURRENCY แยก
     $(if ($NpmScript -eq 'worker:post') { 'set WORKER_CONCURRENCY=5' } else { 'rem' })
     # ตัวเก็บคอมเมนต์: รันพร้อมกันได้ 2 บัญชี (รวมกับตัวโพสต์ 5 = Chrome ไม่เกิน 7 หน้าต่าง — เดิม 4 ทำเครื่องค้าง 29 ต.ค. 2569)

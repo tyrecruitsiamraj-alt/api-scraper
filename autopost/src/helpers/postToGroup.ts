@@ -13,15 +13,20 @@ import {
 import { saveToSheet } from './saveToSheet';
 import { COMPOSER_TRIGGER, ensureGroupMembership, MEMBERSHIP_MESSAGE, readGroupPageHint, type MembershipState } from './groupMembership';
 import { readGroupName, rememberGroupName } from './groupName';
+import { pasteCaption } from './pasteCaption';
 
 /** รวม goto my_posted + pending + สำรองฟีด + POST Sheet + postLog */
 const SAVE_TO_SHEET_MAX_MS = Math.min(240000, Math.max(30000, Number(process.env.SAVE_TO_SHEET_MAX_MS) || 120000));
 
-/** รอบเปิด composer ใหม่ทั้งดีล (goto กลุ่ม + คลิก + ตรวจ dialog) */
-const MAX_COMPOSER_OPEN_ATTEMPTS = Math.min(15, Math.max(2, Number(process.env.GROUP_COMPOSER_OPEN_ATTEMPTS) || 8));
+/**
+ * รอบเปิด composer ใหม่ทั้งดีล (goto กลุ่ม + คลิก + ตรวจ dialog)
+ * เจ้าของเคาะ 10 พ.ย. 2569: เดิม 8 รอบ × รีเฟรชได้รอบละ 12 ครั้ง = โหลดหน้ากลุ่มได้ร้อยกว่าครั้งต่อกลุ่ม เป็นพฤติกรรมบอท
+ * เหลือ 3 รอบ × 2 ครั้ง และพักระหว่างรอบเหมือนคนรอแล้วลองใหม่ — ไม่ได้ก็ข้ามกลุ่ม
+ */
+const MAX_COMPOSER_OPEN_ATTEMPTS = Math.min(15, Math.max(1, Number(process.env.GROUP_COMPOSER_OPEN_ATTEMPTS) || 3));
 
 /** หลังคลิกช่องโพสต์แล้วยังขึ้น toast เทคนิค — รีเฟรชซ้ำได้กี่ครั้งก่อนขยับรอบนอก */
-const MAX_TOAST_RELOAD_AFTER_CLICK = Math.min(20, Math.max(3, Number(process.env.GROUP_TOAST_RELOAD_MAX) || 12));
+const MAX_TOAST_RELOAD_AFTER_CLICK = Math.min(20, Math.max(1, Number(process.env.GROUP_TOAST_RELOAD_MAX) || 2));
 
 export interface PostToGroupOptions {
   userLabel: string;
@@ -441,6 +446,7 @@ export async function postToGroup(
         console.log(
           `🔄 [${userLabel}] เปิดช่องโพสต์ใหม่ ครั้งที่ ${attempt + 1}/${MAX_COMPOSER_OPEN_ATTEMPTS} (หน้ากลุ่ม ${gID})`
         );
+        await humanPause(page, 4000, 9000);
         await page.goto(groupUrl, { waitUntil: 'domcontentloaded' });
         await dismissCommonFacebookPopups(page);
         await page.waitForTimeout(500);
@@ -564,15 +570,19 @@ export async function postToGroup(
 
     fullCaption = varyCaptionForGroup(fullCaption, gID, normalizeGroupName(groupName));
 
-    console.log(`✍️ [${userLabel}] กำลังพิมพ์ Caption ใน dialog โพสต์...`);
     await focusComposerSafely(page, composerDialog, captionEditor, userLabel);
-    const lines = fullCaption.split('\n');
-    for (const line of lines) {
-      if (line.trim() !== '') {
-        await humanType(page, line);
+    // คัดลอกแล้ววางแบบคน (10 พ.ย. 2569) — วางไม่ได้หรือวางแล้วไม่ตรง ค่อยพิมพ์ทีละบรรทัดแบบเดิม
+    if (!(await pasteCaption(page, captionEditor, fullCaption, userLabel))) {
+      console.log(`✍️ [${userLabel}] กำลังพิมพ์ Caption ใน dialog โพสต์...`);
+      await focusComposerSafely(page, composerDialog, captionEditor, userLabel);
+      const lines = fullCaption.split('\n');
+      for (const line of lines) {
+        if (line.trim() !== '') {
+          await humanType(page, line);
+        }
+        await page.keyboard.press('Shift+Enter');
+        await humanPause(page, 50, 140);
       }
-      await page.keyboard.press('Shift+Enter');
-      await humanPause(page, 50, 140);
     }
 
     await humanReviewBeforePost(page);

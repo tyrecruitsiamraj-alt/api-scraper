@@ -303,6 +303,12 @@ function isFacebookRelatedOrigin(origin: string): boolean {
  */
 async function restoreFacebookStorageState(page: Page, statePath: string): Promise<void> {
   try {
+    // โปรไฟล์ Chrome ถาวรที่ล็อกอินอยู่แล้ว — ไม่ต้องใส่คุกกี้จากไฟล์ทับ และไม่ต้องเปิด/โหลดหน้าซ้ำ (เหมือนคนเปิด Chrome ตัวเอง)
+    const live = await page.context().cookies('https://www.facebook.com').catch(() => []);
+    if (live.some((c) => c.name === 'c_user')) {
+      console.log('[fb-session] โปรไฟล์ Chrome ของบัญชีนี้ล็อกอินอยู่แล้ว');
+      return;
+    }
     if (!fs.existsSync(statePath)) return;
     const raw = await fs.promises.readFile(statePath, 'utf-8');
     const parsed = JSON.parse(raw) as PlaywrightStorageStateFile;

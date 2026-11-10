@@ -172,6 +172,9 @@ async function runPlaywrightForJob(job) {
     const mode = String(job.mode || 'post');
     if (mode === 'preflight') env.PREFLIGHT_USER_ID = String(job.user_id || '');
     if (mode === 'warmup') env.WARMUP_USER_ID = String(job.user_id || '');
+    // โปรไฟล์ Chrome ถาวรของบัญชีนี้ (tests/humanBrowser.fixture.ts) — งานไม่มีบัญชี = Chrome ใหม่แบบเดิม
+    if (job.user_id) env.FB_PROFILE_ID = String(job.user_id);
+    else delete env.FB_PROFILE_ID;
     // ทุกงานนับเพดานต่อวัน (เจ้าของ 8 พ.ย. 2569) — เดิมงานที่ไม่ใช่รอบ 8:00 ตั้ง IGNORE_DAILY_CAP=1
     // ใบจาก Jarvis ทุกใบจึงโพสต์ได้เต็มเพดานใหม่ บางบัญชีโพสต์ 25 กลุ่ม/วัน แล้ว Facebook จำกัดบัญชี
     delete env.IGNORE_DAILY_CAP;

@@ -158,6 +158,11 @@ test('Dynamic Post: รันโพสต์ตาม Assignments', async ({ pag
 
   for (const [userId, userAssignments] of assignmentsByUser.entries()) {
     const user = config.users.find((u) => u.id === userId);
+    // งานนี้เปิดโปรไฟล์ Chrome ของบัญชีเดียว (FB_PROFILE_ID) — บัญชีอื่นห้ามล็อกอินซ้อนในโปรไฟล์นี้
+    if (user && process.env.FB_PROFILE_ID && String(process.env.FB_PROFILE_ID) !== String(user.id)) {
+      console.log(`⏭️ ข้าม ${user.name || user.id}: งานนี้เปิดโปรไฟล์ Chrome ของบัญชี ${process.env.FB_PROFILE_ID}`);
+      continue;
+    }
     if (!user) {
       console.log(`⏭️ ข้าม user ${userId}: ไม่พบในตาราง users`);
       continue;

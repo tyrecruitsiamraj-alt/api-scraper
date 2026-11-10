@@ -1,6 +1,8 @@
 node_modules/
 .env
 .auth/
+# โปรไฟล์ Chrome ถาวรต่อบัญชี Facebook (มีคุกกี้ล็อกอิน) — ห้ามขึ้น repo และ git clean ตอนอัปเดตโค้ดต้องไม่ลบ
+.profiles/
 output/
 
 # Skill (IP ลับขององค์กร) — เก็บ local ใช้งานได้ แต่ห้าม push ขึ้น repo public

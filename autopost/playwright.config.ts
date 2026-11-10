@@ -42,9 +42,14 @@ export default defineConfig({
     {
       /** ไม่มีช่องว่างในชื่อ — กัน Windows/cmd แยก argv ผิดแล้ว Playwright ไม่รันโปรเจกต์ที่ตั้งใจ (หน้าเปล่า) */
       name: 'GoogleChrome',
+      /**
+       * ไม่ใช้ devices['Desktop Chrome'] (10 พ.ย. 2569) — มันยัด user agent ตายตัว (Windows + Chrome รุ่นของ Playwright)
+       * ทับ Chrome จริงทุกหน้าต่าง รวมโปรไฟล์ถาวร ทำให้ user agent ไม่ตรงกับรุ่น Chrome/เครื่องจริง Facebook จับได้
+       * ให้ Chrome บอกค่าจริงของตัวเอง ขนาดจอตั้งรายบัญชีใน tests/humanBrowser.fixture.ts
+       */
       use: {
-        ...devices['Desktop Chrome'],
         channel: 'chrome',
+        viewport: { width: 1366, height: 658 },
         launchOptions: {
           ignoreDefaultArgs: ['--enable-automation'],
           args: ['--disable-blink-features=AutomationControlled'],
@@ -56,8 +61,8 @@ export default defineConfig({
       /** รันเฉพาะเทสต์เก็บ comment — ไม่รัน postAll/checkFacebookSession ซ้ำแบบ headless */
       testMatch: ['**/collectComments.spec.ts', '**/collectPostComments.logic.spec.ts', '**/facebookAuthState.spec.ts'],
       use: {
-        ...devices['Desktop Chrome'],
         channel: 'chrome',
+        viewport: { width: 1366, height: 658 },
         headless: true,
       },
     },

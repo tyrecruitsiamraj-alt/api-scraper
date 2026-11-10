@@ -1,10 +1,17 @@
-/** hash จาก groupId → ค่าคงที่ต่อกลุ่ม (กลุ่มเดิมได้รูปแบบเดิม) */
+/**
+ * hash จาก groupId + วัน → ค่าคงที่ต่อกลุ่มต่อวัน
+ * 10 พ.ย. 2569: เดิมกลุ่มเดิมได้รูปแบบเดิมทุกครั้ง โพสต์ซ้ำกลุ่มเดิมจึงเหมือนเดิมเป๊ะ — ใส่วันเข้าไปให้แต่ละวันต่างกัน
+ */
 function hashGroupSeed(groupId: string): number {
   let h = 0;
   for (let i = 0; i < groupId.length; i++) {
     h = (Math.imul(31, h) + groupId.charCodeAt(i)) | 0;
   }
   return Math.abs(h);
+}
+
+function bangkokDay(): string {
+  return new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Bangkok' });
 }
 
 function pick<T>(arr: T[], seed: number, salt: number): T {
@@ -27,10 +34,10 @@ export function isCaptionVariationEnabled(): boolean {
 /**
  * ปรับแคปชั่นเล็กน้อยต่อกลุ่ม — เนื้อหาหลักเหมือนเดิม แต่ลด pattern ข้อความซ้ำทุกกลุ่ม
  */
-export function varyCaptionForGroup(caption: string, groupId: string, _groupName?: string): string {
+export function varyCaptionForGroup(caption: string, groupId: string, _groupName?: string, day = bangkokDay()): string {
   if (!caption.trim() || !isCaptionVariationEnabled()) return caption;
 
-  const seed = hashGroupSeed(String(groupId));
+  const seed = hashGroupSeed(`${groupId}|${day}`);
   let text = caption.replace(/\r\n/g, '\n').trimEnd();
   let salt = 0;
 
@@ -64,10 +71,17 @@ export function varyCaptionForGroup(caption: string, groupId: string, _groupName
     text = paras.join(gap);
   }
 
-  const closers = ['', '', 'ขอบคุณครับ 🙏', 'ยินดีตอบคำถามครับ', ''];
+  const closers = ['', '', 'ขอบคุณครับ 🙏', 'ยินดีตอบคำถามครับ', '', 'สนใจสอบถามเพิ่มเติมได้ครับ', 'แชร์ต่อให้คนที่หางานได้ครับ'];
   const closer = pick(closers, seed, salt++);
   if (closer && !text.includes(closer)) {
     text += `\n\n${closer}`;
+  }
+
+  // บรรทัดเปิดเพิ่มข้างบน (ไม่แก้ข้อความที่คนสั่งพิมพ์มา) — ไม่ใส่คำที่อาจไม่จริง เช่น "ด่วน"
+  const openers = ['', '', 'ประกาศรับสมัครงาน', 'แชร์ประกาศงานครับ', 'เปิดรับสมัครงานครับ', ''];
+  const opener = pick(openers, seed, salt++);
+  if (opener && !text.startsWith(opener)) {
+    text = `${opener}\n\n${text}`;
   }
 
   return text;
