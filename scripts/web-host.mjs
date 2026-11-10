@@ -131,6 +131,70 @@ function readWebEnv() {
   return parseEnv(fs.readFileSync(ENV_FILE));
 }
 
+/**
+ * เติม web/.env.local ให้เอง (เจ้าของ 10 พ.ย. 2569 "งง" — ค่าบน Vercel ตั้งเป็น sensitive เปิดดูย้อนหลังไม่ได้)
+ * - ที่อยู่เว็บ: ค่าตายตัวของ RM009
+ * - ฐานข้อมูล + กุญแจถอดรหัส: เอาจาก .env ของโฟลเดอร์นี้ (ไฟล์ที่ Scrap ใช้อยู่แล้ว ฐานเดียวกัน กุญแจต้องตัวเดียวกัน)
+ * - รหัสที่ตั้งใหม่ได้: สุ่มให้ครั้งเดียวแล้วเก็บในไฟล์ (JARVIS_INTEGRATION_KEY ต้องเอาไปใส่การ์ด So Scraping ใน Jarvis ตอนย้าย)
+ * - Azure 3 ตัว: ใส่บรรทัดว่างไว้ให้กรอก — ระบบเดาไม่ได้
+ * เติมเฉพาะบรรทัดที่ไม่มีหรือว่าง ไม่ทับค่าที่มีอยู่
+ */
+const ENV_DEFAULTS = {
+  NEXTAUTH_URL: 'https://api-scraper.sosiamraj.com',
+  AUTOPOST_URL: 'https://so-autopost.sosiamraj.com',
+};
+const ENV_FROM_ROOT = ['PGHOST', 'PGPORT', 'PGUSER', 'PGPASSWORD', 'PGDATABASE', 'DB_SCHEMA', 'AUTOPOST_SCHEMA', 'APP_ENCRYPTION_KEY'];
+const ENV_GENERATED = ['NEXTAUTH_SECRET', 'AUTOPOST_ACCESS_TOKEN', 'JARVIS_INTEGRATION_KEY'];
+const ENV_ASK_HUMAN = ['AZURE_AD_CLIENT_ID', 'AZURE_AD_CLIENT_SECRET', 'AZURE_AD_TENANT_ID'];
+
+/** ค่าที่มี # ช่องว่าง หรือเครื่องหมายคำพูด ต้องครอบ ไม่งั้นอ่านกลับมาได้ไม่ครบ (เช่นรหัสผ่านที่มี #) */
+function envValue(value) {
+  if (/^[A-Za-z0-9_\-.:/@+=,]*$/.test(value)) return value;
+  if (!value.includes("'")) return `'${value}'`;
+  return `"${value.replace(/"/g, '\\"')}"`;
+}
+
+/** คืนข้อความไฟล์ใหม่ + ชื่อบรรทัดที่เติม (ไม่มีค่า) — pure ให้เทสต์ได้ */
+export function fillEnvText(text, rootEnv, randomSecret = () => crypto.randomBytes(32).toString('hex')) {
+  const current = parseEnv(text || '');
+  const fills = {};
+  const has = (key) => String(current[key] ?? '').trim() !== '';
+  for (const [key, value] of Object.entries(ENV_DEFAULTS)) if (!has(key)) fills[key] = value;
+  for (const key of ENV_FROM_ROOT) if (!has(key) && String(rootEnv?.[key] ?? '').trim()) fills[key] = String(rootEnv[key]).trim();
+  for (const key of ENV_GENERATED) if (!has(key)) fills[key] = randomSecret();
+  const blanks = ENV_ASK_HUMAN.filter((key) => !(key in current));
+
+  const lines = (text || '').split(/\r?\n/);
+  const placed = new Set();
+  const out = lines.map((line) => {
+    const m = line.match(/^\s*([A-Z0-9_]+)\s*=/);
+    if (m && m[1] in fills && !placed.has(m[1])) {
+      placed.add(m[1]);
+      return `${m[1]}=${envValue(fills[m[1]])}`;
+    }
+    return line;
+  });
+  while (out.length && out[out.length - 1].trim() === '') out.pop();
+  const append = Object.keys(fills).filter((k) => !placed.has(k)).map((k) => `${k}=${envValue(fills[k])}`);
+  if (!text) out.push('# ค่าของเว็บ So Scraping บน RM009 — ห้ามส่งในแชท ห้ามขึ้น git');
+  out.push(...append);
+  if (blanks.length) {
+    out.push('# กรอก 3 บรรทัดนี้จาก Azure (ขอฝ่าย IT) แล้วบันทึก — ระบบเช็กใหม่ทุก 1 นาที');
+    out.push(...blanks.map((k) => `${k}=`));
+  }
+  return { text: `${out.join('\n')}\n`, filled: Object.keys(fills), blanks };
+}
+
+function prepareEnvFile() {
+  const before = fs.existsSync(ENV_FILE) ? fs.readFileSync(ENV_FILE, 'utf8') : '';
+  const rootEnvPath = process.env.WEB_HOST_ROOT_ENV_FILE || path.join(ROOT, '.env');
+  const rootEnv = fs.existsSync(rootEnvPath) ? parseEnv(fs.readFileSync(rootEnvPath)) : {};
+  const { text, filled, blanks } = fillEnvText(before, rootEnv);
+  if (!filled.length && !blanks.length) return;
+  fs.writeFileSync(ENV_FILE, text);
+  log(`เติมค่าใน ${path.relative(ROOT, ENV_FILE)} ให้แล้ว: ${[...filled, ...blanks.map((k) => `${k} (ว่าง รอกรอก)`)].join(', ')}`);
+}
+
 function acquireLock() {
   fs.mkdirSync(OUTPUT, { recursive: true });
   try {
@@ -398,11 +462,16 @@ async function main() {
   setInterval(alive, 30_000);
 
   // รอจนมี web/.env.local ครบ — ไม่ปิดตัวเอง (ไม่งั้นหน้าต่างเปิดซ้ำทุก 10 วินาที)
+  try {
+    prepareEnvFile();
+  } catch (e) {
+    log(`เติมค่าใน web/.env.local ไม่ได้: ${e.message}`);
+  }
   let env = readWebEnv();
   for (;;) {
     const missing = env ? missingEnv(env) : ['ไฟล์ web/.env.local'];
     if (!missing.length) break;
-    log(`ยังเปิดเว็บไม่ได้ ขาด: ${missing.join(', ')} — ใส่แล้วรอ 1 นาที`);
+    log(`ยังเปิดเว็บไม่ได้ ขาด: ${missing.join(', ')} — กรอกใน ${path.relative(ROOT, ENV_FILE)} แล้วรอ 1 นาที`);
     await sleep(CHECK_EVERY_MS);
     env = readWebEnv();
   }

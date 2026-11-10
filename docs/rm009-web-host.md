@@ -6,30 +6,16 @@
 ## ตั้งครั้งแรก (ทำตามลำดับ)
 
 1. **RM009 → แผง SO Workers → อัปเดตโค้ด** (กดตอน Autopost ไม่ได้โพสต์อยู่) แผงใหม่จะมีสวิตช์แถวที่ 3 "เว็บ So Scraping"
-2. **สร้างไฟล์ `web\.env.local` ในโฟลเดอร์ api-scraper บน RM009** คัดลอกค่าจาก Vercel → โปรเจกต์ so-scraping → Settings → Environment Variables (Production) ครบทุกตัวด้านล่าง ยกเว้น 2 บรรทัดแรกที่ต้องใช้ค่าใหม่
-   ```
-   NEXTAUTH_URL=https://api-scraper.sosiamraj.com
-   AUTOPOST_URL=https://so-autopost.sosiamraj.com
-   NEXTAUTH_SECRET=
-   AZURE_AD_CLIENT_ID=
-   AZURE_AD_CLIENT_SECRET=
-   AZURE_AD_TENANT_ID=
-   APP_ENCRYPTION_KEY=
-   PGHOST=
-   PGPORT=
-   PGUSER=
-   PGPASSWORD=
-   PGDATABASE=
-   DB_SCHEMA=
-   AUTOPOST_SCHEMA=
-   AUTOPOST_ACCESS_TOKEN=
-   JARVIS_INTEGRATION_KEY=
-   REPAIR_TOKEN=
-   SCRAPE_PREFERRED_WORKER=
-   ```
-   ค่าว่างใน Vercel ก็เว้นว่างไว้ · ห้ามส่งไฟล์นี้ทางแชท · แผงอัปเดตโค้ดไม่ลบไฟล์นี้
-3. **แผง SO Workers → สวิตช์ "เว็บ So Scraping" → เปิด** ครั้งแรกติดตั้งแพ็กเกจ + build ราว 10 นาที ดูความคืบหน้าที่ปุ่ม "เปิดไฟล์ log" → `web-host.log`
-   เสร็จแล้วจะมีบรรทัด `เว็บตอบแล้ว (HTTP 200)` · ค่าในไฟล์ขาด = log บอกชื่อค่าที่ขาด แก้ไฟล์แล้วรอ 1 นาที
+2. **แผง SO Workers → สวิตช์ "เว็บ So Scraping" → เปิด** ระบบสร้างไฟล์ `web\.env.local` ให้เอง
+   - ที่อยู่เว็บ ใส่ให้เป็นโดเมนใหม่
+   - ค่าฐานข้อมูลกับกุญแจถอดรหัส คัดลอกจากไฟล์ `.env` ของโฟลเดอร์เดียวกัน (ไฟล์ที่ Scrap ใช้อยู่)
+   - รหัสที่ตั้งใหม่ได้ (NEXTAUTH_SECRET, AUTOPOST_ACCESS_TOKEN, JARVIS_INTEGRATION_KEY) สุ่มให้ครั้งเดียว
+   - เหลือว่าง 3 บรรทัดท้ายไฟล์: `AZURE_AD_CLIENT_ID` `AZURE_AD_CLIENT_SECRET` `AZURE_AD_TENANT_ID` ขอจากฝ่าย IT
+     (Client ID / Tenant ID ดูได้หน้าแอปใน Azure · Client Secret ดูย้อนหลังไม่ได้ ต้องกด New client secret)
+   - เปิดไฟล์ด้วย Notepad กรอก 3 บรรทัดแล้วบันทึก ระบบเช็กใหม่ทุก 1 นาที
+   - ค่าบน Vercel ตั้งเป็น sensitive เปิดดูย้อนหลังไม่ได้ จึงไม่ต้องไปคัดลอกจาก Vercel
+3. **รอเว็บขึ้น** หลังกรอก Azure ครบ ครั้งแรกติดตั้งแพ็กเกจ + build ราว 10 นาที ดูความคืบหน้าที่ปุ่ม "เปิดไฟล์ log" → `web-host.log`
+   เสร็จแล้วจะมีบรรทัด `เว็บตอบแล้ว (HTTP 200)` · ค่าในไฟล์ขาด = log บอกชื่อค่าที่ขาด
 4. **Cloudflare → Zero Trust → Networks → Tunnels → tunnel ของ RM009 → Public Hostname**
    - แก้ `api-scraper.sosiamraj.com` → Service `HTTP` · URL `localhost:3300`
    - เพิ่ม `so-autopost.sosiamraj.com` → Service `HTTP` · URL `localhost:3100`
@@ -37,7 +23,7 @@
 5. **Azure portal → App registrations → แอปที่ใช้ล็อกอิน So Scraping → Authentication → Add URI**
    `https://api-scraper.sosiamraj.com/api/auth/callback/azure-ad` → Save (ไม่ใส่ = ล็อกอินแล้วขึ้น error redirect_uri)
 6. **Jarvis → ตั้งค่า → เชื่อมระบบภายนอก → การ์ด So Scraping**
-   ช่อง URL ใส่ `https://api-scraper.sosiamraj.com` · ช่อง key วางค่า `JARVIS_INTEGRATION_KEY` ตัวเดิม (ปุ่มบันทึกกดได้เมื่อมี key) → ทดสอบ → บันทึก
+   ช่อง URL ใส่ `https://api-scraper.sosiamraj.com` · ช่อง key วางค่า `JARVIS_INTEGRATION_KEY` จาก `web\.env.local` บน RM009 (ปุ่มบันทึกกดได้เมื่อมี key) → ทดสอบ → บันทึก
 7. **ทดสอบ** เปิด https://api-scraper.sosiamraj.com → ล็อกอิน → เปิดหน้า Autopost รายงาน / เก็บคอมเมนต์ (เป็นหน้าที่ฝัง Autopost) → ใน Jarvis กดดูตัวเลือกโพสต์ของใบขอสักใบ
 8. ใช้ได้ครบสักสองสามวันแล้วค่อยปิดโปรเจกต์ so-scraping / so-autopost บน Vercel (อย่าลบ เก็บไว้ถอยกลับ)
 
