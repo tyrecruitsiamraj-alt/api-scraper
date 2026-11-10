@@ -1,9 +1,10 @@
 import { ExternalLinkIcon } from 'lucide-react';
 import { dismissCommentLeadAction, replyCommentLeadAction } from '@/lib/actions';
-import { jarvisLeadsConfigured, listCommentLeads } from '@/lib/comment-leads';
+import { jarvisLeadsConfigured, listCommentLeads, listReplyTemplates } from '@/lib/comment-leads';
 import type { CommentLead } from '@/lib/comment-leads';
 import { AutopostNav } from '@/components/AutopostNav';
 import { LeadCallTable } from '@/components/post/LeadCallTable';
+import { ReplyTemplatesCard } from '@/components/post/ReplyTemplatesCard';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -86,13 +87,14 @@ export default async function CommentLeadsPage(props: { searchParams?: Promise<{
   const needsReply = all.filter((l) => l.needs_human && !l.reply_text && !l.replied_at);
   const withPhone = all.filter((l) => l.phone);
   const replied = all.filter((l) => l.replied_at).length;
+  const replyTemplates = await listReplyTemplates();
 
   return (
     <div className="flex flex-col gap-6">
       <div className="flex flex-col gap-1">
         <h1 className="text-2xl font-semibold">คนคอมเมนต์</h1>
         <p className="text-sm text-muted-foreground">
-          ระบบเก็บคอมเมนต์ใต้โพสต์ทุก 2 ชั่วโมง ตอบให้เองเมื่อคนฝากเบอร์หรือบอกว่าสนใจ ส่วนคำถามรอให้คนตอบที่นี่
+          ระบบเก็บคอมเมนต์ใต้โพสต์ทุก 4 ชั่วโมง ตอบให้เองเมื่อคนฝากเบอร์หรือบอกว่าสนใจ ส่วนคำถามรอให้คนตอบที่นี่
         </p>
       </div>
 
@@ -124,6 +126,8 @@ export default async function CommentLeadsPage(props: { searchParams?: Promise<{
           </div>
         ))}
       </dl>
+
+      <ReplyTemplatesCard templates={replyTemplates} />
 
       {requestNos.length > 1 && (
         <form className="flex flex-wrap items-end gap-2">

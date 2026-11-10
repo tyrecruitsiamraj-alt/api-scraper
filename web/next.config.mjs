@@ -40,6 +40,9 @@ const nextConfig = {
       '@sparticuz/chromium-min': require.resolve('@sparticuz/chromium-min'),
       cheerio: require.resolve('cheerio'),
     };
+    // ไฟล์ CommonJS ของ autopost/server ที่หน้าเว็บฝั่ง browser ใช้ร่วม (ข้อความตอบคอมเมนต์)
+    // โหมด dev ใส่โค้ด hot reload ที่มี import.meta — ต้องให้ webpack อ่านไฟล์นี้แบบ auto ไม่งั้นหน้าเว็บโหลดไม่ขึ้น
+    config.module.rules.push({ test: /[\\/]autopost[\\/]server[\\/]comment-reply-templates\.js$/, type: 'javascript/auto' });
     return config;
   },
 };

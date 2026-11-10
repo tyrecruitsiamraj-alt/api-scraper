@@ -9,6 +9,7 @@
  */
 
 const crypto = require('crypto');
+const { DEFAULT_REPLY_TEMPLATES, ensureReplyTemplates, loadReplyTemplates, renderReply, replyValues } = require('./comment-reply-templates');
 
 const TABLE_SQL = `
 CREATE TABLE IF NOT EXISTS comment_leads (
@@ -51,6 +52,7 @@ async function ensureCommentLeadsTable(db) {
   for (const stmt of TABLE_SQL.split(';').map((s) => s.trim()).filter(Boolean)) {
     await db.query(stmt);
   }
+  await ensureReplyTemplates(db);
 }
 
 const PHONE_RE = /(?:\+?66|0)[\s.-]?\d(?:[\s.-]?\d){7,8}/g;
@@ -94,25 +96,14 @@ function contactFromCaption(caption) {
   return { link, phone, contactName };
 }
 
-function firstName(name) {
-  return String(name || '').trim().split(/\s+/)[0] || '';
-}
-
 /**
- * ข้อความตอบตามแม่แบบ — คืน null เมื่อไม่ควรตอบเอง (คำถาม/ข้อความอื่น ให้คนตอบ)
+ * ข้อความตอบตามแม่แบบที่ทีมตั้งไว้ (comment-reply-templates.js) — คืน null เมื่อไม่ควรตอบเอง
+ * (คำถาม/ข้อความอื่น หรือทีมเว้นข้อความว่างไว้ = ให้คนตอบ)
  */
-function buildAutoReply({ kind, name, caption, position }) {
+function buildAutoReply({ kind, name, caption, position }, templates = DEFAULT_REPLY_TEMPLATES) {
   if (kind !== 'phone' && kind !== 'interest') return null;
-  const who = firstName(name) ? `คุณ${firstName(name)}` : '';
-  if (kind === 'phone') {
-    return `ขอบคุณ${who ? ` ${who}` : ''}ค่ะ ได้รับเบอร์แล้ว เจ้าหน้าที่จะติดต่อกลับเร็ว ๆ นี้ค่ะ`;
-  }
   const { link, phone, contactName } = contactFromCaption(caption);
-  const lines = [`สวัสดีค่ะ${who ? ` ${who}` : ''} ขอบคุณที่สนใจ${position ? `ตำแหน่ง${position}` : 'งานนี้'}ค่ะ`];
-  if (link) lines.push(`สมัครได้ที่ ${link}`);
-  if (phone) lines.push(`${link ? 'หรือ' : ''}โทร ${phone}${contactName ? ` (${contactName})` : ''}`);
-  lines.push('หรือฝากเบอร์ไว้ในคอมเมนต์ เจ้าหน้าที่จะโทรกลับค่ะ');
-  return lines.join('\n');
+  return renderReply(templates[kind], replyValues({ name, position, link, phone, contactName }));
 }
 
 /** jv-lbm6903001-r2 → LBM6903001 */
@@ -141,9 +132,10 @@ function newId() {
  */
 async function saveComments(db, post, comments) {
   const requestNo = requestNoFromJobId(post.job_id);
+  const templates = await loadReplyTemplates(db);
   for (const c of comments) {
     const kind = classifyComment(c.text);
-    const reply = buildAutoReply({ kind, name: c.name, caption: post.caption, position: post.position });
+    const reply = buildAutoReply({ kind, name: c.name, caption: post.caption, position: post.position }, templates);
     await db.query(
       `INSERT INTO comment_leads (id, comment_key, post_log_id, user_id, job_id, group_id, request_no, post_link,
           comment_url, commenter_name, commenter_profile_url, comment_text, phone, kind, needs_human, reply_text, reply_source)

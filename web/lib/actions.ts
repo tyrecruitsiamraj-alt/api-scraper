@@ -8,7 +8,9 @@ import { encryptFacebookPassword, encryptSecret } from './crypto';
 import { kickWorker } from './worker-kick';
 import { postCaptionIssues } from '../../src/core/post-caption-check.js';
 import { dailyCapCeiling } from '../../autopost/server/post-pacing.js';
-import { dismissCommentLead, jarvisLeadsConfigured, requestAiCall, saveManualReply } from './comment-leads';
+import { dismissCommentLead, jarvisLeadsConfigured, requestAiCall, saveManualReply, saveReplyTemplate } from './comment-leads';
+import type { ReplyKind } from './comment-leads';
+import { replyTemplateProblem } from '../../autopost/server/comment-reply-templates.js';
 import { q } from './db';
 import { clearAccountVerification } from './post-tasks';
 import { CONTENT_DISABLED_OPERATOR_MESSAGE, isContentGenerationEnabled } from './product-scope';
@@ -194,6 +196,28 @@ export async function replyCommentLeadAction(formData: FormData) {
   if (!id || !text) notice = 'พิมพ์คำตอบก่อนบันทึก';
   else if (text.length > 1000) notice = 'คำตอบยาวเกิน 1,000 ตัวอักษร';
   else if (!(await saveManualReply(id, text, session.user?.email ?? session.user?.name ?? null))) notice = 'คอมเมนต์นี้ถูกตอบไปแล้ว';
+  revalidatePath('/autopost/leads');
+  redirect(`/autopost/leads?notice=${encodeURIComponent(notice)}`);
+}
+
+/** ทีมแก้ข้อความที่บอทตอบใต้คอมเมนต์เอง — มีผลกับคอมเมนต์ใหม่ที่เก็บรอบถัดไป (คอมเมนต์ที่ได้คำตอบไปแล้วไม่เปลี่ยน) */
+export async function saveReplyTemplateAction(formData: FormData) {
+  const session = await getServerSession(authOptions);
+  if (!session) throw new Error('unauthorized');
+  const kind = String(formData.get('kind') ?? '');
+  const body = String(formData.get('body') ?? '').replace(/\r\n/g, '\n').trim();
+  let notice: string;
+  if (kind !== 'phone' && kind !== 'interest') notice = 'ไม่รู้จักแบบคอมเมนต์นี้';
+  else {
+    const problem = replyTemplateProblem(body);
+    if (problem) notice = `ยังไม่ได้บันทึก: ${problem}`;
+    else {
+      await saveReplyTemplate(kind as ReplyKind, body, session.user?.email ?? session.user?.name ?? null);
+      notice = body
+        ? 'บันทึกข้อความตอบแล้ว ใช้กับคอมเมนต์ใหม่ตั้งแต่รอบเก็บคอมเมนต์ถัดไป'
+        : 'บันทึกแล้ว: คอมเมนต์แบบนี้ระบบจะไม่ตอบเอง ส่งให้คนตอบในหน้านี้';
+    }
+  }
   revalidatePath('/autopost/leads');
   redirect(`/autopost/leads?notice=${encodeURIComponent(notice)}`);
 }

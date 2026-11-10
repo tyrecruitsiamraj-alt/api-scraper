@@ -63,6 +63,7 @@ test('saveComments marks questions for a human and queues template replies', asy
         }
         return { rows: [] };
       }
+      if (sql.includes('comment_reply_templates')) return { rows: [] };
       return { rows: rows.filter((r) => r.post_link === params[0]) };
     },
   };
@@ -78,4 +79,31 @@ test('saveComments marks questions for a human and queues template replies', asy
   assert.equal(out.find((r) => r.commenter_name === 'Malee K').needs_human, true);
   assert.equal(out.find((r) => r.commenter_name === 'Dang P').phone, '0812345678');
   assert.equal(pendingReplies(out).length, 2);
+});
+
+test('saveComments uses the wording the team saved, and an empty wording leaves it for a person', async () => {
+  const rows = [];
+  const db = {
+    async query(sql, params) {
+      if (sql.includes('comment_reply_templates')) {
+        return { rows: [{ kind: 'phone', body: 'รับเบอร์ {ชื่อ} แล้วนะคะ' }, { kind: 'interest', body: '' }] };
+      }
+      if (sql.startsWith('INSERT')) {
+        const [id, key, , , , , , postLink, , name, , text, phone, kind, needsHuman, reply, source] = params;
+        rows.push({ id, comment_key: key, post_link: postLink, commenter_name: name, comment_text: text, phone, kind, needs_human: needsHuman, reply_text: reply, reply_source: source });
+        return { rows: [] };
+      }
+      return { rows: rows.filter((r) => r.post_link === params[0]) };
+    },
+  };
+  const out = await saveComments(db, { post_log_id: 'pl2', post_link: 'https://fb/p/2', caption }, [
+    { name: 'Dang P', text: '0812345678' },
+    { name: 'Somchai J', text: 'สนใจครับ' },
+  ]);
+  const phoneRow = out.find((r) => r.kind === 'phone');
+  assert.equal(phoneRow.reply_text, 'รับเบอร์ คุณDang แล้วนะคะ');
+  assert.equal(phoneRow.needs_human, false);
+  const interestRow = out.find((r) => r.kind === 'interest');
+  assert.equal(interestRow.reply_text, null);
+  assert.equal(interestRow.needs_human, true);
 });
