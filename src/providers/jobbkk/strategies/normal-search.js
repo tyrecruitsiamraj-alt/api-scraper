@@ -170,15 +170,38 @@ async function readChipTags(input) {
   return info;
 }
 
-/** รอรายการแนะนำของกล่องตำแหน่ง/Keyword ขึ้นจริง (JobBKK โหลดคำแนะนำจากเซิร์ฟเวอร์ ใช้เวลาเกิน 0.25 วิ) */
-async function waitForChipSuggestions(page, timeoutMs = 4000) {
+/** ตัวเลือกที่มองเห็นจริง — ไม่นับ div role="option" ที่ JobBKK ซ่อนไว้ในกล่องขนาด 0x0 ให้โปรแกรมอ่านหน้าจอ */
+const CHIP_OPTION_SEL = '.ant-select-item-option-content:visible';
+
+function looseText(value) {
+  return String(value ?? '').replace(/\s+/g, ' ').trim().toLowerCase();
+}
+
+/**
+ * รอรายการแนะนำ "ของคำที่พิมพ์" ขึ้นจริง (JobBKK โหลดคำแนะนำจากเซิร์ฟเวอร์)
+ * 11 พ.ย. 2569 (ดูบนหน้าจริงกับเจ้าของ): คลิกกล่องตำแหน่งตอนยังว่าง JobBKK โชว์รายการตั้งต้นทันที (3D Designer, กรรมการผู้จัดการ …)
+ * โค้ดเดิมเห็นรายการนี้ก็นับว่าขึ้นแล้ว เลือกก่อนรายการของคำที่พิมพ์มาถึง → ไม่มีชิป ล้มทุกใบตั้งแต่ 3 พ.ย.
+ * จึงนับว่าขึ้นเมื่อมีตัวเลือกที่มีคำที่พิมพ์อยู่ด้วย
+ */
+async function waitForChipSuggestions(page, term, timeoutMs = 4000) {
+  const want = looseText(term);
   const start = Date.now();
   while (Date.now() - start < timeoutMs) {
-    const options = page.locator('.ant-select-dropdown:visible .ant-select-item-option, .ant-select-dropdown:visible [role="option"]');
-    if ((await options.count().catch(() => 0)) > 0) return true;
+    const texts = await page.locator(CHIP_OPTION_SEL).allTextContents().catch(() => []);
+    if (texts.some((text) => looseText(text).includes(want))) return true;
     await sleep(200);
   }
   return false;
+}
+
+/** ไม่มีตัวเลือกตรงคำ: คลิกตัวแรกที่มีคำนั้นอยู่ (เช่น "แม่บ้าน" → "พนักงานแม่บ้าน") */
+async function clickOptionContaining(page, term) {
+  const option = await firstVisibleLocator([
+    page.locator(CHIP_OPTION_SEL).filter({ hasText: new RegExp(escapeRegExp(String(term).trim()), 'iu') }),
+  ]);
+  if (!option) return false;
+  await clickWithoutNavigationWait(option);
+  return true;
 }
 
 /**
@@ -203,17 +226,18 @@ async function applyChipField(page, field, terms, report) {
       await input.fill('').catch(() => {});
       if (attempt === 0) await input.pressSequentially(term, { delay: 40 }).catch(async () => input.fill(term));
       else await input.fill(term);
-      const suggested = await waitForChipSuggestions(page, 6000);
-      const picked = suggested && (await clickMatchingOption(page, [term]));
-      if (!picked) {
-        // ไม่มีตัวเลือกตรงคำ: ลูกศรลงให้ตัวแรกไฮไลต์แล้ว Enter (กล่องนี้รับ Enter เป็นการเลือกตัวที่ไฮไลต์)
-        await page.keyboard.press('ArrowDown').catch(() => {});
+      const suggested = await waitForChipSuggestions(page, term, 8000);
+      let how = 'กด Enter';
+      if (suggested && (await clickMatchingOption(page, [term]))) how = 'คลิกตัวเลือกตรงคำ';
+      else if (suggested && (await clickOptionContaining(page, term))) how = 'คลิกตัวเลือกที่มีคำนี้';
+      else {
+        // ไม่มีรายการของคำนี้: Enter เลือกตัวที่ JobBKK ไฮไลต์ไว้ (ไม่กดลูกศรลง — ลูกศรพาออกจากตัวที่ตรงคำ ดูหน้าจริง 11 พ.ย. 2569)
         await page.keyboard.press('Enter').catch(() => {});
       }
       await sleep(500);
       const { tags, count, box } = await readChipTags(input);
       report[seenKey] = tags.join(', ');
-      report[`${field}Box`] = `${box} · รายการแนะนำ${suggested ? 'ขึ้น' : 'ไม่ขึ้นใน 6 วิ'} · ${picked ? 'คลิกตัวเลือกตรงคำ' : 'ใช้ลูกศร+Enter'} · รอบ ${attempt + 1}`;
+      report[`${field}Box`] = `${box} · รายการของคำนี้${suggested ? 'ขึ้น' : 'ไม่ขึ้นใน 8 วิ'} · ${how} · รอบ ${attempt + 1}`;
       const counterGrew = count != null && (before.count == null || count > before.count);
       if (tagsMatchRequested(tags, [term]) || counterGrew) verified = true;
     }

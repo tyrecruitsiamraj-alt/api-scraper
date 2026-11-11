@@ -353,6 +353,36 @@ test('Position chip drawn one level further out is still seen', async (t) => {
   assert.ok(result.report.applied.includes('position'), result.report.positionBox);
 });
 
+// 11 พ.ย. 2569 (หน้าจริงที่เจ้าของล็อกอินให้ดู): คลิกกล่องตำแหน่งตอนว่าง JobBKK โชว์รายการตั้งต้นทันที (3D Designer …)
+// รายการของคำที่พิมพ์มาทีหลัง — โค้ดเดิมเลือกจากรายการตั้งต้นแล้วกดลูกศรลง+Enter ไม่เกิดชิป ล้มทุกใบตั้งแต่ 3 พ.ย.
+test('Position waits past the default suggestion list for the typed term', async (t) => {
+  const browser = await chromium.launch({ headless: true });
+  t.after(async () => {
+    await browser.close().catch(() => {});
+  });
+  const page = await browser.newPage();
+  const fixture = FIXTURE.replace(
+    "style.display = 'block'; }, 600);",
+    "style.display = 'block'; document.getElementById('default-dropdown').style.display = 'none'; }, 1500);",
+  );
+  assert.notEqual(fixture, FIXTURE, 'fixture rewrite applied');
+  await page.setContent(fixture, { waitUntil: 'domcontentloaded' });
+  await page.evaluate(() => {
+    const list = document.createElement('div');
+    list.className = 'ant-select-dropdown';
+    list.id = 'default-dropdown';
+    list.style.display = 'none';
+    list.innerHTML = '<div class="ant-select-item ant-select-item-option ant-select-item-option-active" title="3D Designer">'
+      + '<div class="ant-select-item-option-content">3D Designer</div></div>';
+    document.body.appendChild(list);
+    document.getElementById('position-input').addEventListener('focus', () => { list.style.display = 'block'; });
+  });
+
+  const result = await runNormalSearch(page, { position: 'เจ้าหน้าที่ IT', province: 'สมุทรปราการ', maxCandidates: 5 }, { need: 5 });
+  assert.ok(result.report.applied.includes('position'), result.report.positionBox);
+  assert.equal(result.report.positionSeen, 'เจ้าหน้าที่');
+});
+
 test('Position counts as applied when only the chip counter moves', async (t) => {
   const browser = await chromium.launch({ headless: true });
   t.after(async () => {
