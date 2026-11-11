@@ -1589,14 +1589,12 @@ export type TaskRow = {
   target_count: number | null;
   updated_since: string | null;
   criteria: Record<string, unknown>;
-  schedule_cron: string | null;
   enabled: boolean;
   status: string;
   phase: string;
   progress_got: number;
   progress_target: number;
   last_run_at: string | null;
-  next_run_at: string | null;
   last_error: string | null;
   created_at: string;
   expand_adjacent: boolean;
@@ -1683,17 +1681,15 @@ export async function insertTask(t: {
   targetCount: number | null;
   updatedSince: string | null;
   criteria: Record<string, unknown>;
-  scheduleCron: string | null;
-  nextRunAt: string | null;
   status: string;
   expandAdjacent?: boolean;
 }) {
   const rows = await q<{ id: string }>(
     `INSERT INTO scrape_tasks (name, connector_id, mode, target_count, updated_since, criteria,
-                               schedule_cron, next_run_at, status, expand_adjacent)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id`,
+                               status, expand_adjacent)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id`,
     [t.name, t.connectorId, t.mode, t.targetCount, t.updatedSince, JSON.stringify(t.criteria),
-     t.scheduleCron, t.nextRunAt, t.status, t.expandAdjacent ?? true],
+     t.status, t.expandAdjacent ?? true],
   );
   return rows[0].id;
 }

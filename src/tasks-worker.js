@@ -49,19 +49,7 @@ import { matchBankCandidates } from './core/candidate-bank.js';
  *   scraping → ocr (AI extract attachments) → enrich (fill missing data) → done
  * Each phase reports progress via scrape_tasks.phase + progress_got/target so the
  * web UI can narrate ("กำลังดึง 7/15" → "กำลัง OCR 2/3" → "เติมข้อมูล 5/5" → เสร็จ).
- *
- * Scheduling (no cron lib): schedule_cron = "every:<sec>" | "@hourly" | "@daily".
  */
-function nextRunFrom(cron) {
-  if (!cron) return null;
-  let sec = null;
-  const m = String(cron).match(/^every:(\d+)$/);
-  if (m) sec = Number.parseInt(m[1], 10);
-  else if (cron === '@hourly') sec = 3600;
-  else if (cron === '@daily') sec = 86400;
-  if (!sec) return null;
-  return new Date(Date.now() + sec * 1000).toISOString();
-}
 
 /** เติมช่องที่ว่างของผู้สมัครจากข้อความเรซูเม่ + ข้อความที่ OCR อ่านได้ — คืน true ถ้าเติมอะไรได้ */
 async function enrichCandidate(c) {
@@ -157,7 +145,7 @@ export async function ocrBacklog({ limit = 20 } = {}) {
 async function finishStopped(t, runId) {
   const matchedTotal = await countTaskCandidates(t.id).catch(() => 0);
   await bumpTaskProgress(t.id, matchedTotal);
-  await finishTask(t.id, { status: 'idle', phase: 'idle', runId, error: 'หยุดแล้ว คนกดปิดงานนี้', nextRunAt: null });
+  await finishTask(t.id, { status: 'idle', phase: 'idle', runId, error: 'หยุดแล้ว คนกดปิดงานนี้' });
   console.log(`  ${t.name}: หยุดแล้ว (ปิดงาน) ได้ ${matchedTotal} คน`);
   return { status: 'stopped', taskId: t.id, matchedTotal };
 }
@@ -188,7 +176,7 @@ export async function runTask(t, runtime) {
   if (t.mode === 'count' && alreadyMatched >= target) {
     await setTaskPhase(t.id, 'done', target);
     await bumpTaskProgress(t.id, alreadyMatched);
-    await finishTask(t.id, { status: 'done', phase: 'done', runId: t.last_run_id, error: null, nextRunAt: nextRunFrom(t.schedule_cron) });
+    await finishTask(t.id, { status: 'done', phase: 'done', runId: t.last_run_id, error: null });
     console.log(`  ${t.name}: ครบเป้าแล้ว ${alreadyMatched}/${target} Resume (ไม่ค้นซ้ำ)`);
     return { status: 'done', taskId: t.id, matchedTotal: alreadyMatched, target };
   }
@@ -281,7 +269,7 @@ export async function runTask(t, runtime) {
       console.warn(`  ⚠️ แปลงเนื้องานไม่ได้ (AI ปิด/ล้ม) — ค้นด้วยตำแหน่งในใบขอ "${searchIdentity.searchTitle || searchIdentity.keyword}"`);
     } else {
       const error = 'AI แปลงเนื้องานเป็นชื่อตำแหน่งไม่ได้ และใบขอไม่มีชื่อตำแหน่ง ใส่ชื่อตำแหน่งแล้วกดรันใหม่';
-      await finishTask(t.id, { status: 'error', phase: 'error', runId: t.last_run_id, error, nextRunAt: nextRunFrom(t.schedule_cron) });
+      await finishTask(t.id, { status: 'error', phase: 'error', runId: t.last_run_id, error });
       console.warn(`  ${t.name}: ${error}`);
       return { status: 'error', error, taskId: t.id };
     }
@@ -315,7 +303,7 @@ export async function runTask(t, runtime) {
     if (afterBank >= target) {
       await setTaskPhase(t.id, 'done', target);
       await bumpTaskProgress(t.id, afterBank);
-      await finishTask(t.id, { status: 'done', phase: 'done', runId: t.last_run_id, error: null, nextRunAt: nextRunFrom(t.schedule_cron) });
+      await finishTask(t.id, { status: 'done', phase: 'done', runId: t.last_run_id, error: null });
       console.log(`  ${t.name}: ได้ครบเป้าจากคลังผู้สมัคร ${afterBank}/${target} (ไม่ออกไปค้นเว็บ)`);
       return { status: 'done', taskId: t.id, matchedTotal: afterBank, target, fromBank: true };
     }
@@ -353,7 +341,6 @@ export async function runTask(t, runtime) {
       phase: 'error',
       runId: r.runId,
       error,
-      nextRunAt: nextRunFrom(t.schedule_cron),
     });
     console.log(`  ${t.name}: ${r.status} (${error})`);
     return {
@@ -446,7 +433,6 @@ export async function runTask(t, runtime) {
     phase: resultStatus,
     runId: r.runId,
     error: resultNote,
-    nextRunAt: nextRunFrom(t.schedule_cron),
   });
   console.log(`  ${t.name}: ${resultStatus} | ผ่าน ${matchedTotal}/${target} · ตรวจเพิ่ม ${qualificationStats.needs_review} · ไม่ผ่าน ${qualificationStats.rejected} across ${runIds.length} run(s) | ocr ${pending.length} | enriched ${filled}`);
   return {
@@ -466,7 +452,6 @@ export async function runTask(t, runtime) {
       status: 'error',
       phase: 'error',
       error: message,
-      nextRunAt: nextRunFrom(t.schedule_cron),
     }).catch((finishError) => {
       console.error(`  ${t.name}: could not release failed task: ${finishError.message}`);
     });

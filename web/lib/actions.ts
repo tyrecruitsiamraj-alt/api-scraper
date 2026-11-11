@@ -506,18 +506,6 @@ export async function deleteGroupAction(formData: FormData) {
 }
 
 /** บันทึกกลุ่มที่บัญชีหนึ่งจะโพสต์ (ติ๊ก checkbox แล้วบันทึกทั้งชุด). */
-/** Mirror api-scraper tasks-worker nextRunFrom() for the first scheduled fire. */
-function firstNextRun(cron: string | null): string | null {
-  if (!cron) return null;
-  let sec: number | null = null;
-  const m = cron.match(/^every:(\d+)$/);
-  if (m) sec = Number.parseInt(m[1], 10);
-  else if (cron === '@hourly') sec = 3600;
-  else if (cron === '@daily') sec = 86400;
-  if (!sec) return null;
-  return new Date(Date.now() + sec * 1000).toISOString();
-}
-
 // ---------------------------------------------------------------------------
 // Tasks
 // ---------------------------------------------------------------------------
@@ -530,7 +518,6 @@ export async function createTaskAction(formData: FormData) {
   const mode = (String(formData.get('mode') ?? 'count') === 'date_range' ? 'date_range' : 'count') as
     | 'count'
     | 'date_range';
-  const schedule = String(formData.get('schedule') ?? '').trim() || null;
   const runNow = formData.get('runNow') === 'on';
   // Checkbox is checked by default in the form; absent => user turned it off.
   const expandAdjacent = formData.get('expandAdjacent') === 'on';
@@ -603,8 +590,6 @@ export async function createTaskAction(formData: FormData) {
     targetCount,
     updatedSince,
     criteria,
-    scheduleCron: schedule,
-    nextRunAt: firstNextRun(schedule),
     // run-now → queued so the worker picks it up immediately
     status: runNow ? 'queued' : 'idle',
     expandAdjacent,

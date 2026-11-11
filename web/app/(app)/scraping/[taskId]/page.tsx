@@ -11,7 +11,6 @@ import {
   formatBangkokDateTime,
   listScrapRuns,
   platformLabel,
-  scheduleLabel,
   scrapTaskTarget,
   scrapTaskTitle,
   scrapTaskUpdatedAt,
@@ -248,10 +247,9 @@ export default async function ScrapeTaskDetailPage(
       <Card>
         <CardHeader>
           <CardTitle>เกณฑ์การค้น</CardTitle>
-          <CardDescription>
-            {scheduleLabel(task.schedule_cron)}
-            {task.mode === 'date_range' && task.updated_since ? ` · Resume ที่อัปเดตตั้งแต่ ${task.updated_since}` : ''}
-          </CardDescription>
+          {task.mode === 'date_range' && task.updated_since && (
+            <CardDescription>Resume ที่อัปเดตตั้งแต่ {task.updated_since}</CardDescription>
+          )}
         </CardHeader>
         <CardContent className="flex flex-col gap-4">
           {criteria.length > 0 ? (

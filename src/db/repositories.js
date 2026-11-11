@@ -93,10 +93,10 @@ export async function platformScrapedToday(platform) {
 // ---------------------------------------------------------------------------
 export async function createTask(t) {
   const { rows } = await query(
-    `INSERT INTO scrape_tasks (name, connector_id, mode, target_count, updated_since, criteria, schedule_cron, next_run_at, enabled)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id`,
+    `INSERT INTO scrape_tasks (name, connector_id, mode, target_count, updated_since, criteria, enabled)
+     VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id`,
     [t.name, t.connectorId, t.mode ?? 'count', t.targetCount ?? null, t.updatedSince ?? null,
-     t.criteria ?? {}, t.scheduleCron ?? null, t.nextRunAt ?? null, t.enabled ?? true],
+     t.criteria ?? {}, t.enabled ?? true],
   );
   return rows[0].id;
 }
@@ -110,12 +110,12 @@ export async function listTasks() {
   return rows;
 }
 
-/** Tasks to run now: explicitly queued, or scheduled and due. */
+/** งานที่ถูกสั่งรันแล้ว (queued) — ไม่มีรอบตั้งเวลาซ้ำแล้ว เจ้าของสั่งถอด 11 พ.ย. 2569 */
 export async function dueTasks() {
   const { rows } = await query(
     `SELECT * FROM scrape_tasks t
       WHERE t.enabled = true
-        AND (t.status = 'queued' OR (t.schedule_cron IS NOT NULL AND t.next_run_at IS NOT NULL AND t.next_run_at <= now() AND t.status <> 'running'))
+        AND t.status = 'queued'
         -- skip tasks already handled by the unified work_queue runner (no double-run)
         AND NOT EXISTS (
           SELECT 1 FROM work_queue w
@@ -245,10 +245,10 @@ export async function recoverStaleRunningTasks(maxStaleMin = 10, { requeue = tru
   );
   return rows;
 }
-export async function finishTask(id, { status, phase, runId, error, nextRunAt }) {
+export async function finishTask(id, { status, phase, runId, error }) {
   await query(
-    `UPDATE scrape_tasks SET status=$2, phase=$3, last_run_id=$4, last_run_at=now(), last_error=$5, next_run_at=$6, updated_at=now() WHERE id=$1`,
-    [id, status, phase ?? (status === 'error' ? 'error' : 'done'), runId ?? null, error ?? null, nextRunAt ?? null],
+    `UPDATE scrape_tasks SET status=$2, phase=$3, last_run_id=$4, last_run_at=now(), last_error=$5, next_run_at=NULL, updated_at=now() WHERE id=$1`,
+    [id, status, phase ?? (status === 'error' ? 'error' : 'done'), runId ?? null, error ?? null],
   );
 }
 export async function queueTask(id) {

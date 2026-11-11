@@ -28,7 +28,6 @@ type ConnectorOption = { id: string; platform: string; label: string; scrape_lim
 const PLATFORM_LABEL: Record<string, string> = { jobbkk: 'JobBKK', jobthai: 'JobThai' };
 
 export function NewTaskForm({ connectors }: { connectors: ConnectorOption[] }) {
-  const [scheduled, setScheduled] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const readyConnectors = connectors.filter((connector) => connector.available);
   const noConnector = readyConnectors.length === 0;
@@ -41,7 +40,6 @@ export function NewTaskForm({ connectors }: { connectors: ConnectorOption[] }) {
           await createTaskAction(fd);
           // reset the uncontrolled fields after a successful create
           (document.getElementById('new-task-form') as HTMLFormElement | null)?.reset();
-          setScheduled(false);
         } finally {
           setSubmitting(false);
         }
@@ -198,28 +196,6 @@ export function NewTaskForm({ connectors }: { connectors: ConnectorOption[] }) {
                 </Field>
               </div>
             </FieldSet>
-
-            <Separator />
-
-            {/* schedule */}
-            <Field orientation="horizontal">
-              <Checkbox
-                id="nt-scheduled"
-                checked={scheduled}
-                onCheckedChange={(checked) => setScheduled(checked === true)}
-              />
-              <FieldLabel htmlFor="nt-scheduled">ตั้งเวลาทำงานซ้ำ</FieldLabel>
-            </Field>
-            {scheduled && (
-              <Field className="md:max-w-72">
-                <FieldLabel htmlFor="nt-schedule" className="sr-only">รอบการทำงานซ้ำ</FieldLabel>
-                <NativeSelect id="nt-schedule" name="schedule" className="w-full" defaultValue="@hourly">
-                  <NativeSelectOption value="every:1800">ทุก 30 นาที</NativeSelectOption>
-                  <NativeSelectOption value="@hourly">ทุกชั่วโมง</NativeSelectOption>
-                  <NativeSelectOption value="@daily">ทุกวัน</NativeSelectOption>
-                </NativeSelect>
-              </Field>
-            )}
           </FieldGroup>
         </CollapsibleContent>
       </Collapsible>

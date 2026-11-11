@@ -186,16 +186,6 @@ export async function listScrapRuns(taskId: string, limit = 50): Promise<ScrapRu
 // งาน Scrap: แถวในรายการ + ตัวช่วยแสดงผล
 // ---------------------------------------------------------------------------
 
-/** ป้ายรอบการรันของงาน */
-export function scheduleLabel(cron: string | null): string {
-  if (!cron) return 'รันเมื่อกดเอง';
-  if (cron === '@hourly') return 'ทุกชั่วโมง';
-  if (cron === '@daily') return 'ทุกวัน';
-  const m = cron.match(/^every:(\d+)$/);
-  if (m) return `ทุก ${Math.round(Number(m[1]) / 60)} นาที`;
-  return cron;
-}
-
 /** เกณฑ์ที่บันทึกไว้กับงาน เป็นคู่ ชื่อ/ค่า สำหรับแสดงผล */
 export function criteriaEntries(criteria: Record<string, unknown> | null | undefined): { label: string; value: string }[] {
   const c = criteria ?? {};
