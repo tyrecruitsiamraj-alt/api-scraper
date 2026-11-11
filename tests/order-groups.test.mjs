@@ -23,7 +23,7 @@ test('ใบ 5 กลุ่ม: ขึ้นแล้ว · รออนุม�
   assert.deepEqual(groups.map((g) => g.status), ['posted', 'pending_approval', 'unconfirmed', 'failed', 'waiting']);
   assert.equal(groups[3].error, 'Facebook ไม่รับโพสต์');
   assert.equal(groups[0].account, 'Thom Blake');
-  assert.deepEqual(countGroupStatuses(groups), { total: 5, posted: 1, pending_approval: 1, unconfirmed: 1, failed: 1, waiting: 1 });
+  assert.deepEqual(countGroupStatuses(groups), { total: 5, posted: 1, pending_approval: 1, unconfirmed: 1, failed: 1, not_tried: 0, waiting: 1 });
   assert.equal(linkedCount(groups), 2, 'สำเร็จนับเฉพาะที่มีลิงก์');
 });
 
@@ -41,10 +41,11 @@ test('ลองโพสต์ไม่ได้ก่อน แล้วบั�
   assert.equal(g.error, null);
 });
 
-test('รอบจบแล้วแต่ไม่ถึงกลุ่มนี้ = ไม่สำเร็จ ไม่ค้างเป็นรอคิว', () => {
+test('รอบจบแล้วแต่ไม่ถึงกลุ่มนี้ = ยังไม่ได้ลองโพสต์ ไม่นับเป็นไม่สำเร็จ และไม่ค้างเป็นรอคิว', () => {
   const [g] = orderGroupResults({ planned: ['884533619479424'], active: false });
-  assert.equal(g.status, 'failed');
-  assert.equal(g.error, 'ยังไม่ได้ลองโพสต์กลุ่มนี้');
+  assert.equal(g.status, 'not_tried');
+  assert.equal(g.error, null);
+  assert.deepEqual(countGroupStatuses([g]), { total: 1, posted: 0, pending_approval: 0, unconfirmed: 0, failed: 0, not_tried: 1, waiting: 0 });
 });
 
 test('กลุ่มที่ไม่ได้ลองโพสต์ บอกเหตุที่รอบหยุด', () => {
@@ -52,5 +53,6 @@ test('กลุ่มที่ไม่ได้ลองโพสต์ บอ�
     planned: ['884533619479424'],
     stopReason: 'บัญชี Camy Rizk ถูกพัก — ย้ายงานให้บัญชีที่ว่างแล้ว\nรายละเอียด',
   });
-  assert.equal(g.error, 'ยังไม่ได้ลองโพสต์กลุ่มนี้ — บัญชี Camy Rizk ถูกพัก — ย้ายงานให้บัญชีที่ว่างแล้ว');
+  assert.equal(g.status, 'not_tried');
+  assert.equal(g.error, 'บัญชี Camy Rizk ถูกพัก — ย้ายงานให้บัญชีที่ว่างแล้ว');
 });

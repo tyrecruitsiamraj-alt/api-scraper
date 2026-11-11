@@ -1,4 +1,4 @@
-export type GroupStatusKey = 'posted' | 'pending_approval' | 'unconfirmed' | 'failed' | 'waiting';
+export type GroupStatusKey = 'posted' | 'pending_approval' | 'unconfirmed' | 'failed' | 'not_tried' | 'waiting';
 export const GROUP_STATUSES: { key: GroupStatusKey; label: string }[];
 export type OrderGroupResult = {
   fb_group_id: string;

@@ -76,7 +76,12 @@ export default async function OrdersPage(props: {
   return (
     <div className="flex flex-col gap-6">
       <header className="flex flex-wrap items-end justify-between gap-4">
-        <h1 className="text-2xl leading-snug font-semibold">คำสั่งงาน</h1>
+        <div className="flex flex-col gap-1">
+          <h1 className="text-2xl leading-snug font-semibold">คำสั่งงาน</h1>
+          <Link href="/orders/groups" className="text-sm underline-offset-4 hover:underline">
+            ดูโพสต์รายกลุ่ม
+          </Link>
+        </div>
         <form method="get" action="/orders" className="flex flex-wrap items-end gap-3">
           {by && <input type="hidden" name="by" value={by} />}
           <Field className="w-40">

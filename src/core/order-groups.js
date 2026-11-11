@@ -12,6 +12,8 @@ export const GROUP_STATUSES = [
   { key: 'pending_approval', label: 'รอแอดมินอนุมัติ' },
   { key: 'unconfirmed', label: 'กดโพสต์แล้ว หาโพสต์ไม่เจอ' },
   { key: 'failed', label: 'ไม่สำเร็จ' },
+  // รอบจบแล้วแต่ไม่ถึงกลุ่มนี้ — แยกจาก "ไม่สำเร็จ" (เจ้าของสั่ง 11 พ.ย. 2569: ไม่สำเร็จ 1,146 กลุ่ม เป็นไม่ได้ลอง 982)
+  { key: 'not_tried', label: 'ยังไม่ได้ลองโพสต์' },
   { key: 'waiting', label: 'รอคิว' },
 ];
 
@@ -53,7 +55,7 @@ export function orderGroupResults({ planned = [], attempts = [], postLogs = [], 
     if (log && String(log.post_link ?? '').trim()) status = postedOutcome(log.post_status, log.post_link);
     else if (latest?.level === 'success' || log) status = postedOutcome(log?.post_status, null);
     else if (latest) status = 'failed';
-    else status = active ? 'waiting' : 'failed';
+    else status = active ? 'waiting' : 'not_tried';
     return {
       fb_group_id: fb,
       name: groupName(fb),
@@ -61,8 +63,8 @@ export function orderGroupResults({ planned = [], attempts = [], postLogs = [], 
       at: log?.at ?? latest?.at ?? null,
       account: log?.account ?? latest?.account ?? null,
       error: status === 'failed'
-        ? (latest ? String(latest.message ?? 'โพสต์ไม่สำเร็จ') : `ยังไม่ได้ลองโพสต์กลุ่มนี้${stopped ? ` — ${stopped}` : ''}`)
-        : null,
+        ? String(latest?.message ?? 'โพสต์ไม่สำเร็จ')
+        : status === 'not_tried' ? stopped || null : null,
       post_link: String(log?.post_link ?? '').trim() || null,
     };
   });

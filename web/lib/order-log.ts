@@ -251,3 +251,74 @@ export function summarizeOrders(rows: OrderLogRow[]): { people: OrderPersonSumma
   const people = [...byWho.values()].sort((a, b) => b.total - a.total || a.who.localeCompare(b.who));
   return { people, total };
 }
+
+export type PostGroupRow = {
+  /** แถวใบใน Jarvis + เลขกลุ่ม — ไม่ซ้ำกันทั้งตาราง */
+  key: string;
+  order_id: string;
+  request_no: string;
+  position: string | null;
+  ordered_at: string;
+  who: string;
+  /** ชื่อเล่นใน Jarvis → ชื่อจริง → อีเมลตัดโดเมน */
+  who_name: string;
+  account: string | null;
+  fb_group_id: string;
+  group_name: string;
+  status: GroupStatusKey;
+  /** เวลาที่โพสต์/ลองโพสต์กลุ่มนี้ — null = ยังไม่ได้ลอง */
+  at: string | null;
+  error: string | null;
+  post_link: string | null;
+};
+
+/** วันที่ YYYY-MM-DD (เวลาไทย) — ไม่ถูกรูปแบบคืน null */
+export function parseDay(value: string | null | undefined): string | null {
+  const v = String(value ?? '').trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(v)) return null;
+  return Number.isNaN(new Date(`${v}T00:00:00+07:00`).getTime()) ? null : v;
+}
+
+/**
+ * ใบโพสต์จาก Jarvis ที่สั่งในช่วงวันที่ (รวมวันสุดท้าย) แตกเป็นแถวละกลุ่ม
+ * สถานะใช้ orderGroupResults ตัวเดียวกับหน้าใบสั่ง — ผลรวมทุกสถานะ = จำนวนแถว
+ */
+export async function listPostGroupRows(fromDay: string, toDay: string): Promise<PostGroupRow[]> {
+  const from = new Date(`${fromDay}T00:00:00+07:00`);
+  const to = new Date(new Date(`${toDay}T00:00:00+07:00`).getTime() + 86_400_000);
+  const orders = await loadOrders(
+    `req.created_at >= $1::timestamptz AND req.created_at < $2::timestamptz`,
+    `$1::timestamptz - interval '1 day'`,
+    [from.toISOString(), to.toISOString()],
+    `req.type = 'content'`,
+  );
+  const whos = [...new Set(orders.map((o) => o.who))];
+  const names = new Map(
+    (whos.length
+      ? await q<{ email: string; name: string | null }>(
+        `SELECT lower(email) AS email, COALESCE(NULLIF(TRIM(nickname), ''), NULLIF(TRIM(full_name), '')) AS name
+           FROM "jarvis_rm".users WHERE lower(email) = ANY($1::text[])`,
+        [whos],
+      ).catch(() => [])
+      : []
+    ).map((u) => [u.email, u.name]),
+  );
+  return orders.flatMap((o) =>
+    o.groups.map((g) => ({
+      key: `${o.id}:${g.fb_group_id}`,
+      order_id: o.id,
+      request_no: o.request_no,
+      position: o.position,
+      ordered_at: o.created_at,
+      who: o.who,
+      who_name: names.get(o.who) || o.who.replace(/@siamraj\.com$/i, ''),
+      account: g.account ?? o.account,
+      fb_group_id: g.fb_group_id,
+      group_name: g.name,
+      status: g.status,
+      at: g.at,
+      error: g.error,
+      post_link: g.post_link,
+    })),
+  );
+}

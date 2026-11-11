@@ -1,13 +1,11 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { OutcomeBadge } from '@/components/OrderOutcomeBadge';
-import { Badge } from '@/components/ui/badge';
+import { GroupStatusBadge } from '@/components/GroupStatusBadge';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { cn } from '@/lib/utils';
 import { getOrder } from '@/lib/order-log';
 import { GROUP_STATUSES } from '../../../../../src/core/order-groups.js';
-import type { GroupStatusKey } from '../../../../../src/core/order-groups.js';
 
 export const dynamic = 'force-dynamic';
 
@@ -20,21 +18,6 @@ function when(iso: string | null) {
     hour: '2-digit',
     minute: '2-digit',
   }).format(new Date(iso));
-}
-
-function StatusBadge({ status }: { status: GroupStatusKey }) {
-  const label = GROUP_STATUSES.find((s) => s.key === status)?.label ?? status;
-  return (
-    <Badge
-      variant={status === 'failed' ? 'destructive' : status === 'waiting' ? 'secondary' : 'outline'}
-      className={cn(
-        status === 'posted' && 'border-success/30 bg-success/10 text-success',
-        (status === 'pending_approval' || status === 'unconfirmed') && 'border-warning/30 bg-warning/10 text-warning',
-      )}
-    >
-      {label}
-    </Badge>
-  );
 }
 
 /** ใบสั่งโพสต์ 1 ใบ: สั่งกี่กลุ่ม แต่ละกลุ่มเป็นยังไง ลิงก์ไปดูโพสต์ หรือเหตุที่ไม่สำเร็จ */
@@ -78,7 +61,7 @@ export default async function OrderDetailPage(props: { params: Promise<{ id: str
       ) : (
         <>
           {counts && (
-            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-7">
               <Card size="sm">
                 <CardHeader>
                   <CardDescription>สั่ง</CardDescription>
@@ -123,7 +106,7 @@ export default async function OrderDetailPage(props: { params: Promise<{ id: str
                         <div>{g.name}</div>
                         <div className="font-mono text-xs text-muted-foreground">{g.fb_group_id}</div>
                       </TableCell>
-                      <TableCell><StatusBadge status={g.status} /></TableCell>
+                      <TableCell><GroupStatusBadge status={g.status} /></TableCell>
                       <TableCell>{g.account ?? '-'}</TableCell>
                       <TableCell className="whitespace-nowrap">{when(g.at)}</TableCell>
                       <TableCell className="min-w-56 whitespace-normal">
