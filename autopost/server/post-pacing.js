@@ -113,7 +113,7 @@ function warmupStartOffsetMin(userId, day) {
 }
 
 /**
- * แผนของรอบอุ่นเครื่อง 1 รอบ: เลื่อนฟีด 3–5 นาที · เข้าดู 2–3 กลุ่ม กลุ่มละ 1–2 นาที · กดถูกใจ 0–2 โพสต์บนฟีด
+ * แผนของรอบอุ่นเครื่อง 1 รอบ: เลื่อนฟีด 3–5 นาที · เข้าดู 2–3 กลุ่ม กลุ่มละ 1–2 นาที · กดถูกใจ 1–2 โพสต์ (ตามที่เจ้าของเคาะ)
  * WARMUP_LIKES_MAX=0 ปิดการกดถูกใจ
  */
 function warmupSessionPlan(env = process.env, rand = Math.random) {
@@ -123,7 +123,7 @@ function warmupSessionPlan(env = process.env, rand = Math.random) {
     feed_sec: between(180, 300),
     groups: between(2, 3),
     group_sec: between(60, 120),
-    likes: likesMax === 0 ? 0 : between(0, likesMax),
+    likes: likesMax === 0 ? 0 : between(1, likesMax),
   };
 }
 

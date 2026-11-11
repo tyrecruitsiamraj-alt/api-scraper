@@ -120,8 +120,8 @@ test('อุ่นเครื่องเริ่มระหว่าง 09:0
   }
 });
 
-test('แผนรอบอุ่นเครื่อง: ฟีด 3–5 นาที · 2–3 กลุ่ม · ถูกใจไม่เกิน 2 · ปิดถูกใจได้', () => {
-  assert.deepEqual(warmupSessionPlan({}, () => 0), { feed_sec: 180, groups: 2, group_sec: 60, likes: 0 });
+test('แผนรอบอุ่นเครื่อง: ฟีด 3–5 นาที · 2–3 กลุ่ม · ถูกใจ 1–2 · ปิดถูกใจได้', () => {
+  assert.deepEqual(warmupSessionPlan({}, () => 0), { feed_sec: 180, groups: 2, group_sec: 60, likes: 1 });
   assert.deepEqual(warmupSessionPlan({}, () => 0.999), { feed_sec: 300, groups: 3, group_sec: 120, likes: 2 });
   assert.equal(warmupSessionPlan({ WARMUP_LIKES_MAX: '0' }, () => 0.999).likes, 0);
 });

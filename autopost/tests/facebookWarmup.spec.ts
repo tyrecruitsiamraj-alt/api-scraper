@@ -14,7 +14,11 @@ const { warmupSessionPlan } = require('../server/post-pacing') as {
  * บันทึกรอบใช้ level 'info' เท่านั้น — 'success' ถูกนับเป็นวันโพสต์แรก (อายุบัญชี)
  */
 
-const LIKE_SEL = 'div[role="button"][aria-label="ถูกใจ"], div[role="button"][aria-label="Like"]';
+/**
+ * ปุ่มถูกใจของโพสต์ หาจากชื่อปุ่ม (aria-label หรือคำบนปุ่ม) ตรงคำเท่านั้น — ไม่โดน "เลิกถูกใจ" / "ถูกใจ: 12 คน"
+ * เดิมหาแค่ div ที่มี aria-label ตรง ๆ: 8 รอบ 8 บัญชีวันที่ 10 พ.ย. 2569 ไม่เจอปุ่มเลยสักรอบ (กดถูกใจ 0 ทุกรอบ)
+ */
+const LIKE_NAME = /^(ถูกใจ|Like)$/;
 
 /** เลื่อนหน้าแบบคนอ่าน: เลื่อนลงทีละช่วง หยุดอ่าน บางทีเลื่อนขึ้นนิดหน่อย */
 async function scrollFor(page: Page, seconds: number, onPause?: () => Promise<void>) {
@@ -31,10 +35,14 @@ async function scrollFor(page: Page, seconds: number, onPause?: () => Promise<vo
   }
 }
 
-/** กดถูกใจโพสต์ที่อยู่บนจอ 1 โพสต์ · คืน 'liked' | 'none' | 'limited' (Facebook ขึ้นว่าจำกัด) */
-async function likeOneVisible(page: Page): Promise<'liked' | 'none' | 'limited'> {
+type LikeTally = { tries: number; seen: number };
+
+/** กดถูกใจโพสต์ที่อยู่บนจอ 1 โพสต์ · คืน 'liked' | 'none' | 'limited' (Facebook ขึ้นว่าจำกัด) · นับว่าเจอปุ่มกี่ครั้งไว้บอกในบันทึก */
+async function likeOneVisible(page: Page, tally: LikeTally): Promise<'liked' | 'none' | 'limited'> {
+  tally.tries += 1;
   const viewport = page.viewportSize();
-  const buttons = await page.locator(LIKE_SEL).all();
+  const buttons = await page.getByRole('button', { name: LIKE_NAME }).all().catch(() => []);
+  tally.seen += buttons.length;
   for (const btn of buttons) {
     if ((await btn.getAttribute('aria-pressed').catch(() => null)) === 'true') continue;
     const box = await btn.boundingBox().catch(() => null);
@@ -91,23 +99,25 @@ test('อุ่นเครื่องบัญชีใหม่: เลื่
   }
   await humanPause(activePage, 2000, 4000);
 
-  // ฟีดช่วงแรก + กดถูกใจตามแผน (กดเป็นช่วง ๆ ไม่รัว)
+  // กดถูกใจตามแผน เป็นช่วง ๆ ไม่รัว · ฟีดยังไม่ครบก็ไปกดในกลุ่มต่อ
   let liked = 0;
   let limited = false;
-  const firstFeed = Math.round(plan.feed_sec * 0.6);
-  await scrollFor(activePage, firstFeed, async () => {
+  const tally: LikeTally = { tries: 0, seen: 0 };
+  const maybeLike = async () => {
     if (limited || liked >= plan.likes || Math.random() > 0.2) return;
-    const r = await likeOneVisible(activePage);
+    const r = await likeOneVisible(activePage, tally);
     if (r === 'liked') liked += 1;
     if (r === 'limited') limited = true;
-  });
+  };
+  const firstFeed = Math.round(plan.feed_sec * 0.6);
+  await scrollFor(activePage, firstFeed, maybeLike);
 
   let visited = 0;
   for (const g of groups) {
     try {
       await activePage.goto(`https://www.facebook.com/groups/${g.fb_group_id}`, { waitUntil: 'domcontentloaded', timeout: 60_000 });
       await humanPause(activePage, 2000, 4000);
-      await scrollFor(activePage, plan.group_sec);
+      await scrollFor(activePage, plan.group_sec, maybeLike);
       visited += 1;
     } catch (e) {
       console.warn(`[warmup] เปิดกลุ่ม ${g.fb_group_id} ไม่ได้: ${(e as Error).message}`);
@@ -118,9 +128,16 @@ test('อุ่นเครื่องบัญชีใหม่: เลื่
   await scrollFor(activePage, plan.feed_sec - firstFeed);
 
   const minutes = Math.round((plan.feed_sec + visited * plan.group_sec) / 60);
-  const msg = `อุ่นเครื่องบัญชี: เลื่อนฟีดและดูกลุ่มราว ${minutes} นาที · เข้าดู ${visited} กลุ่ม · กดถูกใจ ${liked} โพสต์ (ไม่โพสต์)`;
+  const likeNote =
+    liked >= plan.likes || limited ? '' : tally.seen === 0 ? ` (มองหา ${tally.tries} ครั้ง ไม่เจอปุ่มถูกใจบนจอ)` : ` (เจอปุ่ม ${tally.seen} ครั้ง แต่ไม่อยู่ในจอ)`;
+  const msg = `อุ่นเครื่องบัญชี: เลื่อนฟีดและดูกลุ่มราว ${minutes} นาที · เข้าดู ${visited} กลุ่ม · กดถูกใจ ${liked}/${plan.likes} โพสต์${likeNote} (ไม่โพสต์)`;
   console.log(`🔥 [${label}] ${msg}`);
-  await runLog({ level: 'info', message: msg, user_id: user.id, meta: { kind: 'warmup', groups: visited, likes: liked } });
+  await runLog({
+    level: 'info',
+    message: msg,
+    user_id: user.id,
+    meta: { kind: 'warmup', groups: visited, likes: liked, likes_planned: plan.likes, like_tries: tally.tries, like_buttons_seen: tally.seen },
+  });
   if (limited) {
     const warn = 'อุ่นเครื่องบัญชี: Facebook ขึ้นว่าจำกัดการใช้งานตอนกดถูกใจ — หยุดกดถูกใจ';
     console.log(`⚠️ [${label}] ${warn}`);
