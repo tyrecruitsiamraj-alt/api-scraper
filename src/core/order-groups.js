@@ -63,11 +63,35 @@ export function orderGroupResults({ planned = [], attempts = [], postLogs = [], 
       at: log?.at ?? latest?.at ?? null,
       account: log?.account ?? latest?.account ?? null,
       error: status === 'failed'
-        ? String(latest?.message ?? 'โพสต์ไม่สำเร็จ')
+        ? shortFailReason(latest?.message)
         : status === 'not_tried' ? stopped || null : null,
       post_link: String(log?.post_link ?? '').trim() || null,
     };
   });
+}
+
+/**
+ * เหตุที่โพสต์กลุ่มไม่สำเร็จ ย่อให้คนอ่านจบในบรรทัดเดียว (เจ้าของสั่ง 11 พ.ย. 2569)
+ * ข้อความเต็มจาก worker มีชื่องาน เลขใบ เลขกลุ่ม และข้อความทั้งหน้า Facebook ติดมา — งาน/กลุ่มมีคอลัมน์ของตัวเองแล้ว
+ * แบบที่เจอจริงตั้งแต่ 1 ต.ค. 2569 ไล่จาก run_logs ทุกแบบ
+ */
+export function shortFailReason(message) {
+  const m = String(message ?? '').replace(/\s+/g, ' ').trim();
+  if (!m) return 'โพสต์ไม่สำเร็จ';
+  if (/เราได้จำกัดจำนวนการโพสต์|ป้องกันการสแปม|จำกัดการโพสต์ของบัญชี/.test(m)) return 'Facebook จำกัดการโพสต์ของบัญชีนี้ชั่วคราว';
+  if (/ข้อผิดพลาดทางเทคนิค/.test(m)) return 'Facebook ขัดข้องตอนกดโพสต์';
+  if (/HTTP_TRANSPORT_ERROR|Network request/i.test(m)) return 'เน็ตหลุดตอนกดโพสต์';
+  if (/หน้าต่างโพสต์ไม่ปิดหลังกดโพสต์/.test(m)) return 'กดโพสต์แล้วหน้าต่างไม่ปิด Facebook ไม่รับโพสต์';
+  if (/ผู้ดูแลพักกลุ่มนี้ชั่วคราว/.test(m)) return 'แอดมินพักกลุ่มนี้ชั่วคราว';
+  if (/โพสต์ของคุณอยู่ระหว่างรอการอนุมัติ/.test(m)) return 'มีโพสต์ของบัญชีนี้รออนุมัติในกลุ่มอยู่แล้ว';
+  if (/เนื้อหานี้ไม่พร้อมใช้งาน/.test(m)) return 'เปิดกลุ่มไม่ได้ กลุ่มอาจถูกลบหรือซ่อน';
+  if (/ส่งคำขอเข้ากลุ่มแล้ว/.test(m)) return 'ยังไม่เป็นสมาชิก ส่งคำขอเข้ากลุ่มแล้ว รอแอดมินอนุมัติ';
+  if (/ไม่เจอช่องเขียนโพสต์/.test(m)) return 'ไม่เจอช่องเขียนโพสต์ในกลุ่ม';
+  if (/^Facebook ไม่รับโพสต์/.test(m)) return 'Facebook ไม่รับโพสต์';
+  if (/^โพสต์ไม่สำเร็จ/.test(m)) return 'โพสต์ไม่สำเร็จ';
+  // แบบอื่น: ตัด "(กลุ่ม …)" ท้ายข้อความ และไม่ยาวเกิน 1 บรรทัด
+  const cut = m.replace(/\s*\((?:กลุ่ม|ถ้ามี)[^)]*\)\s*$/, '');
+  return cut.length > 120 ? `${cut.slice(0, 119)}…` : cut;
 }
 
 /** บรรทัดแรกของ error รอบ เป็นภาษาคน */

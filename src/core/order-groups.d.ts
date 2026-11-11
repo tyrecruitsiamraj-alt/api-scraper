@@ -19,3 +19,4 @@ export function orderGroupResults(input: {
 }): OrderGroupResult[];
 export function countGroupStatuses(groups: OrderGroupResult[]): { total: number } & Record<GroupStatusKey, number>;
 export function linkedCount(groups: OrderGroupResult[]): number;
+export function shortFailReason(message: string | null | undefined): string;
