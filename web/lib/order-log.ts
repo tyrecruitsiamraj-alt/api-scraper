@@ -262,6 +262,8 @@ export type PostGroupRow = {
   who: string;
   /** ชื่อเล่นใน Jarvis → ชื่อจริง → อีเมลตัดโดเมน */
   who_name: string;
+  /** ฝ่ายของคนสั่ง (jarvis_rm.users.department_code) เช่น LBA · LBD · null = ไม่รู้ */
+  who_bu: string | null;
   account: string | null;
   fb_group_id: string;
   group_name: string;
@@ -282,8 +284,9 @@ export function parseDay(value: string | null | undefined): string | null {
 /**
  * ใบโพสต์จาก Jarvis ที่สั่งในช่วงวันที่ (รวมวันสุดท้าย) แตกเป็นแถวละกลุ่ม
  * สถานะใช้ orderGroupResults ตัวเดียวกับหน้าใบสั่ง — ผลรวมทุกสถานะ = จำนวนแถว
+ * bu = เฉพาะใบที่คนสั่งอยู่ฝ่ายนั้น (การ์ดภาพรวมงานสรรหาใน Jarvis กรองตาม BU) · ไม่ส่ง = ทุกฝ่าย
  */
-export async function listPostGroupRows(fromDay: string, toDay: string): Promise<PostGroupRow[]> {
+export async function listPostGroupRows(fromDay: string, toDay: string, bu: string | null = null): Promise<PostGroupRow[]> {
   const from = new Date(`${fromDay}T00:00:00+07:00`);
   const to = new Date(new Date(`${toDay}T00:00:00+07:00`).getTime() + 86_400_000);
   const orders = await loadOrders(
@@ -295,15 +298,17 @@ export async function listPostGroupRows(fromDay: string, toDay: string): Promise
   const whos = [...new Set(orders.map((o) => o.who))];
   const names = new Map(
     (whos.length
-      ? await q<{ email: string; name: string | null }>(
-        `SELECT lower(email) AS email, COALESCE(NULLIF(TRIM(nickname), ''), NULLIF(TRIM(full_name), '')) AS name
+      ? await q<{ email: string; name: string | null; bu: string | null }>(
+        `SELECT lower(email) AS email, COALESCE(NULLIF(TRIM(nickname), ''), NULLIF(TRIM(full_name), '')) AS name,
+                NULLIF(UPPER(TRIM(department_code)), '') AS bu
            FROM "jarvis_rm".users WHERE lower(email) = ANY($1::text[])`,
         [whos],
       ).catch(() => [])
       : []
-    ).map((u) => [u.email, u.name]),
+    ).map((u) => [u.email, u]),
   );
-  return orders.flatMap((o) =>
+  const wantBu = bu ? bu.trim().toUpperCase() : null;
+  return orders.filter((o) => !wantBu || names.get(o.who)?.bu === wantBu).flatMap((o) =>
     o.groups.map((g) => ({
       key: `${o.id}:${g.fb_group_id}`,
       order_id: o.id,
@@ -311,7 +316,8 @@ export async function listPostGroupRows(fromDay: string, toDay: string): Promise
       position: o.position,
       ordered_at: o.created_at,
       who: o.who,
-      who_name: names.get(o.who) || o.who.replace(/@siamraj\.com$/i, ''),
+      who_name: names.get(o.who)?.name || o.who.replace(/@siamraj\.com$/i, ''),
+      who_bu: names.get(o.who)?.bu ?? null,
       account: g.account ?? o.account,
       fb_group_id: g.fb_group_id,
       group_name: g.name,
