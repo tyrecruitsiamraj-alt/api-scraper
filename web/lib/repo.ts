@@ -6,6 +6,7 @@ import type { GroupJobType } from './group-job-types';
 import { pool, q } from './db';
 import { getCandidateDuplicates } from './candidate-duplicates';
 import { postedOutcome } from '../../src/core/post-task-state.js';
+import { TEXT_FIELDS } from '../../src/core/resume-fields.js';
 import { syncJarvisPostOrders } from '../../src/core/jarvis-post-sync.js';
 import { evaluateContentQuality, operatorFacingQuality, qualityFailureMessages } from '../../src/core/content-quality.js';
 import type { ContentQualityResult } from '../../src/core/content-quality.js';
@@ -5290,4 +5291,30 @@ export async function listCampaignPendingAdminCounts(): Promise<{ campaign_id: s
   } catch {
     return [];
   }
+}
+
+// ---------------------------------------------------------------------------
+// แก้ข้อมูลผู้สมัครจากหน้าจอ (ปุ่ม "แก้ไข" ในหน้าผู้สมัคร · ใช้ได้ทั้งคนที่ได้จาก Scrap และจากอัปโหลด)
+// ---------------------------------------------------------------------------
+const EDITABLE_CANDIDATE_COLS = new Set(TEXT_FIELDS.map((f) => f.key));
+
+/** ทับช่องข้อความตามที่กรอก (ว่าง = ลบค่าเดิม) · เบอร์/อีเมลอัปเดตตัวที่ใช้จับคู่คนซ้ำด้วย */
+export async function updateCandidateFields(id: string, values: Record<string, string>): Promise<void> {
+  const sets: string[] = [];
+  const params: unknown[] = [id];
+  for (const [key, raw] of Object.entries(values)) {
+    if (!EDITABLE_CANDIDATE_COLS.has(key)) continue;
+    params.push(raw.trim() || null);
+    sets.push(`${key} = $${params.length}`);
+  }
+  if ('phone' in values) {
+    params.push(values.phone.replace(/\D/g, '') || null);
+    sets.push(`phone_norm = $${params.length}`);
+  }
+  if ('email' in values) {
+    params.push(values.email.trim().toLowerCase() || null);
+    sets.push(`email_norm = $${params.length}`);
+  }
+  if (!sets.length) return;
+  await q(`UPDATE candidates SET ${sets.join(', ')}, last_updated_at = now() WHERE id = $1`, params);
 }

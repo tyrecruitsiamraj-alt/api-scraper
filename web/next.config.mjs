@@ -16,6 +16,8 @@ const nextConfig = {
     'dotenv',
     'puppeteer-core',
     '@sparticuz/chromium-min',
+    // ตัวอ่าน PDF ตอนอัปโหลดเรซูเม่ (pdf.js) — โหลดตอนรันจาก node_modules ไม่รวมเข้า bundle
+    'unpdf',
   ],
   outputFileTracingIncludes: {
     '/api/candidates/[id]/pdf': ['./node_modules/@sparticuz/chromium-min/**/*'],

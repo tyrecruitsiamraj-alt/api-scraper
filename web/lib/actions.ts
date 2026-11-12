@@ -88,7 +88,10 @@ import {
   updateJarvisPostCaption,
   recordCandidateActivity,
   reassessCandidateJob,
+  updateCandidateFields,
 } from './repo';
+import { mergeUpload, retryFailedUploads, skipUpload } from './resume-uploads';
+import { TEXT_FIELDS } from '../../src/core/resume-fields.js';
 import type { GroupSector } from './group-sectors';
 import { groupSectorLabel } from './group-sectors';
 import { isGroupJobType } from './group-job-types';
@@ -305,6 +308,55 @@ export async function updateWorkersCodeAction(formData: FormData) {
 async function requireSession() {
   const session = await getServerSession(authOptions);
   if (!session) throw new Error('unauthorized');
+}
+
+// ---- อัปโหลดเรซูเม่ (หน้า /candidates/upload) + แก้ไขผู้สมัคร ----
+/** คนที่มีอยู่แล้ว: เอาช่องที่ติ๊กจากไฟล์ใหม่ไปทับ แล้วแนบไฟล์ */
+export async function mergeUploadAction(formData: FormData) {
+  await requireSession();
+  const uploadId = String(formData.get('uploadId') ?? '').trim();
+  const keys = formData.getAll('fields').map((v) => String(v));
+  const done = await mergeUpload(uploadId, keys);
+  if (!done) return;
+  revalidatePath(`/candidates/upload/${done.batchId}`);
+  revalidatePath(`/candidates/${done.candidateId}`);
+}
+
+export async function skipUploadAction(formData: FormData) {
+  await requireSession();
+  const batchId = await skipUpload(String(formData.get('uploadId') ?? '').trim());
+  if (batchId) revalidatePath(`/candidates/upload/${batchId}`);
+}
+
+/** ไฟล์ที่อ่านไม่ได้ ส่งให้อ่านใหม่ (เช่นหลังเซิร์ฟเวอร์ AI ของบริษัทพร้อมแล้ว) */
+export async function retryUploadsAction(formData: FormData) {
+  const session = await getServerSession(authOptions);
+  if (!session) throw new Error('unauthorized');
+  const batchId = String(formData.get('batchId') ?? '').trim();
+  if (!/^[0-9a-f-]{36}$/i.test(batchId)) return;
+  await retryFailedUploads(batchId, session.user?.email ?? null);
+  revalidatePath(`/candidates/upload/${batchId}`);
+}
+
+export async function updateCandidateAction(formData: FormData) {
+  await requireSession();
+  const id = String(formData.get('candidateId') ?? '').trim();
+  if (!/^[0-9a-f-]{36}$/i.test(id)) throw new Error('ไม่พบผู้สมัคร');
+  const back = (notice: string): never => redirect(`/candidates/${id}/edit?notice=${encodeURIComponent(notice)}`);
+  const values: Record<string, string> = {};
+  for (const f of TEXT_FIELDS) {
+    const v = formData.get(f.key);
+    if (v !== null) values[f.key] = String(v);
+  }
+  if (!String(values.full_name ?? '').trim()) back('ใส่ชื่อ-นามสกุลก่อนบันทึก');
+  const digits = String(values.phone ?? '').replace(/\D/g, '');
+  if (digits && (digits.length < 9 || digits.length > 12)) back('เบอร์โทรไม่ถูกต้อง');
+  const email = String(values.email ?? '').trim();
+  if (email && !/^[^@\s]+@[^@\s]+\.[^@\s]{2,}$/.test(email)) back('อีเมลไม่ถูกต้อง');
+  await updateCandidateFields(id, values);
+  revalidatePath('/candidates');
+  revalidatePath(`/candidates/${id}`);
+  redirect(`/candidates/${id}`);
 }
 
 export async function markCandidateViewedAction(formData: FormData) {

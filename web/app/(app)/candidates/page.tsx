@@ -1,9 +1,10 @@
 import Link from 'next/link';
-import { ChevronLeftIcon, ChevronRightIcon, UsersIcon } from 'lucide-react';
+import { ChevronLeftIcon, ChevronRightIcon, UploadIcon, UsersIcon } from 'lucide-react';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth';
 import { countCandidates, listCandidateRequesters, listCandidates, listCandidateProvinces } from '@/lib/repo';
 import { ScrapingNav } from '@/components/ScrapingNav';
+import { uploadersByCandidate } from '@/lib/resume-uploads';
 import { markCandidateCalledAction, markCandidateViewedAction } from '@/lib/actions';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
@@ -34,7 +35,7 @@ const ACTIVITY_OPTS: { value: string; label: string }[] = [
   { value: 'called', label: 'โทรแล้ว' },
 ];
 
-const PLATFORM_LABEL: Record<string, string> = { jobbkk: 'JobBKK', jobthai: 'JobThai' };
+const PLATFORM_LABEL: Record<string, string> = { jobbkk: 'JobBKK', jobthai: 'JobThai', upload: 'อัปโหลด' };
 
 /** Full timestamp for the title attribute (hover). */
 function fmtFull(s: string | null) {
@@ -91,6 +92,8 @@ export default async function CandidatesPage(
     listCandidateRequesters(),
   ]);
   const pages = Math.max(1, Math.ceil(total / limit));
+  // ป้าย "อัปโหลด" บอกชื่อคนอัปโหลดด้วย
+  const uploaders = await uploadersByCandidate(rows.filter((r) => (r.platforms ?? []).includes('upload')).map((r) => r.id));
 
   // เก็บ query ปัจจุบัน (ยกเว้น page) เพื่อใส่ในลิงก์แท็บ/หน้า
   const baseParams = (extra: Record<string, string> = {}) => {
@@ -123,7 +126,15 @@ export default async function CandidatesPage(
       <div className="flex flex-col gap-6">
 
         <header className="flex flex-col gap-1.5">
-          <h1 className="text-2xl font-semibold">คลังผู้สมัคร</h1>
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <h1 className="text-2xl font-semibold">คลังผู้สมัคร</h1>
+            <Button asChild>
+              <Link href="/candidates/upload">
+                <UploadIcon data-icon="inline-start" />
+                อัปโหลดเรซูเม่
+              </Link>
+            </Button>
+          </div>
           <p className="text-sm text-muted-foreground">
             {total.toLocaleString()} โปรไฟล์{activeFilters > 0 ? ' ตามตัวกรอง' : ''}
           </p>
@@ -188,6 +199,7 @@ export default async function CandidatesPage(
             {tab('', 'ทั้งหมด')}
             {tab('jobbkk', 'JobBKK')}
             {tab('jobthai', 'JobThai')}
+            {tab('upload', 'อัปโหลด')}
           </TabsList>
         </Tabs>
 
@@ -240,7 +252,10 @@ export default async function CandidatesPage(
                     <TableCell className="hidden xl:table-cell px-4 py-3">
                       <div className="flex flex-wrap gap-1">
                         {(c.platforms ?? []).map((p) => (
-                          <Badge key={p} variant="outline">{PLATFORM_LABEL[p] ?? p}</Badge>
+                          <Badge key={p} variant="outline">
+                            {PLATFORM_LABEL[p] ?? p}
+                            {p === 'upload' && uploaders.get(c.id) ? ` · ${uploaders.get(c.id)}` : ''}
+                          </Badge>
                         ))}
                       </div>
                     </TableCell>

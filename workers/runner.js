@@ -26,6 +26,7 @@ import { ocrBacklog, runTask } from '../src/tasks-worker.js';
 import { aiStatus } from '../src/core/ai-models.js';
 import { generateDraftForCampaign, regenerateImageForContent } from '../src/core/orchestrator-draft.js';
 import { measureCampaign } from '../src/core/orchestrator-measure.js';
+import { processResumeBatch } from '../src/db/resume-uploads.js';
 import { sendAlert } from '../src/core/alert.js';
 import { classifyScrapeTaskResult, cooldownError, requireSuccessfulScrapeTaskResult } from '../src/core/scrape-task-result.js';
 import { imageGenerationCapability } from '../src/core/ai-image.js';
@@ -193,6 +194,12 @@ const HANDLERS = {
   async measure(job) {
     if (!job.ref_id) throw new Error('measure job missing ref_id (campaign id)');
     return measureCampaign(job.ref_id);
+  },
+  // อัปโหลดเรซูเม่ (หน้าผู้สมัคร): อ่านไฟล์ → AI ของบริษัทแยกช่อง → บันทึกคนใหม่ / รอเลือกช่องถ้ามีคนนี้แล้ว
+  // ไม่ใช้ browser · connector_key = 'upload:<batchId>' หนึ่งรอบอัปโหลดทำทีละงาน
+  async resume_upload(job) {
+    if (!job.ref_id) throw new Error('resume_upload job missing ref_id (batch id)');
+    return processResumeBatch(job.ref_id);
   },
   // Plumbing self-test — zero cost, no browser. Proves claim/lock/status transitions.
   async selftest(job) {

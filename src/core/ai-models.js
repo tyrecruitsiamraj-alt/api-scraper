@@ -79,19 +79,24 @@ export function markModelUnusable(model) {
 
 const isUsable = (model) => !(unusableUntil.get(model) > Date.now());
 
-/** โมเดลข้อความที่จะลองตามลำดับ ไม่รวมตัวที่เพิ่งเรียกไม่ได้ */
-export async function textModelCandidates() {
+/**
+ * โมเดลข้อความที่จะลองตามลำดับ ไม่รวมตัวที่เพิ่งเรียกไม่ได้
+ * localOnly = ข้อความมีข้อมูลผู้สมัคร (อ่านเรซูเม่ที่อัปโหลด) ห้ามส่งออกไป cloud
+ */
+export async function textModelCandidates({ localOnly = false } = {}) {
   const available = await listOllamaModels();
-  return orderTextModels(available, configured('OLLAMA_TEXT_MODELS', 'OLLAMA_MODEL', DEFAULT_TEXT_MODEL)).filter(isUsable);
+  return orderTextModels(available, configured('OLLAMA_TEXT_MODELS', 'OLLAMA_MODEL', DEFAULT_TEXT_MODEL))
+    .filter(isUsable)
+    .filter((m) => !localOnly || !isCloudModel(m));
 }
 
 /**
  * เรียก call(model) ไล่ตามลำดับจนสำเร็จ — ตัวที่เรียกไม่ได้ (402/403/404) ข้ามทันทีไม่นับรอบ
  * ล้มแบบอื่น (ช้า/ตอบผิดรูป) ลองได้ไม่เกิน 3 ตัว เพราะรอบละนานได้ถึง 3 นาที
  */
-export async function withTextModel(call) {
-  const models = await textModelCandidates();
-  if (!models.length) throw new Error('เซิร์ฟเวอร์ AI ไม่มีโมเดลที่ใช้ได้');
+export async function withTextModel(call, { localOnly = false } = {}) {
+  const models = await textModelCandidates({ localOnly });
+  if (!models.length) throw new Error(localOnly ? 'เซิร์ฟเวอร์ AI ของบริษัทไม่มีโมเดลข้อความที่ใช้ได้' : 'เซิร์ฟเวอร์ AI ไม่มีโมเดลที่ใช้ได้');
   const errors = [];
   let attempts = 0;
   for (const model of models) {

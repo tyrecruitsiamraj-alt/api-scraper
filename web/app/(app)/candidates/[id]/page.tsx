@@ -1,8 +1,9 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
-import { ArrowLeftIcon, DownloadIcon, ExternalLinkIcon } from 'lucide-react';
+import { ArrowLeftIcon, DownloadIcon, ExternalLinkIcon, PencilIcon } from 'lucide-react';
 import { getCandidate, listSamePersonCandidates, recordCandidateActivity } from '@/lib/repo';
 import { AttachmentViewer } from '@/components/AttachmentViewer';
+import { uploadersByCandidate } from '@/lib/resume-uploads';
 import { markCandidateCalledAction, markCandidateViewedAction } from '@/lib/actions';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth';
@@ -16,7 +17,7 @@ import { Separator } from '@/components/ui/separator';
 
 export const dynamic = 'force-dynamic';
 
-const PLATFORM_LABEL: Record<string, string> = { jobbkk: 'JobBKK', jobthai: 'JobThai' };
+const PLATFORM_LABEL: Record<string, string> = { jobbkk: 'JobBKK', jobthai: 'JobThai', upload: 'อัปโหลด' };
 
 function Info({ label, value }: { label: string; value?: string | null }) {
   return (
@@ -65,6 +66,9 @@ export default async function CandidateDetail(props: { params: Promise<{ id: str
     a.kind === 'profile' && a.download_status === 'success'
   ));
 
+  const uploadedBy = (await uploadersByCandidate([c.id])).get(c.id) ?? null;
+  const sourceLabel = (platform: string) =>
+    `${PLATFORM_LABEL[platform] ?? platform}${platform === 'upload' && uploadedBy ? ` · ${uploadedBy}` : ''}`;
   const education: any[] = Array.isArray(c.education) ? c.education : [];
   const work: any[] = Array.isArray(c.work_experience) ? c.work_experience : [];
   const hard: string[] = Array.isArray(c.hard_skills) ? c.hard_skills : [];
@@ -79,12 +83,20 @@ export default async function CandidateDetail(props: { params: Promise<{ id: str
             กลับไปรายชื่อ
           </Link>
         </Button>
-        <Button asChild>
-          <a href={`/api/candidates/${params.id}/pdf`}>
-            <DownloadIcon data-icon="inline-start" />
-            ดาวน์โหลด PDF
-          </a>
-        </Button>
+        <div className="flex flex-wrap gap-2">
+          <Button variant="outline" asChild>
+            <Link href={`/candidates/${params.id}/edit`}>
+              <PencilIcon data-icon="inline-start" />
+              แก้ไข
+            </Link>
+          </Button>
+          <Button asChild>
+            <a href={`/api/candidates/${params.id}/pdf`}>
+              <DownloadIcon data-icon="inline-start" />
+              ดาวน์โหลด PDF
+            </a>
+          </Button>
+        </div>
       </div>
 
       <Card>
@@ -101,12 +113,12 @@ export default async function CandidateDetail(props: { params: Promise<{ id: str
                 s.source_url ? (
                   <Badge key={s.external_id} variant="outline" asChild>
                     <a href={s.source_url} target="_blank" rel="noreferrer">
-                      {PLATFORM_LABEL[s.platform] ?? s.platform}
+                      {sourceLabel(s.platform)}
                       <ExternalLinkIcon data-icon="inline-end" />
                     </a>
                   </Badge>
                 ) : (
-                  <Badge key={s.external_id} variant="outline">{PLATFORM_LABEL[s.platform] ?? s.platform}</Badge>
+                  <Badge key={s.external_id} variant="outline">{sourceLabel(s.platform)}</Badge>
                 )
               ))}
             </div>

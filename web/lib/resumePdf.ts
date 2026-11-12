@@ -1,6 +1,6 @@
 /** Shared resume HTML + Chromium PDF generation (Thai-safe via browser render). */
 
-const PLATFORM: Record<string, string> = { jobbkk: 'JobBKK', jobthai: 'JobThai' };
+const PLATFORM: Record<string, string> = { jobbkk: 'JobBKK', jobthai: 'JobThai', upload: 'อัปโหลด' };
 
 function txt(v: unknown): string {
   if (v === null || v === undefined) return '';
