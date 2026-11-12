@@ -8,7 +8,7 @@ export type PostGroupStatus =
   | 'waiting'
   | 'skipped';
 
-export function postedOutcome(postStatus: unknown, postLink: unknown): 'posted' | 'pending_approval' | 'unconfirmed';
+export function postedOutcome(postStatus: unknown, postLink: unknown): 'posted' | 'pending_approval' | 'unconfirmed' | 'failed';
 
 export type PostTaskGroup = {
   group_id: string;

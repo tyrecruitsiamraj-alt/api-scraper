@@ -98,10 +98,10 @@ export default async function OrderGroupsPage(props: {
         </div>
       </header>
 
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-7">
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-8">
         <Card size="sm">
           <CardHeader>
-            <CardDescription>สั่ง</CardDescription>
+            <CardDescription>สั่งทั้งหมด</CardDescription>
             <CardTitle className="text-2xl">{rows.length} กลุ่ม</CardTitle>
           </CardHeader>
         </Card>
@@ -158,8 +158,6 @@ export default async function OrderGroupsPage(props: {
                       </a>
                     ) : r.error ? (
                       <span className="text-sm text-muted-foreground">{r.error}</span>
-                    ) : r.status === 'unconfirmed' ? (
-                      <span className="text-sm text-muted-foreground">กดโพสต์แล้ว ระบบยังหาโพสต์ในกลุ่มไม่เจอ</span>
                     ) : (
                       <span className="text-muted-foreground">-</span>
                     )}

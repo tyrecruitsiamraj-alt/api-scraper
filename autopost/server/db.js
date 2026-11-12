@@ -5,6 +5,9 @@ require('dotenv').config();
 const { Pool } = require('pg');
 const { classifyPostFailure } = require('./failure-learning');
 const { FB_LIMIT_LOG_PREFIX, STRIKE_WINDOW_DAYS, MAX_PAUSE_HOURS, facebookLimitPauseHours, facebookLimitReason } = require('./fb-limit-pause');
+const contentStatus = require('./post-content-status');
+/** โพสต์เก่าที่พ่วงไปเช็กแท็บ "เนื้อหาของคุณ" ต่อบัญชีต่อรอบเก็บคอมเมนต์ (0 = ปิด) */
+const STATUS_CHECK_PER_USER = Math.max(0, Math.min(20, Number(process.env.STATUS_CHECK_PER_USER ?? 5)));
 const { dailyCapCeiling, effectiveDailyCapFor, dailyStartOffsetMin, bangkokDay, needsWarmup, warmupStartOffsetMin } = require('./post-pacing');
 /** เพดานระบบ 8 กลุ่ม/บัญชี/วัน ใน SQL (ตัวเลข ไม่ใช่ข้อความจากผู้ใช้) — ตัวเลือกบัญชีสำรองต้องเห็นเพดานเดียวกับตอนโพสต์ */
 const DAILY_CAP_MAX_SQL = Number(dailyCapCeiling());
@@ -1422,6 +1425,59 @@ async function updatePostLogFoundLink(id, postLink, postStatus) {
     [String(id), link, String(postStatus || '').trim()],
   );
   return rowCount > 0;
+}
+
+/** เวลาที่ตัวเก็บคอมเมนต์เช็กแท็บ "เนื้อหาของคุณ" ของโพสต์นี้ล่าสุด (เพิ่มคอลัมน์อย่างเดียว) */
+async function ensurePostLogStatusCheckColumn() {
+  await query(`ALTER TABLE post_logs ADD COLUMN IF NOT EXISTS status_checked_at TIMESTAMPTZ`);
+}
+
+/**
+ * ผลเช็กแท็บ "เนื้อหาของคุณ" (เผยแพร่แล้ว/รอดำเนินการ/ปฏิเสธแล้ว/ลบออกแล้ว) ของโพสต์หนึ่งแถว
+ * foundStatus ว่าง = เช็กแล้วไม่เจอในแท็บไหน จดแค่เวลาเช็ก · เปลี่ยนสถานะตาม nextPostStatus เท่านั้น
+ * postLink เติมให้เฉพาะแถวที่ยังไม่มีลิงก์ และไม่ซ้ำกับแถวอื่น
+ */
+async function updatePostLogContentStatus(id, foundStatus, postLink) {
+  await ensurePostLogStatusCheckColumn();
+  const { rows } = await query(`SELECT post_status, post_link FROM post_logs WHERE id = $1`, [String(id)]);
+  if (!rows[0]) throw new Error('ไม่พบแถว post_logs');
+  const cur = rows[0].post_status;
+  const next = contentStatus.nextPostStatus(cur, foundStatus);
+  let link = String(postLink || '').trim();
+  const hasLink = String(rows[0].post_link || '').trim() !== '';
+  if (hasLink || !/^https:\/\/www\.facebook\.com\/groups\/[^/]+\/(posts|permalink)\/\d+/.test(link)) link = '';
+  if (link && (await postLinkUsedElsewhere(link, { exceptId: String(id) }))) link = '';
+  const { rowCount } = await query(
+    `UPDATE post_logs
+        SET status_checked_at = NOW(),
+            post_status = COALESCE($3, post_status),
+            post_link = CASE WHEN $4 <> '' THEN $4 ELSE post_link END
+      WHERE id = $1 AND post_status IS NOT DISTINCT FROM $2`,
+    [String(id), cur, next, link],
+  );
+  return { updated: rowCount > 0 && Boolean(next || link), from: cur, to: next };
+}
+
+/**
+ * โพสต์เก่าของบัญชีที่ยังรอดำเนินการ/หาโพสต์ไม่เจอ ให้รอบเก็บคอมเมนต์ไปเช็กแท็บต่อ (ไม่เกิน 30 วัน)
+ * ทีละไม่กี่โพสต์ต่อวัน — ไม่ให้บัญชีเปิด Facebook มากขึ้นจนโดนจำกัด · เช็กแล้วรอ 2 วันค่อยเช็กซ้ำ
+ */
+async function getPostLogsDueStatusCheck(userId, limit) {
+  await ensurePostLogStatusCheckColumn();
+  const n = Math.max(0, Math.min(20, Number(limit) || 0));
+  if (!n) return [];
+  const { rows } = await query(
+    `SELECT id FROM post_logs
+      WHERE user_id = $1
+        AND post_status IN ($2, $3)
+        AND NULLIF(TRIM(COALESCE(group_id, '')), '') IS NOT NULL
+        AND created_at > NOW() - INTERVAL '30 days'
+        AND (status_checked_at IS NULL OR status_checked_at < NOW() - INTERVAL '2 days')
+      ORDER BY status_checked_at NULLS FIRST, created_at
+      LIMIT $4`,
+    [String(userId), contentStatus.STATUS_PENDING, contentStatus.STATUS_NOT_FOUND, n],
+  );
+  return rows.map((r) => String(r.id));
 }
 
 /** รายงานโพสต์: JOIN users + assignments (ผู้ทำ) + นับ total + แยกตามวัน/เจ้าของงาน */
@@ -2881,6 +2937,9 @@ async function enqueueRecentCollectJobs({ start_date, end_date, requested_by = '
         skipped.push({ user_id: uid, reason: 'no_posts' });
         continue;
       }
+      // พ่วงโพสต์เก่าที่ยังรอดำเนินการ/หาไม่เจอ ไปเช็กแท็บในรอบเดียวกัน — ไม่เปิดรอบ Facebook ใหม่ให้บัญชีที่ไม่มีงานเก็บ
+      const due = await getPostLogsDueStatusCheck(uid, STATUS_CHECK_PER_USER).catch(() => []);
+      for (const id of due) if (!ids.includes(id)) ids.push(id);
       const row = await enqueueCollectRunJob({
         user_id: uid,
         post_log_ids: ids,
@@ -3141,6 +3200,8 @@ module.exports = {
   getPostLogs,
   getPostLogsForCommentCollect,
   updatePostLogFoundLink,
+  updatePostLogContentStatus,
+  getPostLogsDueStatusCheck,
   releaseOrphanedJobs,
   getFindLinkHints,
   postLinkUsedElsewhere,

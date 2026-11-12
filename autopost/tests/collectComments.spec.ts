@@ -15,11 +15,22 @@ import {
   replyToComment,
   findMyPostLink,
 } from '../src/helpers';
+import { readContentTab } from '../src/helpers/contentTabs';
+import type { ContentTabRead } from '../src/helpers/contentTabs';
 
 /* eslint-disable @typescript-eslint/no-var-requires */
 // ผู้สนใจจากคอมเมนต์: เขียนลง DB ตรง (worker มี DATABASE_URL) — ดู server/comment-leads.js
 const commentLeads = require('../server/comment-leads');
 const leadsDb = process.env.DATABASE_URL ? require('../server/db') : null;
+const contentStatus = require('../server/post-content-status');
+/**
+ * เช็กแท็บ "เนื้อหาของคุณ" ได้กี่กลุ่มต่อรอบ (เจ้าของ 12 พ.ย. 2569: อยากรู้ปฏิเสธแล้ว/ลบออกแล้ว แต่ไม่ให้บัญชีโดนจำกัดเพิ่ม)
+ * พ่วงไปกับรอบเก็บคอมเมนต์ที่ล็อกอินอยู่แล้ว ไม่เปิดรอบ Facebook ใหม่ · 0 = ปิด
+ */
+const CONTENT_CHECK_MAX_GROUPS = Math.max(0, Math.min(20, Number(process.env.CONTENT_CHECK_MAX_GROUPS ?? 5)));
+const TAB_LABEL: Record<string, string> = { posted: 'เผยแพร่แล้ว', pending: 'รอดำเนินการ', declined: 'ปฏิเสธแล้ว', removed: 'ลบออกแล้ว' };
+/** หน้าโพสต์ที่เปิดไม่ได้แล้ว (โพสต์ของบัญชีเอง = ถูกลบหรือถูกซ่อน) */
+const POST_UNAVAILABLE = /เนื้อหานี้ไม่พร้อมใช้งาน|this content isn.?t available/i;
 /** ตอบคอมเมนต์ต่อรอบเก็บ (ทุกโพสต์รวมกัน) — ตอบเยอะเกิน Facebook มองว่าเป็นสแปม; 0 = ไม่ตอบ */
 const AUTO_REPLY_MAX_PER_RUN = Math.max(0, Math.min(50, Number(process.env.AUTO_REPLY_MAX_PER_RUN ?? 10)));
 
@@ -29,6 +40,8 @@ type CollectPlan = {
     post_log_id: string;
     /** ว่าง = ตอนโพสต์หาลิงก์ไม่เจอ ให้หาใหม่จาก group_id */
     post_link: string;
+    /** สถานะใน post_logs ตอนสร้างรอบ (รออนุมัติ = เช็กแท็บก่อนเก็บคอมเมนต์) */
+    post_status?: string;
     group_id?: string;
     /** ข้อความประกาศของงาน (ส่งมาเฉพาะโพสต์ที่ยังไม่มีลิงก์) */
     caption?: string;
@@ -65,6 +78,21 @@ async function patchFoundLink(postLogId: string, body: { post_link: string; post
     body: JSON.stringify(body),
   });
   if (!res.ok) throw new Error(`found-link ${res.status}: ${await res.text()}`);
+}
+
+async function patchContentStatus(postLogId: string, body: { post_status: string; post_link: string }): Promise<{ from?: string; to?: string | null }> {
+  if (leadsDb) return leadsDb.updatePostLogContentStatus(postLogId, body.post_status, body.post_link);
+  const base = (process.env.RUN_LOG_API_URL || 'http://127.0.0.1:3000').replace(/\/$/, '');
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  if (process.env.COLLECT_PATCH_TOKEN) headers['x-collect-token'] = process.env.COLLECT_PATCH_TOKEN;
+  if (process.env.COLLECT_WORKER_TOKEN) headers['x-worker-token'] = process.env.COLLECT_WORKER_TOKEN;
+  const res = await fetch(`${base}/api/post-logs/${encodeURIComponent(postLogId)}/content-status`, {
+    method: 'PATCH',
+    headers,
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) throw new Error(`content-status ${res.status}: ${await res.text()}`);
+  return res.json();
 }
 
 async function patchCollectResult(
@@ -139,6 +167,54 @@ test('collectComments', async ({ page }) => {
   >();
   const CUSTOMER_PHONE_MAX_LEN = Math.min(2000, Math.max(100, Number(process.env.COLLECT_CUSTOMER_PHONE_MAX_LEN) || 2000));
 
+  // แท็บ "เนื้อหาของคุณ" ที่เปิดแล้วในรอบนี้ (กลุ่ม:แท็บ) — หลายโพสต์ในกลุ่มเดียวกันเปิดครั้งเดียว
+  const tabCache = new Map<string, ContentTabRead>();
+  const checkedGroups = new Set<string>();
+  /** ไม่ทับยอดคอมเมนต์ของโพสต์ที่ยังรอ/ถูกปฏิเสธ/ถูกลบ (ยอดเดิมตอนเผยแพร่อยู่ต้องไม่หายเป็น 0) */
+  const noCollectResult = new Set<string>();
+  /**
+   * เปิดแท็บตามลำดับจนเจอโพสต์นี้ แล้วบันทึกสถานะ · คืนสถานะที่เจอ, null = ไม่เจอในแท็บไหน, 'skipped' = เกินโควตากลุ่มรอบนี้
+   */
+  const checkContentStatus = async (item: CollectPlan['posts'][number], order: string[], idxLabel: string): Promise<string | null> => {
+    const gid = String(item.group_id || '').trim();
+    if (!gid || CONTENT_CHECK_MAX_GROUPS === 0) return 'skipped';
+    if (!checkedGroups.has(gid) && checkedGroups.size >= CONTENT_CHECK_MAX_GROUPS) return 'skipped';
+    checkedGroups.add(gid);
+    const takenIds = (item.known_links || []).map((l) => contentStatus.postIdOf(l)).filter(Boolean);
+    const reads: ContentTabRead[] = [];
+    let found: { tab: string; status: string; post_id: string | null; by: string } | null = null;
+    for (const tab of order) {
+      const key = `${gid}:${tab}`;
+      let read = tabCache.get(key);
+      if (!read) {
+        read = await readContentTab(active, gid, tab).catch((e) => ({ tab, ok: false, items: [], url: String((e as Error).message).slice(0, 120) }));
+        tabCache.set(key, read);
+      }
+      reads.push(read);
+      found = contentStatus.locatePost({ link: item.post_link, caption: item.post_link ? '' : item.caption, takenIds }, [read]);
+      if (found) break;
+    }
+    const link = found && !item.post_link && found.post_id ? `https://www.facebook.com/groups/${gid}/posts/${found.post_id}/` : '';
+    const saved = await patchContentStatus(item.post_log_id, { post_status: found?.status ?? '', post_link: link });
+    if (saved?.to) item.post_status = saved.to;
+    await runLog({
+      level: 'info',
+      message: `${idxLabel} เช็กเนื้อหาของคุณ กลุ่ม ${item.group_name || gid}: ${found ? TAB_LABEL[found.tab] : `ไม่เจอในแท็บ ${reads.map((r) => TAB_LABEL[r.tab]).join(' / ')}`}${saved?.to ? ` (บันทึกเป็น ${TAB_LABEL[contentStatus.CONTENT_TABS.find((t: { status: string }) => t.status === saved.to)?.tab] ?? saved.to})` : ''}`,
+      user_id: user.id,
+      meta: {
+        kind: 'content_status',
+        post_log_id: item.post_log_id,
+        group_id: gid,
+        found: found?.tab ?? null,
+        by: found?.by ?? null,
+        from: saved?.from ?? null,
+        to: saved?.to ?? null,
+        tabs: reads.map((r) => ({ tab: r.tab, ok: r.ok, posts: r.items.length, with_id: r.items.filter((i) => i.post_id).length, url: r.url })),
+      },
+    });
+    return found?.status ?? null;
+  };
+
   let idx = 0;
   for (const item of plan.posts) {
     idx += 1;
@@ -157,6 +233,14 @@ test('collectComments', async ({ page }) => {
           sessionKey: String(user.env_key || user.id || user.email || 'default'),
         });
       }
+      // โพสต์ที่ยังรอดำเนินการ: เช็กแท็บก่อน ผ่านแล้วค่อยเก็บคอมเมนต์ · ยังรอ/ปฏิเสธ/ลบ = ไม่มีคอมเมนต์ให้เก็บ
+      if (item.post_link && item.post_status === contentStatus.STATUS_PENDING && item.group_id) {
+        const st = await checkContentStatus(item, ['pending', 'posted', 'declined', 'removed'], `[${idx}/${plan.posts.length}]`);
+        if (st && st !== 'skipped' && st !== contentStatus.STATUS_POSTED) {
+          noCollectResult.add(item.post_log_id);
+          continue;
+        }
+      }
       if (!item.post_link) {
         if (!item.group_id) continue;
         const knownLinks = [
@@ -166,6 +250,8 @@ test('collectComments', async ({ page }) => {
         const diag: Record<string, unknown> = {};
         const found = await findMyPostLink(active, item.group_id, { jobTitle: item.job_title, caption: item.caption, knownLinks, diag });
         if (!found) {
+          // ไม่อยู่ในเผยแพร่แล้ว/รอดำเนินการ — ดูแท็บปฏิเสธแล้ว/ลบออกแล้วต่อ
+          await checkContentStatus(item, ['declined', 'removed'], `[${idx}/${plan.posts.length}]`);
           await runLog({
             level: 'info',
             message: `[${idx}/${plan.posts.length}] ยังหาลิงก์โพสต์ในกลุ่ม ${item.group_name || item.group_id} ไม่เจอ (อาจยังรออนุมัติหรือถูกลบ) ข้ามไปก่อน`,
@@ -191,6 +277,17 @@ test('collectComments', async ({ page }) => {
       const { phones, commentCount, postBodyPhones, reactions, shares, comments, diag } = await scrapeCommentsAndPhones(active, item.post_link, {
         excludeAuthorNames: ownerNames,
       });
+      // เปิดโพสต์ที่เคยเผยแพร่แล้วไม่ได้ = อาจถูกแอดมินลบ — ยืนยันจากแท็บลบออกแล้วก่อนเปลี่ยนสถานะ
+      if (!commentCount && !reactions && item.group_id) {
+        const bodyText = await active.locator('body').innerText({ timeout: 5000 }).catch(() => '');
+        if (POST_UNAVAILABLE.test(bodyText)) {
+          const st = await checkContentStatus(item, ['removed'], `[${idx}/${plan.posts.length}]`);
+          if (st === contentStatus.STATUS_REMOVED) {
+            noCollectResult.add(item.post_log_id);
+            continue;
+          }
+        }
+      }
       if (!comments.length || !reactions) {
         // จับคอมเมนต์รายคนหรือยอดไลก์ไม่ได้ — เก็บรูปแบบ aria-label (ปิดชื่อแล้ว) ไว้ไล่ว่า Facebook เปลี่ยน markup เป็นแบบไหน
         await runLog({
@@ -298,6 +395,7 @@ test('collectComments', async ({ page }) => {
 
   for (const item of plan.posts) {
     if (!item.post_link) continue; // ยังหาลิงก์ไม่เจอ ไม่มีอะไรให้บันทึก
+    if (noCollectResult.has(item.post_log_id)) continue;
     const st = pendingByPost.get(item.post_log_id) || { commentCount: 0, phones: [], reactions: 0, shares: 0, item };
     const phonesFinal = st.phones || [];
     const phoneStr = phonesFinal.length ? phonesFinal.join(', ').slice(0, CUSTOMER_PHONE_MAX_LEN) : '';

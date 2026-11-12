@@ -127,6 +127,7 @@ function createLocalWorkerApi({ db, workerId, workerName = null, env = process.e
         .map((r) => ({
           post_log_id: String(r.id),
           post_link: String(r.post_link || '').trim(),
+          post_status: String(r.post_status || '').trim(),
           group_id: String(r.group_id || '').trim(),
           job_id: String(r.job_id || ''),
           job_title: String(r.job_title || ''),

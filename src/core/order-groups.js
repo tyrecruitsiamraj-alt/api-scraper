@@ -7,15 +7,27 @@
  */
 import { postedOutcome } from './post-task-state.js';
 
+// คำเดียวกับแท็บ "เนื้อหาของคุณ" ใน Facebook (เจ้าของ 12 พ.ย. 2569: งงคำว่า "กดโพสต์แล้ว หาโพสต์ไม่เจอ")
+// กดโพสต์แล้วแต่ไม่ขึ้นทั้งเผยแพร่แล้วและรอดำเนินการ นับเป็นไม่สำเร็จ เหตุอยู่ในช่องเหตุ
+// ตัวเก็บคอมเมนต์หาลิงก์เจอทีหลัง = มีลิงก์ = เปลี่ยนเป็นเผยแพร่แล้วเอง
 export const GROUP_STATUSES = [
-  { key: 'posted', label: 'ขึ้นแล้ว' },
-  { key: 'pending_approval', label: 'รอแอดมินอนุมัติ' },
-  { key: 'unconfirmed', label: 'กดโพสต์แล้ว หาโพสต์ไม่เจอ' },
+  { key: 'posted', label: 'เผยแพร่แล้ว' },
+  { key: 'pending_approval', label: 'รอดำเนินการ' },
+  // ตัวเก็บคอมเมนต์เช็กแท็บ "เนื้อหาของคุณ" แล้วเจอโพสต์อยู่แท็บปฏิเสธแล้ว / ลบออกแล้ว (12 พ.ย. 2569)
+  { key: 'declined', label: 'ปฏิเสธแล้ว' },
+  { key: 'removed', label: 'ลบออกแล้ว' },
   { key: 'failed', label: 'ไม่สำเร็จ' },
-  // รอบจบแล้วแต่ไม่ถึงกลุ่มนี้ — แยกจาก "ไม่สำเร็จ" (เจ้าของสั่ง 11 พ.ย. 2569: ไม่สำเร็จ 1,146 กลุ่ม เป็นไม่ได้ลอง 982)
-  { key: 'not_tried', label: 'ยังไม่ได้ลองโพสต์' },
+  // รอบจบแล้วแต่บัญชีไม่ได้เข้าไปโพสต์กลุ่มนี้ — แยกจาก "ไม่สำเร็จ" (เจ้าของสั่ง 11 พ.ย. 2569: ไม่สำเร็จ 1,146 กลุ่ม เป็นไม่ได้ลอง 982)
+  { key: 'not_tried', label: 'ไม่ได้โพสต์' },
   { key: 'waiting', label: 'รอคิว' },
 ];
+
+const NOT_FOUND_AFTER_POST = 'กดโพสต์แล้ว แต่โพสต์ไม่ขึ้นในกลุ่ม';
+/** post_logs.post_status ที่ตัวเก็บคอมเมนต์บันทึก (autopost/server/post-content-status.js) */
+const ADMIN_OUTCOME = {
+  'ถูกปฏิเสธ': { status: 'declined', error: 'แอดมินกลุ่มปฏิเสธโพสต์' },
+  'ถูกลบ': { status: 'removed', error: 'โพสต์ถูกลบออกจากกลุ่ม' },
+};
 
 const ts = (v) => (v ? new Date(v).getTime() : 0);
 
@@ -52,20 +64,29 @@ export function orderGroupResults({ planned = [], attempts = [], postLogs = [], 
       .filter((p) => String(p.group_id ?? '') === fb)
       .sort((x, y) => ts(y.at) - ts(x.at))[0] ?? null;
     let status;
-    if (log && String(log.post_link ?? '').trim()) status = postedOutcome(log.post_status, log.post_link);
+    let notFound = false;
+    const admin = log ? ADMIN_OUTCOME[String(log.post_status ?? '').trim()] : null;
+    if (admin) status = admin.status;
+    else if (log && String(log.post_link ?? '').trim()) status = postedOutcome(log.post_status, log.post_link);
     else if (latest?.level === 'success' || log) status = postedOutcome(log?.post_status, null);
     else if (latest) status = 'failed';
     else status = active ? 'waiting' : 'not_tried';
+    if (status === 'unconfirmed') {
+      status = 'failed';
+      notFound = true;
+    }
     return {
       fb_group_id: fb,
       name: groupName(fb),
       status,
       at: log?.at ?? latest?.at ?? null,
       account: log?.account ?? latest?.account ?? null,
-      error: status === 'failed'
-        ? shortFailReason(latest?.message)
+      error: admin ? admin.error
+        : notFound ? NOT_FOUND_AFTER_POST
+        : status === 'failed' ? shortFailReason(latest?.message)
         : status === 'not_tried' ? stopped || null : null,
-      post_link: String(log?.post_link ?? '').trim() || null,
+      // โพสต์ที่ถูกปฏิเสธ/ลบ เปิดลิงก์ไม่ได้แล้ว — โชว์เหตุแทน
+      post_link: admin ? null : String(log?.post_link ?? '').trim() || null,
     };
   });
 }

@@ -4,7 +4,7 @@ import { orderGroupResults, countGroupStatuses, linkedCount, shortFailReason } f
 
 const at = (m) => `2026-11-09T02:${String(m).padStart(2, '0')}:00Z`;
 
-test('ใบ 5 กลุ่ม: ขึ้นแล้ว · รออนุมัติ · หาโพสต์ไม่เจอ · ไม่สำเร็จ · รอคิว — นับรวมเท่าจำนวนกลุ่ม', () => {
+test('ใบ 5 กลุ่ม: เผยแพร่แล้ว · รอดำเนินการ · กดแล้วไม่ขึ้น = ไม่สำเร็จ · ไม่สำเร็จ · รอคิว — นับรวมเท่าจำนวนกลุ่ม', () => {
   const groups = orderGroupResults({
     planned: ['1481054599057270', '433203029287064', '448099235530340', '1398230516956714', '884533619479424'],
     attempts: [
@@ -20,10 +20,11 @@ test('ใบ 5 กลุ่ม: ขึ้นแล้ว · รออนุม�
     ],
     active: true,
   });
-  assert.deepEqual(groups.map((g) => g.status), ['posted', 'pending_approval', 'unconfirmed', 'failed', 'waiting']);
+  assert.deepEqual(groups.map((g) => g.status), ['posted', 'pending_approval', 'failed', 'failed', 'waiting']);
+  assert.equal(groups[2].error, 'กดโพสต์แล้ว แต่โพสต์ไม่ขึ้นในกลุ่ม');
   assert.equal(groups[3].error, 'Facebook ไม่รับโพสต์');
   assert.equal(groups[0].account, 'Thom Blake');
-  assert.deepEqual(countGroupStatuses(groups), { total: 5, posted: 1, pending_approval: 1, unconfirmed: 1, failed: 1, not_tried: 0, waiting: 1 });
+  assert.deepEqual(countGroupStatuses(groups), { total: 5, posted: 1, pending_approval: 1, declined: 0, removed: 0, failed: 2, not_tried: 0, waiting: 1 });
   assert.equal(linkedCount(groups), 2, 'สำเร็จนับเฉพาะที่มีลิงก์');
 });
 
@@ -41,11 +42,11 @@ test('ลองโพสต์ไม่ได้ก่อน แล้วบั�
   assert.equal(g.error, null);
 });
 
-test('รอบจบแล้วแต่ไม่ถึงกลุ่มนี้ = ยังไม่ได้ลองโพสต์ ไม่นับเป็นไม่สำเร็จ และไม่ค้างเป็นรอคิว', () => {
+test('รอบจบแล้วแต่ไม่ถึงกลุ่มนี้ = ไม่ได้โพสต์ ไม่นับเป็นไม่สำเร็จ และไม่ค้างเป็นรอคิว', () => {
   const [g] = orderGroupResults({ planned: ['884533619479424'], active: false });
   assert.equal(g.status, 'not_tried');
   assert.equal(g.error, null);
-  assert.deepEqual(countGroupStatuses([g]), { total: 1, posted: 0, pending_approval: 0, unconfirmed: 0, failed: 0, not_tried: 1, waiting: 0 });
+  assert.deepEqual(countGroupStatuses([g]), { total: 1, posted: 0, pending_approval: 0, declined: 0, removed: 0, failed: 0, not_tried: 1, waiting: 0 });
 });
 
 test('กลุ่มที่ไม่ได้ลองโพสต์ บอกเหตุที่รอบหยุด', () => {
@@ -77,4 +78,26 @@ test('เหตุไม่สำเร็จย่อเหลือบรร�
     attempts: [{ group_id: '1398230516956714', level: 'warn', message: cases[0][0], at: at(1) }],
   });
   assert.equal(g.error, 'Facebook จำกัดการโพสต์ของบัญชีนี้ชั่วคราว');
+});
+
+test('แอดมินปฏิเสธ/ลบโพสต์ (เช็กจากแท็บเนื้อหาของคุณ) แยกสถานะ ไม่นับเป็นเผยแพร่ และไม่โชว์ลิงก์ที่เปิดไม่ได้', () => {
+  const groups = orderGroupResults({
+    planned: ['1481054599057270', '433203029287064'],
+    attempts: [
+      { group_id: '1481054599057270', level: 'success', message: null, at: at(1) },
+      { group_id: '433203029287064', level: 'success', message: null, at: at(2) },
+    ],
+    postLogs: [
+      { group_id: '1481054599057270', post_link: 'https://www.facebook.com/groups/1481054599057270/posts/1234567890123403/', post_status: 'ถูกปฏิเสธ', at: at(1) },
+      { group_id: '433203029287064', post_link: 'https://www.facebook.com/groups/433203029287064/posts/1234567890123404/', post_status: 'ถูกลบ', at: at(2) },
+    ],
+  });
+  assert.deepEqual(groups.map((g) => [g.status, g.post_link, g.error]), [
+    ['declined', null, 'แอดมินกลุ่มปฏิเสธโพสต์'],
+    ['removed', null, 'โพสต์ถูกลบออกจากกลุ่ม'],
+  ]);
+  assert.equal(linkedCount(groups), 0);
+  const c = countGroupStatuses(groups);
+  assert.equal(c.declined, 1);
+  assert.equal(c.removed, 1);
 });

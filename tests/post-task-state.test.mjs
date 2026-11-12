@@ -110,6 +110,8 @@ test('posted outcome follows the real state in the group', async () => {
   assert.equal(postedOutcome('รออนุมัติ', 'https://www.facebook.com/groups/1/posts/2/'), 'pending_approval');
   assert.equal(postedOutcome('ไม่พบลิงก์หลังโพสต์', ''), 'unconfirmed');
   assert.equal(postedOutcome(null, null), 'unconfirmed');
+  assert.equal(postedOutcome('ถูกปฏิเสธ', 'https://www.facebook.com/groups/1/posts/2'), 'failed');
+  assert.equal(postedOutcome('ถูกลบ', 'https://www.facebook.com/groups/1/posts/2'), 'failed');
 });
 
 test('a finished run reports approval and unconfirmed groups, not just success', () => {

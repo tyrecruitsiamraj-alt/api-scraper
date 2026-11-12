@@ -35,8 +35,11 @@ function num(value) {
  *   posted           = ขึ้นในกลุ่มแล้ว (มีลิงก์ และไม่ได้รออนุมัติ)
  *   pending_approval = โพสต์แล้ว รอแอดมินกลุ่มอนุมัติ
  *   unconfirmed      = กดโพสต์แล้ว แต่ยังไม่เจอโพสต์ในกลุ่ม (ไม่มีลิงก์) — ห้ามนับเป็นสำเร็จ
+ *   failed           = แอดมินกลุ่มปฏิเสธหรือลบโพสต์
  */
 export function postedOutcome(postStatus, postLink) {
+  // แอดมินปฏิเสธ/ลบโพสต์ (ตัวเก็บคอมเมนต์เช็กจากแท็บ "เนื้อหาของคุณ" · 12 พ.ย. 2569) — มีลิงก์ก็ไม่นับว่าขึ้น
+  if (/ถูกปฏิเสธ|ถูกลบ/.test(String(postStatus ?? ''))) return 'failed';
   if (/รออนุมัติ|pending/i.test(String(postStatus ?? ''))) return 'pending_approval';
   if (String(postLink ?? '').trim()) return 'posted';
   return 'unconfirmed';

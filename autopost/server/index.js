@@ -51,7 +51,7 @@ app.use((req, res, next) => {
   // Worker (Playwright) ส่งลิงก์โพสต์กลับมาที่นี่เมื่อเขียน DB ตรงไม่ได้ — ใช้ POST_WORKER_TOKEN แทน access token
   if (req.method === 'POST' && p === '/api/post-logs' && isValidPostWorkerToken(req)) return next();
   // ตัวเก็บคอมเมนต์ส่งยอดไลก์/คอมเมนต์/แชร์กลับมาที่นี่ด้วย worker token (handler ตรวจ token ซ้ำอีกชั้น)
-  if (req.method === 'PATCH' && /^\/api\/post-logs\/[^/]+\/(collect-result|found-link)$/.test(p) && isValidPostWorkerToken(req)) return next();
+  if (req.method === 'PATCH' && /^\/api\/post-logs\/[^/]+\/(collect-result|found-link|content-status)$/.test(p) && isValidPostWorkerToken(req)) return next();
 
   // ?access_token= ถูกต้อง → ตั้ง cookie แล้ว redirect ทิ้ง query (กัน token ค้างใน URL/แชร์ลิงก์)
   const qToken = String(req.query.access_token || '').trim();
@@ -1434,6 +1434,22 @@ app.patch('/api/post-logs/:id/found-link', async (req, res) => {
   }
 });
 
+/** ตัวเก็บคอมเมนต์เช็กแท็บ "เนื้อหาของคุณ" ในกลุ่มแล้วส่งผลกลับมา (เผยแพร่แล้ว/รอดำเนินการ/ปฏิเสธแล้ว/ลบออกแล้ว หรือว่าง = ไม่เจอ) */
+app.patch('/api/post-logs/:id/content-status', async (req, res) => {
+  try {
+    const token = req.get('x-collect-token');
+    const workerAuthed = USE_REMOTE_POST_WORKER && isValidPostWorkerToken(req);
+    if (!leadCollectBot.isCollectPatchTokenValid(token) && !workerAuthed) {
+      return res.status(403).json({ error: 'Forbidden' });
+    }
+    const { post_status, post_link } = req.body || {};
+    const out = await db.updatePostLogContentStatus(req.params.id, post_status, post_link);
+    res.json({ ok: true, ...out });
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
 /** CSV สดระหว่างเก็บ Comment — รีเฟรชใน Excel: ข้อมูล → รีเฟรชทั้งหมด / Power Query ตั้งช่วงรีเฟรช */
 app.get('/api/run/collect-export/live.csv', async (req, res) => {
   try {
@@ -1793,6 +1809,7 @@ app.post('/api/worker/collect/claim', async (req, res) => {
       .map((r) => ({
         post_log_id: String(r.id),
         post_link: String(r.post_link || '').trim(),
+        post_status: String(r.post_status || '').trim(),
         group_id: String(r.group_id || '').trim(),
         job_id: String(r.job_id || ''),
         job_title: String(r.job_title || ''),
