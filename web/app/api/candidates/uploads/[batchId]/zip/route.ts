@@ -4,6 +4,7 @@ import { authOptions } from '@/lib/auth';
 import { getAssetBytes, getCandidate } from '@/lib/repo';
 import { batchCandidateIds } from '@/lib/resume-uploads';
 import { buildResumeHtml, htmlToPdf, resumeFileName } from '@/lib/resumePdf';
+import { getResumeTemplate } from '@/lib/resume-templates';
 import { makeZip } from '../../../../../../../src/core/zip.js';
 
 export const runtime = 'nodejs';
@@ -16,7 +17,7 @@ function contentDisposition(filename: string): string {
 }
 
 /** PDF เรซูเม่ (แบบเดียวกับปุ่มดาวน์โหลด PDF ของแต่ละคน) ของทุกคนที่บันทึกจากรอบอัปโหลดนี้ รวมเป็น zip */
-export async function GET(_req: Request, props: { params: Promise<{ batchId: string }> }) {
+export async function GET(req: Request, props: { params: Promise<{ batchId: string }> }) {
   const { batchId } = await props.params;
   const session = await getServerSession(authOptions);
   if (!session) return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
@@ -24,6 +25,7 @@ export async function GET(_req: Request, props: { params: Promise<{ batchId: str
 
   const ids = await batchCandidateIds(batchId);
   if (!ids.length) return NextResponse.json({ error: 'รอบนี้ยังไม่มีผู้สมัครที่บันทึกแล้ว' }, { status: 404 });
+  const template = await getResumeTemplate(new URL(req.url).searchParams.get('template'));
   const files: { name: string; data: Uint8Array }[] = [];
   const used = new Set<string>();
   for (const id of ids) {
@@ -35,7 +37,7 @@ export async function GET(_req: Request, props: { params: Promise<{ batchId: str
       const asset = await getAssetBytes(profile.id);
       if (asset?.content) profileDataUrl = `data:${asset.mime || 'image/jpeg'};base64,${Buffer.from(asset.content).toString('base64')}`;
     }
-    const pdf = await htmlToPdf(buildResumeHtml(c, profileDataUrl));
+    const pdf = await htmlToPdf(buildResumeHtml(c, profileDataUrl, template.settings));
     // ชื่อซ้ำกันในรอบเดียว ต่อท้ายเลขกันไฟล์ทับ
     let name = resumeFileName(c.full_name);
     for (let n = 2; used.has(name); n += 1) name = resumeFileName(`${c.full_name} (${n})`);

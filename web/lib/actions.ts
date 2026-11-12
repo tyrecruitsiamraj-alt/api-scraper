@@ -91,6 +91,7 @@ import {
   updateCandidateFields,
 } from './repo';
 import { mergeUpload, retryFailedUploads, skipUpload } from './resume-uploads';
+import { deleteResumeTemplate, saveResumeTemplate, setDefaultResumeTemplate } from './resume-templates';
 import { TEXT_FIELDS } from '../../src/core/resume-fields.js';
 import type { GroupSector } from './group-sectors';
 import { groupSectorLabel } from './group-sectors';
@@ -308,6 +309,39 @@ export async function updateWorkersCodeAction(formData: FormData) {
 async function requireSession() {
   const session = await getServerSession(authOptions);
   if (!session) throw new Error('unauthorized');
+}
+
+// ---- แบบฟอร์มเรซูเม่ (ตั้งค่า → แบบฟอร์มเรซูเม่) ----
+export async function saveResumeTemplateAction(formData: FormData) {
+  const session = await getServerSession(authOptions);
+  if (!session) throw new Error('unauthorized');
+  const id = String(formData.get('id') ?? '').trim() || null;
+  const name = String(formData.get('name') ?? '').trim();
+  const back = (notice: string): never => redirect(`/settings/resume-templates/${id ?? 'new'}?notice=${encodeURIComponent(notice)}`);
+  if (!name) back('ตั้งชื่อแบบฟอร์มก่อนบันทึก');
+  let settings: unknown = {};
+  try {
+    settings = JSON.parse(String(formData.get('settings') ?? '{}'));
+  } catch {
+    back('ข้อมูลแบบฟอร์มไม่ครบ ลองบันทึกใหม่');
+  }
+  const logo = String((settings as { logo?: unknown })?.logo ?? '');
+  if (logo.length > 1_400_000) back('รูปโลโก้ใหญ่เกิน 1 MB');
+  await saveResumeTemplate({ id, name, settings, actor: session.user?.email ?? session.user?.name ?? null });
+  revalidatePath('/settings/resume-templates');
+  redirect('/settings/resume-templates');
+}
+
+export async function deleteResumeTemplateAction(formData: FormData) {
+  await requireSession();
+  await deleteResumeTemplate(String(formData.get('id') ?? '').trim());
+  revalidatePath('/settings/resume-templates');
+}
+
+export async function setDefaultResumeTemplateAction(formData: FormData) {
+  await requireSession();
+  await setDefaultResumeTemplate(String(formData.get('id') ?? '').trim());
+  revalidatePath('/settings/resume-templates');
 }
 
 // ---- อัปโหลดเรซูเม่ (หน้า /candidates/upload) + แก้ไขผู้สมัคร ----

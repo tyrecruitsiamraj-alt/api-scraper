@@ -9,6 +9,7 @@ const ITEMS = [
   { href: '/settings/posting', label: 'กลุ่มโพสต์', detail: 'คลังกลุ่ม Facebook แยกราชการ/เอกชน และจังหวัด' },
   { href: '/settings/quota', label: 'โควต้าการใช้งาน', detail: 'จำนวนค้นหาต่อเว็บไซต์ และจำนวนโพสต์ต่อบัญชี Facebook' },
   { href: '/settings/trends', label: 'กระแสที่น่าสนใจ', detail: 'หัวข้อหรือมุกที่อยากให้ประกาศนำไปใช้' },
+  { href: '/settings/resume-templates', label: 'แบบฟอร์มเรซูเม่', detail: 'หน้าตา PDF เรซูเม่ โลโก้ ลายน้ำ ฟอนต์ สี' },
 ];
 
 export function SettingsNav() {

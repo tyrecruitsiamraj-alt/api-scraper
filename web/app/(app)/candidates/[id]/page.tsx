@@ -1,9 +1,11 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
-import { ArrowLeftIcon, DownloadIcon, ExternalLinkIcon, PencilIcon } from 'lucide-react';
+import { ArrowLeftIcon, ExternalLinkIcon, PencilIcon } from 'lucide-react';
 import { getCandidate, listSamePersonCandidates, recordCandidateActivity } from '@/lib/repo';
 import { AttachmentViewer } from '@/components/AttachmentViewer';
 import { uploadersByCandidate } from '@/lib/resume-uploads';
+import { PdfDownloadButton } from '@/components/PdfDownloadButton';
+import { listResumeTemplates } from '@/lib/resume-templates';
 import { markCandidateCalledAction, markCandidateViewedAction } from '@/lib/actions';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth';
@@ -67,6 +69,7 @@ export default async function CandidateDetail(props: { params: Promise<{ id: str
   ));
 
   const uploadedBy = (await uploadersByCandidate([c.id])).get(c.id) ?? null;
+  const templates = (await listResumeTemplates()).map((t) => ({ id: t.id, name: t.name, isDefault: t.isDefault }));
   const sourceLabel = (platform: string) =>
     `${PLATFORM_LABEL[platform] ?? platform}${platform === 'upload' && uploadedBy ? ` · ${uploadedBy}` : ''}`;
   const education: any[] = Array.isArray(c.education) ? c.education : [];
@@ -90,12 +93,7 @@ export default async function CandidateDetail(props: { params: Promise<{ id: str
               แก้ไข
             </Link>
           </Button>
-          <Button asChild>
-            <a href={`/api/candidates/${params.id}/pdf`}>
-              <DownloadIcon data-icon="inline-start" />
-              ดาวน์โหลด PDF
-            </a>
-          </Button>
+          <PdfDownloadButton href={`/api/candidates/${params.id}/pdf`} templates={templates} />
         </div>
       </div>
 

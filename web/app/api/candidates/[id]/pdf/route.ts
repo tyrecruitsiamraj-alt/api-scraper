@@ -3,6 +3,7 @@ import { NextResponse } from 'next/server';
 import { authOptions } from '@/lib/auth';
 import { getAssetBytes, getCandidate } from '@/lib/repo';
 import { buildResumeHtml, htmlToPdf, resumeFileName } from '@/lib/resumePdf';
+import { getResumeTemplate } from '@/lib/resume-templates';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -15,7 +16,7 @@ function contentDisposition(filename: string): string {
   return `attachment; filename="${ascii}"; filename*=UTF-8''${encoded}`;
 }
 
-export async function GET(_req: Request, props: { params: Promise<{ id: string }> }) {
+export async function GET(req: Request, props: { params: Promise<{ id: string }> }) {
   const params = await props.params;
   const session = await getServerSession(authOptions);
   if (!session) return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
@@ -37,7 +38,9 @@ export async function GET(_req: Request, props: { params: Promise<{ id: string }
   }
 
   try {
-    const html = buildResumeHtml(c, profileDataUrl);
+    // ?template=<id> จากปุ่มเลือกแบบฟอร์ม · ไม่ระบุ = แบบเริ่มต้น
+    const template = await getResumeTemplate(new URL(req.url).searchParams.get('template'));
+    const html = buildResumeHtml(c, profileDataUrl, template.settings);
     const pdf = await htmlToPdf(html);
     const filename = resumeFileName(c.full_name);
     return new NextResponse(new Uint8Array(pdf), {

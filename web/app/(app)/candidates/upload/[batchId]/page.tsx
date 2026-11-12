@@ -1,7 +1,9 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
-import { ArrowLeftIcon, DownloadIcon, RotateCcwIcon } from 'lucide-react';
+import { ArrowLeftIcon, RotateCcwIcon } from 'lucide-react';
 import { AutoRefresh } from '@/components/AutoRefresh';
+import { PdfDownloadButton } from '@/components/PdfDownloadButton';
+import { listResumeTemplates } from '@/lib/resume-templates';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
@@ -88,8 +90,9 @@ function ReviewCard({ row }: { row: UploadRow }) {
 export default async function UploadBatchPage(props: { params: Promise<{ batchId: string }> }) {
   const { batchId } = await props.params;
   if (!/^[0-9a-f-]{36}$/i.test(batchId)) notFound();
-  const rows = await getUploadBatch(batchId);
+  const [rows, allTemplates] = await Promise.all([getUploadBatch(batchId), listResumeTemplates()]);
   if (!rows.length) notFound();
+  const templates = allTemplates.map((t) => ({ id: t.id, name: t.name, isDefault: t.isDefault }));
 
   const count = (...s: UploadStatus[]) => rows.filter((r) => s.includes(r.status)).length;
   const waiting = count('queued', 'reading');
@@ -127,19 +130,12 @@ export default async function UploadBatchPage(props: { params: Promise<{ batchId
               </Button>
             </form>
           )}
-          <Button asChild={saved > 0} disabled={saved === 0}>
-            {saved > 0 ? (
-              <a href={`/api/candidates/uploads/${batchId}/zip`}>
-                <DownloadIcon data-icon="inline-start" />
-                โหลด PDF ทั้งหมด {saved} คน (zip)
-              </a>
-            ) : (
-              <span>
-                <DownloadIcon data-icon="inline-start" />
-                โหลด PDF ทั้งหมด (zip)
-              </span>
-            )}
-          </Button>
+          <PdfDownloadButton
+            href={`/api/candidates/uploads/${batchId}/zip`}
+            label={saved > 0 ? `โหลด PDF ทั้งหมด ${saved} คน (zip)` : 'โหลด PDF ทั้งหมด (zip)'}
+            templates={templates}
+            disabled={saved === 0}
+          />
         </div>
       </header>
 
