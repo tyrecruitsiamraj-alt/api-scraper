@@ -17,10 +17,20 @@ export const GROUP_STATUSES = [
   { key: 'declined', label: 'ปฏิเสธแล้ว' },
   { key: 'removed', label: 'ลบออกแล้ว' },
   { key: 'failed', label: 'ไม่สำเร็จ' },
-  // รอบจบแล้วแต่บัญชีไม่ได้เข้าไปโพสต์กลุ่มนี้ — แยกจาก "ไม่สำเร็จ" (เจ้าของสั่ง 11 พ.ย. 2569: ไม่สำเร็จ 1,146 กลุ่ม เป็นไม่ได้ลอง 982)
-  { key: 'not_tried', label: 'ไม่ได้โพสต์' },
+  // รอบจบแล้วแต่บัญชีไม่ได้เข้าไปโพสต์กลุ่มนี้ — แยกจาก "ไม่สำเร็จ" (11 พ.ย. 2569) แล้วแยกตามเหตุที่รอบหยุด (12 พ.ย. 2569)
+  // เหตุเป็นรหัสที่บันทึกตอนรอบหยุด (autopost/server/post-stop.js) · รหัสที่ยังไม่มีกองของตัวเองเข้า "ไม่ทราบสาเหตุ"
+  { key: 'not_tried_machine', label: 'เครื่องมีปัญหา' },
+  { key: 'not_tried_account', label: 'บัญชี Facebook มีปัญหา' },
+  { key: 'not_tried_unknown', label: 'ไม่ทราบสาเหตุ' },
   { key: 'waiting', label: 'รอคิว' },
 ];
+
+/** รหัสเหตุที่รอบหยุด → กองของกลุ่มที่ไม่ได้โพสต์ */
+const NOT_TRIED_BY_STOP = { machine: 'not_tried_machine', account: 'not_tried_account' };
+export function notTriedStatus(stopCode) {
+  return NOT_TRIED_BY_STOP[stopCode] ?? 'not_tried_unknown';
+}
+const NO_RUN_REASON = 'ระบบไม่ได้เริ่มรอบโพสต์ให้ใบนี้';
 
 const NOT_FOUND_AFTER_POST = 'กดโพสต์แล้ว แต่โพสต์ไม่ขึ้นในกลุ่ม';
 /** post_logs.post_status ที่ตัวเก็บคอมเมนต์บันทึก (autopost/server/post-content-status.js) */
@@ -37,12 +47,13 @@ const ts = (v) => (v ? new Date(v).getTime() : 0);
  *   attempts: { group_id: string|null, level: string, message: string|null, at: string, account?: string|null }[],
  *   postLogs: { group_id: string|null, post_link: string|null, post_status: string|null, at: string, account?: string|null }[],
  *   active: boolean,                   // ใบนี้ยังมีรอบรอคิว/กำลังทำ
- *   stopReason?: string|null,          // เหตุที่รอบล่าสุดหยุด (error ของรอบ) — ใช้บอกกลุ่มที่ไม่ได้ลองโพสต์เลย
+ *   stop?: { code: string|null, reason: string|null }|null, // เหตุที่รอบหยุด (รหัสจาก post-stop.js) — ใช้แยกกลุ่มที่ไม่ได้โพสต์
  *   groupName?: (fb: string) => string,
  * }} input
  */
-export function orderGroupResults({ planned = [], attempts = [], postLogs = [], active = false, stopReason = null, groupName = (id) => id }) {
-  const stopped = stopReasonText(stopReason);
+export function orderGroupResults({ planned = [], attempts = [], postLogs = [], active = false, stop = null, groupName = (id) => id }) {
+  const notTried = notTriedStatus(stop?.code);
+  const stopped = stop?.code === 'no_run' ? NO_RUN_REASON : String(stop?.reason ?? '').trim();
   const order = [];
   const seen = new Set();
   const add = (id) => {
@@ -70,7 +81,7 @@ export function orderGroupResults({ planned = [], attempts = [], postLogs = [], 
     else if (log && String(log.post_link ?? '').trim()) status = postedOutcome(log.post_status, log.post_link);
     else if (latest?.level === 'success' || log) status = postedOutcome(log?.post_status, null);
     else if (latest) status = 'failed';
-    else status = active ? 'waiting' : 'not_tried';
+    else status = active ? 'waiting' : notTried;
     if (status === 'unconfirmed') {
       status = 'failed';
       notFound = true;
@@ -84,7 +95,7 @@ export function orderGroupResults({ planned = [], attempts = [], postLogs = [], 
       error: admin ? admin.error
         : notFound ? NOT_FOUND_AFTER_POST
         : status === 'failed' ? shortFailReason(latest?.message)
-        : status === 'not_tried' ? stopped || null : null,
+        : status.startsWith('not_tried') ? stopped || null : null,
       // โพสต์ที่ถูกปฏิเสธ/ลบ เปิดลิงก์ไม่ได้แล้ว — โชว์เหตุแทน
       post_link: admin ? null : String(log?.post_link ?? '').trim() || null,
     };
@@ -113,14 +124,6 @@ export function shortFailReason(message) {
   // แบบอื่น: ตัด "(กลุ่ม …)" ท้ายข้อความ และไม่ยาวเกิน 1 บรรทัด
   const cut = m.replace(/\s*\((?:กลุ่ม|ถ้ามี)[^)]*\)\s*$/, '');
   return cut.length > 120 ? `${cut.slice(0, 119)}…` : cut;
-}
-
-/** บรรทัดแรกของ error รอบ เป็นภาษาคน */
-function stopReasonText(err) {
-  const line = String(err ?? '').split('\n').map((l) => l.trim()).find(Boolean) ?? '';
-  if (!line) return '';
-  if (/WORKER_POST_JOB_MAX_MS|stale_running/i.test(line)) return 'รอบโพสต์ใช้เวลานานเกินกำหนด เครื่องหยุดงาน';
-  return line.slice(0, 160);
 }
 
 /** นับตามสถานะ — ทุกกลุ่มลงถังเดียว ผลรวม = จำนวนกลุ่ม */

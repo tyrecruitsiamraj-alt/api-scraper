@@ -98,7 +98,7 @@ export default async function OrderGroupsPage(props: {
         </div>
       </header>
 
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-8">
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
         <Card size="sm">
           <CardHeader>
             <CardDescription>สั่งทั้งหมด</CardDescription>

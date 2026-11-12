@@ -219,7 +219,9 @@ test('Dynamic Post: รันโพสต์ตาม Assignments', async ({ pag
               ? `ครบโควต้าวันนี้แล้ว (${plan.posted_today}/${plan.cap} โพสต์)`
               : 'คู่ที่เหลือติด cooldown หรือถูกบัญชีอื่นจองไปแล้ววันนี้';
         console.log(`⏸️ [${userLabel}] ไม่โพสต์วันนี้ — ${detail}`);
-        await runLog({ level: 'info', message: `ข้ามการโพสต์: ${detail}`, user_id: user.id });
+        // run_stop = เหตุที่รอบนี้ไม่ได้โพสต์ เป็นรหัส (server/post-stop.js) — ตอนจบรอบเซิร์ฟเวอร์คัดลอกไปไว้ที่รอบ
+        const stopCode = plan.reason === 'paused' ? 'account' : plan.reason === 'daily_cap_reached' ? 'daily_cap' : 'group_wait';
+        await runLog({ level: 'info', message: `ข้ามการโพสต์: ${detail}`, user_id: user.id, meta: { kind: 'run_stop', code: stopCode } });
         // บัญชีนี้ถึงข้อจำกัดแล้ว (เต็มโควต้า/ถูกพัก) — ส่งงานให้บัญชีอื่นโพสต์แทนทันที ไม่ต้องรอพรุ่งนี้
         // บัญชีที่รับไปจะกรอง cooldown/โควต้าของตัวเองอีกชั้นตอนวางแผน จึงไม่โพสต์ซ้ำกลุ่มที่เพิ่งลง
         if (plan.reason === 'daily_cap_reached' || plan.reason === 'paused') {
@@ -321,7 +323,7 @@ test('Dynamic Post: รันโพสต์ตาม Assignments', async ({ pag
       if (rest <= 0) return;
       const msg = `${why} — ยังเหลือ ${rest} กลุ่มที่ไม่ได้ลง ไม่ส่งให้บัญชีอื่น (กันโดนจำกัดตามกัน) ถ้าต้องการให้สั่งใหม่ด้วยบัญชีอื่น`;
       console.log(`⏸️ [${userLabel}] ${msg}`);
-      await runLog({ level: 'warn', message: msg, user_id: user.id, meta: { kind: 'deferred', groups: rest } });
+      await runLog({ level: 'warn', message: msg, user_id: user.id, meta: { kind: 'run_stop', code: 'account', groups: rest } });
     };
     for (const [planIndex, item] of planItems.entries()) {
       currentIndex = planIndex;

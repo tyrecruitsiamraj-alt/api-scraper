@@ -52,3 +52,29 @@ test('เปลี่ยนสถานะได้เฉพาะทางท�
   assert.equal(nextPostStatus('ถูกปฏิเสธ', 'อนุมัติเเล้ว'), null);
   assert.equal(nextPostStatus('รออนุมัติ', 'อะไรก็ไม่รู้'), null);
 });
+
+test('เหตุที่รอบหยุด: ข้อความจริงจาก post_run_queue / run_logs เข้ากองถูก', () => {
+  const { stopCodeForText, stopReasonLine } = require('../server/post-stop');
+  const cases = [
+    ['เครื่องเริ่มใหม่ระหว่างทำงาน งานนี้ถูกหยุดกลางทาง สั่งใหม่ได้เลย', 'machine'],
+    ['WORKER_POST_JOB_MAX_MS exceeded (7800000ms) — killed to free slot', 'machine'],
+    ['stale_running_watchdog', 'machine'],
+    ['Connection terminated unexpectedly', 'machine'],
+    ['page.goto: net::ERR_CERT_AUTHORITY_INVALID at https://www.facebook.com/', 'machine'],
+    ['connect ETIMEDOUT 10.0.0.1:5432', 'machine'],
+    ['post worker exit code 1', 'machine'],
+    ['บัญชี Burkhart Debe ถูกพัก — ย้ายงานให้บัญชีที่ว่างแล้ว', 'account'],
+    ['ยังไม่ผ่านการยืนยันตัวตน (verify/checkpoint) กรุณายืนยันให้เสร็จก่อน', 'account'],
+    ['ยังไม่ผ่านการยืนยันตัวตนหรือล็อกอินไม่สำเร็จ — ทำในหน้าต่าง Chrome ให้เสร็จ', 'account'],
+    ['session หมดอายุหรือยังไม่ผ่านการยืนยัน — ใช้ปุ่มล็อกอิน Facebook ใน Users', 'account'],
+    ['Facebook จำกัดการโพสต์ของบัญชีนี้ (ครั้งที่ 1 ใน 30 วัน) — พัก 7 วัน ไม่โพสต์กลุ่มที่เหลือ', 'account'],
+    ['โพสต์ไม่สำเร็จติดกัน 5 กลุ่ม — circuit breaker พัก 24 ชม. (อาจโดน Facebook จำกัดการโพสต์)', 'account'],
+    ['ข้ามการโพสต์: ครบโควต้าวันนี้แล้ว (8/8 โพสต์)', 'daily_cap'],
+    ['ข้ามการโพสต์: คู่ที่เหลือติด cooldown หรือถูกบัญชีอื่นจองไปแล้ววันนี้', 'group_wait'],
+    ['', 'unknown'],
+    ['อะไรสักอย่างที่ไม่เคยเจอ', 'unknown'],
+  ];
+  for (const [text, code] of cases) assert.equal(stopCodeForText(text), code, text);
+  assert.equal(stopReasonLine('WORKER_POST_JOB_MAX_MS exceeded'), 'รอบโพสต์ใช้เวลานานเกินกำหนด เครื่องหยุดงาน');
+  assert.equal(stopReasonLine('บรรทัดแรก\nบรรทัดสอง'), 'บรรทัดแรก');
+});

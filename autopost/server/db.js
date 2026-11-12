@@ -6,6 +6,7 @@ const { Pool } = require('pg');
 const { classifyPostFailure } = require('./failure-learning');
 const { FB_LIMIT_LOG_PREFIX, STRIKE_WINDOW_DAYS, MAX_PAUSE_HOURS, facebookLimitPauseHours, facebookLimitReason } = require('./fb-limit-pause');
 const contentStatus = require('./post-content-status');
+const { stopCodeForText, stopReasonLine } = require('./post-stop');
 /** โพสต์เก่าที่พ่วงไปเช็กแท็บ "เนื้อหาของคุณ" ต่อบัญชีต่อรอบเก็บคอมเมนต์ (0 = ปิด) */
 const STATUS_CHECK_PER_USER = Math.max(0, Math.min(20, Number(process.env.STATUS_CHECK_PER_USER ?? 5)));
 const { dailyCapCeiling, effectiveDailyCapFor, dailyStartOffsetMin, bangkokDay, needsWarmup, warmupStartOffsetMin } = require('./post-pacing');
@@ -1400,9 +1401,11 @@ async function releaseOrphanedJobs(kind, workerId) {
   const m = /^(.+)-(\d+)$/.exec(wid);
   if (!m) return [];
   const reason = 'เครื่องเริ่มใหม่ระหว่างทำงาน งานนี้ถูกหยุดกลางทาง สั่งใหม่ได้เลย';
+  if (table === 'post_run_queue') await ensurePostRunQueueTable();
+  const stopSet = table === 'post_run_queue' ? `, stop_code = 'machine', stop_reason = $3` : '';
   const { rows } = await query(
     `UPDATE ${table}
-        SET status = 'failed', error = $3, message = $3, finished_at = NOW(), updated_at = NOW()
+        SET status = 'failed', error = $3, message = $3, finished_at = NOW(), updated_at = NOW()${stopSet}
       WHERE status = 'running'
         AND worker_id IS NOT NULL AND worker_id <> $1
         AND regexp_replace(worker_id, '-[0-9]+$', '') = $2
@@ -1836,6 +1839,9 @@ async function ensurePostRunQueueTable() {
   `);
   await query(`ALTER TABLE post_run_queue ADD COLUMN IF NOT EXISTS mode VARCHAR(30) NOT NULL DEFAULT 'post'`);
   await query(`ALTER TABLE post_run_queue ADD COLUMN IF NOT EXISTS worker_build_sha VARCHAR(64)`);
+  // เหตุที่รอบหยุดก่อนโพสต์ครบ เป็นรหัส (server/post-stop.js) — ตัดสินตอนบันทึก ไม่เดาจากข้อความทีหลัง
+  await query(`ALTER TABLE post_run_queue ADD COLUMN IF NOT EXISTS stop_code VARCHAR(20)`);
+  await query(`ALTER TABLE post_run_queue ADD COLUMN IF NOT EXISTS stop_reason TEXT`);
 }
 
 /**
@@ -2373,7 +2379,7 @@ async function reassignStuckPostJobs({ requestedBy = 'auto-switch', limit = 20 }
       // handed_off ≠ failed: งานไม่ได้ล้ม แค่ย้ายไปอยู่รอบของบัญชีใหม่ (หน้าเว็บจะไม่นับเป็น "ติดปัญหา")
       `UPDATE post_run_queue
           SET status = 'handed_off', finished_at = NOW(), updated_at = NOW(),
-              message = $2, error = $3
+              message = $2, error = $3, stop_code = 'account', stop_reason = $3
         WHERE id = $1 AND status = 'queued'`,
       [
         row.id,
@@ -2738,6 +2744,32 @@ async function rememberLoginState(userId, ok, error) {
   }
 }
 
+/**
+ * เหตุที่รอบหยุดก่อนโพสต์ครบ เก็บเป็นรหัสตอนจบรอบ (เจ้าของสั่ง 12 พ.ย. 2569: 630 แถวไม่ได้โพสต์และไม่มีเหตุ)
+ * รอบล้ม = จากข้อความ error · รอบจบปกติ = บันทึก run_stop ล่าสุดที่ postAll เขียนตอนหยุดกลางทาง
+ */
+async function recordRunStop(row, error) {
+  let code = null;
+  let reason = null;
+  if (String(error ?? '').trim()) {
+    code = stopCodeForText(error);
+    reason = stopReasonLine(error);
+  } else if (row.run_id) {
+    const { rows } = await query(
+      `SELECT meta->>'code' AS code, message FROM run_logs
+        WHERE run_id = $1 AND meta->>'kind' = 'run_stop'
+        ORDER BY created_at DESC LIMIT 1`,
+      [String(row.run_id)]
+    );
+    if (rows[0]) {
+      code = rows[0].code || stopCodeForText(rows[0].message);
+      reason = stopReasonLine(rows[0].message);
+    }
+  }
+  if (!code) return;
+  await query(`UPDATE post_run_queue SET stop_code = $2, stop_reason = $3 WHERE id = $1`, [String(row.id), code, reason]);
+}
+
 async function completePostRunJob(id, data = {}) {
   await ensurePostRunQueueTable();
   const ok = !!data.ok;
@@ -2755,6 +2787,7 @@ async function completePostRunJob(id, data = {}) {
     [String(id || ''), status, data.run_id || null, data.message || null, data.error || null]
   );
   const completed = rows[0] || null;
+  if (completed) await recordRunStop(completed, data.error).catch((e) => console.warn('[stop] บันทึกเหตุที่รอบหยุดไม่สำเร็จ:', e.message));
   // อุ่นเครื่องก็ล็อกอินบัญชีจริง — ติดยืนยันตัวตนให้รู้เหมือนรอบโพสต์
   if (completed && ['post', 'warmup'].includes(String(completed.mode || 'post'))) {
     await rememberLoginState(completed.user_id, ok, data.error).catch((e) => {
@@ -2848,6 +2881,8 @@ async function failStaleRunningPostJobs(maxAgeMinutes) {
     `UPDATE post_run_queue
      SET status = 'failed',
          error = COALESCE(NULLIF(TRIM(error), ''), 'stale_running_watchdog'),
+         stop_code = COALESCE(stop_code, 'machine'),
+         stop_reason = COALESCE(stop_reason, 'รอบโพสต์ใช้เวลานานเกินกำหนด เครื่องหยุดงาน'),
          message = 'watchdog: running exceeded max age — release slot',
          finished_at = NOW(),
          updated_at = NOW()

@@ -8,7 +8,7 @@ export function GroupStatusBadge({ status }: { status: GroupStatusKey }) {
   const label = GROUP_STATUSES.find((s) => s.key === status)?.label ?? status;
   return (
     <Badge
-      variant={status === 'failed' || status === 'declined' || status === 'removed' ? 'destructive' : status === 'waiting' || status === 'not_tried' ? 'secondary' : 'outline'}
+      variant={status === 'failed' || status === 'declined' || status === 'removed' ? 'destructive' : status === 'waiting' || status.startsWith('not_tried') ? 'secondary' : 'outline'}
       className={cn(
         status === 'posted' && 'border-success/30 bg-success/10 text-success',
         status === 'pending_approval' && 'border-warning/30 bg-warning/10 text-warning',

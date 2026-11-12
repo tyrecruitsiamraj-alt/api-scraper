@@ -24,7 +24,7 @@ test('ใบ 5 กลุ่ม: เผยแพร่แล้ว · รอด�
   assert.equal(groups[2].error, 'กดโพสต์แล้ว แต่โพสต์ไม่ขึ้นในกลุ่ม');
   assert.equal(groups[3].error, 'Facebook ไม่รับโพสต์');
   assert.equal(groups[0].account, 'Thom Blake');
-  assert.deepEqual(countGroupStatuses(groups), { total: 5, posted: 1, pending_approval: 1, declined: 0, removed: 0, failed: 2, not_tried: 0, waiting: 1 });
+  assert.deepEqual(countGroupStatuses(groups), { total: 5, posted: 1, pending_approval: 1, declined: 0, removed: 0, failed: 2, not_tried_machine: 0, not_tried_account: 0, not_tried_unknown: 0, waiting: 1 });
   assert.equal(linkedCount(groups), 2, 'สำเร็จนับเฉพาะที่มีลิงก์');
 });
 
@@ -42,20 +42,23 @@ test('ลองโพสต์ไม่ได้ก่อน แล้วบั�
   assert.equal(g.error, null);
 });
 
-test('รอบจบแล้วแต่ไม่ถึงกลุ่มนี้ = ไม่ได้โพสต์ ไม่นับเป็นไม่สำเร็จ และไม่ค้างเป็นรอคิว', () => {
+test('รอบจบแล้วแต่ไม่ถึงกลุ่มนี้ และไม่มีเหตุ = ไม่ทราบสาเหตุ ไม่นับเป็นไม่สำเร็จ และไม่ค้างเป็นรอคิว', () => {
   const [g] = orderGroupResults({ planned: ['884533619479424'], active: false });
-  assert.equal(g.status, 'not_tried');
+  assert.equal(g.status, 'not_tried_unknown');
   assert.equal(g.error, null);
-  assert.deepEqual(countGroupStatuses([g]), { total: 1, posted: 0, pending_approval: 0, declined: 0, removed: 0, failed: 0, not_tried: 1, waiting: 0 });
+  assert.deepEqual(countGroupStatuses([g]), { total: 1, posted: 0, pending_approval: 0, declined: 0, removed: 0, failed: 0, not_tried_machine: 0, not_tried_account: 0, not_tried_unknown: 1, waiting: 0 });
 });
 
-test('กลุ่มที่ไม่ได้ลองโพสต์ บอกเหตุที่รอบหยุด', () => {
-  const [g] = orderGroupResults({
-    planned: ['884533619479424'],
-    stopReason: 'บัญชี Camy Rizk ถูกพัก — ย้ายงานให้บัญชีที่ว่างแล้ว\nรายละเอียด',
-  });
-  assert.equal(g.status, 'not_tried');
-  assert.equal(g.error, 'บัญชี Camy Rizk ถูกพัก — ย้ายงานให้บัญชีที่ว่างแล้ว');
+test('กลุ่มที่ไม่ได้โพสต์ แยกกองตามรหัสเหตุที่รอบหยุด และบอกเหตุ', () => {
+  const one = (stop) => orderGroupResults({ planned: ['884533619479424'], stop })[0];
+  assert.deepEqual(
+    [one({ code: 'account', reason: 'บัญชี Camy Rizk ถูกพัก — ย้ายงานให้บัญชีที่ว่างแล้ว' })].map((g) => [g.status, g.error]),
+    [['not_tried_account', 'บัญชี Camy Rizk ถูกพัก — ย้ายงานให้บัญชีที่ว่างแล้ว']],
+  );
+  assert.equal(one({ code: 'machine', reason: 'เครื่องเริ่มใหม่ระหว่างทำงาน' }).status, 'not_tried_machine');
+  const cap = one({ code: 'daily_cap', reason: 'ข้ามการโพสต์: ครบโควต้าวันนี้แล้ว (8/8 โพสต์)' });
+  assert.deepEqual([cap.status, cap.error], ['not_tried_unknown', 'ข้ามการโพสต์: ครบโควต้าวันนี้แล้ว (8/8 โพสต์)'], 'เหตุที่ยังไม่มีกองของตัวเอง เข้าไม่ทราบสาเหตุแต่ยังบอกเหตุ');
+  assert.deepEqual([one({ code: 'no_run', reason: null }).error], ['ระบบไม่ได้เริ่มรอบโพสต์ให้ใบนี้']);
 });
 
 test('เหตุไม่สำเร็จย่อเหลือบรรทัดเดียว — ข้อความจริงจาก run_logs', () => {

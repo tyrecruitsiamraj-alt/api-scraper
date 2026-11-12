@@ -3,6 +3,7 @@ import { q } from './db';
 import { OUTCOMES, orderOutcome } from '../../src/core/order-outcome.js';
 import type { OrderOutcomeKey } from '../../src/core/order-outcome.js';
 import { countGroupStatuses, linkedCount, orderGroupResults } from '../../src/core/order-groups.js';
+import { stopCodeForText, stopReasonLine } from '../../autopost/server/post-stop.js';
 import type { GroupStatusKey, OrderGroupResult } from '../../src/core/order-groups.js';
 
 const AP_SCHEMA = process.env.AUTOPOST_SCHEMA || 'so_autopost_apiscraper';
@@ -71,6 +72,7 @@ type RawOrder = {
   id: string; request_no: string; type: 'content' | 'scraping'; who: string; created_at: string; next_at: string | null;
   position: string | null; account: string | null; notes: string | null; jarvis_status: string;
   run_status: string | null; active: boolean; run_error: string | null; group_ids: unknown; task_id: string | null; task_status: string | null;
+  run_count: number; stop_code: string | null; stop_reason: string | null; stop_log: string | null;
   got: number | null; target: number | null;
 };
 
@@ -95,7 +97,9 @@ async function loadOrders(where: string, runsSince: string, params: unknown[], t
          FROM "jarvis_rm".job_posting_requests r
      ),
      runs AS (
-       SELECT DISTINCT p.id, p.status, p.created_at, NULLIF(TRIM(COALESCE(p.error, '')), '') AS error, jid AS job_id
+       SELECT DISTINCT p.id, p.run_id, p.status, p.created_at, NULLIF(TRIM(COALESCE(p.error, '')), '') AS error, jid AS job_id,
+              -- to_jsonb: คอลัมน์ stop_* เพิ่มทีหลัง (ฐานที่ยังไม่อัปเดตไม่มี) ห้ามให้หน้าเว็บล้ม
+              NULLIF(to_jsonb(p)->>'stop_code', '') AS stop_code, NULLIF(to_jsonb(p)->>'stop_reason', '') AS stop_reason
          FROM ${AP}.post_run_queue p
          CROSS JOIN LATERAL jsonb_array_elements_text(p.assignment_ids::jsonb) a
          JOIN ${AP}.assignments asg ON asg.id = a
@@ -105,18 +109,32 @@ async function loadOrders(where: string, runsSince: string, params: unknown[], t
      SELECT req.id, req.request_no, req.type, req.who, req.created_at, req.next_at, req.position, req.account, req.notes,
             req.jarvis_status, req.group_ids,
             lastrun.status AS run_status, COALESCE(lastrun.active, false) AS active, lastrun.error AS run_error,
+            COALESCE(lastrun.run_count, 0)::int AS run_count, lastrun.stop_code, lastrun.stop_reason, stoplog.message AS stop_log,
             t.id::text AS task_id, t.status AS task_status, t.progress_got AS got, t.progress_target AS target
        FROM req
        LEFT JOIN LATERAL (
          SELECT (array_agg(ru.status ORDER BY ru.created_at DESC))[1] AS status,
                 bool_or(ru.status IN ('queued', 'running')) AS active,
-                (array_agg(ru.error ORDER BY ru.created_at DESC) FILTER (WHERE ru.error IS NOT NULL))[1] AS error
+                (array_agg(ru.error ORDER BY ru.created_at DESC) FILTER (WHERE ru.error IS NOT NULL))[1] AS error,
+                count(*) AS run_count,
+                (array_agg(ru.stop_code ORDER BY ru.created_at DESC) FILTER (WHERE ru.stop_code IS NOT NULL))[1] AS stop_code,
+                (array_agg(ru.stop_reason ORDER BY ru.created_at DESC) FILTER (WHERE ru.stop_code IS NOT NULL))[1] AS stop_reason,
+                array_agg(ru.run_id) FILTER (WHERE ru.run_id IS NOT NULL) AS run_ids
            FROM runs ru
           WHERE req.type = 'content'
             AND ru.job_id = 'jv-' || lower(req.request_no)
             AND ru.created_at >= req.created_at - interval '1 minute'
             AND (req.next_at IS NULL OR ru.created_at < req.next_at)
        ) lastrun ON true
+       -- รอบก่อนมีรหัสเหตุ: บรรทัดหยุดกลางทางในบันทึกรอบ (โดนจำกัด/ถูกพัก/ข้ามการโพสต์) — ใช้ตัวแยกเหตุเดียวกันอ่าน
+       LEFT JOIN LATERAL (
+         SELECT l.message FROM ${AP}.run_logs l
+          WHERE lastrun.stop_code IS NULL AND lastrun.error IS NULL
+            AND l.run_id = ANY(lastrun.run_ids)
+            AND l.group_id IS NULL
+            AND (l.meta->>'kind' IN ('run_stop', 'deferred', 'handoff') OR l.level = 'error' OR l.message LIKE 'ข้ามการโพสต์%')
+          ORDER BY l.created_at DESC LIMIT 1
+       ) stoplog ON true
        LEFT JOIN LATERAL (
          SELECT st.id, st.status, st.progress_got, st.progress_target FROM scrape_tasks st
           WHERE req.type = 'scraping'
@@ -160,6 +178,18 @@ async function loadOrders(where: string, runsSince: string, params: unknown[], t
       groups,
     };
   });
+}
+
+/**
+ * เหตุที่รอบของใบนี้หยุด: รหัสที่บันทึกตอนรอบหยุด (post_run_queue.stop_code)
+ * รอบก่อนมีรหัส: อ่านข้อความ error ของรอบ หรือบรรทัดหยุดในบันทึกรอบ ด้วยตัวแยกเหตุตัวเดียวกัน
+ * ไม่มีรอบเลย = no_run · มีรอบแต่ไม่มีเหตุ = unknown
+ */
+function orderStop(o: RawOrder): { code: string; reason: string | null } {
+  if (o.stop_code) return { code: o.stop_code, reason: o.stop_reason };
+  const legacy = o.run_error ?? o.stop_log;
+  if (legacy) return { code: stopCodeForText(legacy), reason: stopReasonLine(legacy) || null };
+  return { code: o.run_count > 0 ? 'unknown' : 'no_run', reason: null };
 }
 
 /** ผลรายกลุ่มของทุกใบโพสต์ในชุดเดียว — 3 query รวม ไม่ยิงทีละใบ */
@@ -220,7 +250,7 @@ async function loadPostGroups(orders: RawOrder[]): Promise<Map<string, OrderGrou
       attempts: attempts.filter(inWindow),
       postLogs: logs.filter(inWindow),
       active: o.active || o.jarvis_status === 'pending' || (o.jarvis_status === 'in_progress' && !o.run_status),
-      stopReason: o.run_error,
+      stop: orderStop(o),
       groupName: (fb) => nameOf.get(fb) ?? fb,
     }));
   }
