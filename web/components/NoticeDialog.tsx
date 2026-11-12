@@ -24,6 +24,7 @@ export function NoticeDialog({ title, notice }: { title: string; notice: string 
     setOpen(false);
     const params = new URLSearchParams(searchParams.toString());
     params.delete('notice');
+    params.delete('ok');
     const query = params.toString();
     router.replace(query ? `${pathname}?${query}` : pathname, { scroll: false });
   };
@@ -33,7 +34,7 @@ export function NoticeDialog({ title, notice }: { title: string; notice: string 
       <AlertDialogContent>
         <AlertDialogHeader>
           <AlertDialogTitle>{title}</AlertDialogTitle>
-          <AlertDialogDescription>{notice}</AlertDialogDescription>
+          <AlertDialogDescription className="whitespace-pre-line">{notice}</AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
           <AlertDialogAction>ตกลง</AlertDialogAction>

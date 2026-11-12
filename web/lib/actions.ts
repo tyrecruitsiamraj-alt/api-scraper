@@ -7,6 +7,7 @@ import { authOptions } from './auth';
 import { encryptFacebookPassword, encryptSecret } from './crypto';
 import { kickWorker } from './worker-kick';
 import { postCaptionIssues } from '../../src/core/post-caption-check.js';
+import { MAX_GROUPS_PER_ADD, parseGroupLinks } from '../../src/core/group-links.js';
 import { dailyCapCeiling } from '../../autopost/server/post-pacing.js';
 import { dismissCommentLead, jarvisLeadsConfigured, requestAiCall, saveManualReply, saveReplyTemplate } from './comment-leads';
 import type { ReplyKind } from './comment-leads';
@@ -60,7 +61,9 @@ import {
   setSoRecruitRequestStatus,
   rejectSoRecruitRequest,
   createPostingGroup,
+  createPostingGroups,
   findPostingGroupByFbId,
+  findPostingGroupsByFbIds,
   deletePostingGroup,
   setPostingGroupDepartment,
   setAccountGroups,
@@ -374,48 +377,87 @@ export async function deleteTrendAction(formData: FormData) {
 }
 
 // ---- จัดการกลุ่มโพสต์ + ผูกกลุ่มเข้าบัญชี (หน้า /settings/posting native) ----
-/** เพิ่มกลุ่มใหม่จาก URL หรือ ID กลุ่ม Facebook. */
+/** รายชื่อในกล่องสรุป ยาวเกินตัดเหลือ 10 รายการ */
+function listSome(items: string[], max = 10) {
+  return items.slice(0, max).join(', ') + (items.length > max ? ` และอีก ${items.length - max}` : '');
+}
+
+/**
+ * เพิ่มกลุ่มจากลิงก์หรือ ID กลุ่ม Facebook — วางได้หลายบรรทัด บรรทัดละกลุ่ม (เจ้าของ 12 พ.ย. 2569)
+ * ทุกกลุ่มในรอบเดียวกันได้ธุรกิจ/หมวด/จังหวัด/ประเภทงานเดียวกัน · กลุ่มที่มีอยู่แล้วข้าม ไม่แตะของเดิม
+ */
 export async function createGroupAction(formData: FormData) {
   await requireSession();
   // ข้อผิดพลาดที่ผู้ใช้แก้เองได้ ขึ้นเป็นข้อความบนหน้า — throw ใน production กลายเป็นจอ "Application error"
   // (9 พ.ย. 2569: เพิ่มกลุ่มที่มีอยู่แล้ว ชน unique fb_group_id จอขาวทั้งหน้า)
   const back: (notice: string, list?: string) => never = (notice, list = '') =>
     redirect(`/settings/posting?notice=${encodeURIComponent(notice)}${list}`);
-  const raw = String(formData.get('fbGroupId') ?? '').trim();
-  // รับได้ทั้ง ID ล้วน หรือ URL — ดึงเลขกลุ่มออกมา
-  const fbGroupId = (raw.match(/(?:groups\/)?(\d{6,})/)?.[1] ?? raw).trim();
-  if (!/^\d{6,}$/.test(fbGroupId)) back('ใส่ ID กลุ่ม (ตัวเลข) หรือลิงก์กลุ่ม Facebook ที่ถูกต้อง');
+  const { ids, invalid } = parseGroupLinks(String(formData.get('fbGroupId') ?? ''));
+  if (!ids.length) {
+    back(`ใส่ ID กลุ่ม (ตัวเลข) หรือลิงก์กลุ่ม Facebook ที่ถูกต้อง${invalid.length ? `\nอ่านเลขกลุ่มไม่ได้: ${listSome(invalid)}` : ''}`);
+  }
+  if (ids.length > MAX_GROUPS_PER_ADD) back(`วางได้ครั้งละไม่เกิน ${MAX_GROUPS_PER_ADD} กลุ่ม ตอนนี้วางมา ${ids.length} กลุ่ม`);
   const name = String(formData.get('name') ?? '').trim();
+  if (name && ids.length > 1) back('ชื่อกลุ่มใส่ได้ตอนเพิ่มทีละกลุ่ม ถ้าเพิ่มหลายกลุ่มให้เว้นช่องชื่อไว้ ระบบอ่านชื่อจาก Facebook ให้ตอนโพสต์');
   const province = String(formData.get('province') ?? '').trim();
   const department = readBusinessUnit(formData.get('department'));
   if (!department) back('เลือกธุรกิจของกลุ่มนี้ (LBD / LBA / LM)');
   const sector = readGroupSector(formData.get('sector'));
-  const existing = await findPostingGroupByFbId(fbGroupId);
-  // รายการด้านล่างเปิดที่หมวดของกลุ่มนั้นพร้อมค้นเลขกลุ่มให้ — เดิมรายการเปิดที่ "เอกชน" เสมอ
-  // กลุ่มที่นำเข้าจากชีตราชการเลยดูเหมือนไม่มี (9 พ.ย. 2569: 1481054599057270 อยู่หมวดราชการ)
-  if (existing) {
-    back(
-      `กลุ่มนี้มีในระบบแล้ว ชื่อ "${existing.name}" อยู่หมวด${groupSectorLabel(existing.sector)}` +
-        `${existing.department ? ` · ${existing.department}` : ''} (เลขกลุ่ม ${fbGroupId}) ไม่ต้องเพิ่มซ้ำ ` +
-        `ถ้าจะใช้เป็นกลุ่ม${groupSectorLabel(sector)} ให้เปลี่ยนหมวดที่กลุ่มนี้ในรายการด้านล่าง`,
-      `&sector=${existing.sector}&q=${fbGroupId}`,
-    );
-  }
   let jobTypes: GroupJobType[] = [];
   try {
     jobTypes = readGroupJobTypes(formData);
   } catch (e) {
     back((e as Error).message);
   }
-  try {
-    await createPostingGroup({ fbGroupId, name: name || null, province: province || null, department, sector, jobTypes });
-  } catch (e) {
-    // มีคนเพิ่มกลุ่มเดียวกันพร้อมกัน
-    if ((e as { code?: string }).code === '23505') back(`กลุ่มนี้มีในระบบแล้ว (เลขกลุ่ม ${fbGroupId}) ไม่ต้องเพิ่มซ้ำ`);
-    throw e;
+
+  if (ids.length === 1 && !invalid.length) {
+    const fbGroupId = ids[0];
+    const existing = await findPostingGroupByFbId(fbGroupId);
+    // รายการด้านล่างเปิดที่หมวดของกลุ่มนั้นพร้อมค้นเลขกลุ่มให้ — เดิมรายการเปิดที่ "เอกชน" เสมอ
+    // กลุ่มที่นำเข้าจากชีตราชการเลยดูเหมือนไม่มี (9 พ.ย. 2569: 1481054599057270 อยู่หมวดราชการ)
+    if (existing) {
+      back(
+        `กลุ่มนี้มีในระบบแล้ว ชื่อ "${existing.name}" อยู่หมวด${groupSectorLabel(existing.sector)}` +
+          `${existing.department ? ` · ${existing.department}` : ''} (เลขกลุ่ม ${fbGroupId}) ไม่ต้องเพิ่มซ้ำ ` +
+          `ถ้าจะใช้เป็นกลุ่ม${groupSectorLabel(sector)} ให้เปลี่ยนหมวดที่กลุ่มนี้ในรายการด้านล่าง`,
+        `&sector=${existing.sector}&q=${fbGroupId}`,
+      );
+    }
+    try {
+      await createPostingGroup({ fbGroupId, name: name || null, province: province || null, department, sector, jobTypes });
+    } catch (e) {
+      // มีคนเพิ่มกลุ่มเดียวกันพร้อมกัน
+      if ((e as { code?: string }).code === '23505') back(`กลุ่มนี้มีในระบบแล้ว (เลขกลุ่ม ${fbGroupId}) ไม่ต้องเพิ่มซ้ำ`);
+      throw e;
+    }
+    revalidatePath('/settings/posting');
+    revalidatePath('/orchestrator');
+    return;
   }
+
+  const existing = await findPostingGroupsByFbIds(ids);
+  const existingIds = new Set(existing.map((g) => g.fb_group_id));
+  const added = await createPostingGroups({
+    fbGroupIds: ids.filter((id) => !existingIds.has(id)),
+    province: province || null,
+    department,
+    sector,
+    jobTypes,
+  });
+  const addedSet = new Set(added);
+  // เลขที่ไม่ได้เพิ่มและไม่อยู่ในรายการเดิม = มีคนเพิ่มพร้อมกัน นับเป็นมีอยู่แล้ว
+  const skipped = [
+    ...existing.map((g) => `${g.name} (${g.fb_group_id}${g.sector !== sector ? ` หมวด${groupSectorLabel(g.sector)}` : ''})`),
+    ...ids.filter((id) => !existingIds.has(id) && !addedSet.has(id)),
+  ];
+  const lines = [
+    added.length ? `เพิ่ม ${added.length} กลุ่ม เป็นกลุ่ม${groupSectorLabel(sector)} ของ ${department}` : 'ไม่มีกลุ่มใหม่ให้เพิ่ม',
+    skipped.length ? `มีในระบบอยู่แล้ว ${skipped.length} กลุ่ม ข้ามไป: ${listSome(skipped)}` : '',
+    invalid.length ? `อ่านเลขกลุ่มไม่ได้ ${invalid.length} บรรทัด: ${listSome(invalid)}` : '',
+  ].filter(Boolean);
   revalidatePath('/settings/posting');
   revalidatePath('/orchestrator');
+  back(lines.join('\n'), `&sector=${sector}${added.length ? '&ok=1' : ''}`);
 }
 
 /** ประเภทงานจากฟอร์ม (checkbox ชื่อ jobTypes หลายตัว) — ค่าที่ไม่รู้จักถือว่าพิมพ์มั่ว */

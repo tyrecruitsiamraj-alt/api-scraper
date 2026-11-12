@@ -4354,6 +4354,45 @@ export async function createPostingGroup(input: {
   return id;
 }
 
+/** กลุ่มที่มีอยู่แล้วจากเลขกลุ่มหลายตัว (เพิ่มทีละหลายกลุ่ม) */
+export async function findPostingGroupsByFbIds(
+  fbGroupIds: string[],
+): Promise<{ fb_group_id: string; name: string; sector: GroupSector }[]> {
+  if (!fbGroupIds.length) return [];
+  await ensureGroupSectorColumn();
+  return q<{ fb_group_id: string; name: string; sector: GroupSector }>(
+    `SELECT fb_group_id, COALESCE(NULLIF(TRIM(name), ''), fb_group_id) AS name,
+            CASE WHEN sector = 'government' THEN 'government' ELSE 'private' END AS sector
+       FROM ${AP}.groups WHERE fb_group_id = ANY($1::text[])`,
+    [fbGroupIds],
+  );
+}
+
+/**
+ * เพิ่มหลายกลุ่มในคำสั่งเดียว ค่าธุรกิจ/หมวด/จังหวัด/ประเภทงานเดียวกันทั้งรอบ
+ * เลขที่มีอยู่แล้ว (รวมที่มีคนเพิ่มพร้อมกัน) ข้ามโดย unique fb_group_id · คืนเลขที่เพิ่มได้จริง
+ */
+export async function createPostingGroups(input: {
+  fbGroupIds: string[];
+  province?: string | null;
+  department?: string | null;
+  sector?: GroupSector | null;
+  jobTypes?: GroupJobType[];
+}): Promise<string[]> {
+  if (!input.fbGroupIds.length) return [];
+  await ensureGroupSectorColumn();
+  const ids = input.fbGroupIds.map(() => autopostId());
+  const rows = await q<{ fb_group_id: string }>(
+    `INSERT INTO ${AP}.groups (id, name, fb_group_id, province, department, sector, job_positions)
+     SELECT x.id, 'Group ' || x.fb, x.fb, $3, $4, $5, $6::jsonb
+       FROM unnest($1::text[], $2::text[]) AS x(id, fb)
+     ON CONFLICT (fb_group_id) DO NOTHING
+     RETURNING fb_group_id`,
+    [ids, input.fbGroupIds, input.province || null, input.department || null, input.sector || 'private', JSON.stringify(input.jobTypes ?? [])],
+  );
+  return rows.map((r) => r.fb_group_id);
+}
+
 /** ตั้งประเภทงานของกลุ่ม (ทับทั้งชุด) */
 export async function setPostingGroupJobTypes(id: string, jobTypes: GroupJobType[]): Promise<void> {
   await q(`UPDATE ${AP}.groups SET job_positions = $2::jsonb WHERE id = $1`, [id, JSON.stringify(jobTypes)]);

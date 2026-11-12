@@ -10,11 +10,13 @@ import { GroupSectorSelect } from '@/components/GroupSectorSelect';
 import { AutoSubmitSelect } from '@/components/AutoSubmitSelect';
 import { GroupJobTypesDropdown, GroupJobTypesEditor } from '@/components/GroupJobTypesEditor';
 import { GROUP_JOB_TYPES, isGroupJobType } from '@/lib/group-job-types';
+import { MAX_GROUPS_PER_ADD } from '../../src/core/group-links.js';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Field, FieldGroup, FieldLabel } from '@/components/ui/field';
+import { Field, FieldDescription, FieldGroup, FieldLabel } from '@/components/ui/field';
 import { Input } from '@/components/ui/input';
+import { Textarea } from '@/components/ui/textarea';
 import { Item, ItemActions, ItemContent, ItemDescription, ItemGroup, ItemTitle } from '@/components/ui/item';
 
 /** แสดงได้สูงสุดต่อหน้า — คลังมี 2,000+ กลุ่มหลังนำเข้าชีตราชการ ต้องพิมพ์ค้นหาแทนการเลื่อนดูทั้งหมด */
@@ -70,18 +72,23 @@ export async function PostingGroupsManager({ sector = 'private', query = '', pro
         <CardContent>
           <form action={createGroupAction}>
             <FieldGroup>
-              <div className="grid gap-4 sm:grid-cols-[2fr_1.5fr_1fr_1fr_1fr_1.2fr_auto] sm:items-end">
+              <Field>
+                <FieldLabel htmlFor="new-group-id">ลิงก์กลุ่ม หรือ ID กลุ่ม</FieldLabel>
+                <Textarea
+                  id="new-group-id"
+                  name="fbGroupId"
+                  required
+                  rows={3}
+                  placeholder={'https://facebook.com/groups/123456789\nhttps://facebook.com/groups/987654321\n…'}
+                />
+                <FieldDescription>
+                  เพิ่มหลายกลุ่มได้ วางบรรทัดละกลุ่ม ครั้งละไม่เกิน {MAX_GROUPS_PER_ADD} กลุ่ม ทุกกลุ่มได้ค่าด้านล่างเหมือนกัน
+                  ชื่อกลุ่มระบบอ่านจาก Facebook ให้ตอนโพสต์ครั้งแรก
+                </FieldDescription>
+              </Field>
+              <div className="grid gap-4 sm:grid-cols-[1.5fr_1fr_1fr_1fr_1.2fr_auto] sm:items-end">
                 <Field>
-                  <FieldLabel htmlFor="new-group-id">ลิงก์กลุ่ม หรือ ID กลุ่ม</FieldLabel>
-                  <Input
-                    id="new-group-id"
-                    name="fbGroupId"
-                    required
-                    placeholder="https://facebook.com/groups/123… หรือ 123456789"
-                  />
-                </Field>
-                <Field>
-                  <FieldLabel htmlFor="new-group-name">ชื่อกลุ่ม (ไม่บังคับ)</FieldLabel>
+                  <FieldLabel htmlFor="new-group-name">ชื่อกลุ่ม (ไม่บังคับ ใส่ได้เมื่อเพิ่มกลุ่มเดียว)</FieldLabel>
                   <Input id="new-group-name" name="name" placeholder="เช่น หางานขับรถ กทม." />
                 </Field>
                 <Field>
