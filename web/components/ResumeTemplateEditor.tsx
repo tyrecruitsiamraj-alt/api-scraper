@@ -126,11 +126,16 @@ export function ResumeTemplateEditor({ id, name: initialName, settings: initial 
                 <NativeSelectOption value="none">ไม่มี</NativeSelectOption>
                 <NativeSelectOption value="text">ข้อความ</NativeSelectOption>
                 <NativeSelectOption value="logo" disabled={!s.logo}>โลโก้</NativeSelectOption>
+                <NativeSelectOption value="both" disabled={!s.logo}>ข้อความ + โลโก้</NativeSelectOption>
               </NativeSelect>
             </Field>
             <Field>
               <FieldLabel htmlFor="tpl-wm-text">ข้อความลายน้ำ</FieldLabel>
-              <Input id="tpl-wm-text" value={s.watermarkText} onChange={(e) => set('watermarkText', e.target.value)} disabled={s.watermark !== 'text'} placeholder="เช่น SO Recruitment" />
+              <Input id="tpl-wm-text" value={s.watermarkText} onChange={(e) => set('watermarkText', e.target.value)} disabled={s.watermark !== 'text' && s.watermark !== 'both'} placeholder="เช่น SO Recruitment" />
+              <Field orientation="horizontal" className="w-auto">
+                <Checkbox id="tpl-wm-tile" checked={s.watermarkTile} onCheckedChange={(v) => set('watermarkTile', v === true)} disabled={s.watermark !== 'text' && s.watermark !== 'both'} />
+                <FieldLabel htmlFor="tpl-wm-tile" className="font-normal">ซ้ำเต็มหน้า</FieldLabel>
+              </Field>
             </Field>
             <Field>
               <FieldLabel htmlFor="tpl-wm-op">ความเข้มลายน้ำ {s.watermarkOpacity}%</FieldLabel>
@@ -175,6 +180,7 @@ export function ResumeTemplateEditor({ id, name: initialName, settings: initial 
               })}
             </div>
             {s.layout === 'sidebar' && <FieldDescription>แบบแถบข้าง: ข้อมูลส่วนตัวกับทักษะอยู่ในแถบซ้ายเสมอ</FieldDescription>}
+            {s.layout === 'profile' && <FieldDescription>แบบแถบขวา: ข้อมูลส่วนตัว งานที่ต้องการ และทักษะอยู่ในแถบเทาด้านขวาเสมอ</FieldDescription>}
           </FieldSet>
 
           <Field>

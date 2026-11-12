@@ -31,3 +31,13 @@ test('ข้อความจากผู้ใช้ถูก escape (ชื�
   assert.ok(!html.includes('<script>x'));
   assert.ok(html.includes('&lt;b&gt;wm&lt;/b&gt;'));
 });
+
+test('แบบแถบขวา: ทักษะ/ภาษา/ข้อมูลส่วนตัวอยู่แถบขวา งานกับการศึกษาอยู่ซ้าย · ลายน้ำซ้ำเต็มหน้า', () => {
+  const html = buildResumeHtml(SAMPLE_CANDIDATE, null, { layout: 'profile', watermark: 'text', watermarkText: 'SO', watermarkTile: true });
+  const side = html.slice(html.indexOf('<aside class="pf-side">'));
+  const main = html.slice(html.indexOf('<main>'), html.indexOf('<aside class="pf-side">'));
+  assert.ok(side.includes('Microsoft Excel') && side.includes('เพศ: หญิง'));
+  assert.ok(main.includes('ประสบการณ์ทำงาน') && main.includes('การศึกษา'));
+  assert.ok(html.includes('เจ้าหน้าที่ธุรการ  |  แอดมิน'));
+  assert.equal((html.match(/<span>SO<\/span>/g) ?? []).length, 21);
+});
