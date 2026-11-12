@@ -224,7 +224,7 @@ html, body { background: #fff; margin: 0; font-family: '${t.font}', 'Sarabun', '
 .cols { display: grid; grid-template-columns: 1fr 1fr; gap: 0 22px; }
 .wm { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; pointer-events: none; z-index: 0; opacity: ${t.watermarkOpacity / 100}; }
 .wm span { font-size: 72px; font-weight: 700; color: ${t.accentColor}; transform: rotate(-30deg); white-space: nowrap; }
-.wm img { width: 60%; max-height: 60%; object-fit: contain; }
+.wm img { width: 38%; max-height: 38%; object-fit: contain; }
 .side-wrap { display: grid; grid-template-columns: 34% 1fr; min-height: 297mm; max-width: none; }
 .side { background: ${tint(t.accentColor, 0.1)}; padding: 16mm 7mm 12mm 9mm; }
 .side .avatar { width: 110px; height: 110px; border-radius: 50%; display: block; margin: 0 auto 12px; }
@@ -236,24 +236,26 @@ html, body { background: #fff; margin: 0; font-family: '${t.font}', 'Sarabun', '
 .main .name { margin-bottom: 2px; }
 .main .head-line { border-bottom: 2px solid ${t.accentColor}; padding-bottom: 12px; margin-bottom: 16px; }
 .wm-tile { display: grid; grid-template-columns: repeat(3, 1fr); grid-auto-rows: 1fr; align-items: center; justify-items: center; overflow: hidden; }
-.wm-tile span { font-size: 15px; letter-spacing: 1px; }
-.pf-head { display: flex; justify-content: space-between; align-items: flex-end; gap: 18px; border-bottom: 2px solid ${t.accentColor}; padding-bottom: 14px; margin-bottom: 14px; }
-.pf-head .name { font-size: 28px; }
-.pf-sub { opacity: .75; font-size: 12.5px; margin-top: 4px; }
-.pf-tags { color: ${t.accentColor}; font-weight: 700; font-size: 12px; text-transform: uppercase; margin-top: 4px; }
-.pf-photo { width: 130px; height: 170px; object-fit: cover; flex-shrink: 0; }
+.wm-tile span { font-size: 15px; font-weight: 600; letter-spacing: 1px; color: #6b7280; transform: rotate(-40deg); }
+.pf { font-size: 12px; line-height: 1.45; }
+.pf-head { display: flex; justify-content: space-between; align-items: flex-end; gap: 18px; border-bottom: 2px solid ${t.accentColor}; padding: 40px 0 14px; margin-bottom: 18px; }
+.pf-head .name { font-size: 24px; font-weight: 600; letter-spacing: 0; }
+.pf-sub { opacity: .75; font-size: 12px; margin-top: 3px; }
+.pf-tags { color: ${t.accentColor}; font-weight: 700; font-size: 12px; text-transform: uppercase; margin-top: 3px; }
+.pf-photo { width: 140px; height: 190px; object-fit: cover; flex-shrink: 0; }
 .pf-right { display: flex; flex-direction: column; align-items: flex-end; gap: 8px; }
-.pf-cols { display: grid; grid-template-columns: 1fr 34%; gap: 0 18px; }
-.pf-side { background: #f1f1f1; padding: 10px 12px; align-self: start; }
-.pf h2 { font-size: 16px; font-weight: 700; color: ${t.accentColor}; margin: 0 0 4px; padding: 0; border: 0; text-transform: none; letter-spacing: 0; }
-.pf .sec { margin-bottom: 10px; }
-.pf .entry { border-left: 0; padding-left: 0; margin-bottom: 7px; }
-.pf .et { font-weight: 700; }
+.pf-cols { display: grid; grid-template-columns: 1fr 31%; gap: 0 22px; }
+.pf-side { background: #f0f0f0; padding: 12px 14px 18px; align-self: stretch; }
+.pf h2 { font-size: 15.5px; font-weight: 700; color: ${t.accentColor}; margin: 0 0 3px; padding: 0; border: 0; text-transform: none; letter-spacing: 0; }
+.pf .sec { margin-bottom: 9px; }
+.pf .entry { border-left: 0; padding-left: 0; margin-bottom: 5px; }
+.pf .et { font-weight: 600; }
 .pf .et .co { font-weight: 400; opacity: .8; }
-.pf .em { font-style: italic; }
+.pf .em { font-style: italic; font-size: 11.5px; margin-top: 0; }
 .pf ul { margin: 2px 0 0; padding: 0; list-style: none; }
 .pf li { position: relative; padding-left: 10px; margin-bottom: 2px; }
-.pf li::before { content: ''; position: absolute; left: 0; top: .6em; width: 4px; height: 4px; border-radius: 50%; background: ${t.accentColor}; }
+.pf li::before { content: ''; position: absolute; left: 0; top: .6em; width: 4px; height: 4px; border-radius: 50%; background: #6b7280; }
+.pf-side li::before { background: ${t.accentColor}; }
 .pf .para { margin: 0; }
 `;
 }
@@ -318,7 +320,7 @@ function profileLayout(
       ${roles.length ? `<div class="pf-tags">${roles.map(esc).join('  |  ')}</div>` : ''}
       ${p.sources.length ? `<div class="sources">แหล่งข้อมูล: ${esc(p.sources.join(', '))}</div>` : ''}
     </div>
-    <div class="pf-right">${p.logo}${p.photo}</div>
+    <div class="pf-right">${p.photo}</div>
   </header>
   <div class="pf-cols"><main>${mainHtml}</main>${sideHtml ? `<aside class="pf-side">${sideHtml}</aside>` : '<aside></aside>'}</div>
   ${p.footer}
