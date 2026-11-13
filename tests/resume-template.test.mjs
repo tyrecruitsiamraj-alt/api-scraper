@@ -13,7 +13,7 @@ test('ค่าแปลกจากฟอร์ม/ฐาน กลับเป
   assert.equal(t.accentColor, '#7F1D1D');
   assert.equal(t.logo, '', 'โลโก้ต้องเป็นรูปเท่านั้น');
   assert.equal(t.watermark, 'none', 'ลายน้ำโลโก้แต่ไม่มีโลโก้ = ไม่มีลายน้ำ');
-  assert.equal(t.watermarkOpacity, 30);
+  assert.equal(t.watermarkOpacity, 60);
   assert.deepEqual(t.sections, ['work', 'education']);
 });
 
@@ -39,5 +39,26 @@ test('แบบแถบขวา: ทักษะ/ภาษา/ข้อมู�
   assert.ok(side.includes('Microsoft Excel') && side.includes('เพศ: หญิง'));
   assert.ok(main.includes('ประสบการณ์ทำงาน') && main.includes('การศึกษา'));
   assert.ok(html.includes('เจ้าหน้าที่ธุรการ  |  แอดมิน'));
-  assert.equal((html.match(/<span>SO<\/span>/g) ?? []).length, 21);
+  assert.equal((html.match(/<span style="left:[\d.]+%;top:[\d.]+%">SO<\/span>/g) ?? []).length, 18);
+});
+
+test('แบบที่บันทึกก่อนมีรูปลายน้ำแยก: ลายน้ำโลโก้ยังใช้โลโก้เดิม · ตั้งรูปลายน้ำเองได้แยกจากโลโก้', () => {
+  const logo = 'data:image/png;base64,AAAA';
+  const old = normalizeTemplateSettings({ logo, watermark: 'both', watermarkOpacity: 14 });
+  assert.equal(old.watermarkImage, logo);
+  assert.equal(old.watermarkImageOpacity, 14);
+  const own = normalizeTemplateSettings({ logo, watermark: 'logo', watermarkImage: 'data:image/svg+xml;base64,BBBB', watermarkImageSize: 29, watermarkImageOpacity: 17 });
+  const html = buildResumeHtml(SAMPLE_CANDIDATE, null, own);
+  assert.ok(html.includes('<div class="wm wm-img"><img src="data:image/svg+xml;base64,BBBB"'));
+  assert.ok(html.includes('.wm-img { opacity: 0.17; }') && html.includes('width: 29%'));
+  assert.equal(normalizeTemplateSettings({ watermark: 'logo', watermarkImage: '' }).watermark, 'none', 'เลือกลายน้ำรูปแต่ไม่มีรูป = ไม่มีลายน้ำ');
+});
+
+test('แบบแถบขวา: หัวข้ออังกฤษ · ใต้ชื่อเป็นตำแหน่งงานล่าสุด แท็กเป็นตำแหน่งที่ต้องการ · ความเชี่ยวชาญ/จุดเด่นอยู่แถบขวา', () => {
+  const html = buildResumeHtml(SAMPLE_CANDIDATE, null, { layout: 'profile', headingLang: 'en', sections: ['intro', 'work', 'education', 'skills'] });
+  for (const h of ['Profile', 'Work Experience', 'Education', 'Languages', 'Expertise', 'Strengths']) assert.ok(html.includes(`<h2>${h}</h2>`), h);
+  assert.ok(html.includes('<div class="pf-sub">เจ้าหน้าที่ธุรการ</div>'));
+  assert.ok(html.includes('Class of 2564'));
+  const side = html.slice(html.indexOf('<aside class="pf-side">'));
+  assert.ok(side.indexOf('ทำงานเป็นทีม') < side.indexOf('Microsoft Excel'), 'Expertise (ทักษะทั่วไป) ก่อน Strengths (ทักษะเฉพาะทาง)');
 });

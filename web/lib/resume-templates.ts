@@ -1,6 +1,6 @@
 import 'server-only';
 import { q } from './db';
-import { SO_LOGO_DATA_URL } from './resume-logo';
+import { SO_CIRCLE_DATA_URL } from './resume-logo';
 import { DEFAULT_RESUME_TEMPLATE, normalizeTemplateSettings } from './resume-template';
 import type { ResumeTemplateSettings } from './resume-template';
 
@@ -11,7 +11,7 @@ import type { ResumeTemplateSettings } from './resume-template';
 
 export const BUILTIN_TEMPLATE_ID = 'standard';
 
-/** แบบที่มากับระบบ แก้ตรง ๆ ไม่ได้ (กด "คัดลอกไปแก้") · แถบขวา = ตามรูปที่เจ้าของส่งมา 12 พ.ย. 2569 */
+/** แบบที่มากับระบบ แก้ตรง ๆ ไม่ได้ (กด "คัดลอกไปแก้") · แถบขวา = ตามรูปที่เจ้าของส่งมา 13 พ.ย. 2569 */
 const BUILTINS: { id: string; name: string; settings: ResumeTemplateSettings }[] = [
   { id: BUILTIN_TEMPLATE_ID, name: 'แบบมาตรฐาน', settings: DEFAULT_RESUME_TEMPLATE },
   {
@@ -19,14 +19,18 @@ const BUILTINS: { id: string; name: string; settings: ResumeTemplateSettings }[]
     name: 'แบบแถบขวา',
     settings: normalizeTemplateSettings({
       layout: 'profile',
-      font: 'Noto Sans Thai',
-      accentColor: '#c62828',
-      textColor: '#444444',
-      logo: SO_LOGO_DATA_URL,
+      font: 'Arimo',
+      accentColor: '#a63d38',
+      textColor: '#333333',
+      logo: '',
       watermark: 'both',
       watermarkText: 'SIAMRAJATHANEE',
       watermarkTile: true,
-      watermarkOpacity: 18,
+      watermarkOpacity: 25,
+      watermarkImage: SO_CIRCLE_DATA_URL,
+      watermarkImageSize: 29,
+      watermarkImageOpacity: 17,
+      headingLang: 'en',
       showContacts: false,
       showSources: false,
       footerText: '',

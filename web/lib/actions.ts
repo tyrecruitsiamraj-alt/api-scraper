@@ -327,6 +327,8 @@ export async function saveResumeTemplateAction(formData: FormData) {
   }
   const logo = String((settings as { logo?: unknown })?.logo ?? '');
   if (logo.length > 1_400_000) back('รูปโลโก้ใหญ่เกิน 1 MB');
+  const watermarkImage = String((settings as { watermarkImage?: unknown })?.watermarkImage ?? '');
+  if (watermarkImage.length > 1_400_000) back('รูปลายน้ำใหญ่เกิน 1 MB');
   await saveResumeTemplate({ id, name, settings, actor: session.user?.email ?? session.user?.name ?? null });
   revalidatePath('/settings/resume-templates');
   redirect('/settings/resume-templates');

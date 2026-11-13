@@ -8,12 +8,18 @@ export const RESUME_LAYOUTS = [
   { key: 'sidebar', label: 'แถบข้าง', detail: 'แถบสีด้านซ้ายมีรูป ช่องทางติดต่อ ข้อมูลส่วนตัว ทักษะ' },
   { key: 'compact', label: 'กระชับ', detail: 'ตัวเล็กลง จัดสองคอลัมน์ ให้จบในหน้าเดียว' },
   // ตามรูปที่เจ้าของส่งมา 12 พ.ย. 2569
-  { key: 'profile', label: 'แถบขวา', detail: 'รูปมุมขวาบน เส้นสีใต้หัว เนื้อหาหลักด้านซ้าย แถบเทาด้านขวามีภาษา ทักษะ ข้อมูลส่วนตัว' },
+  { key: 'profile', label: 'แถบขวา', detail: 'รูปมุมขวาบน เส้นสีใต้หัว เนื้อหาหลักด้านซ้าย แถบเทาด้านขวามีภาษา ความเชี่ยวชาญ จุดเด่น' },
 ] as const;
 export type ResumeLayout = (typeof RESUME_LAYOUTS)[number]['key'];
 
-/** ฟอนต์ไทยจาก Google Fonts */
-export const RESUME_FONTS = ['Kanit', 'Sarabun', 'Prompt', 'Noto Sans Thai', 'IBM Plex Sans Thai', 'Bai Jamjuree'] as const;
+/** ฟอนต์จาก Google Fonts · Arimo = หน้าตาแบบ Arial ไม่มีตัวไทย ตัวไทยใช้ Noto Sans Thai (โหลดคู่กันเสมอ) */
+export const RESUME_FONTS = ['Kanit', 'Sarabun', 'Prompt', 'Noto Sans Thai', 'IBM Plex Sans Thai', 'Bai Jamjuree', 'Arimo'] as const;
+
+/** หัวข้อในเรซูเม่ ไทย/อังกฤษ */
+const HEADINGS = {
+  th: { intro: 'แนะนำตัว', work: 'ประสบการณ์ทำงาน', education: 'การศึกษา', languages: 'ภาษา', expertise: 'ความเชี่ยวชาญ', strengths: 'จุดเด่น', personal: 'ข้อมูลส่วนตัว', wanted: 'งานที่ต้องการ', classOf: 'จบปี' },
+  en: { intro: 'Profile', work: 'Work Experience', education: 'Education', languages: 'Languages', expertise: 'Expertise', strengths: 'Strengths', personal: 'Personal Information', wanted: 'Job Preferences', classOf: 'Class of' },
+} as const;
 
 export const RESUME_SECTIONS = [
   { key: 'intro', label: 'แนะนำตัว' },
@@ -30,15 +36,22 @@ export type ResumeTemplateSettings = {
   font: string;
   textColor: string;
   accentColor: string;
-  /** รูปโลโก้แบบ data URL (ว่าง = ไม่มีโลโก้) */
+  /** รูปโลโก้หัวกระดาษแบบ data URL (ว่าง = ไม่มีโลโก้) */
   logo: string;
-  /** both = ข้อความ + โลโก้กลางหน้า */
+  /** logo = รูปลายน้ำกลางหน้า (watermarkImage) · both = ข้อความ + รูป */
   watermark: 'none' | 'text' | 'logo' | 'both';
   watermarkText: string;
   /** ข้อความลายน้ำซ้ำเต็มหน้าแบบเฉียง (ไม่ติ๊ก = คำเดียวใหญ่กลางหน้า) */
   watermarkTile: boolean;
-  /** ความจางของลายน้ำ 3–30 (%) */
+  /** ความเข้มข้อความลายน้ำ 3–60 (%) */
   watermarkOpacity: number;
+  /** รูปลายน้ำกลางหน้าแบบ data URL แยกจากโลโก้ */
+  watermarkImage: string;
+  /** ความกว้างรูปลายน้ำ 10–80 (% ของหน้า) */
+  watermarkImageSize: number;
+  /** ความเข้มรูปลายน้ำ 3–60 (%) */
+  watermarkImageOpacity: number;
+  headingLang: 'th' | 'en';
   showPhoto: boolean;
   showContacts: boolean;
   showSources: boolean;
@@ -58,6 +71,10 @@ export const DEFAULT_RESUME_TEMPLATE: ResumeTemplateSettings = {
   watermarkText: '',
   watermarkTile: false,
   watermarkOpacity: 8,
+  watermarkImage: '',
+  watermarkImageSize: 38,
+  watermarkImageOpacity: 8,
+  headingLang: 'th',
   showPhoto: true,
   showContacts: true,
   showSources: true,
@@ -66,6 +83,8 @@ export const DEFAULT_RESUME_TEMPLATE: ResumeTemplateSettings = {
 };
 
 const HEX = /^#[0-9a-f]{6}$/i;
+const IMAGE_URL = /^data:image\/(png|jpeg|webp|svg\+xml);base64,/;
+const clamp = (v: unknown, min: number, max: number, d: number) => Math.min(max, Math.max(min, Number(v) || d));
 
 /** ค่าที่อ่านจากฐาน/ฟอร์ม → ค่าที่ใช้ได้แน่นอน (ค่าแปลก ๆ กลับเป็นค่าเริ่มต้น) */
 export function normalizeTemplateSettings(raw: unknown): ResumeTemplateSettings {
@@ -75,18 +94,27 @@ export function normalizeTemplateSettings(raw: unknown): ResumeTemplateSettings 
   const sections = Array.isArray(r.sections)
     ? [...new Set(r.sections.map(String).filter((k) => sectionKeys.includes(k)))] as ResumeSectionKey[]
     : d.sections;
-  const logo = typeof r.logo === 'string' && /^data:image\/(png|jpeg|webp|svg\+xml);base64,/.test(r.logo) ? r.logo : '';
+  const logo = typeof r.logo === 'string' && IMAGE_URL.test(r.logo) ? r.logo : '';
   const watermark = r.watermark === 'text' || r.watermark === 'logo' || r.watermark === 'both' ? r.watermark : 'none';
+  // แบบที่บันทึกก่อนมีรูปลายน้ำแยก ใช้โลโก้เป็นลายน้ำ
+  const watermarkImage = typeof r.watermarkImage === 'string' && IMAGE_URL.test(r.watermarkImage)
+    ? r.watermarkImage
+    : r.watermarkImage === undefined && (watermark === 'logo' || watermark === 'both') ? logo : '';
+  const textOpacity = clamp(r.watermarkOpacity, 3, 60, d.watermarkOpacity);
   return {
     layout: RESUME_LAYOUTS.some((l) => l.key === r.layout) ? (r.layout as ResumeLayout) : d.layout,
     font: (RESUME_FONTS as readonly string[]).includes(String(r.font)) ? String(r.font) : d.font,
     textColor: HEX.test(String(r.textColor)) ? String(r.textColor) : d.textColor,
     accentColor: HEX.test(String(r.accentColor)) ? String(r.accentColor) : d.accentColor,
     logo,
-    watermark: !logo && watermark === 'logo' ? 'none' : !logo && watermark === 'both' ? 'text' : watermark,
+    watermark: !watermarkImage && watermark === 'logo' ? 'none' : !watermarkImage && watermark === 'both' ? 'text' : watermark,
     watermarkText: String(r.watermarkText ?? '').slice(0, 60),
     watermarkTile: Boolean(r.watermarkTile),
-    watermarkOpacity: Math.min(30, Math.max(3, Number(r.watermarkOpacity) || d.watermarkOpacity)),
+    watermarkOpacity: textOpacity,
+    watermarkImage,
+    watermarkImageSize: clamp(r.watermarkImageSize, 10, 80, d.watermarkImageSize),
+    watermarkImageOpacity: clamp(r.watermarkImageOpacity, 3, 60, textOpacity),
+    headingLang: r.headingLang === 'en' ? 'en' : 'th',
     showPhoto: r.showPhoto === undefined ? d.showPhoto : Boolean(r.showPhoto),
     showContacts: r.showContacts === undefined ? d.showContacts : Boolean(r.showContacts),
     showSources: r.showSources === undefined ? d.showSources : Boolean(r.showSources),
@@ -183,7 +211,9 @@ function sectionHtml(key: ResumeSectionKey, c: any): string {
 }
 
 function fontHref(font: string): string {
-  return `https://fonts.googleapis.com/css2?family=${encodeURIComponent(font).replace(/%20/g, '+')}:wght@300;400;500;600;700&display=swap`;
+  const fam = (f: string) => `family=${encodeURIComponent(f).replace(/%20/g, '+')}:wght@400;600;700`;
+  const families = font === 'Noto Sans Thai' ? [font] : [font, 'Noto Sans Thai'];
+  return `https://fonts.googleapis.com/css2?${families.map(fam).join('&')}&display=swap`;
 }
 
 /** สีอ่อนของสีหลัก (พื้นแถบข้าง/ป้ายทักษะ) */
@@ -194,10 +224,12 @@ function tint(hex: string, alpha: number): string {
 
 function css(t: ResumeTemplateSettings): string {
   const small = t.layout === 'compact';
+  const margin = t.layout === 'sidebar' ? '0' : t.layout === 'profile' ? '10mm 11mm 12mm 9mm' : '14mm';
   return `
-@page { size: A4; margin: ${t.layout === 'sidebar' ? '0' : '14mm'}; }
+@page { size: A4; margin: ${margin}; }
+@media screen { body { padding: ${margin}; } }
 * { box-sizing: border-box; }
-html, body { background: #fff; margin: 0; font-family: '${t.font}', 'Sarabun', 'Noto Sans Thai', Tahoma, sans-serif; color: ${t.textColor}; }
+html, body { background: #fff; margin: 0; font-family: '${t.font}', 'Noto Sans Thai', Tahoma, sans-serif; color: ${t.textColor}; }
 .sheet { max-width: 800px; margin: 0 auto; font-size: ${small ? '11.5px' : '13px'}; line-height: 1.5; position: relative; z-index: 1; }
 .head { display: flex; gap: 18px; align-items: flex-start; border-bottom: 2px solid ${t.accentColor}; padding-bottom: ${small ? '10px' : '16px'}; margin-bottom: ${small ? '12px' : '18px'}; }
 .avatar { width: ${small ? '64px' : '84px'}; height: ${small ? '64px' : '84px'}; border-radius: 10px; object-fit: cover; border: 1px solid #e5e7eb; flex-shrink: 0; }
@@ -222,9 +254,11 @@ html, body { background: #fff; margin: 0; font-family: '${t.font}', 'Sarabun', '
 .chip { background: ${tint(t.accentColor, 0.1)}; color: ${t.accentColor}; font-size: 11.5px; padding: 2px 8px; border-radius: 5px; }
 .foot { margin-top: 20px; padding-top: 8px; border-top: 1px solid #e5e7eb; opacity: .55; font-size: 10px; text-align: center; }
 .cols { display: grid; grid-template-columns: 1fr 1fr; gap: 0 22px; }
-.wm { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; pointer-events: none; z-index: 0; opacity: ${t.watermarkOpacity / 100}; }
-.wm span { font-size: 72px; font-weight: 700; color: ${t.accentColor}; transform: rotate(-30deg); white-space: nowrap; }
-.wm img { width: 38%; max-height: 38%; object-fit: contain; }
+.wm { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; pointer-events: none; z-index: 0; }
+.wm-text { opacity: ${t.watermarkOpacity / 100}; }
+.wm-text span { font-size: 72px; font-weight: 700; color: ${t.accentColor}; transform: rotate(-30deg); white-space: nowrap; }
+.wm-img { opacity: ${t.watermarkImageOpacity / 100}; }
+.wm-img img { width: ${t.watermarkImageSize}%; max-height: ${t.watermarkImageSize}%; object-fit: contain; }
 .side-wrap { display: grid; grid-template-columns: 34% 1fr; min-height: 297mm; max-width: none; }
 .side { background: ${tint(t.accentColor, 0.1)}; padding: 16mm 7mm 12mm 9mm; }
 .side .avatar { width: 110px; height: 110px; border-radius: 50%; display: block; margin: 0 auto 12px; }
@@ -235,97 +269,107 @@ html, body { background: #fff; margin: 0; font-family: '${t.font}', 'Sarabun', '
 .main { padding: 16mm 10mm 12mm 9mm; }
 .main .name { margin-bottom: 2px; }
 .main .head-line { border-bottom: 2px solid ${t.accentColor}; padding-bottom: 12px; margin-bottom: 16px; }
-.wm-tile { display: grid; grid-template-columns: repeat(3, 1fr); grid-auto-rows: 1fr; align-items: center; justify-items: center; overflow: hidden; }
-.wm-tile span { font-size: 15px; font-weight: 600; letter-spacing: 1px; color: #6b7280; transform: rotate(-40deg); }
-.pf { font-size: 12px; line-height: 1.45; }
-.pf-head { display: flex; justify-content: space-between; align-items: flex-end; gap: 18px; border-bottom: 2px solid ${t.accentColor}; padding: 40px 0 14px; margin-bottom: 18px; }
-.pf-head .name { font-size: 24px; font-weight: 600; letter-spacing: 0; }
-.pf-sub { opacity: .75; font-size: 12px; margin-top: 3px; }
-.pf-tags { color: ${t.accentColor}; font-weight: 700; font-size: 12px; text-transform: uppercase; margin-top: 3px; }
-.pf-photo { width: 140px; height: 190px; object-fit: cover; flex-shrink: 0; }
-.pf-right { display: flex; flex-direction: column; align-items: flex-end; gap: 8px; }
-.pf-cols { display: grid; grid-template-columns: 1fr 31%; gap: 0 22px; }
-.pf-side { background: #f0f0f0; padding: 12px 14px 18px; align-self: stretch; }
-.pf h2 { font-size: 15.5px; font-weight: 700; color: ${t.accentColor}; margin: 0 0 3px; padding: 0; border: 0; text-transform: none; letter-spacing: 0; }
-.pf .sec { margin-bottom: 9px; }
-.pf .entry { border-left: 0; padding-left: 0; margin-bottom: 5px; }
-.pf .et { font-weight: 600; }
-.pf .et .co { font-weight: 400; opacity: .8; }
-.pf .em { font-style: italic; font-size: 11.5px; margin-top: 0; }
-.pf ul { margin: 2px 0 0; padding: 0; list-style: none; }
-.pf li { position: relative; padding-left: 10px; margin-bottom: 2px; }
-.pf li::before { content: ''; position: absolute; left: 0; top: .6em; width: 4px; height: 4px; border-radius: 50%; background: #6b7280; }
-.pf-side li::before { background: ${t.accentColor}; }
-.pf .para { margin: 0; }
+.wm-tile { display: block; overflow: hidden; }
+.wm-tile span { position: absolute; font-size: 14px; font-weight: 400; letter-spacing: .5px; color: #555; transform: translate(-50%, -50%) rotate(-40deg); }
+.pf { font-size: 12px; line-height: 1.36; max-width: none; }
+.pf-head { display: flex; justify-content: space-between; align-items: flex-end; gap: 18px; border-bottom: 2px solid ${t.accentColor}; padding: 76px 0 34px; }
+.pf-head .name { font-size: 23px; font-weight: 700; letter-spacing: 0; line-height: 1.15; }
+.pf-sub { opacity: .8; font-size: 12px; margin-top: 3px; }
+.pf-tags { color: ${t.accentColor}; font-weight: 700; font-size: 12px; text-transform: uppercase; margin-top: 2px; white-space: pre; }
+.pf-contacts { opacity: .7; font-size: 11px; margin-top: 3px; }
+.pf-photo { width: 34mm; height: 45.5mm; object-fit: cover; flex-shrink: 0; margin-bottom: 13px; }
+.pf-cols { display: grid; grid-template-columns: 1fr 30.4%; gap: 0 18px; }
+.pf-cols > main { padding-top: 15px; }
+.pf-side { background: rgba(0, 0, 0, .065); margin-top: 6px; padding: 10px 13px 14px; }
+.pf h2 { font-size: 16px; font-weight: 700; color: ${t.accentColor}; margin: 0 0 2px; padding: 0; border: 0; text-transform: none; letter-spacing: 0; line-height: 1.25; }
+.pf .sec { margin-bottom: 6px; break-inside: auto; }
+.pf .entry { border-left: 0; padding-left: 0; margin-bottom: 3px; }
+.pf .et { font-weight: 700; }
+.pf .et .co { font-weight: 400; opacity: .85; }
+.pf .em { font-style: italic; font-size: 12px; opacity: .65; margin-top: 0; }
+.pf ul { margin: 0; padding: 0; list-style: none; }
+.pf main li { padding-left: 9px; text-indent: -9px; }
+.pf main li::before { content: '•'; display: inline-block; width: 9px; text-indent: 0; }
+.pf-side li::before { content: '•'; color: ${t.accentColor}; margin-right: 2px; }
+.pf .para { margin: 0; opacity: .85; font-size: 12px; }
+.pf li { opacity: .85; }
 `;
 }
 
-/** แบบแถบขวา: หัวชื่อ + แท็กตำแหน่งสีหลัก + รูปมุมขวา · ซ้าย = แนะนำตัว/งาน/การศึกษา · ขวา (เทา) = ภาษา ทักษะ ข้อมูลส่วนตัว งานที่ต้องการ */
+/**
+ * แบบแถบขวา (ตามรูปที่เจ้าของส่งมา 13 พ.ย. 2569)
+ * หัว: ชื่อ · ตำแหน่งล่าสุด · แท็กตำแหน่งที่ต้องการตัวใหญ่สีหลัก · รูปมุมขวา
+ * ซ้าย = แนะนำตัว/งาน/การศึกษา · ขวา (เทา) = ภาษา ความเชี่ยวชาญ (ทักษะทั่วไป) จุดเด่น (ทักษะเฉพาะทาง) ข้อมูลส่วนตัว งานที่ต้องการ
+ */
 function profileLayout(
   c: any,
   t: ResumeTemplateSettings,
-  p: { name: string; logo: string; photo: string; contactList: string[]; sources: string[]; footer: string },
+  p: { name: string; photo: string; contactList: string[]; sources: string[]; footer: string },
 ): string {
-  const bullets = (title: string, items: string[]) =>
-    items.length ? `<section class="sec"><h2>${esc(title)}</h2><ul>${items.map((x) => `<li>${esc(x)}</li>`).join('')}</ul></section>` : '';
+  const h = HEADINGS[t.headingLang];
+  const sec = (title: string, body: string) => (body ? `<section class="sec"><h2>${esc(title)}</h2>${body}</section>` : '');
+  const bullets = (title: string, items: string[]) => sec(title, items.length ? `<ul>${items.map((x) => `<li>${esc(x)}</li>`).join('')}</ul>` : '');
   const kv = (pairs: [string, unknown][]) => pairs.filter(([, v]) => txt(v)).map(([k, v]) => `${k}: ${txt(v)}`);
+  const co = (v: unknown) => (txt(v) ? ` <span class="co">&nbsp;—&nbsp; ${esc(txt(v))}</span>` : '');
+  const work = arr(c.work_experience);
   const main: Record<string, () => string> = {
-    intro: () => (txt(c.intro) ? `<section class="sec"><h2>แนะนำตัว</h2><p class="para">${esc(txt(c.intro))}</p></section>` : ''),
-    work: () => {
-      const rows = arr(c.work_experience);
-      if (!rows.length) return '';
-      return `<section class="sec"><h2>ประสบการณ์ทำงาน</h2>${rows
+    intro: () => sec(h.intro, txt(c.intro) ? `<p class="para">${esc(txt(c.intro))}</p>` : ''),
+    work: () =>
+      sec(h.work, work
         .map((w) => {
           const resp = txt(w.responsibilities) ? `<ul><li>${esc(txt(w.responsibilities))}</li></ul>` : '';
           const meta = [txt(w.period) || txt(w.year), salaryTxt(w.salary)].filter(Boolean).join(' · ');
-          return `<div class="entry"><div class="et">${esc(txt(w.position) || '—')}${txt(w.company) ? ` <span class="co">— ${esc(txt(w.company))}</span>` : ''}</div>${meta ? `<div class="em">${esc(meta)}</div>` : ''}${resp}</div>`;
+          return `<div class="entry"><div class="et">${esc(txt(w.position) || '—')}${co(w.company)}</div>${meta ? `<div class="em">${esc(meta)}</div>` : ''}${resp}</div>`;
         })
-        .join('')}</section>`;
-    },
-    education: () => {
-      const rows = arr(c.education);
-      if (!rows.length) return '';
-      return `<section class="sec"><h2>การศึกษา</h2>${rows
+        .join('')),
+    education: () =>
+      sec(h.education, arr(c.education)
         .map((e) => {
           const what = [txt(e.degree), txt(e.major)].filter(Boolean).join(' ') + (txt(e.gpa) ? ` (GPA ${txt(e.gpa)})` : '');
-          return `<div class="entry"><div class="et">${esc(what || '—')}${txt(e.institution) ? ` <span class="co">— ${esc(txt(e.institution))}</span>` : ''}</div>${txt(e.graduation_year) ? `<div class="em">จบปี ${esc(txt(e.graduation_year))}</div>` : ''}</div>`;
+          return `<div class="entry"><div class="et">${esc(what || '—')}${co(e.institution)}</div>${txt(e.graduation_year) ? `<div class="em">${h.classOf} ${esc(txt(e.graduation_year))}</div>` : ''}</div>`;
         })
-        .join('')}</section>`;
-    },
+        .join('')),
   };
   const side: Record<string, () => string> = {
     skills: () =>
-      bullets('ภาษา', arr(c.language_skills).map(langLine).filter(Boolean)) +
-      bullets('ทักษะเฉพาะทาง', skills(c.hard_skills)) +
-      bullets('จุดเด่น', skills(c.soft_skills)),
+      bullets(h.languages, arr(c.language_skills).map(langLine).filter(Boolean)) +
+      bullets(h.expertise, skills(c.soft_skills)) +
+      bullets(h.strengths, skills(c.hard_skills)),
     personal: () =>
-      bullets('ข้อมูลส่วนตัว', kv([
+      bullets(h.personal, kv([
         ['เพศ', c.gender], ['อายุ', c.age && `${txt(c.age)} ปี`], ['สัญชาติ', c.nationality], ['ศาสนา', c.religion],
         ['ส่วนสูง', c.height], ['น้ำหนัก', c.weight], ['สถานภาพ', c.marital_status], ['ทหาร', c.military_status],
         ['ใบขับขี่', c.driving_license], ['จังหวัด', c.province],
       ])),
     wanted: () =>
-      bullets('งานที่ต้องการ', kv([
+      bullets(h.wanted, kv([
         ['เงินเดือน', salaryTxt(c.expected_salary)], ['พื้นที่', c.desired_work_area], ['ประเภทงาน', c.job_type], ['เริ่มงานได้', c.available_start],
       ])),
   };
   const mainHtml = t.sections.filter((k) => k in main).map((k) => main[k]()).join('');
   const sideHtml = t.sections.filter((k) => k in side).map((k) => side[k]()).join('');
+  const current = txt(work[0]?.position);
   const roles = txt(c.desired_positions).split(/\s*[,/|]\s*/).filter(Boolean);
   return `<div class="sheet pf">
   <header class="pf-head">
     <div>
       <h1 class="name">${esc(p.name)}</h1>
-      ${p.contactList.length ? `<div class="pf-sub">${esc(p.contactList.join('  ·  '))}</div>` : ''}
+      ${current ? `<div class="pf-sub">${esc(current)}</div>` : ''}
       ${roles.length ? `<div class="pf-tags">${roles.map(esc).join('  |  ')}</div>` : ''}
+      ${p.contactList.length ? `<div class="pf-contacts">${esc(p.contactList.join('  ·  '))}</div>` : ''}
       ${p.sources.length ? `<div class="sources">แหล่งข้อมูล: ${esc(p.sources.join(', '))}</div>` : ''}
     </div>
-    <div class="pf-right">${p.photo}</div>
+    ${p.photo}
   </header>
   <div class="pf-cols"><main>${mainHtml}</main>${sideHtml ? `<aside class="pf-side">${sideHtml}</aside>` : '<aside></aside>'}</div>
   ${p.footer}
 </div>`;
 }
+
+/** ตำแหน่งข้อความลายน้ำแบบซ้ำเต็มหน้า: 6 แถว แถวเว้นแถวเยื้องครึ่งช่อง (ตามรูปตัวอย่าง) */
+const TILE_SPOTS = Array.from({ length: 6 }, (_, row) =>
+  (row % 2 ? [22, 57, 92] : [5, 40, 75]).map((x) => [x, 7 + row * 17.5] as const),
+).flat();
 
 /**
  * HTML เรซูเม่หน้า A4 ของผู้สมัครหนึ่งคนตามแบบฟอร์ม
@@ -350,17 +394,17 @@ export function buildResumeHtml(c: any, profileDataUrl?: string | null, template
   const footer = t.footerText ? `<footer class="foot">${esc(t.footerText)} · ${esc(name)}</footer>` : '';
   const wmText = (t.watermark === 'text' || t.watermark === 'both') && t.watermarkText
     ? t.watermarkTile
-      ? `<div class="wm wm-tile">${Array.from({ length: 21 }, () => `<span>${esc(t.watermarkText)}</span>`).join('')}</div>`
-      : `<div class="wm"><span>${esc(t.watermarkText)}</span></div>`
+      ? `<div class="wm wm-text wm-tile">${TILE_SPOTS.map(([x, y]) => `<span style="left:${x}%;top:${y}%">${esc(t.watermarkText)}</span>`).join('')}</div>`
+      : `<div class="wm wm-text"><span>${esc(t.watermarkText)}</span></div>`
     : '';
-  const wmLogo = (t.watermark === 'logo' || t.watermark === 'both') && t.logo ? `<div class="wm"><img src="${t.logo}" alt=""/></div>` : '';
+  const wmLogo = (t.watermark === 'logo' || t.watermark === 'both') && t.watermarkImage ? `<div class="wm wm-img"><img src="${t.watermarkImage}" alt=""/></div>` : '';
   const wm = wmText + wmLogo;
   const html = (key: ResumeSectionKey) => sectionHtml(key, c);
 
   let body: string;
   if (t.layout === 'profile') {
     const pfPhoto = t.showPhoto && profileDataUrl ? `<img class="pf-photo" src="${profileDataUrl}" alt=""/>` : '';
-    body = profileLayout(c, t, { name, logo, photo: pfPhoto, contactList, sources, footer });
+    body = profileLayout(c, t, { name, photo: pfPhoto, contactList, sources, footer });
   } else if (t.layout === 'sidebar') {
     const sideKeys: ResumeSectionKey[] = ['personal', 'skills'];
     const side = t.sections.filter((k) => sideKeys.includes(k)).map(html).join('');
