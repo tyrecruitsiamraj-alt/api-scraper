@@ -1669,7 +1669,7 @@ app.post('/api/worker/post/pause-user', async (req, res) => {
     if (!userId) return res.status(400).json({ error: 'user_id required' });
     // kind=fb_limited: Facebook จำกัดบัญชี — ให้เซิร์ฟเวอร์นับครั้งที่โดนแล้วพักตามขั้น (โดนซ้ำพักนานขึ้น)
     const row = req.body?.kind === 'fb_limited'
-      ? await db.pauseUserForFacebookLimit(userId, Number(req.body?.hours) || 24)
+      ? await db.pauseUserForFacebookLimit(userId, Number(req.body?.hours) || 24, { until: req.body?.until || null })
       : await db.pauseUser(userId, Number(req.body?.hours) || 24, req.body?.reason || null);
     if (!row) return res.status(404).json({ error: 'user not found' });
     logger.warn('post_user.paused', { user_id: userId, until: row.paused_until, reason: row.pause_reason });
@@ -1705,7 +1705,7 @@ app.post('/api/worker/post/handoff', async (req, res) => {
 /** ปลดพักบัญชี (จากหน้าเว็บ/มือ) */
 app.post('/api/users/:id/resume-posting', async (req, res) => {
   try {
-    const row = await db.resumeUser(req.params.id);
+    const row = await db.resumeUser(req.params.id, req.body?.requested_by || null);
     if (!row) return res.status(404).json({ error: 'user not found' });
     res.json({ ok: true, user: row });
   } catch (e) {

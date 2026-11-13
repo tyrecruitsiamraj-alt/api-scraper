@@ -7,6 +7,6 @@ export type PostingAvailability = {
   message: string | null;
 };
 export function postingAvailability(
-  accounts: { status: string; remaining_today: number; paused_until: string | null }[],
+  accounts: { status: string; remaining_today: number; paused_until: string | null; pause_reason?: string | null }[],
   now?: number,
 ): PostingAvailability;

@@ -20,6 +20,7 @@ export { postToGroupWorker } from './postToGroupWorker';
 export type { PostToGroupOptions } from './postToGroup';
 export { saveToSheet, findMyPostLink } from './saveToSheet';
 export { runLog } from './runLog';
+export { readFacebookRestrictionEnd } from './facebookRestriction';
 export {
   buildDailyPostPlanForUser,
   pauseUserPosting,

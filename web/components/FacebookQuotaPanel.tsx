@@ -78,7 +78,7 @@ export function FacebookQuotaPanel({ initialFb }: { initialFb: FacebookQuotaSumm
                 </div>
                 <Progress value={pct} aria-label={`${a.label} ใช้ไป ${a.used_today} จาก ${a.cap}`} />
                 <div className="flex items-center justify-end gap-1.5 tabular-nums">
-                  {a.paused && <Badge variant="outline">{a.paused_until ? `พักถึง ${backDate(a.paused_until)}` : 'พัก'}</Badge>}
+                  {a.paused && <Badge variant="outline">{a.retired ? 'เลิกใช้โพสต์' : a.paused_until ? `พักถึง ${backDate(a.paused_until)}` : 'พัก'}</Badge>}
                   {full && <Badge variant="destructive">เต็ม</Badge>}
                   <span className={cn(full ? 'font-semibold text-destructive' : 'text-muted-foreground')}>
                     {a.used_today}/{a.cap}

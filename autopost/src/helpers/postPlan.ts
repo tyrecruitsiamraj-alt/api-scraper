@@ -94,17 +94,20 @@ export async function pauseUserPosting(
 }
 
 /**
- * Facebook จำกัดการโพสต์ของบัญชี — พักตามจำนวนครั้งที่โดนใน 30 วัน (ครั้งแรก 7 วัน · ครั้งที่ 2 14 วัน · 3 ขึ้นไป 28 วัน — autopost/server/fb-limit-pause.js)
+ * Facebook จำกัดการโพสต์ของบัญชี — autopost/server/fb-limit-pause.js
+ * until (วันปลดล็อกที่อ่านจากหน้า Facebook) มี = พักถึงวันนั้น · ไม่มี = พักตามครั้งที่โดนใน 30 วัน (7/14/28 วัน)
+ * ต่อท้ายอุ่นเครื่อง 2 วัน · โดนครบ 4 ครั้ง = เลิกใช้โพสต์
  * คืนข้อความเหตุที่ใช้บันทึกรอบ (ขึ้นต้นด้วยคำเดียวกับที่ตัวนับใช้)
  */
 export async function pauseUserForFacebookLimit(
   userId: string,
-  baseHours: number
+  baseHours: number,
+  until: string | null = null
 ): Promise<{ hours: number; strikes: number; reason: string }> {
   if (process.env.DATABASE_URL) {
     // eslint-disable-next-line @typescript-eslint/no-var-requires
     const db = require('../../server/db');
-    const row = await db.pauseUserForFacebookLimit(userId, baseHours);
+    const row = await db.pauseUserForFacebookLimit(userId, baseHours, { until });
     if (!row) throw new Error(`ไม่พบบัญชี ${userId}`);
     return { hours: row.hours, strikes: row.strikes, reason: row.reason };
   }
@@ -114,7 +117,7 @@ export async function pauseUserForFacebookLimit(
   const res = await fetch(`${base}/api/worker/post/pause-user`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'x-worker-token': token },
-    body: JSON.stringify({ user_id: userId, hours: baseHours, kind: 'fb_limited' }),
+    body: JSON.stringify({ user_id: userId, hours: baseHours, kind: 'fb_limited', until }),
   });
   if (!res.ok) throw new Error(`พักบัญชีไม่สำเร็จ (HTTP ${res.status})`);
   const data = (await res.json().catch(() => ({}))) as { user?: { hours?: number; strikes?: number; reason?: string } };

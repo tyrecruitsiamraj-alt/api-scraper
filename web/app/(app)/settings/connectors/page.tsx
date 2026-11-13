@@ -1,6 +1,7 @@
 import { Fragment } from 'react';
 import Link from 'next/link';
-import { deleteConnectorAction, deleteFacebookAccountAction, setAccountProvinceAction, setAccountWorkerAction, toggleConnectorAction } from '@/lib/actions';
+import { deleteConnectorAction, deleteFacebookAccountAction, returnToPostingAction, setAccountProvinceAction, setAccountWorkerAction, toggleConnectorAction } from '@/lib/actions';
+import { isRetiredReason } from '../../../../../autopost/server/fb-limit-pause.js';
 import { knownWorkerNames, listAllConnectors } from '@/lib/repo';
 import type { UnifiedConnectorRow } from '@/lib/repo';
 import { ConnectorEditButton } from '@/components/ConnectorEditButton';
@@ -160,6 +161,7 @@ export default async function SettingsConnectorsPage({ searchParams }: { searchP
               {bu.items.map((c, index) => {
                 const p = PLATFORM[c.platform] ?? { label: c.platform, letter: '?' };
                 const paused = !!c.paused_until && new Date(c.paused_until) > new Date();
+                const retired = paused && isRetiredReason(c.pause_reason);
                 const state = accountState(c);
                 const id = c.key.slice(c.key.indexOf(':') + 1);
                 return (
@@ -205,7 +207,7 @@ export default async function SettingsConnectorsPage({ searchParams }: { searchP
                           variant={state === 'ready' ? 'secondary' : state === 'off' ? 'ghost' : 'outline'}
                           className={state === 'ready' ? '' : state === 'off' ? 'text-muted-foreground' : 'text-destructive'}
                         >
-                          {state === 'paused' && paused ? `พักถึง ${backDate(c.paused_until!)}` : STATE_LABEL[state]}
+                          {state === 'paused' && retired ? 'เลิกใช้โพสต์' : state === 'paused' && paused ? `พักถึง ${backDate(c.paused_until!)}` : STATE_LABEL[state]}
                         </Badge>
                       </div>
 
@@ -234,6 +236,12 @@ export default async function SettingsConnectorsPage({ searchParams }: { searchP
                               />
                               <Button variant="secondary" size="sm" type="submit">บันทึกเครื่อง</Button>
                             </form>
+                            {retired && (
+                              <form action={returnToPostingAction}>
+                                <input type="hidden" name="id" value={id} />
+                                <Button variant="outline" size="sm" type="submit">กลับมาใช้โพสต์</Button>
+                              </form>
+                            )}
                             <ConnectorEditButton id={id} platform="facebook" label={c.label} username={c.username ?? ''} skipWarmup={Boolean(c.skip_warmup)} hasPassword={Boolean(c.has_password)} groupIds={c.group_ids} department={c.department} />
                             <form action={deleteFacebookAccountAction}>
                               <input type="hidden" name="id" value={id} />

@@ -4,7 +4,11 @@
 require('dotenv').config();
 const { Pool } = require('pg');
 const { classifyPostFailure } = require('./failure-learning');
-const { FB_LIMIT_LOG_PREFIX, STRIKE_WINDOW_DAYS, MAX_PAUSE_HOURS, facebookLimitPauseHours, facebookLimitReason } = require('./fb-limit-pause');
+const {
+  FB_LIMIT_LOG_PREFIX, STRIKE_WINDOW_DAYS, MAX_PAUSE_HOURS, LIMIT_WARMUP_DAYS, RETIRE_AT_STRIKES, RETIRED_REASON_PREFIX, RETIRED_UNTIL,
+  facebookLimitPauseHours, facebookLimitReason, facebookLimitRetireLog, retiredReason, isRetiredReason, inLimitWarmupWindow,
+  strikesSinceReturnSql, returnToPostingStatements,
+} = require('./fb-limit-pause');
 const contentStatus = require('./post-content-status');
 const { stopCodeForText, stopReasonLine } = require('./post-stop');
 /** โพสต์เก่าที่พ่วงไปเช็กแท็บ "เนื้อหาของคุณ" ต่อบัญชีต่อรอบเก็บคอมเมนต์ (0 = ปิด) */
@@ -2036,6 +2040,7 @@ async function enqueueDailyWarmupJobs() {
   await ensurePostRunQueueUserColumn();
   await ensureUsersPostControlColumns();
   await ensureVerificationColumns();
+  await retireAccountsOverStrikeLimit();
   await query(
     `UPDATE post_run_queue
         SET status = 'cancelled', finished_at = NOW(), updated_at = NOW(),
@@ -2046,24 +2051,28 @@ async function enqueueDailyWarmupJobs() {
   const { rows } = await query(
     `SELECT u.*, COALESCE((to_jsonb(u)->>'skip_warmup')::boolean, false) AS skip_warmup
        FROM users u
-      WHERE (u.paused_until IS NULL OR u.paused_until <= NOW())
+      WHERE (u.paused_until IS NULL OR u.paused_until <= NOW()
+             /** ช่วงอุ่นเครื่องหลังพักจากโดนจำกัด (2 วันสุดท้ายของการพัก) */
+             OR (u.pause_reason LIKE $1 AND u.paused_until <= NOW() + ($2::int * INTERVAL '1 day')))
         AND u.needs_verification_since IS NULL
         AND NOT EXISTS (
           SELECT 1 FROM post_run_queue q
            WHERE q.user_id = u.id AND q.mode = 'warmup'
              AND (q.created_at AT TIME ZONE 'Asia/Bangkok')::date = (NOW() AT TIME ZONE 'Asia/Bangkok')::date
-        )`
+        )`,
+    [`${FB_LIMIT_LOG_PREFIX}%`, LIMIT_WARMUP_DAYS]
   );
   const day = bangkokDay();
   const created = [];
   for (const u of rows) {
-    if (!needsWarmup(u, await getAccountAgeDays(u.id))) continue;
+    const afterLimit = inLimitWarmupWindow(u);
+    if (!afterLimit && !needsWarmup(u, await getAccountAgeDays(u.id))) continue;
     const row = await enqueuePostRunJob({
       assignment_ids: [],
       user_id: u.id,
       mode: 'warmup',
       requested_by: 'auto-warmup',
-      message: 'อุ่นเครื่องบัญชีใหม่ (ไม่โพสต์)',
+      message: afterLimit ? 'อุ่นเครื่องก่อนกลับมาโพสต์หลังพัก (ไม่โพสต์)' : 'อุ่นเครื่องบัญชีใหม่ (ไม่โพสต์)',
       not_before: warmupStartAt(u.id, day),
     });
     if (row) created.push(row);
@@ -2154,8 +2163,10 @@ async function claimNextPostRunJob(workerId, runId, workerName, capabilities = [
            )
            /** งานโพสต์จริงไม่ต้องรอผลทดสอบแบบไม่โพสต์ (preflight) แล้ว — เจ้าของสั่งเอาออก 28 ต.ค. 2569
                ถ้าบัญชีล็อกอินไม่ได้ จะรู้จากผลรอบโพสต์ */
-           /** ข้ามบัญชีที่โดนพัก (circuit breaker) */
-           AND (u.paused_until IS NULL OR u.paused_until <= NOW())
+           /** ข้ามบัญชีที่โดนพัก (circuit breaker) — ยกเว้นงานอุ่นเครื่องช่วง 2 วันสุดท้ายของการพักจากโดนจำกัด */
+           AND (u.paused_until IS NULL OR u.paused_until <= NOW()
+                OR (COALESCE(q.mode, 'post') = 'warmup' AND u.pause_reason LIKE '${FB_LIMIT_LOG_PREFIX}%'
+                    AND u.paused_until <= NOW() + INTERVAL '${LIMIT_WARMUP_DAYS} days'))
            /** pin บัญชี→เครื่อง: บัญชีที่ผูกเครื่องไว้ ให้เครื่องนั้นหยิบเท่านั้น
                (บัญชีไม่ผูก = ใครหยิบก็ได้; worker เก่าที่ไม่ส่งชื่อ = หยิบได้เฉพาะบัญชีไม่ผูก) */
            /** งานที่ระบุเครื่อง (target_worker จาก Jarvis) ให้เครื่องนั้นหยิบเท่านั้น */
@@ -2236,21 +2247,64 @@ async function pauseUser(userId, hours, reason) {
 }
 
 /**
- * Facebook จำกัดการโพสต์ของบัญชี — นับครั้งที่โดนใน 30 วันจากบันทึกรอบ แล้วพักตามขั้น (fb-limit-pause.js)
+ * Facebook จำกัดการโพสต์ของบัญชี — นับครั้งที่โดนจากบันทึกรอบ แล้วพักตามขั้น (fb-limit-pause.js)
  * เรียกก่อนเขียนบันทึกของครั้งนี้ จึงบวก 1 ให้ครั้งนี้เอง
+ * - until = วันปลดล็อกที่เครื่องโพสต์อ่านได้จากหน้า Facebook → พักถึงวันนั้น (อ่านไม่ได้ = พักตามขั้น 7/14/28 วัน)
+ * - ทุกครั้งต่อท้ายอุ่นเครื่อง 2 วันก่อนกลับมาโพสต์
+ * - โดนครบ 4 ครั้ง (นับจากครั้งล่าสุดที่คนกดกลับมาใช้โพสต์) = เลิกใช้โพสต์ ไม่ลบบัญชี
+ * คืน reason = ข้อความที่ผู้เรียกเขียนลงบันทึกรอบ (ขึ้นต้นด้วยคำที่ตัวนับใช้)
  */
-async function pauseUserForFacebookLimit(userId, baseHours = 7 * 24) {
+async function pauseUserForFacebookLimit(userId, baseHours = 7 * 24, { until = null } = {}) {
+  await ensureUsersPostControlColumns();
   const { rows } = await query(
-    `SELECT count(*)::int AS n FROM run_logs
-      WHERE user_id::text = $1 AND message LIKE $2
-        AND created_at > NOW() - ($3::int * INTERVAL '1 day')`,
+    `SELECT (SELECT count(*)::int FROM run_logs
+              WHERE user_id::text = $1 AND message LIKE $2
+                AND created_at > NOW() - ($3::int * INTERVAL '1 day')) AS window_n,
+            ${strikesSinceReturnSql('run_logs', '$1')} AS total_n`,
     [String(userId), `${FB_LIMIT_LOG_PREFIX}%`, STRIKE_WINDOW_DAYS]
   );
-  const strikes = (rows[0]?.n || 0) + 1;
-  const hours = facebookLimitPauseHours(strikes, baseHours);
-  const reason = facebookLimitReason(strikes, hours);
-  const row = await pauseUser(userId, hours, reason);
-  return row ? { ...row, hours, strikes, reason } : null;
+  const strikes = (rows[0]?.window_n || 0) + 1;
+  const total = (rows[0]?.total_n || 0) + 1;
+  if (RETIRE_AT_STRIKES > 0 && total >= RETIRE_AT_STRIKES) {
+    const { rows: done } = await query(
+      `UPDATE users SET paused_until = $2::timestamptz, pause_reason = $3, updated_at = NOW()
+        WHERE id = $1 RETURNING id, name, paused_until, pause_reason`,
+      [String(userId), RETIRED_UNTIL, retiredReason(total)]
+    );
+    return done[0] ? { ...done[0], hours: null, strikes, total, retired: true, reason: facebookLimitRetireLog(total) } : null;
+  }
+  const untilMs = until ? new Date(until).getTime() : NaN;
+  const fromFacebook = Number.isFinite(untilMs) && untilMs > Date.now();
+  const hours = fromFacebook ? Math.ceil((untilMs - Date.now()) / 3_600_000) : facebookLimitPauseHours(strikes, baseHours);
+  const reason = facebookLimitReason(strikes, hours, { until: fromFacebook ? new Date(untilMs) : null, warmupDays: LIMIT_WARMUP_DAYS });
+  const row = await pauseUser(userId, hours + LIMIT_WARMUP_DAYS * 24, reason);
+  return row ? { ...row, hours, strikes, total, retired: false, reason } : null;
+}
+
+/**
+ * บัญชีที่โดนครบ 4 ครั้งไปแล้วก่อนมีกติกานี้ (13 พ.ย. 2569) — เลิกใช้โพสต์ตอนเข้าคิวอุ่นเครื่องรายวัน
+ * บัญชีที่คนกดกลับมาใช้โพสต์แล้ว นับใหม่จากตอนนั้น จึงไม่โดนปลดซ้ำ
+ */
+async function retireAccountsOverStrikeLimit() {
+  if (!(RETIRE_AT_STRIKES > 0)) return [];
+  await ensureUsersPostControlColumns();
+  const { rows } = await query(
+    `SELECT u.id, ${strikesSinceReturnSql('run_logs', 'u.id')} AS total_n
+       FROM users u
+      WHERE COALESCE(u.pause_reason, '') NOT LIKE $1`,
+    [`${RETIRED_REASON_PREFIX}%`]
+  );
+  const retired = [];
+  for (const r of rows) {
+    if (Number(r.total_n) < RETIRE_AT_STRIKES) continue;
+    await query(
+      `UPDATE users SET paused_until = $2::timestamptz, pause_reason = $3, updated_at = NOW() WHERE id = $1`,
+      [String(r.id), RETIRED_UNTIL, retiredReason(r.total_n)]
+    );
+    await createRunLog({ level: 'warn', user_id: r.id, message: `${retiredReason(r.total_n)} — เลิกใช้บัญชีนี้โพสต์ กด "กลับมาใช้โพสต์" ที่หน้าบัญชีถ้าจะใช้ต่อ`, meta: { kind: 'retired', strikes: r.total_n } });
+    retired.push(r.id);
+  }
+  return retired;
 }
 
 /**
@@ -2392,8 +2446,16 @@ async function reassignStuckPostJobs({ requestedBy = 'auto-switch', limit = 20 }
   return moved;
 }
 
-async function resumeUser(userId) {
+async function resumeUser(userId, actor = null) {
   await ensureUsersPostControlColumns();
+  const { rows: cur } = await query(`SELECT pause_reason FROM users WHERE id = $1`, [String(userId)]);
+  if (isRetiredReason(cur[0]?.pause_reason)) {
+    // เลิกใช้โพสต์แล้วกลับมา: อุ่นเครื่อง 2 วันก่อน แล้วโพสต์หยั่ง · นับครั้งใหม่ (fb-limit-pause.js)
+    const [upd, log] = returnToPostingStatements('users', 'run_logs', userId, actor);
+    const { rows } = await query(upd.sql, upd.params);
+    if (rows[0]) await query(log.sql, log.params);
+    return rows[0] || null;
+  }
   const { rows } = await query(
     `UPDATE users SET paused_until = NULL, pause_reason = NULL, updated_at = NOW()
      WHERE id = $1 RETURNING id, name`,
@@ -3264,6 +3326,7 @@ module.exports = {
   completePostRunJob,
   pauseUser,
   pauseUserForFacebookLimit,
+  retireAccountsOverStrikeLimit,
   handoffRemainingGroups,
   reassignStuckPostJobs,
   resumeUser,

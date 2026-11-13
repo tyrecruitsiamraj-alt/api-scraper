@@ -46,6 +46,7 @@ import {
   updateScraperConnector,
   updateFacebookAccount,
   deleteFacebookAccount,
+  returnFacebookAccountToPosting,
   deleteTask,
   enqueueScrapeForTask,
   insertConnector,
@@ -1363,6 +1364,16 @@ export async function editConnectorAction(formData: FormData) {
 }
 
 /** ลบบัญชี Facebook. */
+export async function returnToPostingAction(formData: FormData) {
+  const session = await getServerSession(authOptions);
+  if (!session) throw new Error('unauthorized');
+  const id = String(formData.get('id') ?? '').trim();
+  if (id) await returnFacebookAccountToPosting(id, session.user?.email ?? session.user?.name ?? null);
+  revalidatePath('/settings');
+  revalidatePath('/settings/connectors');
+  revalidatePath('/settings/quota');
+}
+
 export async function deleteFacebookAccountAction(formData: FormData) {
   await requireSession();
   const id = String(formData.get('id') ?? '').trim();

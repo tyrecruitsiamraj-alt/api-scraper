@@ -36,3 +36,15 @@ test('พักที่หมดเวลาแล้วไม่นับเ�
   assert.equal(a.next_available_at, null);
   assert.equal(a.message, 'สั่งโพสต์ไม่ได้ตอนนี้ เพราะไม่มีบัญชีที่โพสต์ได้: Facebook จำกัดแล้วระบบพักไว้ 1 บัญชี');
 });
+
+test('เลิกใช้โพสต์นับแยกจากพัก และไม่เอาปี 2099 ไปบอกว่าบัญชีแรกกลับมาเมื่อไร', () => {
+  const now = Date.parse('2026-11-13T10:00:00+07:00');
+  const r = postingAvailability([
+    { status: 'paused', remaining_today: 0, paused_until: '2099-12-31T00:00:00Z', pause_reason: 'เลิกใช้โพสต์ — Facebook จำกัดการโพสต์ครบ 4 ครั้ง' },
+    { status: 'paused', remaining_today: 0, paused_until: '2026-11-16T09:00:00+07:00', pause_reason: 'Facebook จำกัดการโพสต์ของบัญชีนี้ (ครั้งที่ 1 ใน 30 วัน) — พัก 7 วัน' },
+  ], now);
+  assert.equal(r.counts.retired, 1);
+  assert.equal(r.counts.paused, 1);
+  assert.equal(r.next_available_at, new Date('2026-11-16T09:00:00+07:00').toISOString());
+  assert.match(r.message, /เลิกใช้โพสต์แล้ว 1 บัญชี/);
+});

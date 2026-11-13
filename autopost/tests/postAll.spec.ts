@@ -17,6 +17,7 @@ import {
   pauseUserPosting,
   pauseUserForFacebookLimit,
   isAccountLimitedMessage,
+  readFacebookRestrictionEnd,
   getFailStreakLimit,
   getPauseHours,
   handoffRemainingGroups,
@@ -459,9 +460,19 @@ test('Dynamic Post: รันโพสต์ตาม Assignments', async ({ pag
         if (failStreak >= streakLimit || accountLimited) {
           const pauseHours = getPauseHours();
           if (accountLimited) {
-            // โดนซ้ำพักนานขึ้น: เซิร์ฟเวอร์นับครั้งจากบันทึกรอบ 30 วัน (ต้องพักก่อนเขียนบันทึกครั้งนี้ ไม่งั้นนับซ้ำ)
+            // หาวันปลดล็อกจากหน้าสถานะบัญชีก่อน (ป๊อปอัปไม่บอกวัน) · ข้อความที่เห็นบันทึกไว้ทุกครั้ง
+            const restriction = await readFacebookRestrictionEnd(activePage);
+            await runLog({
+              level: 'info',
+              message: restriction.until
+                ? `อ่านวันปลดล็อกจากหน้า Facebook ได้: ${new Date(restriction.until).toLocaleString('th-TH', { timeZone: 'Asia/Bangkok' })}`
+                : 'อ่านวันปลดล็อกจากหน้า Facebook ไม่ได้ — พักตามจำนวนครั้งที่โดน',
+              meta: { kind: 'fb_restriction_page', until: restriction.until, pages: restriction.pages },
+              user_id: user.id,
+            });
+            // โดนซ้ำพักนานขึ้น: เซิร์ฟเวอร์นับครั้งจากบันทึกรอบ (ต้องพักก่อนเขียนบันทึกครั้งนี้ ไม่งั้นนับซ้ำ)
             try {
-              const paused = await pauseUserForFacebookLimit(user.id, pauseHours);
+              const paused = await pauseUserForFacebookLimit(user.id, pauseHours, restriction.until);
               console.log(`🛑 [${userLabel}] ${paused.reason}`);
               await runLog({ level: 'error', message: paused.reason, user_id: user.id });
             } catch (e) {

@@ -22,6 +22,7 @@ import type { PosterLayout, PosterStandard } from '../../src/core/poster-templat
 import { evaluateResumeQualification } from '../../src/core/resume-qualification.js';
 import { selectPreferredScrapeWorker } from '../../src/core/worker-selection.js';
 import { dailyCapCeiling, effectiveDailyCapFor, needsWarmup } from '../../autopost/server/post-pacing.js';
+import { isRetiredReason, returnToPostingStatements } from '../../autopost/server/fb-limit-pause.js';
 import { assertAgeRange, buildScrapeCriteria, hydrateJobSnapshot, jobDescriptionFromJarvis, scrapeRequestProblems } from './scrape-intake.js';
 
 // schema ของ autopost — แยกต่อ project ได้ผ่าน env (ไม่ตั้ง = so_autopost_jobs เดิม)
@@ -873,6 +874,24 @@ export async function deleteFacebookAccount(id: string) {
   await q(`DELETE FROM ${AP}.users WHERE id = $1`, [id]);
 }
 
+/** บัญชีที่เลิกใช้โพสต์ (โดน Facebook จำกัดครบ 4 ครั้ง) กลับมาใช้โพสต์ — อุ่นเครื่อง 2 วันก่อน นับครั้งใหม่ (fb-limit-pause.js) */
+export async function returnFacebookAccountToPosting(id: string, actor: string | null): Promise<boolean> {
+  const [upd, log] = returnToPostingStatements(`${AP}.users`, `${AP}.run_logs`, id, actor);
+  const client = await pool().connect();
+  try {
+    await client.query('BEGIN');
+    const { rowCount } = await client.query(upd.sql, upd.params);
+    if (rowCount) await client.query(log.sql, log.params);
+    await client.query('COMMIT');
+    return Boolean(rowCount);
+  } catch (e) {
+    await client.query('ROLLBACK');
+    throw e;
+  } finally {
+    client.release();
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Provider daily caps (provider_limits) — across all connectors of a platform
 // ---------------------------------------------------------------------------
@@ -911,6 +930,8 @@ export type FacebookAccountQuota = {
   paused: boolean;
   /** พักถึงเมื่อไร (มีค่าเมื่อ paused) */
   paused_until: string | null;
+  /** เลิกใช้โพสต์ (โดน Facebook จำกัดครบ 4 ครั้ง) — ไม่ใช่พักชั่วคราว */
+  retired: boolean;
   /** บัญชีใหม่ที่ระบบอุ่นเครื่องให้วันละรอบ (autopost/server/post-pacing.js: needsWarmup) */
   warming_up: boolean;
   /** อุ่นเครื่องสำเร็จมาแล้วกี่วัน */
@@ -970,6 +991,7 @@ export async function facebookQuotaSummary(): Promise<FacebookQuotaSummary | nul
       cap: Number(r.cap),
       paused: r.paused,
       paused_until: r.paused ? r.paused_until : null,
+      retired: r.paused && isRetiredReason(r.pause_reason),
       warming_up: r.warming_up,
       warmup_days: Number(r.warmup_days) || 0,
     }));

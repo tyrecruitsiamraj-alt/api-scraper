@@ -7,6 +7,7 @@ import { classifyGroupOutcome, GROUP_STATE } from '../../src/core/group-outcome.
 import { SCRAPE_RULES } from './scrape-intake.js';
 import { effectiveDailyCapFor } from '../../autopost/server/post-pacing.js';
 import { postingAvailability } from '../../src/core/posting-availability.js';
+import { isRetiredReason } from '../../autopost/server/fb-limit-pause.js';
 import type { PostingAvailability } from '../../src/core/posting-availability.js';
 
 /**
@@ -195,6 +196,9 @@ export function accountStatus(a: {
   warming_since?: string | null;
 }): { status: AccountStatus; warning: string | null } {
   if (a.paused_until && new Date(a.paused_until).getTime() > Date.now()) {
+    if (isRetiredReason(a.pause_reason)) {
+      return { status: 'paused', warning: `เลิกใช้บัญชีนี้โพสต์แล้ว (${a.pause_reason}) — ให้กลับมาใช้ได้ที่หน้าบัญชีของ So Scraping` };
+    }
     return {
       status: 'paused',
       warning: `บัญชีถูกพักถึง ${thaiDateTime(a.paused_until)}${a.pause_reason ? ` (${a.pause_reason})` : ''}`,

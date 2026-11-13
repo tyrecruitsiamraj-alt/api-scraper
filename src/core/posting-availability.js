@@ -5,26 +5,31 @@
  * สั่งได้ = มีบัญชี ready หรือ busy (กำลังโพสต์งานอื่น งานใหม่ต่อคิว) ที่ยังเหลือโควต้าวันนี้
  */
 
+import { isRetiredReason } from '../../autopost/server/fb-limit-pause.js';
+
 const thaiDateTime = (iso) =>
   new Date(iso).toLocaleString('th-TH', { timeZone: 'Asia/Bangkok', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
 
 /**
- * @param {{ status: string, remaining_today: number, paused_until: string|null }[]} accounts
+ * @param {{ status: string, remaining_today: number, paused_until: string|null, pause_reason?: string|null }[]} accounts
  * @param {number} [now]
  */
 export function postingAvailability(accounts, now = Date.now()) {
-  const counts = { ready: 0, busy: 0, full: 0, paused: 0, needs_verification: 0, worker_offline: 0, no_worker: 0 };
+  const counts = { ready: 0, busy: 0, full: 0, paused: 0, retired: 0, needs_verification: 0, worker_offline: 0, no_worker: 0 };
   let room = 0;
   let orderable = 0;
   let nextAt = null;
   for (const a of accounts) {
-    counts[a.status] = (counts[a.status] ?? 0) + 1;
+    // เลิกใช้โพสต์ (โดนจำกัดครบ 4 ครั้ง) ไม่ใช่พักชั่วคราว — นับแยก ไม่เอาไปคิดวันที่บัญชีแรกกลับมา
+    const retired = a.status === 'paused' && isRetiredReason(a.pause_reason);
+    const key = retired ? 'retired' : a.status;
+    counts[key] = (counts[key] ?? 0) + 1;
     const left = Math.max(0, Number(a.remaining_today) || 0);
     if ((a.status === 'ready' || a.status === 'busy') && left > 0) {
       orderable += 1;
       room += left;
     }
-    if (a.status === 'paused' && a.paused_until) {
+    if (!retired && a.status === 'paused' && a.paused_until) {
       const t = new Date(a.paused_until).getTime();
       if (t > now && (nextAt == null || t < nextAt)) nextAt = t;
     }
@@ -33,6 +38,7 @@ export function postingAvailability(accounts, now = Date.now()) {
 
   const why = [];
   if (counts.paused) why.push(`Facebook จำกัดแล้วระบบพักไว้ ${counts.paused} บัญชี${next_available_at ? ` (บัญชีแรกกลับมา ${thaiDateTime(next_available_at)})` : ''}`);
+  if (counts.retired) why.push(`เลิกใช้โพสต์แล้ว ${counts.retired} บัญชี (โดน Facebook จำกัดครบ 4 ครั้ง)`);
   if (counts.needs_verification) why.push(`รอยืนยันตัวตนที่เครื่อง ${counts.needs_verification} บัญชี`);
   if (counts.full) why.push(`โพสต์ครบโควต้าวันนี้แล้ว ${counts.full} บัญชี`);
   const busyFull = accounts.filter((a) => a.status === 'busy' && !(Number(a.remaining_today) > 0)).length;
