@@ -557,3 +557,76 @@ x-api-key: <key เดิม>
 
 - เปลี่ยนช่วงวันที่/BU บนภาพรวม → การ์ดดึงใหม่ตามค่า และ `total` = ผลรวม `counts`
 - ทดสอบผ่านหน้าจอจริง: เปิดภาพรวม กดหน้าถัดไป กด "เปิดดูโพสต์" ได้โพสต์ในกลุ่มที่ตรงกับคอลัมน์กลุ่ม
+
+## 14. ฉบับ 13 พ.ย. 2569: หน้า "คำสั่งงาน" ของ So Scraping ไปโชว์ใน Jarvis
+
+เจ้าของสั่ง: เอาหน้า **คำสั่งงาน** ของ So Scraping (ใบที่ทุกคนสั่งผ่าน Jarvis ทั้งโพสต์และ Scrap · ยอดรวมต่อคน · ผลของแต่ละใบ · กดดูผลรายกลุ่ม) ไปโชว์ใน Jarvis **ทั้งหน้า** และ **แยกตามฝ่าย**: คนเห็นเฉพาะใบของคนในฝ่ายตัวเอง (`department_code` ของคนที่ล็อกอิน) · คนที่ใน Jarvis ดูได้ทุกฝ่ายอยู่แล้ว ให้เลือกฝ่ายได้ (ไม่ส่ง `bu` = ทุกฝ่าย)
+
+ทำเป็นหน้าใหม่ในเมนูเดียวกับงานสรรหา ชื่อ "คำสั่งงาน" · ดึงจากเซิร์ฟเวอร์ Jarvis เท่านั้น (`loadSoKey()` แบบข้อ 13 ห้ามส่ง key ไปหน้าจอ) · ที่อยู่ So Scraping ต้องเป็น `https://api-scraper.sosiamraj.com` (ข้อ 13)
+
+### รายการใบ + ยอดต่อคน
+
+```
+GET {base_url}/api/integrations/jarvis/orders?from=2026-11-13&to=2026-11-13&bu=LBD&type=&by=&outcome=&page=1&page_size=20
+x-api-key: <key เดิม>
+```
+
+- `from` / `to` = วันที่สั่ง เวลาไทย รวมวันสุดท้าย · ไม่ส่ง = วันนี้ · หน้าจอมีตัวเลือก วันนี้ / 7 วันล่าสุด / 30 วันล่าสุด (แปลงเป็น from/to เอง) แบบหน้าคำสั่งงาน
+- `bu` = ฝ่าย · `type` = `content` (โพสต์) หรือ `scraping` · ไม่ส่ง = ทั้งหมด
+- `by` = อีเมลคนสั่ง (ตัวพิมพ์เล็ก) · `outcome` = รหัสผล — ทั้งสองค่ากรองเฉพาะ `rows` ไม่กรองยอดสรุป
+- `page_size` สูงสุด 200
+
+คำตอบ:
+
+```json
+{
+  "from": "2026-11-07", "to": "2026-11-13", "bu": "LBD", "type": null,
+  "outcomes": [{ "key": "waiting", "label": "ยังไม่เริ่ม" }, { "key": "working", "label": "กำลังทำ" }, { "key": "done", "label": "สำเร็จ" }, { "key": "partial", "label": "ได้บางส่วน" }, { "key": "failed", "label": "ไม่สำเร็จ" }, { "key": "cancelled", "label": "ยกเลิก" }],
+  "group_statuses": [{ "key": "posted", "label": "เผยแพร่แล้ว" }, "…"],
+  "total": { "who": "รวม", "total": 60, "counts": { "waiting": 0, "working": 0, "done": 35, "partial": 1, "failed": 24, "cancelled": 0 }, "posted_groups": "…", "candidates": 0 },
+  "people": [{ "ordered_by": "xxx@siamraj.com", "ordered_by_name": "แบงค์", "ordered_by_bu": "LBD", "total": 12, "counts": { "…": 0 }, "posted_groups": 15, "candidates": 0 }],
+  "page": 1, "page_size": 20, "pages": 3, "listed": 60,
+  "rows": [{
+    "id": "8f0c…", "request_no": "OPL6909018", "type": "content", "ordered_at": "2026-11-13T02:10:00.000Z",
+    "ordered_by": "xxx@siamraj.com", "ordered_by_name": "แบงค์", "ordered_by_bu": "LBD",
+    "position": "พนักงานขับรถ", "account": "Jannie Penelope",
+    "outcome": "done", "outcome_label": "สำเร็จ", "stage": "…",
+    "got": 2, "target": null,
+    "group_counts": { "total": 2, "posted": 2, "pending_approval": 0, "…": 0 },
+    "notes": null
+  }]
+}
+```
+
+- `total` / `people` = ยอดทั้งช่วงหลังกรองฝ่ายกับประเภท · แต่ละคน `total` = ผลรวม `counts` · `posted_groups` = กลุ่มที่โพสต์ขึ้นแล้ว (มีลิงก์) · `candidates` = คนที่ Scrap ได้
+- ใบโพสต์: `got` = กลุ่มที่ขึ้นแล้ว · `group_counts` = จำนวนกลุ่มแยกสถานะ (ผลรวม = `group_counts.total`) · ใบ Scrap: `got` / `target` = คนที่ได้ / เป้าหมาย · `group_counts` = null
+- `notes` = เหตุที่ใบถูกปฏิเสธ (มีเฉพาะใบที่ถูกปฏิเสธ)
+- **ห้ามคำนวณผลเอง** ใช้ `outcome` / `outcome_label` / `group_counts` ตามที่ส่งไป (นิยามเดียวกับหน้าคำสั่งงานของ So Scraping) · คำของผลและสถานะกลุ่มอ่านจาก `outcomes` / `group_statuses` อย่าฝังไว้ในโค้ด Jarvis
+
+### ใบเดียว + ผลรายกลุ่ม
+
+```
+GET {base_url}/api/integrations/jarvis/orders/{id}?bu=LBD
+```
+
+`id` = `rows[].id` · ส่ง `bu` แล้วใบเป็นของฝ่ายอื่น = 404 · คำตอบมีทุกช่องของ `rows[]` บวก `groups[]`:
+
+```json
+{ "fb_group_id": "583362260400984", "group_name": "หางานขับรถ กทม", "status": "posted", "status_label": "เผยแพร่แล้ว",
+  "account": "Jannie Penelope", "posted_at": "2026-11-13T02:20:00.000Z", "post_link": "https://www.facebook.com/groups/…", "error": null }
+```
+
+### หน้าตา (เหมือนหน้าคำสั่งงานของ So Scraping)
+
+- บนสุด: ตัวเลือกช่วงวัน (วันนี้ / 7 วัน / 30 วัน) · ประเภท (ทั้งหมด / โพสต์ / Scrap) · ฝ่าย (เฉพาะคนที่ดูได้ทุกฝ่าย) — ตัวเลือกอยู่ที่เดิมตั้งแต่เปิดหน้า
+- ตารางยอดต่อคน: คนสั่ง · ทั้งหมด · ทุกผลตาม `outcomes` · กลุ่มที่ขึ้น · คนที่ได้ · แถวล่างสุด = `total` · ว่างก็โชว์ 0 · กดชื่อคน = กรอง `by` · กดตัวเลขผล = กรอง `by` + `outcome`
+- ตารางใบ: วันที่สั่ง · เลขใบ + ตำแหน่ง · คนสั่ง · ประเภท · บัญชี · ผล (ป้ายคำ `outcome_label`) · ได้ (`got` กลุ่ม หรือ `got/target` คน) · บรรทัดล่างของใบโพสต์ = จำนวนแยกสถานะจาก `group_counts` ทุกสถานะ (โชว์ 0) · แบ่งหน้า ก่อนหน้า / ถัดไป
+- กดใบ = หน้ารายละเอียด: หัวใบ + ตารางกลุ่ม (กลุ่ม · บัญชี · สถานะ + เวลา · ปุ่ม "เปิดดูโพสต์" หรือ `error`)
+- ดึงไม่ได้: หน้ายังอยู่ ขึ้น "ดึงคำสั่งงานจาก So Scraping ไม่ได้" + เหตุ + ปุ่มลองใหม่
+- shadcn เท่านั้น ฟอนต์และสีตาม Jarvis
+
+### ทดสอบ
+
+- ยอดในตารางต่อคนของ Jarvis = หน้าคำสั่งงานของ So Scraping ในช่วงและฝ่ายเดียวกัน (13 พ.ย. 2569 เทียบแล้ว: 7 วัน 80 ใบ เท่ากันทั้งสองทาง)
+- ล็อกอินเป็นคนฝ่าย LBA → ไม่เห็นใบของ LBD · เปิด `/orders/{id}` ของใบ LBD ด้วย `bu=LBA` ได้ 404
+- ทดสอบผ่านหน้าจอจริง: เปลี่ยนช่วงวัน กดชื่อคน กดใบ กด "เปิดดูโพสต์"

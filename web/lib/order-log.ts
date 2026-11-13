@@ -62,6 +62,38 @@ export async function listOrderLog(range: OrderRange, type: string): Promise<Ord
   return loadOrders(`req.created_at >= ${since}`, `${since} - interval '1 day'`, [type === 'content' || type === 'scraping' ? type : ''], `($1 = '' OR req.type = $1)`);
 }
 
+/**
+ * ใบที่สั่งในช่วงวันที่ไทย (รวมวันสุดท้าย) — เส้นให้ Jarvis ดึงหน้าคำสั่งงาน (เจ้าของ 13 พ.ย. 2569)
+ * คำนวณด้วย loadOrders ตัวเดียวกับหน้าคำสั่งงาน ตัวเลขจึงตรงกัน
+ */
+export async function listOrdersBetween(fromDay: string, toDay: string, type: string): Promise<OrderLogRow[]> {
+  const from = new Date(`${fromDay}T00:00:00+07:00`);
+  const to = new Date(new Date(`${toDay}T00:00:00+07:00`).getTime() + 86_400_000);
+  return loadOrders(
+    `req.created_at >= $1::timestamptz AND req.created_at < $2::timestamptz`,
+    `$1::timestamptz - interval '1 day'`,
+    [from.toISOString(), to.toISOString(), type === 'content' || type === 'scraping' ? type : ''],
+    `($3 = '' OR req.type = $3)`,
+  );
+}
+
+export type OrderPerson = { name: string; bu: string | null };
+
+/** ชื่อและฝ่ายของคนสั่ง (jarvis_rm.users) — ชื่อเล่น → ชื่อจริง → อีเมลตัดโดเมน · ฝ่าย = department_code */
+export async function loadOrderPeople(whos: string[]): Promise<Map<string, OrderPerson>> {
+  const uniq = [...new Set(whos)];
+  const rows = uniq.length
+    ? await q<{ email: string; name: string | null; bu: string | null }>(
+      `SELECT lower(email) AS email, COALESCE(NULLIF(TRIM(nickname), ''), NULLIF(TRIM(full_name), '')) AS name,
+              NULLIF(UPPER(TRIM(department_code)), '') AS bu
+         FROM "jarvis_rm".users WHERE lower(email) = ANY($1::text[])`,
+      [uniq],
+    ).catch(() => [])
+    : [];
+  const found = new Map(rows.map((u) => [u.email, u]));
+  return new Map(uniq.map((w) => [w, { name: found.get(w)?.name || w.replace(/@siamraj\.com$/i, ''), bu: found.get(w)?.bu ?? null }]));
+}
+
 /** ใบเดียว (id แถวใน Jarvis) พร้อมผลทีละกลุ่ม — หน้ารายละเอียด */
 export async function getOrder(id: string): Promise<OrderLogRow | null> {
   const rows = await loadOrders(`req.id = $1`, `now() - interval '60 days'`, [id], 'true');
@@ -325,18 +357,7 @@ export async function listPostGroupRows(fromDay: string, toDay: string, bu: stri
     [from.toISOString(), to.toISOString()],
     `req.type = 'content'`,
   );
-  const whos = [...new Set(orders.map((o) => o.who))];
-  const names = new Map(
-    (whos.length
-      ? await q<{ email: string; name: string | null; bu: string | null }>(
-        `SELECT lower(email) AS email, COALESCE(NULLIF(TRIM(nickname), ''), NULLIF(TRIM(full_name), '')) AS name,
-                NULLIF(UPPER(TRIM(department_code)), '') AS bu
-           FROM "jarvis_rm".users WHERE lower(email) = ANY($1::text[])`,
-        [whos],
-      ).catch(() => [])
-      : []
-    ).map((u) => [u.email, u]),
-  );
+  const names = await loadOrderPeople(orders.map((o) => o.who));
   const wantBu = bu ? bu.trim().toUpperCase() : null;
   return orders.filter((o) => !wantBu || names.get(o.who)?.bu === wantBu).flatMap((o) =>
     o.groups.map((g) => ({
@@ -346,7 +367,7 @@ export async function listPostGroupRows(fromDay: string, toDay: string, bu: stri
       position: o.position,
       ordered_at: o.created_at,
       who: o.who,
-      who_name: names.get(o.who)?.name || o.who.replace(/@siamraj\.com$/i, ''),
+      who_name: names.get(o.who)?.name ?? o.who,
       who_bu: names.get(o.who)?.bu ?? null,
       account: g.account ?? o.account,
       fb_group_id: g.fb_group_id,
