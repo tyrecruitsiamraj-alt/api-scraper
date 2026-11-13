@@ -583,7 +583,7 @@ x-api-key: <key เดิม>
   "from": "2026-11-07", "to": "2026-11-13", "bu": "LBD", "type": null,
   "outcomes": [{ "key": "waiting", "label": "ยังไม่เริ่ม" }, { "key": "working", "label": "กำลังทำ" }, { "key": "done", "label": "สำเร็จ" }, { "key": "partial", "label": "ได้บางส่วน" }, { "key": "failed", "label": "ไม่สำเร็จ" }, { "key": "cancelled", "label": "ยกเลิก" }],
   "group_statuses": [{ "key": "posted", "label": "เผยแพร่แล้ว" }, "…"],
-  "total": { "who": "รวม", "total": 60, "counts": { "waiting": 0, "working": 0, "done": 35, "partial": 1, "failed": 24, "cancelled": 0 }, "posted_groups": "…", "candidates": 0 },
+  "total": { "who": "รวม", "total": 60, "counts": { "waiting": 0, "working": 0, "done": 37, "partial": 1, "failed": 22, "cancelled": 0 }, "posted_groups": 64, "candidates": 53 },
   "people": [{ "ordered_by": "xxx@siamraj.com", "ordered_by_name": "แบงค์", "ordered_by_bu": "LBD", "total": 12, "counts": { "…": 0 }, "posted_groups": 15, "candidates": 0 }],
   "page": 1, "page_size": 20, "pages": 3, "listed": 60,
   "rows": [{
