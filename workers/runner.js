@@ -28,6 +28,7 @@ import { generateDraftForCampaign, regenerateImageForContent } from '../src/core
 import { measureCampaign } from '../src/core/orchestrator-measure.js';
 import { processResumeBatch } from '../src/db/resume-uploads.js';
 import { sendAlert } from '../src/core/alert.js';
+import { REJECT_JARVIS_SCRAPE_SQL, rejectJarvisScrapeParams } from '../src/core/jarvis-scrape-fail.js';
 import { classifyScrapeTaskResult, cooldownError, requireSuccessfulScrapeTaskResult } from '../src/core/scrape-task-result.js';
 import { imageGenerationCapability } from '../src/core/ai-image.js';
 import { scraperSlotLockName } from '../src/core/worker-selection.js';
@@ -361,6 +362,15 @@ async function retryOrFail(job, error, retryAt = null) {
           WHERE id=$1 AND status IN ('researching','drafting')`,
         [job.ref_id, `สร้างสื่อไม่สำเร็จ: ${error}`.slice(0, 520)],
       );
+    }
+    // งาน Scrap จาก Jarvis ล้มจนหมดรอบ: บอก Jarvis ว่าไม่สำเร็จ ไม่ปล่อยค้าง "กำลังทำ" (Jarvis เปิดปุ่มสั่งใหม่ให้)
+    if (job.type === 'scrape' && job.ref_id) {
+      try {
+        const { rows } = await query(REJECT_JARVIS_SCRAPE_SQL, rejectJarvisScrapeParams(job.ref_id, error));
+        if (rows?.length) console.log(`  ↩ Jarvis ${rows[0].request_no}: ไม่สำเร็จ`);
+      } catch (e) {
+        console.warn(`  เขียนสถานะไม่สำเร็จกลับ Jarvis ไม่ได้: ${e.message}`);
+      }
     }
     return false;
   }
