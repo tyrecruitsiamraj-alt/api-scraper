@@ -121,7 +121,24 @@ function returnToPostingStatements(usersTable, logsTable, userId, actor) {
   ];
 }
 
+/**
+ * จำนวนครั้งที่บัญชีนี้เคยโดน Facebook จำกัด (ทั้งหมด ไม่ตัดตอนกลับมาใช้) — ใช้เรียงบัญชีสะอาดก่อน (เจ้าของ 16 พ.ย. 2569)
+ * เหตุ: 835 ครั้งที่โพสต์ 28 ต.ค.–16 พ.ย. บัญชีไม่เคยโดนถูกบล็อก 4.8% · เคยโดน 1 ครั้ง 47% · 2 ครั้ง 41%
+ * และ 16 พ.ย. บัญชีที่เคยโดน 2–8 ครั้งพักมา 7–11 วันยังโดนตั้งแต่กลุ่มแรก 7 จาก 9 บัญชี (หน้าสถานะบัญชีขึ้น "ไม่มีปัญหา")
+ */
+function fbLimitCountSql(logsTable, userExpr) {
+  return `(SELECT count(*)::int FROM ${logsTable} l
+            WHERE l.user_id::text = ${userExpr}::text AND l.message LIKE '${FB_LIMIT_LOG_PREFIX}%')`;
+}
+
+/** เรียงบัญชีโดนจำกัดน้อยสุดก่อน · ค่าไม่มี = 0 */
+function compareFewestLimits(a, b) {
+  return (Number(a?.fb_limits) || 0) - (Number(b?.fb_limits) || 0);
+}
+
 module.exports = {
+  fbLimitCountSql,
+  compareFewestLimits,
   FB_LIMIT_LOG_PREFIX,
   STRIKE_WINDOW_DAYS,
   MAX_PAUSE_HOURS,

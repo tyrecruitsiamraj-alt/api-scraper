@@ -22,7 +22,7 @@ import type { PosterLayout, PosterStandard } from '../../src/core/poster-templat
 import { evaluateResumeQualification } from '../../src/core/resume-qualification.js';
 import { selectPreferredScrapeWorker } from '../../src/core/worker-selection.js';
 import { dailyCapCeiling, effectiveDailyCapFor, needsWarmup } from '../../autopost/server/post-pacing.js';
-import { isRetiredReason, returnToPostingStatements } from '../../autopost/server/fb-limit-pause.js';
+import { fbLimitCountSql, isRetiredReason, returnToPostingStatements } from '../../autopost/server/fb-limit-pause.js';
 import { assertAgeRange, buildScrapeCriteria, hydrateJobSnapshot, jobDescriptionFromJarvis, scrapeRequestProblems } from './scrape-intake.js';
 
 // schema ของ autopost — แยกต่อ project ได้ผ่าน env (ไม่ตั้ง = so_autopost_jobs เดิม)
@@ -3689,6 +3689,7 @@ function workerProblem(worker: string | null, online: boolean, lastSeen: string 
 /**
  * บัญชีสำรองเมื่อตัวที่เลือกไว้ใช้ไม่ได้ — เอาตัวที่ "ว่างจริง" เท่านั้น:
  * ไม่ถูกพัก · ไม่ติดยืนยันตัวตน · ยังไม่เต็มโควต้าวันนี้ แล้วเรียงเครื่องออนไลน์ก่อน
+ * แล้วตัวที่เคยโดน Facebook จำกัดน้อยสุด (เจ้าของ 16 พ.ย. 2569 "เลือกบัญชีสะอาดก่อน")
  * และเลือกตัวที่ใช้โควต้าวันนี้น้อยสุด (กระจายโหลด ลดโอกาสโดน Facebook จำกัดซ้ำ)
  */
 async function pickSubstituteAccount(excludeId: string | null) {
@@ -3701,6 +3702,7 @@ async function pickSubstituteAccount(excludeId: string | null) {
                 COALESCE(u.group_ids::jsonb, '[]'::jsonb) AS group_ids,
                 NULLIF(TRIM(u.preferred_worker), '') AS preferred_worker,
                 (SELECT w.last_seen FROM ${AP}.workers w WHERE w.name = u.preferred_worker) AS worker_last_seen,
+                ${fbLimitCountSql(`${AP}.run_logs`, 'u.id')} AS fb_limits,
                 LEAST(COALESCE(u.daily_cap, ${FB_CAP}), ${FB_CAP})::int AS cap,
                 COALESCE((SELECT count(*)::int FROM ${AP}.post_logs pl
                            WHERE pl.user_id = u.id
@@ -3712,7 +3714,7 @@ async function pickSubstituteAccount(excludeId: string | null) {
             AND ($1::text IS NULL OR u.id <> $1::text)
        ) a
        WHERE a.used_today < a.cap
-       ORDER BY a.worker_online DESC, (a.used_today::float / NULLIF(a.cap, 0)) ASC, a.label
+       ORDER BY a.worker_online DESC, a.fb_limits ASC, (a.used_today::float / NULLIF(a.cap, 0)) ASC, a.label
        LIMIT 1`,
       [excludeId],
     );
@@ -3767,7 +3769,7 @@ async function pickPostAccount(groupIds: string[]) {
       WHERE COALESCE(u.group_ids::jsonb, '[]'::jsonb) ?| $1::text[]
         AND (u.paused_until IS NULL OR u.paused_until <= now())
         AND u.needs_verification_since IS NULL
-      ORDER BY 3 DESC, label`,
+      ORDER BY 3 DESC, ${fbLimitCountSql(`${AP}.run_logs`, 'u.id')} ASC, label`,
     [groupIds],
   );
   return rows[0] ?? null;

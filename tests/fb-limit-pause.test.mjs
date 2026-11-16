@@ -68,3 +68,17 @@ test('กลับมาใช้โพสต์: แก้เฉพาะบั
   assert.ok(!log.params[1].startsWith(FB_LIMIT_LOG_PREFIX));
   assert.match(log.params[1], /a@b\.c/);
 });
+
+test('บัญชีสะอาดก่อน: เรียงตามจำนวนครั้งที่เคยโดนจำกัด น้อยไปมาก (เจ้าของ 16 พ.ย. 2569)', () => {
+  const { compareFewestLimits, fbLimitCountSql } = require('../autopost/server/fb-limit-pause.js');
+  const list = [
+    { name: 'Jenny Audra', fb_limits: 4 },
+    { name: 'Rand Mize', fb_limits: 0 },
+    { name: 'Brittini Sophia', fb_limits: 3 },
+    { name: 'ไม่มีค่า' },
+  ];
+  assert.deepEqual([...list].sort(compareFewestLimits).map((a) => a.name), ['Rand Mize', 'ไม่มีค่า', 'Brittini Sophia', 'Jenny Audra']);
+  const sql = fbLimitCountSql('"s".run_logs', 'u.id');
+  assert.match(sql, /l\.message LIKE 'Facebook จำกัดการโพสต์ของบัญชีนี้%'/);
+  assert.doesNotMatch(sql, /กลับมาใช้โพสต์/, 'นับทั้งหมด ไม่ตัดตอนกดกลับมาใช้');
+});

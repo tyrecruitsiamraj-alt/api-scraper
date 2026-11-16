@@ -7,7 +7,7 @@ import { classifyGroupOutcome, GROUP_STATE } from '../../src/core/group-outcome.
 import { SCRAPE_RULES } from './scrape-intake.js';
 import { effectiveDailyCapFor } from '../../autopost/server/post-pacing.js';
 import { postingAvailability } from '../../src/core/posting-availability.js';
-import { isRetiredReason } from '../../autopost/server/fb-limit-pause.js';
+import { compareFewestLimits, fbLimitCountSql, isRetiredReason } from '../../autopost/server/fb-limit-pause.js';
 import type { PostingAvailability } from '../../src/core/posting-availability.js';
 
 /**
@@ -50,6 +50,8 @@ export type JarvisAccountOption = {
   recommended: boolean;
   /** ลำดับที่ควรแสดง: 0 พร้อมและล็อกอินอยู่บนเครื่องออนไลน์ · 1 พร้อมแต่ยังไม่เคยล็อกอิน · 2 ใช้ได้แต่มีเงื่อนไข (มีงานค้าง/โควต้าเต็ม/เครื่องออฟไลน์) · 3 ใช้ไม่ได้ (ถูกพัก/ต้องยืนยันตัวตน) */
   sort_rank: 0 | 1 | 2 | 3;
+  /** เคยโดน Facebook จำกัดกี่ครั้ง (ทั้งหมด) — ในลำดับเดียวกัน รายการเรียงตัวที่โดนน้อยสุดก่อน (เจ้าของ 16 พ.ย. 2569 "เลือกบัญชีสะอาดก่อน") */
+  fb_limits: number;
   /** กลุ่มที่บัญชีนี้เลือกโพสต์ได้ = ทุกกลุ่มในระบบ (กลุ่มไม่ได้ผูกกับบัญชี) */
   group_ids: string[];
   /** กลุ่มที่ตั้งไว้กับบัญชีนี้ในหน้าตั้งค่า (ใช้กับโพสต์อัตโนมัติรายวัน) */
@@ -245,7 +247,7 @@ export async function getJarvisOptions(opts: { requestNo?: string | null } = {})
       id: string; env_key: string | null; email: string | null; skip_warmup: boolean; name: string; worker: string | null; worker_online: boolean; daily_cap: number | null;
       paused_until: string | null; pause_reason: string | null; group_ids: string[];
       needs_verification_since: string | null; needs_verification_note: string | null;
-      posted_today: number; age_days: number | null; running: number; queued: number; warming_since: string | null; pending_groups: number; department: string | null;
+      posted_today: number; age_days: number | null; fb_limits: number; running: number; queued: number; warming_since: string | null; pending_groups: number; department: string | null;
     }>(
       `SELECT u.id, u.env_key, u.email, COALESCE((to_jsonb(u)->>'skip_warmup')::boolean, false) AS skip_warmup,
               NULLIF(to_jsonb(u)->>'department', '') AS department,
@@ -267,6 +269,7 @@ export async function getJarvisOptions(opts: { requestNo?: string | null } = {})
                  UNION ALL
                  SELECT MIN(created_at) FROM ${AP}.run_logs WHERE user_id = u.id AND level = 'success'
                ) t) AS age_days,
+              ${fbLimitCountSql(`${AP}.run_logs`, 'u.id')} AS fb_limits,
               (SELECT count(*) FROM ${AP}.post_run_queue p WHERE p.user_id = u.id AND p.status = 'running')::int AS running,
               (SELECT min(p.started_at) FROM ${AP}.post_run_queue p WHERE p.user_id = u.id AND p.status = 'running' AND p.mode = 'warmup') AS warming_since,
               -- งานอุ่นเครื่องที่รอเวลา (โหมด warmup) ไม่นับเป็นงานโพสต์ที่รอคิว — ตอนกำลังอุ่นเครื่องนับเป็น running (บัญชีใช้อยู่)
@@ -448,8 +451,11 @@ export async function getJarvisOptions(opts: { requestNo?: string | null } = {})
       session_workers,
       department: r.department,
       group_status: statusByAccount.get(String(r.id)) ?? [],
+      fb_limits: Number(r.fb_limits) || 0,
     };
   });
+  // Jarvis เลือกบัญชีแรกที่ recommended ตามลำดับที่ส่งไป และเรียงแถวในสีเดียวกันตามลำดับนี้ — บัญชีสะอาดจึงต้องมาก่อน
+  accounts.sort((a, b) => a.sort_rank - b.sort_rank || compareFewestLimits(a, b));
 
   const groups: JarvisGroupOption[] = groupRows.map((g) => ({
     id: g.id,
