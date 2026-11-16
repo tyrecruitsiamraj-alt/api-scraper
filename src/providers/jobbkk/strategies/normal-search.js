@@ -205,6 +205,22 @@ async function clickOptionContaining(page, term) {
 }
 
 /**
+ * คลิกช่องให้พร้อมพิมพ์ — JobBKK เด้งป้ายโฆษณาเต็มจอ (Radix dialog) ตอนคลิกครั้งแรกบนหน้า แล้วดึงโฟกัสไป
+ * ตัวอักษรที่พิมพ์จึงไม่ลงช่อง (ตัวนับ 0/80 · รายการไม่ขึ้น) — JobBKK ไม่ได้ใครเลยตั้งแต่ 3 พ.ย. 2569
+ * ยืนยันบนหน้าจริง 16 พ.ย. 2569: ป้ายเด้งหลังคลิกช่องตำแหน่ง · กด Esc ปิดแล้วพิมพ์ "คนสวน" รายการขึ้น เลือกแล้วได้ชิป 1/3
+ * รอให้ป้ายมีเวลาเด้งก่อน ถ้าเด้งก็ปิดแล้วคลิกช่องอีกครั้ง
+ */
+async function focusPastPromo(page, input) {
+  await clickWithoutNavigationWait(input);
+  await sleep(1200);
+  const promo = page.locator('[role="dialog"][data-state="open"]').first();
+  if (await promo.isVisible().catch(() => false)) {
+    await dismissJobbkkOverlays(page);
+    await clickWithoutNavigationWait(input);
+  }
+}
+
+/**
  * พิมพ์ชื่อตำแหน่ง/Keyword แล้วเลือกจากรายการ — นับว่า "ติด" ก็ต่อเมื่อเห็นชิปจริงหรือตัวนับขยับ
  * เหตุเดิม (3 พ.ย. 2569): พิมพ์แล้วรอ 0.25 วิ รายการแนะนำยังเป็น "กำลังโหลด…" กด Enter ตอนนั้นไม่เกิดชิป
  * แล้วโค้ดนับว่าติด → ค้นได้เรซูเม่ล่าสุดทั้งจังหวัด ใบคนขับรถ 2 ใบ เปิดดู 119 คน ไม่มีคนขับรถเลย
@@ -220,12 +236,19 @@ async function applyChipField(page, field, terms, report) {
       return;
     }
     const before = await readChipTags(input);
-    // รอบแรกพิมพ์ทีละตัวอักษรเหมือนคน (ค่าใส่ทั้งก้อนด้วย fill บางทีกล่อง React ไม่ยิงโหลดคำแนะนำ) · รอบสองลอง fill
-    for (let attempt = 0; attempt < 2 && !verified; attempt += 1) {
-      await clickWithoutNavigationWait(input);
+    // รอบแรกพิมพ์ทีละตัวอักษรเหมือนคน (ค่าใส่ทั้งก้อนด้วย fill บางทีกล่อง React ไม่ยิงโหลดคำแนะนำ) · รอบหลังลอง fill
+    for (let attempt = 0; attempt < 3 && !verified; attempt += 1) {
+      await focusPastPromo(page, input);
       await input.fill('').catch(() => {});
       if (attempt === 0) await input.pressSequentially(term, { delay: 40 }).catch(async () => input.fill(term));
       else await input.fill(term);
+      // ตัวอักษรไม่ลงช่อง = ป้ายโฆษณาเด้งทับระหว่างพิมพ์ ปิดแล้วลองรอบใหม่ (ไม่กด Enter ใส่ป้าย)
+      const typed = await input.inputValue().catch(() => '');
+      if (!looseText(typed).includes(looseText(term))) {
+        await dismissJobbkkOverlays(page);
+        report[`${field}Box`] = `พิมพ์ "${term}" แล้วช่องได้ "${typed}" (ป้ายโฆษณาทับ?) · รอบ ${attempt + 1}`;
+        continue;
+      }
       const suggested = await waitForChipSuggestions(page, term, 8000);
       let how = 'กด Enter';
       if (suggested && (await clickMatchingOption(page, [term]))) how = 'คลิกตัวเลือกตรงคำ';

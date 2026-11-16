@@ -383,6 +383,39 @@ test('Position waits past the default suggestion list for the typed term', async
   assert.equal(result.report.positionSeen, 'เจ้าหน้าที่');
 });
 
+// 16 พ.ย. 2569 (หน้าจริงที่เจ้าของล็อกอินให้ดู): ป้ายโฆษณาเต็มจอเด้งตอนคลิกช่องตำแหน่งครั้งแรก แล้วดึงโฟกัสไป
+// ตัวอักษรที่พิมพ์ไม่ลงช่อง (ตัวนับ 0/80 · รายการไม่ขึ้น) — JobBKK ไม่ได้ใครเลยตั้งแต่ 3 พ.ย.
+test('Position closes the banner that pops up on the first click, then types', async (t) => {
+  const browser = await chromium.launch({ headless: true });
+  t.after(async () => {
+    await browser.close().catch(() => {});
+  });
+  const page = await browser.newPage();
+  await page.setContent(FIXTURE, { waitUntil: 'domcontentloaded' });
+  await page.evaluate(() => {
+    const input = document.getElementById('position-input');
+    let shown = false;
+    input.addEventListener('click', () => {
+      if (shown) return;
+      shown = true;
+      setTimeout(() => {
+        const promo = document.createElement('div');
+        promo.id = 'promo';
+        promo.setAttribute('role', 'dialog');
+        promo.setAttribute('data-state', 'open');
+        promo.style.cssText = 'position:fixed;inset:0;z-index:1000;background:rgba(0,0,0,.45)';
+        promo.innerHTML = '<button id="promo-focus">JOBBKK</button>';
+        document.body.appendChild(promo);
+        document.getElementById('promo-focus').focus();
+      }, 100);
+    });
+  });
+
+  const result = await runNormalSearch(page, { position: 'เจ้าหน้าที่ IT', province: 'สมุทรปราการ', maxCandidates: 5 }, { need: 5 });
+  assert.ok(result.report.applied.includes('position'), result.report.positionBox);
+  assert.equal(result.report.positionSeen, 'เจ้าหน้าที่');
+});
+
 test('Position counts as applied when only the chip counter moves', async (t) => {
   const browser = await chromium.launch({ headless: true });
   t.after(async () => {
