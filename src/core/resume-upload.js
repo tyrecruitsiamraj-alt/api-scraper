@@ -8,8 +8,9 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
+import { envInt } from '../config.js';
 import { ollamaBase, withTextModel } from './ai-models.js';
-import { extractAttachment } from './ollama.js';
+import { extractAttachment, OCR_LOOP_STATUS } from './ollama.js';
 import { applyThaiNameSplit } from './thai-name.js';
 import { ResumeReadError, MIN_TEXT_CHARS, docxText } from './resume-files.js';
 
@@ -39,6 +40,7 @@ async function ocrText(buffer, fileType) {
   if (r.status === 'success' && r.text) return r.text;
   if (r.waiting === 'no_ocr_model') throw new ResumeReadError('ตอนนี้เซิร์ฟเวอร์ AI ของบริษัทไม่มีโมเดลอ่านรูป อ่านไฟล์รูปหรือ PDF สแกนไม่ได้');
   if (r.waiting === 'no_pdf_tool') throw new ResumeReadError('เครื่องที่อ่านไฟล์ยังไม่มีตัวแปลง PDF อ่าน PDF สแกนไม่ได้');
+  if (r.status === OCR_LOOP_STATUS) throw new ResumeReadError('AI อ่านรูปนี้ไม่จบ (อ่านวนซ้ำ) ลองส่งเป็น PDF หรือรูปที่ชัดกว่า');
   if (r.waiting) throw new ResumeReadError('ต่อเซิร์ฟเวอร์ AI ของบริษัทไม่ได้ ลองอัปโหลดใหม่อีกครั้ง');
   throw new ResumeReadError('อ่านตัวหนังสือในไฟล์ไม่ได้ ภาพอาจไม่ชัด');
 }
@@ -135,7 +137,8 @@ export async function structureResume(text) {
             stream: false,
             think: false,
             format: RESUME_SCHEMA,
-            options: { temperature: 0, num_predict: 4096 },
+            // ค่าเริ่มของเซิร์ฟเวอร์ 4096 ไม่พอ: เราส่งเรซูเม่ได้ถึง 12,000 ตัวอักษร + คำสั่ง + คำตอบ เรซูเม่ยาวถูกตัดท้ายก่อนถึง AI
+            options: { temperature: 0, num_predict: 4096, num_ctx: envInt('RESUME_NUM_CTX', 16384) },
             messages: [
               { role: 'system', content: SYSTEM },
               { role: 'user', content: `เรซูเม่:\n${body}` },

@@ -14,7 +14,33 @@ export const OCR_WAITING = 'pending';
 const OCR_PROMPT =
   'Below is an image of a document page. Just return the plain text representation of this document as if you were reading it naturally. Do not hallucinate.';
 
-/** OCR a single image buffer via the Ollama vision model. */
+/**
+ * ช่องความจำของโมเดลอ่านรูป — ค่าเริ่มของเซิร์ฟเวอร์ 4096 ไม่พอรูปเอกสารหนึ่งหน้า (ตัวรูปกินเกือบหมด)
+ * โมเดลจึงพิมพ์วนซ้ำจนเซิร์ฟเวอร์ตัดทิ้ง ("token repeat limit reached") แล้วเราเคยแปลผิดว่าต่อเซิร์ฟเวอร์ไม่ได้
+ * ทดลองรูปจริง 12 ไฟล์ 16 พ.ย. 2569: 4096 อ่านได้ 1 ไฟล์ (เฉลี่ย 16 ตัวอักษร) · 16384 ได้ 10 ไฟล์ (เฉลี่ย 4,107) · ย่อรูปแย่ลง
+ */
+const ocrNumCtx = () => envInt('OCR_NUM_CTX', 16384);
+
+/** ท้ายข้อความที่โมเดลวนบรรทัดเดิม: ตัดตั้งแต่บรรทัดที่ซ้ำติดกันครั้งที่ 3 (เก็บส่วนที่อ่านได้จริงไว้) */
+export function cutRepeatedTail(text) {
+  const out = [];
+  let run = 0;
+  for (const line of String(text ?? '').split('\n')) {
+    const same = out.length && line.trim() && line.trim() === out[out.length - 1].trim();
+    run = same ? run + 1 : 0;
+    if (run >= 2) break;
+    out.push(line);
+  }
+  return out.join('\n').trim();
+}
+
+/** โมเดลอ่านรูปวนซ้ำก่อนได้ข้อความพอใช้ — ไม่ใช่เซิร์ฟเวอร์ล่ม (ไม่รอซ้ำ บอกเหตุตรง ๆ) */
+export const OCR_LOOP_STATUS = 'error:ocr_loop';
+
+/**
+ * อ่านรูปหนึ่งรูปด้วยโมเดลในบริษัท · รับคำตอบทีละท่อน: ถ้าเซิร์ฟเวอร์ตัดกลางทางเพราะวนซ้ำ ยังได้ส่วนก่อนวน
+ * ได้ข้อความไม่ถึง 30 ตัวก่อนถูกตัด = throw ocr_loop
+ */
 async function ocrImage(png, model) {
   const res = await fetch(`${ollamaBase()}/api/generate`, {
     method: 'POST',
@@ -23,13 +49,36 @@ async function ocrImage(png, model) {
       model,
       prompt: OCR_PROMPT,
       images: [png.toString('base64')],
-      stream: false,
-      options: { temperature: 0 },
+      stream: true,
+      options: { temperature: 0, num_ctx: ocrNumCtx() },
     }),
   });
-  if (!res.ok) throw new Error(`ollama HTTP ${res.status}`);
-  const j = await res.json();
-  return (j.response ?? '').trim();
+  if (!res.ok) {
+    const body = await res.text().catch(() => '');
+    if (/repeat limit/i.test(body)) throw new Error('ocr_loop');
+    throw new Error(`ollama HTTP ${res.status}`);
+  }
+  let text = '';
+  let failed = '';
+  let buf = '';
+  const take = (line) => {
+    if (!line.trim()) return;
+    const j = JSON.parse(line);
+    if (j.error) failed = String(j.error);
+    if (j.response) text += j.response;
+  };
+  for await (const chunk of res.body) {
+    buf += Buffer.from(chunk).toString('utf8');
+    let i;
+    while ((i = buf.indexOf('\n')) >= 0) {
+      take(buf.slice(0, i));
+      buf = buf.slice(i + 1);
+    }
+  }
+  take(buf);
+  const kept = cutRepeatedTail(text);
+  if (failed && kept.replace(/\s+/g, '').length < 30) throw new Error(/repeat limit/i.test(failed) ? 'ocr_loop' : `ollama HTTP 500 ${failed.slice(0, 60)}`);
+  return kept;
 }
 
 /** Rasterize a PDF to PNG page buffers using poppler (pdftoppm). */
@@ -77,6 +126,7 @@ export async function extractAttachment(buffer, fileType) {
     }
     return { text: '', status: 'skipped:unsupported_type' };
   } catch (e) {
+    if (String(e.message) === 'ocr_loop') return { text: '', status: OCR_LOOP_STATUS, model };
     // เซิร์ฟเวอร์/โมเดลหายชั่วคราว ไม่ใช่ไฟล์เสีย — รออ่านใหม่ ไม่ตีว่าล้ม
     if (/ollama HTTP (404|5\d\d)|fetch failed|ECONNREFUSED|ETIMEDOUT|ENOENT|aborted/i.test(String(e.message))) {
       return { text: '', status: OCR_WAITING, waiting: String(e.message).slice(0, 80) };
