@@ -38,7 +38,7 @@ import { extractAttachment } from './core/ollama.js';
 import { hasPdfTool, ocrModel } from './core/ai-models.js';
 import { contactsFromText } from './core/contacts.js';
 import { finalizeCandidateRecord, hasUsefulEducation, hasUsefulWorkExperience } from './providers/jobbkk/parser.js';
-import { acceptedPositionsForTitle, suggestAdjacentPositions, positionsFromDescription } from './core/job-family.js';
+import { acceptedPositionsForTitle, keepLevelTerms, suggestAdjacentPositions, positionsFromDescription } from './core/job-family.js';
 import { resolveSearchIdentityFromDescription } from '../web/lib/scrape-intake.js';
 import { filterZeroYieldExpansionTerms } from './core/scrape-failure-learning.js';
 import { isZeroYieldRound, zeroYieldNote } from './core/zero-yield.js';
@@ -238,7 +238,8 @@ export async function runTask(t, runtime) {
         const learned = await recommendedSourcingTerms({
           jobFamily, location: (t.criteria || {}).province || '', platform: connector.platform, limit: 5,
         });
-        const learnedTerms = learned.map((x) => x.search_term).filter((x) => x && !descPositions.includes(x));
+        // งานระดับหัวหน้า: คำที่เคยได้คนเยอะในสายงานเดียวกันมักเป็นระดับพนักงาน — ไม่เติม
+        const learnedTerms = keepLevelTerms(learned.map((x) => x.search_term), dp.level).filter((x) => x && !descPositions.includes(x));
         if (learnedTerms.length) {
           descPositions = [...descPositions, ...learnedTerms];
           console.log(`  🧠 Second Brain เพิ่มคำค้นที่มี Qualified Yield ดี: ${learnedTerms.join(', ')}`);
