@@ -18,6 +18,7 @@ import {
   SAMPLE_CANDIDATE,
   buildResumeHtml,
 } from '@/lib/resume-template';
+import { SAMPLE_PHOTO_DATA_URL } from '@/lib/resume-sample-photo';
 import type { ResumeSectionKey, ResumeTemplateSettings } from '@/lib/resume-template';
 
 const LOGO_MAX_BYTES = 1024 * 1024;
@@ -29,7 +30,7 @@ export function ResumeTemplateEditor({ id, name: initialName, settings: initial 
   const [logoError, setLogoError] = useState('');
   const [wmImageError, setWmImageError] = useState('');
   const set = <K extends keyof ResumeTemplateSettings>(key: K, value: ResumeTemplateSettings[K]) => setS((prev) => ({ ...prev, [key]: value }));
-  const preview = useMemo(() => buildResumeHtml(SAMPLE_CANDIDATE, null, s), [s]);
+  const preview = useMemo(() => buildResumeHtml(SAMPLE_CANDIDATE, SAMPLE_PHOTO_DATA_URL, s), [s]);
   const frameRef = useRef<HTMLIFrameElement>(null);
   useEffect(() => {
     const el = frameRef.current;

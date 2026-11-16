@@ -17,8 +17,8 @@ export const RESUME_FONTS = ['Kanit', 'Sarabun', 'Prompt', 'Noto Sans Thai', 'IB
 
 /** หัวข้อในเรซูเม่ ไทย/อังกฤษ */
 const HEADINGS = {
-  th: { intro: 'แนะนำตัว', work: 'ประสบการณ์ทำงาน', education: 'การศึกษา', languages: 'ภาษา', expertise: 'ความเชี่ยวชาญ', strengths: 'จุดเด่น', personal: 'ข้อมูลส่วนตัว', wanted: 'งานที่ต้องการ', classOf: 'จบปี' },
-  en: { intro: 'Profile', work: 'Work Experience', education: 'Education', languages: 'Languages', expertise: 'Expertise', strengths: 'Strengths', personal: 'Personal Information', wanted: 'Job Preferences', classOf: 'Class of' },
+  th: { intro: 'แนะนำตัว', work: 'ประสบการณ์ทำงาน', education: 'การศึกษา', languages: 'ภาษา', activity: 'กิจกรรม', expertise: 'ทักษะเฉพาะทาง', strengths: 'จุดเด่น', personal: 'ข้อมูลส่วนตัว', wanted: 'งานที่ต้องการ', classOf: 'จบปี' },
+  en: { intro: 'Profile', work: 'Work Experience', education: 'Education', languages: 'Languages', activity: 'Activity', expertise: 'Expertise', strengths: 'Strengths', personal: 'Personal Information', wanted: 'Job Preferences', classOf: 'Class of' },
 } as const;
 
 export const RESUME_SECTIONS = [
@@ -272,7 +272,9 @@ html, body { background: #fff; margin: 0; font-family: '${t.font}', 'Noto Sans T
 .wm-tile { display: block; overflow: hidden; }
 .wm-tile span { position: absolute; font-size: 14px; font-weight: 400; letter-spacing: .5px; color: #555; transform: translate(-50%, -50%) rotate(-40deg); }
 .pf { font-size: 12px; line-height: 1.36; max-width: none; }
-.pf-head { display: flex; justify-content: space-between; align-items: flex-end; gap: 18px; border-bottom: 2px solid ${t.accentColor}; padding: 76px 0 34px; }
+/* แพทเทิร์นคงที่ (เจ้าของ 16 พ.ย. 2569 "ข้อมูลมากน้อยไม่สนใจ เอาตามนั้นเลย"): หัวสูงเท่าเดิมแม้ไม่มีรูป
+   แถบเทาเริ่ม-จบที่เดิมตามรูปตัวอย่างแม้ข้อมูลน้อย · ข้อมูลยาวเกินไหลลงหน้าถัดไป แถบเทายาวตาม */
+.pf-head { display: flex; justify-content: space-between; align-items: flex-end; gap: 18px; border-bottom: 2px solid ${t.accentColor}; padding: 76px 0 34px; min-height: 78mm; }
 .pf-head .name { font-size: 23px; font-weight: 700; letter-spacing: 0; line-height: 1.15; }
 .pf-sub { opacity: .8; font-size: 12px; margin-top: 3px; }
 .pf-tags { color: ${t.accentColor}; font-weight: 700; font-size: 12px; text-transform: uppercase; margin-top: 2px; white-space: pre; }
@@ -280,7 +282,7 @@ html, body { background: #fff; margin: 0; font-family: '${t.font}', 'Noto Sans T
 .pf-photo { width: 34mm; height: 45.5mm; object-fit: cover; flex-shrink: 0; margin-bottom: 13px; }
 .pf-cols { display: grid; grid-template-columns: 1fr 30.4%; gap: 0 18px; }
 .pf-cols > main { padding-top: 15px; }
-.pf-side { background: rgba(0, 0, 0, .065); margin-top: 6px; padding: 10px 13px 14px; }
+.pf-side { background: rgba(0, 0, 0, .065); margin-top: 6px; padding: 10px 13px 14px; min-height: 158mm; }
 .pf h2 { font-size: 16px; font-weight: 700; color: ${t.accentColor}; margin: 0 0 2px; padding: 0; border: 0; text-transform: none; letter-spacing: 0; line-height: 1.25; }
 .pf .sec { margin-bottom: 6px; break-inside: auto; }
 .pf .entry { border-left: 0; padding-left: 0; margin-bottom: 3px; }
@@ -290,7 +292,8 @@ html, body { background: #fff; margin: 0; font-family: '${t.font}', 'Noto Sans T
 .pf ul { margin: 0; padding: 0; list-style: none; }
 .pf main li { padding-left: 9px; text-indent: -9px; }
 .pf main li::before { content: '•'; display: inline-block; width: 9px; text-indent: 0; }
-.pf-side li::before { content: '•'; color: ${t.accentColor}; margin-right: 2px; }
+.pf-side li { padding-left: 7px; text-indent: -7px; }
+.pf-side li::before { content: '•'; color: ${t.accentColor}; display: inline-block; width: 7px; text-indent: 0; }
 .pf .para { margin: 0; opacity: .85; font-size: 12px; }
 .pf li { opacity: .85; }
 `;
@@ -299,7 +302,8 @@ html, body { background: #fff; margin: 0; font-family: '${t.font}', 'Noto Sans T
 /**
  * แบบแถบขวา (ตามรูปที่เจ้าของส่งมา 13 พ.ย. 2569)
  * หัว: ชื่อ · ตำแหน่งล่าสุด · แท็กตำแหน่งที่ต้องการตัวใหญ่สีหลัก · รูปมุมขวา
- * ซ้าย = แนะนำตัว/งาน/การศึกษา · ขวา (เทา) = ภาษา ความเชี่ยวชาญ (ทักษะทั่วไป) จุดเด่น (ทักษะเฉพาะทาง) ข้อมูลส่วนตัว งานที่ต้องการ
+ * ซ้าย = แนะนำตัว/งาน/การศึกษา · ขวา (เทา) = ภาษา กิจกรรม (ถ้ามี) ความเชี่ยวชาญ (ทักษะทั่วไป) จุดเด่น (ทักษะเฉพาะทาง) ข้อมูลส่วนตัว งานที่ต้องการ
+ * บรรทัดใต้ชื่อ = headline ถ้ามี ไม่งั้นตำแหน่งงานล่าสุด
  */
 function profileLayout(
   c: any,
@@ -333,6 +337,7 @@ function profileLayout(
   const side: Record<string, () => string> = {
     skills: () =>
       bullets(h.languages, arr(c.language_skills).map(langLine).filter(Boolean)) +
+      bullets(h.activity, skills(c.activities)) +
       bullets(h.expertise, skills(c.soft_skills)) +
       bullets(h.strengths, skills(c.hard_skills)),
     personal: () =>
@@ -348,7 +353,7 @@ function profileLayout(
   };
   const mainHtml = t.sections.filter((k) => k in main).map((k) => main[k]()).join('');
   const sideHtml = t.sections.filter((k) => k in side).map((k) => side[k]()).join('');
-  const current = txt(work[0]?.position);
+  const current = txt(c.headline) || txt(work[0]?.position);
   const roles = txt(c.desired_positions).split(/\s*[,/|]\s*/).filter(Boolean);
   return `<div class="sheet pf">
   <header class="pf-head">
@@ -364,6 +369,27 @@ function profileLayout(
   <div class="pf-cols"><main>${mainHtml}</main>${sideHtml ? `<aside class="pf-side">${sideHtml}</aside>` : '<aside></aside>'}</div>
   ${p.footer}
 </div>`;
+}
+
+/** ตัวเลือกตอนดาวน์โหลด: เอางานบางรายการออก / ซ่อนรายละเอียดหน้าที่ — ให้จบหน้าเดียว (เจ้าของ 16 พ.ย. 2569 "เลือกได้ว่าจะตัดหรือไหลลงไป") */
+export type ResumeTrim = { hideWork: number[]; hideDetails: boolean };
+
+/** อ่านตัวเลือกตัดจาก query (?hide_work=0,3&details=0) · ไม่ส่ง = ไม่ตัด */
+export function parseResumeTrim(params: URLSearchParams): ResumeTrim {
+  const hideWork = (params.get('hide_work') ?? '')
+    .split(',')
+    .map((v) => Number.parseInt(v, 10))
+    .filter((n) => Number.isInteger(n) && n >= 0 && n < 100);
+  return { hideWork: [...new Set(hideWork)], hideDetails: params.get('details') === '0' };
+}
+
+/** สำเนาผู้สมัครที่ตัดตามตัวเลือก (ไม่แก้ข้อมูลเดิม) · ลำดับงานที่เหลือคงเดิม */
+export function trimResumeCandidate<T extends { work_experience?: unknown }>(c: T, trim: ResumeTrim): T {
+  if (!trim.hideWork.length && !trim.hideDetails) return c;
+  const work = arr(c.work_experience)
+    .filter((_, i) => !trim.hideWork.includes(i))
+    .map((w) => (trim.hideDetails && w && typeof w === 'object' ? { ...w, responsibilities: '' } : w));
+  return { ...c, work_experience: work };
 }
 
 /** ตำแหน่งข้อความลายน้ำแบบซ้ำเต็มหน้า: 6 แถว แถวเว้นแถวเยื้องครึ่งช่อง (ตามรูปตัวอย่าง) */
@@ -457,31 +483,56 @@ ${body}
 </html>`;
 }
 
-/** ผู้สมัครตัวอย่างสำหรับดูหน้าตาในหน้าตั้งค่า (ไม่ใช่คนจริง) */
+/**
+ * ผู้สมัครตัวอย่างสำหรับดูหน้าตาในหน้าตั้งค่า = ข้อมูลจากรูปตัวอย่างที่เจ้าของส่งมา 13 พ.ย. 2569
+ * เจ้าของเลือกใช้ข้อมูลจริงตามรูปทุกตัว (16 พ.ย. 2569) เพื่อเทียบหน้าตากับรูปได้ตรง ๆ
+ */
 export const SAMPLE_CANDIDATE = {
-  full_name: 'นางสาวตัวอย่าง ใจดี',
-  prefix: 'นางสาว',
-  gender: 'หญิง',
-  age: '27',
-  nationality: 'ไทย',
-  province: 'กรุงเทพมหานคร',
-  address: '99/9 ถนนตัวอย่าง แขวงตัวอย่าง เขตตัวอย่าง กรุงเทพมหานคร',
-  phone: '080-000-0000',
-  email: 'sample@example.com',
-  line_id: 'sample.line',
-  desired_positions: 'เจ้าหน้าที่ธุรการ, แอดมิน',
-  expected_salary: '18,000',
-  available_start: 'ทันที',
-  intro: 'ทำงานธุรการมา 3 ปี ถนัดงานเอกสารและประสานงาน',
-  education: [
-    { degree: 'ปริญญาตรี', major: 'บริหารธุรกิจ', institution: 'มหาวิทยาลัยตัวอย่าง', graduation_year: '2564', gpa: '3.10' },
-  ],
+  full_name: 'Watcharaporn Promwong',
+  headline: 'Tourism Marketing / Travel Agent Relations (Senior Officer)',
+  desired_positions: 'Tourism Marketing, Travel Agent Relations, Customer Service',
+  intro:
+    'Senior Officer in travel agent relations and tourism marketing at Central Pattana (July 2019 – July 2026), planning tourist promotion, media, reports and tour company sales visits. Prior experience in customer service, airline passenger service at Lufthansa Services (Thailand), student services and housing coordination, tour administration and hospitality. Graduate in English from Khon Kaen University (GPA 3.50), TOEIC score 805.',
   work_experience: [
-    { position: 'เจ้าหน้าที่ธุรการ', company: 'บริษัท ตัวอย่าง จำกัด', period: '2565 - ปัจจุบัน', responsibilities: 'คีย์ข้อมูล จัดเอกสาร ประสานงานจัดซื้อ' },
-    { position: 'พนักงานขาย', company: 'ร้านตัวอย่างมาร์ท', period: '2564 - 2565' },
+    {
+      position: 'Travel Agent Relations / Tourism Marketing (Senior Officer)',
+      company: 'Central Pattana Public Company Limited',
+      period: 'July 2019 – July 2026',
+      responsibilities: 'Planning tourist marketing including tourist promotion, media, reports and tour company sales visits',
+    },
+    {
+      position: 'Waitress, Rooftop Bar',
+      company: 'King Power Mahanakhon',
+      period: 'November 2018 – July 2019',
+      responsibilities: 'Taking orders, serving drinks, and giving information about the building',
+    },
+    {
+      position: 'Administrator',
+      company: 'Follow Me Bike Tours',
+      period: 'April – October 2018',
+      responsibilities: 'Making tour schedules, selling bike tour programs, company accounting, greeting customers, contacting guides, preparing all documents',
+    },
+    {
+      position: 'Student Services and Housing Coordinator',
+      company: 'CIEE Council on International Educational Exchange',
+      period: 'July – November 2017',
+      responsibilities: 'Preparing documents for Visa applications, taking care of international students, apartment and regularity',
+    },
+    {
+      position: 'Passenger Service Agent',
+      company: 'Lufthansa Services (Thailand) Ltd.',
+      period: 'December 2014 – April 2017',
+      responsibilities: 'Checking in and boarding',
+    },
+    { position: 'English Program Academician', company: 'Aksorn Charoen Tat Act. Company Limited', period: 'March – November 2014' },
+    { position: 'Customer Service Officer', company: 'Central Pattana Public Company Limited', period: 'January 2013 – February 2014' },
   ],
-  hard_skills: ['Microsoft Excel', 'Word', 'พิมพ์ดีดไทย'],
-  soft_skills: ['ทำงานเป็นทีม'],
-  language_skills: [{ language: 'อังกฤษ', level: 'พอใช้' }],
-  sources: [{ platform: 'upload' }],
+  education: [
+    { degree: 'Faculty of Humanities and Social Sciences, Major in English', institution: 'Khon Kaen University', graduation_year: '2012', gpa: '3.50' },
+    { degree: 'Major in English and Mathematics', institution: 'Narinukul School, Ubon Ratchathani' },
+  ],
+  language_skills: ['Thai', 'English – TOEIC score 805'],
+  activities: ['Interpreter, Cobra Gold 2018 (February – March 2018)'],
+  soft_skills: ['Management Skills', 'Creativity', 'Negotiation', 'Critical Thinking', 'Leadership'],
+  hard_skills: ['Travel trade & tourism marketing', 'Customer & guest service', 'Coordination & documentation'],
 };

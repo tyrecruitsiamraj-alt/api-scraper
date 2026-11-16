@@ -1,19 +1,46 @@
 import 'server-only';
 import { q } from './db';
 import { SO_CIRCLE_DATA_URL } from './resume-logo';
-import { DEFAULT_RESUME_TEMPLATE, normalizeTemplateSettings } from './resume-template';
+import { normalizeTemplateSettings } from './resume-template';
 import type { ResumeTemplateSettings } from './resume-template';
 
 /**
  * แบบฟอร์มเรซูเม่ที่ตั้งจากหน้าจอ (ตั้งค่า → แบบฟอร์มเรซูเม่) — มีได้หลายแบบ เลือกตอนกดดาวน์โหลด PDF
- * ยังไม่ได้ตั้งแบบไหนเป็นแบบเริ่มต้น = ใช้ "แบบมาตรฐาน" ที่มากับระบบ (หน้าตาเดิม)
+ * ยังไม่ได้ตั้งแบบไหนเป็นแบบเริ่มต้น = ใช้ "แบบมาตรฐาน" ที่มากับระบบ
  */
 
 export const BUILTIN_TEMPLATE_ID = 'standard';
 
-/** แบบที่มากับระบบ แก้ตรง ๆ ไม่ได้ (กด "คัดลอกไปแก้") · แถบขวา = ตามรูปที่เจ้าของส่งมา 13 พ.ย. 2569 */
+/**
+ * แบบที่มากับระบบ แก้ตรง ๆ ไม่ได้ (กด "คัดลอกไปแก้")
+ * มาตรฐาน = แบบแถบขวาสีแดงหัวข้อภาษาไทยที่ทำให้ดู 12 พ.ย. 2569 (เจ้าของเลือกเป็นแบบมาตรฐาน 16 พ.ย. 2569 แทนแบบสีน้ำเงินเดิม)
+ * แถบขวา = ตามรูปที่เจ้าของส่งมา 13 พ.ย. 2569
+ */
 const BUILTINS: { id: string; name: string; settings: ResumeTemplateSettings }[] = [
-  { id: BUILTIN_TEMPLATE_ID, name: 'แบบมาตรฐาน', settings: DEFAULT_RESUME_TEMPLATE },
+  {
+    id: BUILTIN_TEMPLATE_ID,
+    name: 'แบบมาตรฐาน',
+    settings: normalizeTemplateSettings({
+      layout: 'profile',
+      font: 'Noto Sans Thai',
+      accentColor: '#c62828',
+      textColor: '#444444',
+      logo: '',
+      watermark: 'both',
+      watermarkText: 'SIAMRAJATHANEE',
+      watermarkTile: true,
+      watermarkOpacity: 18,
+      watermarkImage: SO_CIRCLE_DATA_URL,
+      watermarkImageSize: 32,
+      watermarkImageOpacity: 17,
+      // หัวข้ออังกฤษตามรูปตัวอย่าง (เจ้าของ 16 พ.ย. 2569 "ตัวอย่างเป็นภาษาอังกฤษนะ") · เปลี่ยนเป็นไทยได้ในแบบที่คัดลอกไปแก้
+      headingLang: 'en',
+      showContacts: false,
+      showSources: false,
+      footerText: '',
+      sections: ['intro', 'work', 'education', 'skills'],
+    }),
+  },
   {
     id: 'profile',
     name: 'แบบแถบขวา',

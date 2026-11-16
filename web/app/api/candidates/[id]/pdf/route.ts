@@ -4,6 +4,7 @@ import { authOptions } from '@/lib/auth';
 import { getAssetBytes, getCandidate } from '@/lib/repo';
 import { buildResumeHtml, htmlToPdf, resumeFileName } from '@/lib/resumePdf';
 import { getResumeTemplate } from '@/lib/resume-templates';
+import { parseResumeTrim, trimResumeCandidate } from '@/lib/resume-template';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -39,8 +40,13 @@ export async function GET(req: Request, props: { params: Promise<{ id: string }>
 
   try {
     // ?template=<id> จากปุ่มเลือกแบบฟอร์ม · ไม่ระบุ = แบบเริ่มต้น
-    const template = await getResumeTemplate(new URL(req.url).searchParams.get('template'));
-    const html = buildResumeHtml(c, profileDataUrl, template.settings);
+    // ?hide_work=0,3&details=0 = ตัดให้จบหน้าเดียว · ?format=html = หน้าตัวอย่างในหน้าต่างดาวน์โหลด (ใช้นับหน้า) HTML ชุดเดียวกับที่ทำ PDF
+    const search = new URL(req.url).searchParams;
+    const template = await getResumeTemplate(search.get('template'));
+    const html = buildResumeHtml(trimResumeCandidate(c, parseResumeTrim(search)), profileDataUrl, template.settings);
+    if (search.get('format') === 'html') {
+      return new NextResponse(html, { status: 200, headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'private, no-store' } });
+    }
     const pdf = await htmlToPdf(html);
     const filename = resumeFileName(c.full_name);
     return new NextResponse(new Uint8Array(pdf), {

@@ -4,7 +4,7 @@ import { ArrowLeftIcon, ExternalLinkIcon, PencilIcon } from 'lucide-react';
 import { getCandidate, listSamePersonCandidates, recordCandidateActivity } from '@/lib/repo';
 import { AttachmentViewer } from '@/components/AttachmentViewer';
 import { uploadersByCandidate } from '@/lib/resume-uploads';
-import { PdfDownloadButton } from '@/components/PdfDownloadButton';
+import { PdfDownloadDialog } from '@/components/PdfDownloadDialog';
 import { listResumeTemplates } from '@/lib/resume-templates';
 import { markCandidateCalledAction, markCandidateViewedAction } from '@/lib/actions';
 import { getServerSession } from 'next-auth';
@@ -93,7 +93,11 @@ export default async function CandidateDetail(props: { params: Promise<{ id: str
               แก้ไข
             </Link>
           </Button>
-          <PdfDownloadButton href={`/api/candidates/${params.id}/pdf`} templates={templates} />
+          <PdfDownloadDialog
+            href={`/api/candidates/${params.id}/pdf`}
+            templates={templates}
+            works={work.map((w) => ({ position: String(w?.position ?? '').trim(), company: String(w?.company ?? '').trim(), period: String(w?.period ?? w?.year ?? '').trim() }))}
+          />
         </div>
       </div>
 

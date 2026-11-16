@@ -18,12 +18,13 @@ test('ค่าแปลกจากฟอร์ม/ฐาน กลับเป
 });
 
 test('ซ่อนเบอร์ = ไม่มีเบอร์/อีเมลในเรซูเม่ · หัวข้อที่ปิดไม่แสดง · ลำดับตามที่ตั้ง', () => {
-  const html = buildResumeHtml(SAMPLE_CANDIDATE, null, { showContacts: false, sections: ['work', 'education'], footerText: 'ส่งลูกค้า' });
+  const c = { ...SAMPLE_CANDIDATE, phone: '080-000-0000', email: 'sample@example.com', gender: 'หญิง' };
+  const html = buildResumeHtml(c, null, { showContacts: false, sections: ['work', 'education'], footerText: 'ส่งลูกค้า' });
   assert.ok(!html.includes('080-000-0000'));
   assert.ok(!html.includes('sample@example.com'));
   assert.ok(!html.includes('<h2>ข้อมูลส่วนตัว</h2>'));
   assert.ok(html.indexOf('ประสบการณ์ทำงาน') < html.indexOf('การศึกษา'));
-  assert.ok(html.includes('ส่งลูกค้า · นางสาวตัวอย่าง ใจดี'));
+  assert.ok(html.includes('ส่งลูกค้า · Watcharaporn Promwong'));
 });
 
 test('ข้อความจากผู้ใช้ถูก escape (ชื่อแบบฟอร์ม/ลายน้ำ/ข้อมูลผู้สมัคร)', () => {
@@ -33,12 +34,12 @@ test('ข้อความจากผู้ใช้ถูก escape (ชื�
 });
 
 test('แบบแถบขวา: ทักษะ/ภาษา/ข้อมูลส่วนตัวอยู่แถบขวา งานกับการศึกษาอยู่ซ้าย · ลายน้ำซ้ำเต็มหน้า', () => {
-  const html = buildResumeHtml(SAMPLE_CANDIDATE, null, { layout: 'profile', watermark: 'text', watermarkText: 'SO', watermarkTile: true });
+  const html = buildResumeHtml({ ...SAMPLE_CANDIDATE, gender: 'หญิง' }, null, { layout: 'profile', watermark: 'text', watermarkText: 'SO', watermarkTile: true });
   const side = html.slice(html.indexOf('<aside class="pf-side">'));
   const main = html.slice(html.indexOf('<main>'), html.indexOf('<aside class="pf-side">'));
-  assert.ok(side.includes('Microsoft Excel') && side.includes('เพศ: หญิง'));
+  assert.ok(side.includes('Coordination &amp; documentation') && side.includes('เพศ: หญิง'));
   assert.ok(main.includes('ประสบการณ์ทำงาน') && main.includes('การศึกษา'));
-  assert.ok(html.includes('เจ้าหน้าที่ธุรการ  |  แอดมิน'));
+  assert.ok(html.includes('Tourism Marketing  |  Travel Agent Relations  |  Customer Service'));
   assert.equal((html.match(/<span style="left:[\d.]+%;top:[\d.]+%">SO<\/span>/g) ?? []).length, 18);
 });
 
@@ -54,11 +55,33 @@ test('แบบที่บันทึกก่อนมีรูปลาย�
   assert.equal(normalizeTemplateSettings({ watermark: 'logo', watermarkImage: '' }).watermark, 'none', 'เลือกลายน้ำรูปแต่ไม่มีรูป = ไม่มีลายน้ำ');
 });
 
-test('แบบแถบขวา: หัวข้ออังกฤษ · ใต้ชื่อเป็นตำแหน่งงานล่าสุด แท็กเป็นตำแหน่งที่ต้องการ · ความเชี่ยวชาญ/จุดเด่นอยู่แถบขวา', () => {
+test('แบบแถบขวา: หัวข้ออังกฤษ · ใต้ชื่อเป็น headline (ไม่มี = ตำแหน่งงานล่าสุด) · กิจกรรม/ความเชี่ยวชาญ/จุดเด่นอยู่แถบขวา', () => {
   const html = buildResumeHtml(SAMPLE_CANDIDATE, null, { layout: 'profile', headingLang: 'en', sections: ['intro', 'work', 'education', 'skills'] });
-  for (const h of ['Profile', 'Work Experience', 'Education', 'Languages', 'Expertise', 'Strengths']) assert.ok(html.includes(`<h2>${h}</h2>`), h);
-  assert.ok(html.includes('<div class="pf-sub">เจ้าหน้าที่ธุรการ</div>'));
-  assert.ok(html.includes('Class of 2564'));
+  for (const h of ['Profile', 'Work Experience', 'Education', 'Languages', 'Activity', 'Expertise', 'Strengths']) assert.ok(html.includes(`<h2>${h}</h2>`), h);
+  assert.ok(html.includes('<div class="pf-sub">Tourism Marketing / Travel Agent Relations (Senior Officer)</div>'));
+  assert.ok(html.includes('Class of 2012'));
   const side = html.slice(html.indexOf('<aside class="pf-side">'));
-  assert.ok(side.indexOf('ทำงานเป็นทีม') < side.indexOf('Microsoft Excel'), 'Expertise (ทักษะทั่วไป) ก่อน Strengths (ทักษะเฉพาะทาง)');
+  // ลำดับตามรูปตัวอย่าง: Languages → Activity → Expertise → Strengths
+  const at = (x) => side.indexOf(x);
+  assert.ok(at('TOEIC score 805') < at('Cobra Gold 2018') && at('Cobra Gold 2018') < at('Leadership') && at('Leadership') < at('Customer &amp; guest service'));
+  const noHeadline = buildResumeHtml({ ...SAMPLE_CANDIDATE, headline: '', activities: [] }, null, { layout: 'profile', headingLang: 'th' });
+  assert.ok(noHeadline.includes('<div class="pf-sub">Travel Agent Relations / Tourism Marketing (Senior Officer)</div>'));
+  assert.ok(!noHeadline.includes('<h2>กิจกรรม</h2>'), 'ไม่มีกิจกรรม = ไม่มีหัวข้อ');
+  assert.ok(noHeadline.includes('<h2>ทักษะเฉพาะทาง</h2>'), 'หัวข้อไทยตามแบบ 12 พ.ย.');
+});
+
+test('ตัดให้จบหน้าเดียว: เอางานตามลำดับที่ติ๊กออก · ซ่อนรายละเอียดหน้าที่ · ไม่แก้ข้อมูลเดิม', async () => {
+  const { parseResumeTrim, trimResumeCandidate } = await import('../web/lib/resume-template.ts');
+  const trim = parseResumeTrim(new URLSearchParams('hide_work=6,1,1,x,-2,500&details=0'));
+  assert.deepEqual(trim, { hideWork: [6, 1], hideDetails: true });
+  const out = trimResumeCandidate(SAMPLE_CANDIDATE, trim);
+  assert.deepEqual(out.work_experience.map((w) => w.position), [
+    'Travel Agent Relations / Tourism Marketing (Senior Officer)', 'Administrator', 'Student Services and Housing Coordinator', 'Passenger Service Agent', 'English Program Academician',
+  ]);
+  assert.ok(out.work_experience.every((w) => !w.responsibilities));
+  assert.equal(SAMPLE_CANDIDATE.work_experience.length, 7, 'ข้อมูลเดิมไม่ถูกแก้');
+  assert.ok(SAMPLE_CANDIDATE.work_experience[0].responsibilities);
+  assert.equal(trimResumeCandidate(SAMPLE_CANDIDATE, parseResumeTrim(new URLSearchParams(''))), SAMPLE_CANDIDATE, 'ไม่ส่ง = ไม่ตัด');
+  const html = buildResumeHtml(out, null, { layout: 'profile' });
+  assert.ok(!html.includes('Waitress, Rooftop Bar') && !html.includes('Taking orders'));
 });
