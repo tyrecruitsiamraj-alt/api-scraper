@@ -945,9 +945,16 @@ export type FacebookQuotaSummary = {
   cap_default: number;
   /** เพดานสูงสุดของระบบ — ตั้งต่อบัญชีเกินนี้ไม่ได้ */
   cap_max: number;
-  /** รายบัญชี เรียงใช้เยอะสุดก่อน (ตัวเสี่ยงโดน block อยู่บนสุด) */
+  /** รายบัญชี: โพสต์ได้อยู่ (เหลือมากสุดก่อน) → เต็มแล้ว → พัก (กลับมาเร็วสุดก่อน) → เลิกใช้โพสต์ */
   list: FacebookAccountQuota[];
 };
+
+/** ลำดับกลุ่มในรายการโควต้า: 0 โพสต์ได้อยู่ · 1 เต็มแล้ว · 2 พัก · 3 เลิกใช้โพสต์ (เจ้าของ 16 พ.ย. 2569: บัญชีที่ใช้ได้อยู่บนสุด) */
+function quotaRank(a: FacebookAccountQuota): number {
+  if (a.retired) return 3;
+  if (a.paused) return 2;
+  return a.used_today >= a.cap ? 1 : 0;
+}
 
 export async function facebookQuotaSummary(): Promise<FacebookQuotaSummary | null> {
   try {
@@ -981,8 +988,7 @@ export async function facebookQuotaSummary(): Promise<FacebookQuotaSummary | nul
       .map((r) => {
         const age = r.age_days == null ? null : Number(r.age_days);
         return { ...r, cap: effectiveDailyCapFor(r, age), warming_up: needsWarmup(r, age) };
-      })
-      .sort((a, b) => Number(b.used_today) - Number(a.used_today) || a.label.localeCompare(b.label, 'th'));
+      });
     if (rows.length === 0) return null;
     const list: FacebookAccountQuota[] = rows.map((r) => ({
       id: r.id,
@@ -995,6 +1001,14 @@ export async function facebookQuotaSummary(): Promise<FacebookQuotaSummary | nul
       warming_up: r.warming_up,
       warmup_days: Number(r.warmup_days) || 0,
     }));
+    list.sort(
+      (a, b) =>
+        quotaRank(a) - quotaRank(b) ||
+        (quotaRank(a) === 0 ? b.cap - b.used_today - (a.cap - a.used_today) : 0) ||
+        (quotaRank(a) === 2 ? Date.parse(a.paused_until ?? '') - Date.parse(b.paused_until ?? '') : 0) ||
+        b.used_today - a.used_today ||
+        a.label.localeCompare(b.label, 'th'),
+    );
     // ค่าที่ตั้งไว้ (daily_cap) ที่พบบ่อยสุด — เป็นค่า prefill ของช่องปรับ cap
     // ไม่ใช้เพดานวันนี้ (หลังวอร์ม/สุ่ม) ไม่งั้นช่องขึ้น 2 แล้วกด "ใช้กับทุกบัญชี" จะลดบัญชีเก่าเหลือ 2 ไปด้วย
     const capCounts = new Map<number, number>();
