@@ -9,12 +9,15 @@
  *
  *   node autopost/scripts/recheck-jarvis-post-links.js           # ดูว่าจะส่งกี่แถว ไม่เขียนอะไร
  *   node autopost/scripts/recheck-jarvis-post-links.js --apply   # ส่งเข้าคิวจริง (บัญชีละ 1 รอบ · ข้ามบัญชีที่มีรอบค้าง)
+ *   ... --apply --users=fb_a,fb_b                                 # ส่งเฉพาะบัญชีที่ระบุ (บัญชีที่ถูกข้ามรอบก่อน — ไม่ส่งซ้ำบัญชีที่ส่งไปแล้ว)
  */
 require('dotenv').config();
 const db = require('../server/db');
 
 async function main() {
   const apply = process.argv.includes('--apply');
+  const usersArg = process.argv.find((a) => a.startsWith('--users='));
+  const onlyUsers = usersArg ? new Set(usersArg.slice('--users='.length).split(',').map((x) => x.trim()).filter(Boolean)) : null;
   const { rows } = await db.query(
     `SELECT p.id, p.user_id
        FROM post_logs p
@@ -26,8 +29,12 @@ async function main() {
       ORDER BY p.user_id, p.created_at`,
   );
   const byUser = new Map();
-  for (const r of rows) byUser.set(r.user_id, [...(byUser.get(r.user_id) || []), String(r.id)]);
-  console.log(`แถวที่ต้องตรวจ ${rows.length} แถว · ${byUser.size} บัญชี`);
+  for (const r of rows) {
+    if (onlyUsers && !onlyUsers.has(String(r.user_id))) continue;
+    byUser.set(r.user_id, [...(byUser.get(r.user_id) || []), String(r.id)]);
+  }
+  const total = [...byUser.values()].reduce((n, ids) => n + ids.length, 0);
+  console.log(`แถวที่ต้องตรวจ ${total} แถว · ${byUser.size} บัญชี`);
   if (!apply) {
     console.log('ยังไม่ได้ส่ง — ใส่ --apply เพื่อส่งเข้าคิว');
     return;
