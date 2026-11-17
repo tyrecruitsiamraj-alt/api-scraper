@@ -56,7 +56,13 @@ test('cannot tell when post or announcement has no apply link', () => {
 test('ตรวจลิงก์ย้อนหลัง: รอบเก็บคอมเมนต์เทียบลิงก์สมัคร · ของงานอื่น = ล้างลิงก์ ไม่เก็บคอมเมนต์ · หาใหม่ไม่หยิบโพสต์งานอื่น', () => {
   const fs = require('node:fs');
   const spec = fs.readFileSync(require.resolve('./collectComments.spec.ts'), 'utf8');
-  assert.match(spec, /postLinkVerdict\(postText, item\.own_apply_text\) === 'other'/);
+  assert.match(spec, /const verdict = groupPostLink\.postLinkVerdict\(postText, item\.own_apply_text\);/);
+  assert.match(spec, /if \(verdict === 'other'\) \{/);
+  // 17 พ.ย. 2569: ขยาย "ดูเพิ่มเติม" + อ่านลิงก์ในโพสต์ก่อนตัดสิน · ตัดสินไม่ได้ = จด link_unverified
+  assert.match(spec, /const postText = await readPostForVerdict\(active\);/);
+  assert.match(spec, /ดูเพิ่มเติม/);
+  assert.match(spec, /l\.facebook\.com/);
+  assert.match(spec, /kind: 'link_unverified'/);
   assert.match(spec, /clearWrongPostLink\(item\.post_log_id, item\.post_link\)/);
   assert.match(spec, /ownText: item\.own_apply_text/);
   const db = fs.readFileSync(require.resolve('../server/db.js'), 'utf8');

@@ -10,6 +10,8 @@
  *   node autopost/scripts/recheck-jarvis-post-links.js           # ดูว่าจะส่งกี่แถว ไม่เขียนอะไร
  *   node autopost/scripts/recheck-jarvis-post-links.js --apply   # ส่งเข้าคิวจริง (บัญชีละ 1 รอบ · ข้ามบัญชีที่มีรอบค้าง)
  *   ... --apply --users=fb_a,fb_b                                 # ส่งเฉพาะบัญชีที่ระบุ (บัญชีที่ถูกข้ามรอบก่อน — ไม่ส่งซ้ำบัญชีที่ส่งไปแล้ว)
+ *   ... --apply --approved                                        # เฉพาะโพสต์ที่อนุมัติแล้ว (โพสต์รออนุมัติยืนยันจากแท็บเนื้อหาของคุณแล้ว)
+ *       17 พ.ย. 2569 รอบแรกพลาดโพสต์ สวก. เพราะ Facebook พับข้อความหลัง "ดูเพิ่มเติม" — แก้ตัวอ่านแล้วรันใหม่ด้วยตัวนี้
  */
 require('dotenv').config();
 const db = require('../server/db');
@@ -17,6 +19,7 @@ const db = require('../server/db');
 async function main() {
   const apply = process.argv.includes('--apply');
   const usersArg = process.argv.find((a) => a.startsWith('--users='));
+  const approvedOnly = process.argv.includes('--approved');
   const onlyUsers = usersArg ? new Set(usersArg.slice('--users='.length).split(',').map((x) => x.trim()).filter(Boolean)) : null;
   const { rows } = await db.query(
     `SELECT p.id, p.user_id
@@ -24,9 +27,11 @@ async function main() {
       WHERE p.job_id LIKE 'jv-%'
         AND p.post_link IS NOT NULL AND TRIM(p.post_link) <> ''
         AND p.user_id IS NOT NULL
+        AND ($1::boolean = false OR p.post_status = 'อนุมัติเเล้ว')
         AND EXISTS (SELECT 1 FROM post_logs e
                      WHERE e.group_id = p.group_id AND e.poster_name = p.poster_name AND e.created_at < p.created_at)
       ORDER BY p.user_id, p.created_at`,
+    [approvedOnly],
   );
   const byUser = new Map();
   for (const r of rows) {

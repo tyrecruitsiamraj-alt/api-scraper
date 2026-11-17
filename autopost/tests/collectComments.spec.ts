@@ -17,6 +17,7 @@ import {
 } from '../src/helpers';
 import { readContentTab } from '../src/helpers/contentTabs';
 import type { ContentTabRead } from '../src/helpers/contentTabs';
+import type { Page } from '@playwright/test';
 
 /* eslint-disable @typescript-eslint/no-var-requires */
 // ผู้สนใจจากคอมเมนต์: เขียนลง DB ตรง (worker มี DATABASE_URL) — ดู server/comment-leads.js
@@ -30,6 +31,34 @@ const groupPostLink = require('../server/group-post-link') as {
  * เช็กแท็บ "เนื้อหาของคุณ" ได้กี่กลุ่มต่อรอบ (เจ้าของ 12 พ.ย. 2569: อยากรู้ปฏิเสธแล้ว/ลบออกแล้ว แต่ไม่ให้บัญชีโดนจำกัดเพิ่ม)
  * พ่วงไปกับรอบเก็บคอมเมนต์ที่ล็อกอินอยู่แล้ว ไม่เปิดรอบ Facebook ใหม่ · 0 = ปิด
  */
+/**
+ * ข้อความโพสต์ไว้ตัดสินว่าเป็นของงานนี้ไหม (`postLinkVerdict`)
+ * 17 พ.ย. 2569 ตรวจย้อนหลังพลาดโพสต์ สวก. (OPL6911041): Facebook พับประกาศยาวไว้หลัง "ดูเพิ่มเติม" ลิงก์สมัครท้ายโพสต์จึงไม่อยู่ในข้อความ
+ * → ตัดสินไม่ได้ (unknown) แล้วปล่อยผ่าน · ตอนนี้กด "ดูเพิ่มเติม" ในโพสต์ก่อน (กดแค่ขยายข้อความ ไม่ไปหน้าอื่น)
+ * และอ่านลิงก์ในโพสต์ด้วย (Facebook ห่อเป็น l.facebook.com/l.php?u=…) — ได้ลิงก์สมัครแม้ข้อความยังถูกตัด
+ */
+async function readPostForVerdict(page: Page): Promise<string> {
+  const article = page.locator('[role="main"] [role="article"]').first();
+  const more = article.locator('div[role="button"]:text-is("ดูเพิ่มเติม"), div[role="button"]:text-is("See more")').first();
+  if (await more.isVisible({ timeout: 1500 }).catch(() => false)) await more.click({ timeout: 3000 }).catch(() => {});
+  const text =
+    (await article.innerText({ timeout: 5000 }).catch(() => '')) ||
+    (await page.locator('[role="main"]').first().innerText({ timeout: 5000 }).catch(() => ''));
+  const hrefs = await article
+    .locator('a[href]')
+    .evaluateAll((as) => as.map((a) => a.getAttribute('href') || ''))
+    .catch(() => [] as string[]);
+  const links = hrefs.map((h) => {
+    try {
+      const u = new URL(h, 'https://www.facebook.com');
+      return u.hostname.startsWith('l.facebook.com') ? u.searchParams.get('u') || '' : h;
+    } catch {
+      return h;
+    }
+  });
+  return [text, ...links].filter(Boolean).join('\n');
+}
+
 const CONTENT_CHECK_MAX_GROUPS = Math.max(0, Math.min(20, Number(process.env.CONTENT_CHECK_MAX_GROUPS ?? 5)));
 const TAB_LABEL: Record<string, string> = { posted: 'เผยแพร่แล้ว', pending: 'รอดำเนินการ', declined: 'ปฏิเสธแล้ว', removed: 'ลบออกแล้ว' };
 /** หน้าโพสต์ที่เปิดไม่ได้แล้ว (โพสต์ของบัญชีเอง = ถูกลบหรือถูกซ่อน) */
@@ -284,10 +313,18 @@ test('collectComments', async ({ page }) => {
       });
       // ลิงก์ที่บันทึกไว้ชี้โพสต์ของงานอื่น (เดิมตอนโพสต์หาไม่เจอแล้วหยิบโพสต์บนสุด) → ล้างลิงก์ ไม่เก็บคอมเมนต์ของโพสต์ผิด
       if (item.own_apply_text && leadsDb) {
-        const postText =
-          (await active.locator('[role="main"] [role="article"]').first().innerText({ timeout: 5000 }).catch(() => '')) ||
-          (await active.locator('[role="main"]').first().innerText({ timeout: 5000 }).catch(() => ''));
-        if (groupPostLink.postLinkVerdict(postText, item.own_apply_text) === 'other') {
+        const postText = await readPostForVerdict(active);
+        const verdict = groupPostLink.postLinkVerdict(postText, item.own_apply_text);
+        // ตัดสินไม่ได้ = จดไว้ให้นับได้ (เดิมเงียบ — ตรวจย้อนหลังบอก 0 ทั้งที่มีโพสต์ที่อ่านไม่ออก)
+        if (verdict === 'unknown') {
+          await runLog({
+            level: 'info',
+            message: `[${idx}/${plan.posts.length}] ตรวจไม่ได้ว่าลิงก์โพสต์เป็นของงานนี้ไหม (ไม่เห็นลิงก์สมัครในโพสต์)`,
+            user_id: user.id,
+            meta: { kind: 'link_unverified', post_log_id: item.post_log_id, group_id: item.group_id, post_link: item.post_link, text_len: postText.length },
+          });
+        }
+        if (verdict === 'other') {
           const cleared = await leadsDb.clearWrongPostLink(item.post_log_id, item.post_link).catch(() => false);
           await runLog({
             level: 'warn',
