@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { groupSlugFromUrl, groupAliases, postIdForGroup, canonicalPostLink } = require('../server/group-post-link');
+const { groupSlugFromUrl, groupAliases, postIdForGroup, canonicalPostLink, applyPaths, postLinkVerdict } = require('../server/group-post-link');
 
 const G = '1486494998623206';
 
@@ -31,4 +31,24 @@ test('stored link is always the numbered form', () => {
     canonicalPostLink('/groups/hangankhabrot/posts/2172970066642359/?x=1', G, [G, 'hangankhabrot']),
     `https://www.facebook.com/groups/${G}/posts/2172970066642359/`,
   );
+});
+
+// 17 พ.ย. 2569: หาโพสต์ใหม่ไม่เจอแล้วหยิบโพสต์บนสุด ได้ลิงก์โพสต์งานนายไทย 4 พ.ย. ให้ใบ สวก. OPL6911041
+const SVK = 'รับสมัครพนักงานขับรถ (หน่วยงาน สวก.)\n📍 ขับรถส่วนกลาง\nหรือสมัครงานได้ที่: https://jarvis.siamrajathanee.dev/apply/p/a1b2c3d\n';
+const NAITHAI_POST = 'Diermeier Debi · 4 พฤศจิกายน เวลา 22:16 น.\nรับสมัครพนักงานขับรถ นายไทย (หน่วยงาน หลักทรัพย์ภัทร)\nหรือสมัครงานได้ที่:https://jarvis.siamrajathanee.dev/apply/p/q8tbrxr\nยินดีตอบคำถามครับ';
+
+test('post of another job (different apply link) is never ours', () => {
+  assert.equal(postLinkVerdict(NAITHAI_POST, SVK), 'other');
+});
+
+test('post with this job apply link is ours — also when Facebook cuts the link with …', () => {
+  assert.equal(postLinkVerdict('Diermeier Debi · 3 นาที\nhttps://jarvis.siamrajathanee.dev/apply/p/a1b2c3d', SVK), 'ours');
+  assert.equal(postLinkVerdict('ดูได้ที่ jarvis.siamrajathanee.dev/apply/p/a1b2c…', SVK), 'ours');
+  assert.equal(postLinkVerdict('https://jarvis.siamrajathanee.dev/apply/p/A1B2C3D/', SVK), 'ours');
+});
+
+test('cannot tell when post or announcement has no apply link', () => {
+  assert.equal(postLinkVerdict('รับสมัครพนักงานขับรถ โทร 08x', SVK), 'unknown');
+  assert.equal(postLinkVerdict(NAITHAI_POST, 'รับสมัครพนักงานขับรถ ไม่มีลิงก์'), 'unknown');
+  assert.deepEqual([...applyPaths('a /apply/ b https://x.dev/apply/p/zz9/ c')], ['/apply/p/zz9']);
 });

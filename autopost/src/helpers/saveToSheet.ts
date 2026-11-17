@@ -22,7 +22,13 @@ const groupLink = require('../../server/group-post-link') as {
   groupAliases: (gID: string, currentUrl: string) => string[];
   postIdForGroup: (href: string, aliases: string[]) => string | null;
   canonicalPostLink: (href: string, gID: string, aliases: string[]) => string | null;
+  postLinkVerdict: (postText: string, ourText: string) => 'ours' | 'other' | 'unknown';
 };
+
+/** ข้อความที่ใช้เทียบว่าโพสต์เป็นของงานนี้ — ข้อความประกาศ + ลิงก์สมัคร (ตอนโพสต์อาจต่อท้ายลิงก์ให้) */
+function ourPostText(postItem: PostItem): string {
+  return `${String((postItem as { caption?: string }).caption || '')}\n${String(postItem.apply_link || '')}`;
+}
 
 /**
  * กลุ่มที่กำลังหาลิงก์: เลขกลุ่ม + ชื่อกลุ่มจาก URL (กลุ่มที่แอดมินตั้งชื่อ ลิงก์โพสต์จะเป็น /groups/<ชื่อ>/posts/…)
@@ -221,7 +227,7 @@ async function ensureNoDialogBlockingNavigation(page: Page): Promise<void> {
 /**
  * ดึงลิงก์จากฟีดกลุ่ม (fallback หลัง my_posted / my_pending ไม่เจอ)
  */
-async function tryExtractLinkFromGroupFeed(page: Page, posterName: string, gID: string): Promise<string | null> {
+async function tryExtractLinkFromGroupFeed(page: Page, posterName: string, gID: string, ourText = ''): Promise<string | null> {
   if (!posterName.trim()) return null;
   const g = groupRefOnPage(page, gID);
   try {
@@ -239,8 +245,12 @@ async function tryExtractLinkFromGroupFeed(page: Page, posterName: string, gID: 
     const maxArt = Math.min(ac, 14);
     for (let i = 0; i < maxArt; i++) {
       const art = articles.nth(i);
-      const snippet = (await art.innerText().catch(() => '')).slice(0, 900);
+      const fullText = await art.innerText().catch(() => '');
+      const snippet = fullText.slice(0, 900);
       if (!snippet.includes(posterName)) continue;
+      // โพสต์ของบัญชีนี้แต่ลิงก์สมัครเป็นของงานอื่น = โพสต์เก่า ห้ามหยิบ
+      const verdict = groupLink.postLinkVerdict(fullText, ourText);
+      if (verdict === 'other') continue;
 
       const links = art.locator('a[href*="/posts/"], a[href*="/permalink/"], a[href*="story_fbid"]');
       const lc = await links.count();
@@ -257,7 +267,8 @@ async function tryExtractLinkFromGroupFeed(page: Page, posterName: string, gID: 
         if (groupLinkHere && RECENT_LABEL_RE.test(blob)) return groupLinkHere;
       }
 
-      if (i < 4) {
+      // ไม่มีป้ายเวลาว่าเพิ่งโพสต์ หยิบได้เฉพาะโพสต์ที่มีลิงก์สมัครของงานนี้ — ไม่เดาโพสต์บนสุดแล้ว
+      if (i < 4 && verdict === 'ours') {
         const firstGroupLink = await findGroupPostPermalinkInArticle(art, g);
         if (firstGroupLink) return firstGroupLink;
       }
@@ -301,6 +312,7 @@ async function scanMyContentCurrentPage(
   const articles = page.locator('div[role="article"]').filter({ hasText: posterName });
   const count = Math.min(await articles.count(), 20);
   const caption = String((postItem as { caption?: string }).caption || '');
+  const ourText = ourPostText(postItem);
   const g = groupRefOnPage(page, gID);
 
   // เก็บทุกโพสต์ของเราที่เพิ่งโพสต์ แล้วเลือกตัวที่ข้อความตรงกับประกาศมากสุด
@@ -310,13 +322,25 @@ async function scanMyContentCurrentPage(
     const article = articles.nth(i);
     const link = await recentPostLinkInArticle(article, g);
     if (!link || knownLinks.has(normLink(link)) || candidates.some((c) => c.link === link)) continue;
-    const score = caption ? captionMatchScore(await article.innerText().catch(() => ''), caption) : 0;
+    const text = await article.innerText().catch(() => '');
+    const verdict = groupLink.postLinkVerdict(text, ourText);
+    if (verdict === 'other') continue;
+    const score = (verdict === 'ours' ? 100 : 0) + (caption ? captionMatchScore(text, caption) : 0);
     candidates.push({ link, score, order: i });
   }
 
-  if (candidates.length === 0 && count > 0) {
-    const quick = await findGroupPostPermalinkInArticle(articles.nth(0), g);
-    if (quick && !knownLinks.has(normLink(quick))) candidates.push({ link: quick, score: 0, order: 0 });
+  // ไม่มีโพสต์ที่มีป้ายเวลาว่าเพิ่งโพสต์: หยิบได้เฉพาะโพสต์ที่มีลิงก์สมัครของงานนี้
+  // เดิมหยิบโพสต์บนสุดเลย ได้ลิงก์โพสต์เก่าของงานอื่น (OPL6911041 ได้โพสต์นายไทย 4 พ.ย. · 17 พ.ย. 2569)
+  if (candidates.length === 0) {
+    for (let i = 0; i < Math.min(count, 4); i++) {
+      const article = articles.nth(i);
+      if (groupLink.postLinkVerdict(await article.innerText().catch(() => ''), ourText) !== 'ours') continue;
+      const link = await findGroupPostPermalinkInArticle(article, g);
+      if (link && !knownLinks.has(normLink(link))) {
+        candidates.push({ link, score: 100, order: i });
+        break;
+      }
+    }
   }
 
   candidates.sort((a, b) => b.score - a.score || a.order - b.order);
@@ -395,7 +419,7 @@ export async function saveToSheet(
     await ensureNoDialogBlockingNavigation(page);
     await page.goto(`https://www.facebook.com/groups/${gID}`, { waitUntil: 'domcontentloaded', timeout: 60000 });
     await page.waitForTimeout(2500);
-    const fromFeed = await tryExtractLinkFromGroupFeed(page, posterName, gID);
+    const fromFeed = await tryExtractLinkFromGroupFeed(page, posterName, gID, ourPostText(postItem));
     if (fromFeed) {
       await pushPostRecord(
         request,
