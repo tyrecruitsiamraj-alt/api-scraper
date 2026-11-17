@@ -17,6 +17,7 @@ import { renderPoster } from '../../src/core/poster.js';
 import { applyTrustedPosterFacts } from '../../src/core/campaign-facts.js';
 import { postCaptionIssues } from '../../src/core/post-caption-check.js';
 import { groupLinkIssues, parseGroupLinks } from '../../autopost/server/group-apply-link.js';
+import { imageRefFor, isImageOnly, jarvisImageUrl, postModeIssue } from '../../autopost/server/jarvis-post-image.js';
 import { normalizePosterLayout, normalizePosterStandard, posterFieldsForQuality, posterStandardFromFields, POSTER_TEMPLATE_ID, POSTER_TEMPLATE_VERSION, withPosterTemplate, buildPosterSvg } from '../../src/core/poster-template.js';
 import type { PosterLayout, PosterStandard } from '../../src/core/poster-template.js';
 import { evaluateResumeQualification } from '../../src/core/resume-qualification.js';
@@ -3549,6 +3550,8 @@ export type JarvisPostOrder = {
   /** ลิงก์สมัครแยกกลุ่มจาก Jarvis (job_snapshot.group_links) — ว่าง = ลิงก์เดียวทุกกลุ่มแบบเดิม */
   group_links: JarvisGroupLink[];
   post_mode: string;
+  /** ลิงก์รูปจาก Jarvis (job_snapshot.image_url) — แบบ "ข้อความ + รูป" เท่านั้น · null = ไม่มีรูป */
+  image_url: string | null;
   group_names: string[];
   issues: string[];
   account_id: string | null;
@@ -3844,14 +3847,18 @@ export async function listJarvisPostOrders(opts: { requestNos?: string[]; skipSy
   const buildOrder = async (row: (typeof rows)[number]): Promise<JarvisPostOrder> => {
     const s = row.snapshot ?? {};
     const groupIds = Array.isArray(s.group_ids) ? s.group_ids.map(String) : [];
-    const caption = String(s.caption ?? '');
     const postMode = String(s.post_mode ?? 'caption_only');
+    // "รูปอย่างเดียว" (17 พ.ย. 2569) = โพสต์แค่รูป ไม่มีข้อความ/ลิงก์สมัคร
+    const caption = isImageOnly(postMode) ? '' : String(s.caption ?? '');
     const jobId = jarvisPostJobId(row.request_no);
-    const issues = postCaptionIssues(caption);
-    if (postMode !== 'caption_only') issues.push(`ชนิด "${postModeLabel(postMode)}" ยังต้องรอระบบแนบรูป`);
+    const issues = isImageOnly(postMode) ? [] : postCaptionIssues(caption);
+    // รูปจาก Jarvis (17 พ.ย. 2569) — "ข้อความ + รูป" ต้องมีลิงก์รูปที่ใช้ได้ · "รูปอย่างเดียว" ยังไม่รับ
+    const imageUrl = jarvisImageUrl(s.image_url);
+    const modeIssue = postModeIssue(postMode, imageUrl);
+    if (modeIssue) issues.push(modeIssue);
     // ลิงก์สมัครแยกกลุ่ม: ข้อความต้องยังมีลิงก์เดิม ไม่งั้น worker แทนลิงก์ของกลุ่มไม่ได้
-    const applyLink = typeof s.apply_link === 'string' && s.apply_link.trim() ? s.apply_link.trim() : null;
-    const groupLinks = parseGroupLinks(s.group_links);
+    const applyLink = !isImageOnly(postMode) && typeof s.apply_link === 'string' && s.apply_link.trim() ? s.apply_link.trim() : null;
+    const groupLinks = isImageOnly(postMode) ? [] : parseGroupLinks(s.group_links);
     issues.push(...groupLinkIssues(caption, applyLink, groupLinks));
     if (!groupIds.length) issues.push('ยังไม่ได้เลือกกลุ่มใน Jarvis');
     const requestedAccountId = typeof s.account_id === 'string' && s.account_id.trim() ? s.account_id.trim() : null;
@@ -3989,6 +3996,7 @@ export async function listJarvisPostOrders(opts: { requestNos?: string[]; skipSy
       apply_link: applyLink,
       group_links: groupLinks,
       post_mode: postMode,
+      image_url: imageUrl,
       group_names: groupIds.map((id) => groupNames.get(id) ?? id),
       issues,
       account_id: account?.id ?? null,
@@ -4033,8 +4041,9 @@ export async function repostJarvisOrder(requestNo: string, groupIds: string[], r
   if (!order) throw new Error(`ไม่พบคำสั่งโพสต์ ${requestNo}`);
   if (order.jarvis_status === 'pending') throw new Error('ใบนี้ยังไม่เคยโพสต์ ใช้ปุ่มโพสต์ปกติก่อน');
   if (order.queue_status === 'queued' || order.queue_status === 'running') throw new Error('ใบนี้มีรอบโพสต์รอคิวหรือกำลังโพสต์อยู่');
-  const captionIssues = postCaptionIssues(order.caption);
-  if (order.post_mode !== 'caption_only') captionIssues.push(`ชนิด "${postModeLabel(order.post_mode)}" ยังต้องรอระบบแนบรูป`);
+  const captionIssues = isImageOnly(order.post_mode) ? [] : postCaptionIssues(order.caption);
+  const modeIssue = postModeIssue(order.post_mode, order.image_url);
+  if (modeIssue) captionIssues.push(modeIssue);
   if (captionIssues.length) throw new Error(`ยังโพสต์ไม่ได้: ${captionIssues.join(', ')}`);
 
   const wanted = [...new Set(groupIds.map(String).filter(Boolean))];
@@ -4078,10 +4087,11 @@ export async function repostJarvisOrder(requestNo: string, groupIds: string[], r
     // บัญชีที่มีงานอยู่แล้ว ไม่ปฏิเสธ — งานใหม่ต่อคิว worker รับทีละงานต่อบัญชีเอง (ล็อกต่อบัญชีใน claim)
     // รอบโพสต์ซ้ำใช้ลิงก์แยกกลุ่มชุดล่าสุดจาก Jarvis ด้วย (worker แทนลิงก์ตอนโพสต์ — autopost/server/group-apply-link.js)
     await client.query(
-      `INSERT INTO ${AP}.jobs (id, title, owner, company, caption, apply_link, group_links, status)
-       VALUES ($1, $2, 'SO Recruitment', 'SO Recruitment', $3, $4, $5::jsonb, 'pending')
-       ON CONFLICT (id) DO UPDATE SET caption = EXCLUDED.caption, apply_link = EXCLUDED.apply_link, group_links = EXCLUDED.group_links`,
-      [jobId, `${order.position} · ${requestNo}`, order.caption, order.apply_link, order.group_links.length ? JSON.stringify(order.group_links) : null],
+      `INSERT INTO ${AP}.jobs (id, title, owner, company, caption, apply_link, group_links, status, image_ref)
+       VALUES ($1, $2, 'SO Recruitment', 'SO Recruitment', $3, $4, $5::jsonb, 'pending', $6)
+       ON CONFLICT (id) DO UPDATE SET caption = EXCLUDED.caption, apply_link = EXCLUDED.apply_link, group_links = EXCLUDED.group_links,
+         image_ref = EXCLUDED.image_ref`,
+      [jobId, `${order.position} · ${requestNo}`, order.caption, order.apply_link, order.group_links.length ? JSON.stringify(order.group_links) : null, imageRefFor(order.post_mode, order.image_url)],
     );
     const prior = await client.query<{ n: number }>(
       `SELECT count(*)::int AS n FROM ${AP}.assignments WHERE id = $1 OR id LIKE $1 || '-r%'`,
@@ -4177,11 +4187,11 @@ export async function postJarvisOrder(requestNo: string, requestedBy: string | n
     // ลิงก์สมัครแยกกลุ่ม (apply_link เดิม + group_links) เก็บไว้ที่งาน worker แทนลิงก์ตอนโพสต์ลงแต่ละกลุ่ม
     const groupLinks = parseGroupLinks(snapshot.rows[0].group_links);
     await client.query(
-      `INSERT INTO ${AP}.jobs (id, title, owner, company, caption, apply_link, group_links, status)
-       VALUES ($1, $2, 'SO Recruitment', 'SO Recruitment', $3, $4, $5::jsonb, 'pending')
+      `INSERT INTO ${AP}.jobs (id, title, owner, company, caption, apply_link, group_links, status, image_ref)
+       VALUES ($1, $2, 'SO Recruitment', 'SO Recruitment', $3, $4, $5::jsonb, 'pending', $6)
        ON CONFLICT (id) DO UPDATE SET caption = EXCLUDED.caption, title = EXCLUDED.title,
-         apply_link = EXCLUDED.apply_link, group_links = EXCLUDED.group_links`,
-      [jobId, `${order.position} · ${requestNo}`, order.caption, snapshot.rows[0].apply_link, groupLinks.length ? JSON.stringify(groupLinks) : null],
+         apply_link = EXCLUDED.apply_link, group_links = EXCLUDED.group_links, image_ref = EXCLUDED.image_ref`,
+      [jobId, `${order.position} · ${requestNo}`, order.caption, isImageOnly(order.post_mode) ? null : snapshot.rows[0].apply_link, groupLinks.length && !isImageOnly(order.post_mode) ? JSON.stringify(groupLinks) : null, imageRefFor(order.post_mode, order.image_url)],
     );
     const prior = await client.query<{ n: number }>(
       `SELECT count(*)::int AS n FROM ${AP}.assignments WHERE id = $1 OR id LIKE $1 || '-r%'`,

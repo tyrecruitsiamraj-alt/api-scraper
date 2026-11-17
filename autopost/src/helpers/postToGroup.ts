@@ -572,7 +572,8 @@ export async function postToGroup(
 
     await focusComposerSafely(page, composerDialog, captionEditor, userLabel);
     // คัดลอกแล้ววางแบบคน (10 พ.ย. 2569) — วางไม่ได้หรือวางแล้วไม่ตรง ค่อยพิมพ์ทีละบรรทัดแบบเดิม
-    if (!(await pasteCaption(page, captionEditor, fullCaption, userLabel))) {
+    // โพสต์รูปอย่างเดียว (ใบสั่ง Jarvis "รูปอย่างเดียว" · 17 พ.ย. 2569) = ไม่พิมพ์อะไรเลย
+    if (fullCaption.trim() && !(await pasteCaption(page, captionEditor, fullCaption, userLabel))) {
       console.log(`✍️ [${userLabel}] กำลังพิมพ์ Caption ใน dialog โพสต์...`);
       await focusComposerSafely(page, composerDialog, captionEditor, userLabel);
       const lines = fullCaption.split('\n');
