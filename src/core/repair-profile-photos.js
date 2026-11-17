@@ -9,7 +9,7 @@
  */
 import { resolveProvider } from '../connectors/registry.js';
 import { sleep } from '../config.js';
-import { isRejectedProfileUrl } from './profile-photo.js';
+import { isRejectedProfileUrl, PLACEHOLDER_PHOTO_SHA256 } from './profile-photo.js';
 import {
   listConnectors,
   saveAsset,
@@ -22,6 +22,8 @@ const PLACEHOLDER_URL_SQL = `(
   OR COALESCE(a.source_url, '') ~* 'default[-_]?profile|no[-_]?photo|no[-_]?image|avatar[-_]?default|placeholder|anonymous'
   OR COALESCE(a.source_url, '') ~* '/logo|/favicon|employer[_-]?login'
   OR COALESCE(a.source_url, '') ~* '^data:'
+  OR COALESCE(a.source_url, '') ~* '/assets/template/|default_user|mem_prof_pic|protected_th_(men|women)'
+  OR COALESCE(a.sha256, '') IN (${[...PLACEHOLDER_PHOTO_SHA256].map((h) => `'${h}'`).join(', ')})
 )`;
 
 const NEED_PHOTO_SQL = `

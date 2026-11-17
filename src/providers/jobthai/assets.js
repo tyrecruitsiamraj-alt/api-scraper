@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { isPlaceholderPhotoHash } from '../../core/profile-photo.js';
 import { BASE, fetchAsset } from './client.js';
 import { externalId } from './parser.js';
 
@@ -34,14 +35,16 @@ export async function collectAssetsForDb(request, record, _options = {}) {
   try {
     const { buffer, contentType } = await fetchAsset(request, url, record.source_url);
     // Real JobThai photos are larger; tiny buffers are empty/gender silhouettes.
-    if (!buffer || buffer.length < 2_048) {
+    // เงาคน/"ปกปิดโดยผู้สมัคร" ใหญ่กว่า 2KB (3–9KB) จึงเทียบไบต์กับรูปแทนที่รู้จักด้วย
+    const hash = buffer ? sha256(buffer) : '';
+    if (!buffer || buffer.length < 2_048 || isPlaceholderPhotoHash(hash)) {
       record.profile_image_url = '';
       return [];
     }
     const { ext, mime } = imageExt(buffer, contentType);
     return [{
       kind: 'profile', title: 'profile', source_url: url,
-      file_type: ext, mime, byte_size: buffer.length, sha256: sha256(buffer),
+      file_type: ext, mime, byte_size: buffer.length, sha256: hash,
       content: buffer, download_status: 'success',
     }];
   } catch (e) {

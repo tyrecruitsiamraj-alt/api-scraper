@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { extname, join } from 'node:path';
-import { isRejectedProfileUrl } from '../../core/profile-photo.js';
+import { isPlaceholderPhotoHash, isRejectedProfileUrl } from '../../core/profile-photo.js';
 import { fetchAsset } from './client.js';
 
 const sha256 = (buf) => createHash('sha256').update(buf).digest('hex');
@@ -28,10 +28,12 @@ export async function collectAssetsForDb(request, record, options = {}) {
       if (!insp.valid) throw new Error(insp.kind === 'html' ? 'html_instead_of_image' : `invalid_image:${insp.kind}`);
       if (!['jpeg', 'png', 'gif', 'webp'].includes(insp.kind)) throw new Error(`not_image:${insp.kind}`);
       const ext = insp.ext.replace('.', '');
+      const hash = sha256(buffer);
+      if (isPlaceholderPhotoHash(hash)) throw new Error('placeholder_profile_image');
       assets.push({
         kind: 'profile', title: 'profile', source_url: url,
         file_type: ext, mime: MIME[insp.kind] || contentType || '', byte_size: buffer.length,
-        sha256: sha256(buffer), content: buffer, download_status: 'success',
+        sha256: hash, content: buffer, download_status: 'success',
       });
     } catch (e) {
       assets.push({ kind: 'profile', title: 'profile', source_url: record.profile_image_url, download_status: `error:${e.message}` });
