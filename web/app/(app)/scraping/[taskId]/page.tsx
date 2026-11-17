@@ -19,7 +19,7 @@ import { AutoRefresh } from '@/components/AutoRefresh';
 import { ScrapQueueKick } from '@/components/scrap/ScrapQueueKick';
 import { ScrapStageStepper } from '@/components/scrap/ScrapStageStepper';
 import { ScrapStatusBadge } from '@/components/scrap/ScrapStatusBadge';
-import { AdjacentPlanPanel, TaskApproveForm, TaskCriteriaEditor, TaskManageActions, TaskRunForm } from '../TaskList';
+import { AdjacentPlanPanel, TaskCriteriaEditor, TaskManageActions, TaskRunForm } from '../TaskList';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import {
@@ -87,7 +87,6 @@ export default async function ScrapeTaskDetailPage(
   const runDisabled = busy || !task.enabled || alreadyComplete || !task.connector_available;
   const humanError = humanizeOperatorError(task.last_error);
   const criteria = criteriaEntries(task.criteria);
-  const needsApproval = (status === 'done' || status === 'partial') && task.review_status === 'pending';
 
   const lastProgressAt = task.last_progress_at ? new Date(task.last_progress_at).getTime() : null;
   const staleMin = lastProgressAt ? Math.floor((Date.now() - lastProgressAt) / 60000) : 0;
@@ -129,10 +128,7 @@ export default async function ScrapeTaskDetailPage(
           <p className="text-sm leading-relaxed text-muted-foreground">{meta.join(' · ')}</p>
         </div>
         <div className="flex flex-wrap gap-2">
-          {needsApproval && <TaskApproveForm taskId={task.id} />}
-          {(!needsApproval || status === 'partial') && (
-            <TaskRunForm task={task} disabled={runDisabled} alreadyComplete={alreadyComplete} />
-          )}
+          <TaskRunForm task={task} disabled={runDisabled} alreadyComplete={alreadyComplete} />
           <Button variant="outline" asChild>
             <Link href={`/candidates/jobs/${task.id}`}>
               <UsersIcon data-icon="inline-start" />

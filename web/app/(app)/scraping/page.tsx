@@ -25,18 +25,17 @@ export const dynamic = 'force-dynamic';
 
 type TabKey = ScrapTaskGroup | 'all';
 
-const TAB_ORDER: TabKey[] = ['working', 'review', 'attention', 'done', 'idle', 'all'];
+const TAB_ORDER: TabKey[] = ['working', 'attention', 'done', 'idle', 'all'];
 
 const EMPTY_TEXT: Record<TabKey, string> = {
   working: 'ไม่มีงานที่กำลังทำ',
-  review: 'ไม่มีงานที่รอตรวจรับ',
   attention: 'ไม่มีงานที่ติดปัญหา',
   done: 'ยังไม่มีงานที่เสร็จ',
   idle: 'ไม่มีงานที่บันทึกไว้แต่ยังไม่เริ่ม',
   all: 'ยังไม่มีงาน Scrap',
 };
 
-export default async function ScrapingPage(props: { searchParams?: Promise<{ notice?: string; by?: string }> }) {
+export default async function ScrapingPage(props: { searchParams?: Promise<{ notice?: string; by?: string; q?: string }> }) {
   const searchParams = await props.searchParams;
   const [tasks, requests, connectors] = await Promise.all([
     listTasks(),
@@ -57,14 +56,19 @@ export default async function ScrapingPage(props: { searchParams?: Promise<{ not
     .map(([name, count]) => ({ name, count }))
     .sort((a, b) => a.name.localeCompare(b.name, 'th'));
   const unknownCount = allRows.filter((r) => !r.requestedBy).length;
-  const rows = !by
+  const byRows = !by
     ? allRows
     : by === UNKNOWN_REQUESTER
       ? allRows.filter((r) => !r.requestedBy)
       : allRows.filter((r) => r.requestedBy === by);
+  // ค้นหาใบงาน: เลขใบขอ ชื่องาน (มีตำแหน่ง) หรือเว็บ/บัญชีที่ใช้ค้น ไม่สนตัวพิมพ์เล็กใหญ่และช่องว่าง
+  const search = typeof searchParams?.q === 'string' ? searchParams.q.trim() : '';
+  const needle = search.toLowerCase().replace(/\s+/g, '');
+  const rows = !needle
+    ? byRows
+    : byRows.filter((r) => [r.requestNo, r.title, r.source].some((v) => String(v ?? '').toLowerCase().replace(/\s+/g, '').includes(needle)));
   const byTab: Record<TabKey, ScrapTaskRowData[]> = {
     working: rows.filter((r) => r.stage.group === 'working'),
-    review: rows.filter((r) => r.stage.group === 'review'),
     attention: rows.filter((r) => r.stage.group === 'attention'),
     done: rows.filter((r) => r.stage.group === 'done'),
     idle: rows.filter((r) => r.stage.group === 'idle'),
@@ -72,9 +76,8 @@ export default async function ScrapingPage(props: { searchParams?: Promise<{ not
   };
   const defaultTab: TabKey =
     byTab.attention.length > 0 ? 'attention'
-      : byTab.review.length > 0 ? 'review'
-        : byTab.working.length > 0 ? 'working'
-          : 'all';
+      : byTab.working.length > 0 ? 'working'
+        : 'all';
 
   const anyBusy = tasks.some((t) => t.status === 'queued' || t.status === 'running');
   const anyQueued = tasks.some((t) => t.status === 'queued');
@@ -137,7 +140,7 @@ export default async function ScrapingPage(props: { searchParams?: Promise<{ not
 
       <section className="flex flex-col gap-3" aria-labelledby="scrap-tasks">
         <h2 id="scrap-tasks" className="text-base font-semibold">งานค้นหา</h2>
-        <ScrapRequesterFilter value={by} options={requesterOptions} unknownCount={unknownCount} />
+        <ScrapRequesterFilter value={by} query={search} options={requesterOptions} unknownCount={unknownCount} />
         <Tabs key={by} defaultValue={defaultTab} className="gap-4">
           <TabsList aria-label="กรองงานตามสถานะ" className="max-w-full justify-start overflow-x-auto">
             {TAB_ORDER.map((key) => (
@@ -152,7 +155,7 @@ export default async function ScrapingPage(props: { searchParams?: Promise<{ not
               {byTab[key].length === 0 ? (
                 <Empty className="border py-10">
                   <EmptyHeader>
-                    <EmptyDescription>{EMPTY_TEXT[key]}</EmptyDescription>
+                    <EmptyDescription>{search ? `ไม่พบใบงานที่ตรงกับ "${search}"` : EMPTY_TEXT[key]}</EmptyDescription>
                   </EmptyHeader>
                 </Empty>
               ) : (

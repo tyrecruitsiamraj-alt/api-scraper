@@ -101,7 +101,6 @@ export default async function OrchestratorPage(props: { searchParams?: Promise<{
   const scrap = {
     waiting: jarvisScrap.length,
     working: scrapRows.filter((t) => t.stage.group === 'working'),
-    review: scrapRows.filter((t) => t.stage.group === 'review'),
     attention: scrapRows.filter((t) => t.stage.group === 'attention'),
   };
   const weekAgo = Date.now() - 7 * 86_400_000;
@@ -130,7 +129,7 @@ export default async function OrchestratorPage(props: { searchParams?: Promise<{
 
   const live = scrap.working.length > 0 || livePosts.length > 0;
   const nothingToDo =
-    !scrap.waiting && !scrap.review.length && !scrap.attention.length && !pendingPosts.length && !problemPosts.length;
+    !scrap.waiting && !scrap.attention.length && !pendingPosts.length && !problemPosts.length;
 
   return (
     <div className="flex flex-col gap-6">
@@ -160,10 +159,9 @@ export default async function OrchestratorPage(props: { searchParams?: Promise<{
               </Button>
             </CardAction>
           </CardHeader>
-          <CardContent className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+          <CardContent className="grid grid-cols-2 gap-3 sm:grid-cols-3">
             <Count label="Jarvis รอกดเริ่ม" value={scrap.waiting} href="/scraping" tone="warning" />
             <Count label="กำลังทำ" value={scrap.working.length} href="/scraping" />
-            <Count label="ต้องตรวจรับ" value={scrap.review.length} href="/scraping" tone="warning" />
             <Count label="ติดปัญหา (14 วัน)" value={scrap.attention.length} href="/scraping" tone="destructive" />
           </CardContent>
         </Card>
@@ -226,7 +224,7 @@ export default async function OrchestratorPage(props: { searchParams?: Promise<{
                 </Link>
               </Item>
             )}
-            {[...scrap.attention, ...scrap.review].map((t) => (
+            {scrap.attention.map((t) => (
               <ScrapRow key={t.id} task={t} />
             ))}
             {problemPosts.map((t) => (

@@ -93,7 +93,7 @@ export default function WorkflowPage() {
             { no: 2, title: 'ตรวจข้อมูลก่อนค้นหา', detail: 'ตรวจตำแหน่ง พื้นที่ จำนวน คุณสมบัติบังคับ และเลือกว่าใช้ JobThai หรือ JobBKK ผ่าน Connector ใด' },
             { no: 3, title: 'กดเริ่มค้นหาผู้สมัคร', detail: 'งานเข้าคิวไปที่เครื่อง Worker ที่ผูก Connector ไว้ ระบบ Login แล้วค้นแบบปกติ ถ้าได้ 0 คนจะผ่อนตัวกรอง จากนั้นใช้ AI Search เติมจำนวน เก็บ Resume ตัดคนซ้ำ และคัดตาม Hard Filter' },
             { no: 4, title: 'ดูผลระหว่างรัน', detail: 'หน้า Scraping แสดงจำนวนที่ได้จริงเทียบเป้า และบอกว่า Worker ทำถึงขั้นไหน', href: '/scraping', action: 'ดูสถานะการค้นหา' },
-            { no: 5, title: 'ตรวจรับและส่งเข้าคลังผู้สมัคร', detail: 'เมื่อได้ครบ หรือค้นตาม Job Family จบแล้ว ให้คนตรวจรับผล ข้อมูลจะเข้าคลังผู้สมัครเพื่อติดต่อต่อ' },
+            { no: 5, title: 'จบงานและส่งผลกลับ Jarvis', detail: 'ได้ครบเป้า หรือค้นตาม Job Family จบแล้ว ใบใน Jarvis เปลี่ยนเป็นเสร็จเอง ผู้สมัครอยู่ในคลังพร้อมติดต่อ' },
           ]}
         />
 
@@ -119,7 +119,7 @@ export default function WorkflowPage() {
               <Link href="/orchestrator">
                 <ItemContent>
                   <ItemTitle>ศูนย์งาน · ค้นหา</ItemTitle>
-                  <ItemDescription>ใบรอเริ่ม · กำลังค้น · รอตรวจรับ</ItemDescription>
+                  <ItemDescription>ใบรอเริ่ม · กำลังค้น · เสร็จแล้ว</ItemDescription>
                 </ItemContent>
               </Link>
             </Item>

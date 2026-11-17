@@ -74,7 +74,7 @@ export type JarvisRequestStatus =
         task_id: string;
         platform: string;
         account: string;
-        /** working / review / attention / done / idle */
+        /** working / attention / done / idle */
         group: string;
         status_label: string;
         step: string;

@@ -58,7 +58,6 @@ import {
   setProviderCap,
   setFacebookDailyCapForAll,
   setTaskEnabled,
-  approveScrapeTaskResult,
   setSoRecruitRequestStatus,
   rejectSoRecruitRequest,
   createPostingGroup,
@@ -932,18 +931,6 @@ export async function startSoRecruitScrapeAction(formData: FormData) {
   revalidatePath('/orchestrator/imports');
   revalidatePath('/scraping');
   redirect(`/scraping/${taskId}?started=1`);
-}
-
-/** ตรวจรับผล Scraping หลัง worker ทำครบ เพื่อปิดคำขอกลับไปยัง So Recruit. */
-export async function approveScrapeResultAction(formData: FormData) {
-  const session = await getServerSession(authOptions);
-  if (!session) throw new Error('unauthorized');
-  const taskId = String(formData.get('taskId') ?? '').trim();
-  if (taskId) {
-    await approveScrapeTaskResult(taskId, session.user?.email ?? session.user?.name ?? null);
-  }
-  revalidatePath('/orchestrator');
-  revalidatePath('/scraping');
 }
 
 /** อนุมัติ "สื่อ" เท่านั้น แล้วพาไปหน้าสรุปก่อนกด Auto-post จริง. */

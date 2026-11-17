@@ -28,7 +28,7 @@ import { generateDraftForCampaign, regenerateImageForContent } from '../src/core
 import { measureCampaign } from '../src/core/orchestrator-measure.js';
 import { processResumeBatch } from '../src/db/resume-uploads.js';
 import { sendAlert } from '../src/core/alert.js';
-import { REJECT_JARVIS_SCRAPE_SQL, rejectJarvisScrapeParams } from '../src/core/jarvis-scrape-fail.js';
+import { COMPLETE_JARVIS_SCRAPES_SQL, REJECT_JARVIS_SCRAPE_SQL, rejectJarvisScrapeParams } from '../src/core/jarvis-scrape-status.js';
 import { classifyScrapeTaskResult, cooldownError, requireSuccessfulScrapeTaskResult } from '../src/core/scrape-task-result.js';
 import { imageGenerationCapability } from '../src/core/ai-image.js';
 import { scraperSlotLockName } from '../src/core/worker-selection.js';
@@ -412,13 +412,24 @@ async function reschedulePendingMeasurement(job) {
   return true;
 }
 
-// Jarvis ไม่ถามสถานะเอง — เครื่องนี้เปลี่ยนสถานะใบสั่งโพสต์ที่จบรอบแล้วให้ทุก 5 นาที
+// Jarvis ไม่ถามสถานะเอง — เครื่องนี้เปลี่ยนสถานะใบสั่งโพสต์และใบ Scrap ที่จบแล้วให้ทุก 5 นาที
 // (หลาย runner ในเครื่อง/หลายเครื่อง ใช้ advisory lock ให้ทำทีละตัว)
 const JARVIS_SYNC_MS = 5 * 60 * 1000;
 let lastJarvisSync = 0;
+// งาน Scrap จาก Jarvis ที่ค้นจบแล้ว → ใบใน Jarvis เป็น "เสร็จ" (ไม่ต้องรอคนตรวจรับ)
+async function completeJarvisScrapes(run = query) {
+  try {
+    const { rows } = await run(COMPLETE_JARVIS_SCRAPES_SQL);
+    if (rows?.length) console.log(`  ✓ Jarvis เสร็จ: ${rows.map((r) => r.request_no).join(', ')}`);
+  } catch (e) {
+    console.warn(`  เขียนสถานะเสร็จกลับ Jarvis ไม่ได้: ${e?.message ?? e}`);
+  }
+}
+
 async function syncJarvisIfDue() {
   if (Date.now() - lastJarvisSync < JARVIS_SYNC_MS) return;
   lastJarvisSync = Date.now();
+  await completeJarvisScrapes();
   try {
     await withTransaction(async (client) => {
       const lock = await client.query(`SELECT pg_try_advisory_xact_lock(hashtext('jarvis-post-sync')) AS ok`);
@@ -491,6 +502,7 @@ async function runOne() {
       : outcome === 'already_running' ? 'งานนี้กำลังรันอยู่แล้วในอีกช่อง ไม่รันซ้ำ' : null;
     await finish(job.id, status, detail);
     console.log(`  ✓ done: ${JSON.stringify(r).slice(0, 200)}`);
+    if (job.type === 'scrape') await completeJarvisScrapes();
   } catch (e) {
     const errMsg = String(e?.message ?? e).slice(0, 1500);
     const retryAt = e?.retryAt instanceof Date && !Number.isNaN(e.retryAt.getTime()) ? e.retryAt : null;

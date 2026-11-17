@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { REJECT_JARVIS_SCRAPE_SQL, rejectJarvisScrapeParams, scrapeFailNote } from '../src/core/jarvis-scrape-fail.js';
+import { COMPLETE_JARVIS_SCRAPES_SQL, REJECT_JARVIS_SCRAPE_SQL, rejectJarvisScrapeParams, scrapeFailNote } from '../src/core/jarvis-scrape-status.js';
 
 // ข้อความดิบจริงของ LMO6911012 (16 พ.ย. 2569)
 const LMO_ERROR = 'JOBBKK_FILTER_NOT_APPLIED: Normal Search ไม่ยืนยันตำแหน่งหรือ Keyword จึงไม่รับผลค้นหาแบบกว้าง (กล่องตำแหน่งว่าง ไม่มีชิป) · โครงกล่อง: div.ant-select-selection-search-input.flex.items-center · ตัวนับชิป 0';
@@ -25,4 +25,11 @@ test('notes ขึ้นต้น "ตีกลับ: " ให้ Jarvis ตั
   assert.deepEqual(rejectJarvisScrapeParams('t1', LMO_ERROR), ['t1', 'ตีกลับ: JobBKK เลือกตำแหน่งในหน้าค้นหาไม่ได้ ระบบจึงหยุดเพื่อไม่ดึงคนตำแหน่งอื่นมาปน']);
   assert.match(REJECT_JARVIS_SCRAPE_SQL, /r\.status IN \('pending', 'in_progress'\)/);
   assert.match(REJECT_JARVIS_SCRAPE_SQL, /request_type' = 'scraping'/);
+});
+
+test('ค้นจบ (ครบหรือไม่ครบเป้า) = ใบ Scrap ใน Jarvis เสร็จ · แตะเฉพาะใบที่ยังทำอยู่ ไม่แตะใบรอเริ่ม/ใบโพสต์', () => {
+  assert.match(COMPLETE_JARVIS_SCRAPES_SQL, /SET status = 'completed'/);
+  assert.match(COMPLETE_JARVIS_SCRAPES_SQL, /t\.status IN \('done', 'partial'\)/);
+  assert.match(COMPLETE_JARVIS_SCRAPES_SQL, /r\.status = 'in_progress'/);
+  assert.match(COMPLETE_JARVIS_SCRAPES_SQL, /request_type' = 'scraping'/);
 });

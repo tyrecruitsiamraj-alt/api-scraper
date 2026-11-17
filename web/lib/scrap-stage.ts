@@ -5,7 +5,7 @@
  * ค่า phase ที่ worker เขียนจริง (src/tasks-worker.js, src/pipeline.js):
  *   idle → starting → planning → login → scraping → ocr → enrich → done | partial | error
  * status: idle | queued | running | done | partial | error
- * review_status: not_required (งานที่สร้างเอง) | pending | approved | rejected (งานจาก Jarvis)
+ * ค้นจบ (done/partial) = จบ ไม่มีขั้นให้คนตรวจรับ — worker เขียนใบใน Jarvis เป็นเสร็จเอง (เจ้าของ 17 พ.ย. 2569)
  */
 
 export const SCRAP_STAGES = [
@@ -15,18 +15,16 @@ export const SCRAP_STAGES = [
   { key: 'search', label: 'ค้นหาและคัดโปรไฟล์' },
   { key: 'ocr', label: 'อ่านเอกสาร (OCR)' },
   { key: 'enrich', label: 'เติมข้อมูล' },
-  { key: 'review', label: 'ตรวจรับ' },
 ] as const;
 
 export type ScrapStageKey = (typeof SCRAP_STAGES)[number]['key'];
 export type ScrapStageState = 'done' | 'current' | 'failed' | 'upcoming';
 
 /** กลุ่มที่ใช้แบ่งแท็บในหน้ารายการ */
-export type ScrapTaskGroup = 'working' | 'review' | 'attention' | 'done' | 'idle';
+export type ScrapTaskGroup = 'working' | 'attention' | 'done' | 'idle';
 
 export const SCRAP_GROUP_LABEL: Record<ScrapTaskGroup, string> = {
   working: 'กำลังทำ',
-  review: 'ต้องตรวจรับ',
   attention: 'ติดปัญหา',
   done: 'เสร็จแล้ว',
   idle: 'ยังไม่เริ่ม',
@@ -35,7 +33,6 @@ export const SCRAP_GROUP_LABEL: Record<ScrapTaskGroup, string> = {
 export type ScrapStageInput = {
   status: string;
   phase?: string | null;
-  review_status?: string | null;
   assessed_total?: number | null;
   last_error?: string | null;
 };
@@ -107,8 +104,8 @@ const PHASE_TO_STAGE: Record<string, ScrapStageKey> = {
   scraping: 'search',
   ocr: 'ocr',
   enrich: 'enrich',
-  done: 'review',
-  partial: 'review',
+  done: 'enrich',
+  partial: 'enrich',
 };
 
 function indexOfStage(key: ScrapStageKey) {
@@ -128,10 +125,8 @@ function buildSteps(currentIdx: number, currentState: ScrapStageState, extraDone
 export function deriveScrapStage(input: ScrapStageInput): ScrapStageResult {
   const status = String(input.status ?? 'idle');
   const phase = String(input.phase ?? 'idle');
-  const review = String(input.review_status ?? 'not_required');
   const assessed = Number(input.assessed_total ?? 0);
   const total = SCRAP_STAGES.length;
-  const reviewIdx = indexOfStage('review');
 
   let currentIdx: number;
   let steps: ScrapStageStep[];
@@ -154,48 +149,14 @@ export function deriveScrapStage(input: ScrapStageInput): ScrapStageResult {
     statusLabel = 'กำลังทำ';
     if (phase === 'starting') note = 'เครื่องรับงานแล้ว กำลังเริ่ม';
     else if (phase === 'planning') note = 'กำลังเตรียมคำค้นจากเนื้องาน';
-  } else if (status === 'done') {
-    if (review === 'pending') {
-      currentIdx = reviewIdx;
-      steps = buildSteps(currentIdx, 'current');
-      group = 'review';
-      statusLabel = 'รอตรวจรับ';
-      note = 'ได้ผู้สมัครครบแล้ว รอคนตรวจรับ';
-    } else if (review === 'rejected') {
-      currentIdx = reviewIdx;
-      steps = buildSteps(currentIdx, 'failed');
-      group = 'attention';
-      statusLabel = 'ไม่รับผล';
-      note = 'ผลการค้นหาถูกตีกลับ';
-    } else {
-      currentIdx = reviewIdx;
-      steps = buildSteps(total, 'done');
-      complete = true;
-      group = 'done';
-      statusLabel = 'เสร็จแล้ว';
-      note = review === 'approved' ? 'ตรวจรับแล้ว' : null;
-    }
-  } else if (status === 'partial' && review === 'pending') {
-    // งานจาก Jarvis ได้ไม่ครบเป้า: คนเลือกได้ว่าจะยืนยันเท่าที่ได้ หรือรันค้นเพิ่ม
-    currentIdx = reviewIdx;
-    steps = buildSteps(currentIdx, 'current');
-    group = 'review';
-    statusLabel = 'ได้ไม่ครบเป้า';
-    note = 'ยืนยันเท่าที่ได้ หรือรันค้นเพิ่ม';
-  } else if (status === 'partial' && review === 'approved') {
-    currentIdx = reviewIdx;
+  } else if (status === 'done' || status === 'partial') {
+    // ค้นจบ = งานจบ (ครบเป้าหรือไม่ครบ) · ไม่ครบเป้ากด "รันตอนนี้" ค้นเพิ่มได้จากหน้างาน
+    currentIdx = total - 1;
     steps = buildSteps(total, 'done');
     complete = true;
     group = 'done';
-    statusLabel = 'เสร็จแล้ว';
-    note = 'ตรวจรับแล้ว ได้ไม่ครบเป้า';
-  } else if (status === 'partial') {
-    // ค้นครบทุกคำค้นแล้วแต่ไม่ถึงเป้า ขั้น OCR/เติมข้อมูลยังทำกับคนที่ได้มา
-    currentIdx = indexOfStage('search');
-    steps = buildSteps(currentIdx, 'failed', [indexOfStage('ocr'), indexOfStage('enrich')]);
-    group = 'attention';
-    statusLabel = 'ได้ไม่ครบเป้า';
-    note = 'ค้นครบแล้วแต่ยังได้คนไม่ครบเป้า';
+    statusLabel = status === 'done' ? 'เสร็จแล้ว' : 'ได้ไม่ครบเป้า';
+    note = status === 'done' ? null : 'ค้นครบทุกคำแล้ว ได้คนไม่ครบเป้า';
   } else if (status === 'error') {
     currentIdx = indexOfStage(failedStageFromError(input.last_error, assessed));
     steps = buildSteps(currentIdx, 'failed');

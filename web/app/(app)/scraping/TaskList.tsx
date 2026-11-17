@@ -2,7 +2,6 @@
 
 import type { TaskRow } from '@/lib/repo';
 import {
-  approveScrapeResultAction,
   deleteTaskAction,
   expandAdjacentTaskAction,
   queueTaskAction,
@@ -60,19 +59,6 @@ export function TaskRunForm({
             รันตอนนี้
           </>
         )}
-      </Button>
-    </form>
-  );
-}
-
-/** ปุ่มตรวจรับผล (งานจาก Jarvis ที่ค้นจบแล้ว ครบเป้าหรือไม่ครบก็ได้) */
-export function TaskApproveForm({ taskId }: { taskId: string }) {
-  return (
-    <form action={approveScrapeResultAction}>
-      <input type="hidden" name="taskId" value={taskId} />
-      <Button>
-        <CheckIcon data-icon="inline-start" />
-        ยืนยันข้อมูลผู้สมัคร
       </Button>
     </form>
   );

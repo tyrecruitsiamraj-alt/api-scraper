@@ -1637,9 +1637,6 @@ export type TaskRow = {
   expand_adjacent: boolean;
   adjacent_plan: AdjacentPlan | null;
   source_request_no: string | null;
-  review_status: 'not_required' | 'pending' | 'approved' | 'rejected';
-  reviewed_by: string | null;
-  reviewed_at: string | null;
   qualified_count: number;
   needs_review_count: number;
   rejected_count: number;
@@ -2217,13 +2214,14 @@ export async function createScrapeTaskFromSoRecruit(
 
   let taskId: string | undefined;
   if (existing[0]) {
-    // สั่งใหม่: ใช้เกณฑ์/เป้า/บัญชีจากคำสั่งล่าสุด และเริ่มตรวจรับใหม่ — งานที่ยังรันอยู่ไม่แก้กลางทาง
+    // สั่งใหม่: ใช้เกณฑ์/เป้า/บัญชีจากคำสั่งล่าสุด — งานที่ยังรันอยู่ไม่แก้กลางทาง
+    // กลับเป็น idle ก่อนเขียน in_progress ให้ Jarvis: ผลรอบเก่า (done/partial) ต้องไม่ปิดใบใหม่ (COMPLETE_JARVIS_SCRAPES_SQL)
     taskId = existing[0].id;
     if (!['running', 'queued'].includes(existing[0].status)) {
       await q(
         `UPDATE scrape_tasks
             SET name = $2, connector_id = $3, target_count = $4, criteria = $5::jsonb, enabled = true,
-                review_status = 'pending', reviewed_by = NULL, reviewed_at = NULL, last_error = NULL, updated_at = now()
+                status = 'idle', phase = 'idle', last_error = NULL, updated_at = now()
           WHERE id = $1 AND status NOT IN ('running', 'queued')`,
         [taskId, `${requestNo} · ${position || 'Scraping งาน'}`, connectorId, target, JSON.stringify(criteria)],
       );
@@ -2232,8 +2230,8 @@ export async function createScrapeTaskFromSoRecruit(
   const inserted = existing[0] ? [] : await q<{ id: string }>(
     `INSERT INTO scrape_tasks
        (name, connector_id, mode, target_count, criteria, status, enabled,
-        expand_adjacent, source_request_no, review_status)
-     VALUES ($1,$2,'count',$3,$4::jsonb,'queued',true,true,$5,'pending')
+        expand_adjacent, source_request_no)
+     VALUES ($1,$2,'count',$3,$4::jsonb,'queued',true,true,$5)
      ON CONFLICT DO NOTHING
      RETURNING id`,
     [`${requestNo} · ${position || 'Scraping งาน'}`, connectorId, target, JSON.stringify(criteria), requestNo],
@@ -2257,30 +2255,6 @@ export async function createScrapeTaskFromSoRecruit(
     console.warn(`[scraping] เขียนสถานะกลับ So Recruit ไม่สำเร็จ (${requestNo}): ${(e as Error).message}`);
   }
   return taskId;
-}
-
-/** ตรวจรับผล Scraping จากศูนย์งาน; ข้อมูลเดิมไม่ได้รับผลกระทบเพราะมี source_request_no เท่านั้น. */
-export async function approveScrapeTaskResult(taskId: string, reviewedBy: string | null) {
-  const rows = await q<{ source_request_no: string | null }>(
-    `UPDATE scrape_tasks
-        SET review_status = 'approved', reviewed_by = $2, reviewed_at = now(), updated_at = now()
-      WHERE id = $1 AND status IN ('done', 'partial') AND review_status = 'pending'
-      RETURNING source_request_no`,
-    [taskId, reviewedBy],
-  );
-  if (!rows[0]) throw new Error('งานยังไม่เสร็จหรือถูกตรวจรับไปแล้ว');
-  if (rows[0].source_request_no) {
-    try {
-      await q(
-        `UPDATE "jarvis_rm".job_posting_requests
-            SET status = 'completed', updated_at = now()
-          WHERE request_no = $1 AND status = 'in_progress' AND to_jsonb(job_posting_requests)->>'request_type' = 'scraping'`,
-        [rows[0].source_request_no],
-      );
-    } catch (e) {
-      console.warn(`[scraping] ปิดคำขอ So Recruit ไม่สำเร็จ (${rows[0].source_request_no}): ${(e as Error).message}`);
-    }
-  }
 }
 
 /** เปลี่ยนสถานะคำขอ So Recruit แบบ guarded เพื่อให้ระบบต้นทางเห็นความคืบหน้า. */

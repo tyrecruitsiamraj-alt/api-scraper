@@ -12,7 +12,7 @@ const STATE_TEXT: Record<ScrapStageState, string> = {
 
 /**
  * ขั้นของงาน Scrap: แนวนอนบนจอกว้าง แนวตั้งบนมือถือ
- * running=true แสดง spinner ที่ขั้นปัจจุบัน; false แปลว่ารอคนทำต่อ (เช่น รอตรวจรับ)
+ * running=true แสดง spinner ที่ขั้นปัจจุบัน; false แปลว่ารอคนทำต่อ (เช่น ยังไม่กดรัน)
  */
 export function ScrapStageStepper({ steps, running }: { steps: ScrapStageStep[]; running: boolean }) {
   return (

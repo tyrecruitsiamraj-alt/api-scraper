@@ -1,4 +1,18 @@
 /**
+ * งาน Scrap ที่ค้นจบ (ครบเป้าหรือไม่ครบ) → ใบใน Jarvis เป็น "เสร็จ" ทันที ไม่ต้องมีคนกดตรวจรับ (เจ้าของ 17 พ.ย. 2569)
+ * เดิมรอคนกด "ยืนยันข้อมูลผู้สมัคร" ไม่มีใครกด ใบค้าง "กำลังทำ" (LAO6911016 ได้ 24 คนตั้งแต่ 13 พ.ย.)
+ * เปลี่ยนเฉพาะใบ Scrap ที่ Jarvis ยัง in_progress · สั่งใหม่ งานกลับเป็น idle/queued ก่อน ใบใหม่จึงไม่ถูกปิดด้วยผลรอบเก่า
+ */
+export const COMPLETE_JARVIS_SCRAPES_SQL = `UPDATE "jarvis_rm".job_posting_requests r
+    SET status = 'completed', updated_at = now()
+   FROM scrape_tasks t
+  WHERE t.source_request_no IS NOT NULL AND r.request_no = t.source_request_no
+    AND t.status IN ('done', 'partial')
+    AND r.status = 'in_progress'
+    AND to_jsonb(r)->>'request_type' = 'scraping'
+  RETURNING r.request_no`;
+
+/**
  * งาน Scrap ที่มาจาก Jarvis ล้มจนหมดรอบลองใหม่ → เขียนใบใน Jarvis เป็น "ไม่สำเร็จ" พร้อมเหตุ
  * เดิมไม่เขียนอะไรกลับ ใบค้าง "กำลังทำ" และ Jarvis ล็อกปุ่มสั่งใหม่ (LMO6911012 ล้ม 13 พ.ย. 2569 ยังค้างถึง 16 พ.ย.)
  * Jarvis อ่าน status 'rejected' = "ไม่สำเร็จ" แสดงเหตุจาก notes (ตัด "ตีกลับ: " ออก) และเปิดปุ่ม "สั่งใหม่"
