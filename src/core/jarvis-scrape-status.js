@@ -1,16 +1,48 @@
 /**
- * งาน Scrap ที่ค้นจบ (ครบเป้าหรือไม่ครบ) → ใบใน Jarvis เป็น "เสร็จ" ทันที ไม่ต้องมีคนกดตรวจรับ (เจ้าของ 17 พ.ย. 2569)
+ * งาน Scrap ที่ค้นจบ → ใบใน Jarvis ปิดเองตามผลจริง ไม่ต้องมีคนกดตรวจรับ (เจ้าของ 17 พ.ย. 2569)
  * เดิมรอคนกด "ยืนยันข้อมูลผู้สมัคร" ไม่มีใครกด ใบค้าง "กำลังทำ" (LAO6911016 ได้ 24 คนตั้งแต่ 13 พ.ย.)
+ * เจ้าของ "แสดงตามจริง เสร็จ เจอบางส่วน ไม่สำเร็จ" — Jarvis มีแค่ completed/rejected (CHECK ใน jarvis_rm)
+ * จึงบอกระดับผลด้วยคำนำหน้าใน notes ("ได้ครบ: " / "เจอบางส่วน: " / "ตีกลับ: ") ให้ Jarvis แยกป้ายเอง
  * เปลี่ยนเฉพาะใบ Scrap ที่ Jarvis ยัง in_progress · สั่งใหม่ งานกลับเป็น idle/queued ก่อน ใบใหม่จึงไม่ถูกปิดด้วยผลรอบเก่า
  */
-export const COMPLETE_JARVIS_SCRAPES_SQL = `UPDATE "jarvis_rm".job_posting_requests r
-    SET status = 'completed', updated_at = now()
+export const FINISHED_JARVIS_SCRAPES_SQL = `SELECT t.source_request_no AS request_no,
+         COALESCE(NULLIF(t.target_count, 0), t.progress_target, 0)::int AS target,
+         count(c.candidate_id) FILTER (WHERE c.qualification_status = 'qualified')::int AS qualified,
+         count(c.candidate_id) FILTER (WHERE c.qualification_status = 'needs_review')::int AS waiting
+    FROM scrape_tasks t
+    JOIN "jarvis_rm".job_posting_requests r
+      ON r.request_no = t.source_request_no AND r.status = 'in_progress' AND to_jsonb(r)->>'request_type' = 'scraping'
+    LEFT JOIN scrape_task_candidates c ON c.task_id = t.id
+   WHERE t.source_request_no IS NOT NULL AND t.status IN ('done', 'partial')
+   GROUP BY t.id`;
+
+/** $1 = request_no · $2 = status · $3 = notes — ปิดเมื่องานยังจบอยู่จริง (กันสั่งใหม่แทรกระหว่างอ่านกับเขียน) */
+export const CLOSE_JARVIS_SCRAPE_SQL = `UPDATE "jarvis_rm".job_posting_requests r
+    SET status = $2, notes = $3, updated_at = now()
    FROM scrape_tasks t
-  WHERE t.source_request_no IS NOT NULL AND r.request_no = t.source_request_no
+  WHERE r.request_no = $1 AND t.source_request_no = r.request_no
     AND t.status IN ('done', 'partial')
     AND r.status = 'in_progress'
     AND to_jsonb(r)->>'request_type' = 'scraping'
   RETURNING r.request_no`;
+
+/**
+ * ผลของงานที่ค้นจบ → สถานะ + notes ที่เขียนลงใบ Jarvis
+ * ครบเป้า = เสร็จ · ผ่านเกณฑ์บางส่วน = เจอบางส่วน (Jarvis ยังเป็น completed) · ไม่มีใครผ่านเกณฑ์ = ไม่สำเร็จ (สั่งใหม่ได้)
+ */
+export function scrapeOutcome({ target, qualified, waiting = 0 }) {
+  const goal = Math.max(0, Number(target) || 0);
+  const got = Math.max(0, Number(qualified) || 0);
+  const pending = Math.max(0, Number(waiting) || 0);
+  const waitText = pending > 0 ? ` · รอตรวจอีก ${pending} คน` : '';
+  if (got > 0 && got >= goal) {
+    return { status: 'completed', label: 'เสร็จ', notes: `ได้ครบ: ผ่านเกณฑ์ ${got}${goal ? `/${goal}` : ''} คน` };
+  }
+  if (got > 0) {
+    return { status: 'completed', label: 'เจอบางส่วน', notes: `เจอบางส่วน: ผ่านเกณฑ์ ${got}/${goal} คน${waitText}` };
+  }
+  return { status: 'rejected', label: 'ไม่สำเร็จ', notes: `ตีกลับ: ค้นครบทุกคำแล้ว ไม่เจอคนผ่านเกณฑ์${waitText}` };
+}
 
 /**
  * งาน Scrap ที่มาจาก Jarvis ล้มจนหมดรอบลองใหม่ → เขียนใบใน Jarvis เป็น "ไม่สำเร็จ" พร้อมเหตุ

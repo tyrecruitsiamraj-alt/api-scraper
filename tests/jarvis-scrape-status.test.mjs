@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { COMPLETE_JARVIS_SCRAPES_SQL, REJECT_JARVIS_SCRAPE_SQL, rejectJarvisScrapeParams, scrapeFailNote } from '../src/core/jarvis-scrape-status.js';
+import { CLOSE_JARVIS_SCRAPE_SQL, FINISHED_JARVIS_SCRAPES_SQL, REJECT_JARVIS_SCRAPE_SQL, rejectJarvisScrapeParams, scrapeFailNote, scrapeOutcome } from '../src/core/jarvis-scrape-status.js';
 
 // ข้อความดิบจริงของ LMO6911012 (16 พ.ย. 2569)
 const LMO_ERROR = 'JOBBKK_FILTER_NOT_APPLIED: Normal Search ไม่ยืนยันตำแหน่งหรือ Keyword จึงไม่รับผลค้นหาแบบกว้าง (กล่องตำแหน่งว่าง ไม่มีชิป) · โครงกล่อง: div.ant-select-selection-search-input.flex.items-center · ตัวนับชิป 0';
@@ -27,9 +27,20 @@ test('notes ขึ้นต้น "ตีกลับ: " ให้ Jarvis ตั
   assert.match(REJECT_JARVIS_SCRAPE_SQL, /request_type' = 'scraping'/);
 });
 
-test('ค้นจบ (ครบหรือไม่ครบเป้า) = ใบ Scrap ใน Jarvis เสร็จ · แตะเฉพาะใบที่ยังทำอยู่ ไม่แตะใบรอเริ่ม/ใบโพสต์', () => {
-  assert.match(COMPLETE_JARVIS_SCRAPES_SQL, /SET status = 'completed'/);
-  assert.match(COMPLETE_JARVIS_SCRAPES_SQL, /t\.status IN \('done', 'partial'\)/);
-  assert.match(COMPLETE_JARVIS_SCRAPES_SQL, /r\.status = 'in_progress'/);
-  assert.match(COMPLETE_JARVIS_SCRAPES_SQL, /request_type' = 'scraping'/);
+test('ผลจริงของงานที่ค้นจบ: ครบเป้า = เสร็จ · ผ่านบางส่วน = เจอบางส่วน · ไม่มีใครผ่าน = ไม่สำเร็จ', () => {
+  // LAO6911016 (24/20) และ LMO6911012 (3/20 รอตรวจ 46) ณ 17 พ.ย. 2569
+  assert.deepEqual(scrapeOutcome({ target: 20, qualified: 24, waiting: 0 }), { status: 'completed', label: 'เสร็จ', notes: 'ได้ครบ: ผ่านเกณฑ์ 24/20 คน' });
+  assert.deepEqual(scrapeOutcome({ target: 20, qualified: 3, waiting: 46 }), { status: 'completed', label: 'เจอบางส่วน', notes: 'เจอบางส่วน: ผ่านเกณฑ์ 3/20 คน · รอตรวจอีก 46 คน' });
+  assert.deepEqual(scrapeOutcome({ target: 15, qualified: 0, waiting: 0 }), { status: 'rejected', label: 'ไม่สำเร็จ', notes: 'ตีกลับ: ค้นครบทุกคำแล้ว ไม่เจอคนผ่านเกณฑ์' });
+  assert.equal(scrapeOutcome({ target: 15, qualified: 0, waiting: 7 }).notes, 'ตีกลับ: ค้นครบทุกคำแล้ว ไม่เจอคนผ่านเกณฑ์ · รอตรวจอีก 7 คน');
+  // ไม่มีเป้า: มีคนผ่าน = เสร็จ
+  assert.equal(scrapeOutcome({ target: 0, qualified: 5 }).notes, 'ได้ครบ: ผ่านเกณฑ์ 5 คน');
+});
+
+test('ปิดเฉพาะใบ Scrap ที่ยังทำอยู่ และงานยังจบอยู่จริงตอนเขียน', () => {
+  for (const sql of [FINISHED_JARVIS_SCRAPES_SQL, CLOSE_JARVIS_SCRAPE_SQL]) {
+    assert.match(sql, /t\.status IN \('done', 'partial'\)/);
+    assert.match(sql, /r\.status = 'in_progress'/);
+    assert.match(sql, /request_type' = 'scraping'/);
+  }
 });

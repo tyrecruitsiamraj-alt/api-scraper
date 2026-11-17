@@ -28,7 +28,7 @@ import { generateDraftForCampaign, regenerateImageForContent } from '../src/core
 import { measureCampaign } from '../src/core/orchestrator-measure.js';
 import { processResumeBatch } from '../src/db/resume-uploads.js';
 import { sendAlert } from '../src/core/alert.js';
-import { COMPLETE_JARVIS_SCRAPES_SQL, REJECT_JARVIS_SCRAPE_SQL, rejectJarvisScrapeParams } from '../src/core/jarvis-scrape-status.js';
+import { CLOSE_JARVIS_SCRAPE_SQL, FINISHED_JARVIS_SCRAPES_SQL, REJECT_JARVIS_SCRAPE_SQL, rejectJarvisScrapeParams, scrapeOutcome } from '../src/core/jarvis-scrape-status.js';
 import { classifyScrapeTaskResult, cooldownError, requireSuccessfulScrapeTaskResult } from '../src/core/scrape-task-result.js';
 import { imageGenerationCapability } from '../src/core/ai-image.js';
 import { scraperSlotLockName } from '../src/core/worker-selection.js';
@@ -416,13 +416,17 @@ async function reschedulePendingMeasurement(job) {
 // (หลาย runner ในเครื่อง/หลายเครื่อง ใช้ advisory lock ให้ทำทีละตัว)
 const JARVIS_SYNC_MS = 5 * 60 * 1000;
 let lastJarvisSync = 0;
-// งาน Scrap จาก Jarvis ที่ค้นจบแล้ว → ใบใน Jarvis เป็น "เสร็จ" (ไม่ต้องรอคนตรวจรับ)
-async function completeJarvisScrapes(run = query) {
+// งาน Scrap จาก Jarvis ที่ค้นจบแล้ว → ปิดใบใน Jarvis ตามผลจริง เสร็จ / เจอบางส่วน / ไม่สำเร็จ (ไม่ต้องรอคนตรวจรับ)
+async function completeJarvisScrapes() {
   try {
-    const { rows } = await run(COMPLETE_JARVIS_SCRAPES_SQL);
-    if (rows?.length) console.log(`  ✓ Jarvis เสร็จ: ${rows.map((r) => r.request_no).join(', ')}`);
+    const { rows } = await query(FINISHED_JARVIS_SCRAPES_SQL);
+    for (const row of rows) {
+      const out = scrapeOutcome(row);
+      const done = await query(CLOSE_JARVIS_SCRAPE_SQL, [row.request_no, out.status, out.notes]);
+      if (done.rows?.length) console.log(`  ✓ Jarvis ${row.request_no}: ${out.label} (${out.notes})`);
+    }
   } catch (e) {
-    console.warn(`  เขียนสถานะเสร็จกลับ Jarvis ไม่ได้: ${e?.message ?? e}`);
+    console.warn(`  เขียนผล Scrap กลับ Jarvis ไม่ได้: ${e?.message ?? e}`);
   }
 }
 
