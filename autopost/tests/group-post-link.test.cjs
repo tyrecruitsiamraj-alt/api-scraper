@@ -52,3 +52,15 @@ test('cannot tell when post or announcement has no apply link', () => {
   assert.equal(postLinkVerdict(NAITHAI_POST, 'รับสมัครพนักงานขับรถ ไม่มีลิงก์'), 'unknown');
   assert.deepEqual([...applyPaths('a /apply/ b https://x.dev/apply/p/zz9/ c')], ['/apply/p/zz9']);
 });
+
+test('ตรวจลิงก์ย้อนหลัง: รอบเก็บคอมเมนต์เทียบลิงก์สมัคร · ของงานอื่น = ล้างลิงก์ ไม่เก็บคอมเมนต์ · หาใหม่ไม่หยิบโพสต์งานอื่น', () => {
+  const fs = require('node:fs');
+  const spec = fs.readFileSync(require.resolve('./collectComments.spec.ts'), 'utf8');
+  assert.match(spec, /postLinkVerdict\(postText, item\.own_apply_text\) === 'other'/);
+  assert.match(spec, /clearWrongPostLink\(item\.post_log_id, item\.post_link\)/);
+  assert.match(spec, /ownText: item\.own_apply_text/);
+  const db = fs.readFileSync(require.resolve('../server/db.js'), 'utf8');
+  assert.match(db, /SET post_link = NULL, post_status = 'ไม่พบลิงก์หลังโพสต์' WHERE id = \$1 AND post_link = \$2/);
+  const find = fs.readFileSync(require.resolve('../src/helpers/saveToSheet.ts'), 'utf8');
+  assert.match(find, /if \(verdict === 'other'\) continue;/);
+});

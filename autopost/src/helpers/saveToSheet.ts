@@ -485,6 +485,8 @@ export async function findMyPostLink(
     jobTitle?: string;
     caption?: string;
     knownLinks?: string[];
+    /** ข้อความ + ลิงก์สมัครของงาน (ใบสั่ง Jarvis) — โพสต์ที่มีลิงก์สมัครของงานอื่นไม่หยิบ (17 พ.ย. 2569) */
+    ownText?: string;
     /** ถ้าหาไม่เจอ จะเติมสรุปหน้า + ที่อยู่ภาพหน้าจอ/HTML ลงในนี้ */
     diag?: Record<string, unknown>;
   } = {}
@@ -508,6 +510,10 @@ export async function findMyPostLink(
       const link = await findGroupPostPermalinkInArticle(art, groupRefOnPage(page, gID));
       if (!link || known.has(normLink(link)) || candidates.some((c) => c.link === link)) continue;
       const text = await art.innerText().catch(() => '');
+      const verdict = opts.ownText ? groupLink.postLinkVerdict(text, opts.ownText) : 'unknown';
+      if (verdict === 'other') continue;
+      // มีลิงก์สมัครของงานนี้ = ตัวจริง เลือกก่อนเสมอ
+      if (verdict === 'ours') return { link, status: item.status };
       candidates.push({
         link,
         score: caption ? captionMatchScore(text, caption) : 0,

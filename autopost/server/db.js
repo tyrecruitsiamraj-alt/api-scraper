@@ -1434,6 +1434,33 @@ async function updatePostLogFoundLink(id, postLink, postStatus) {
   return rowCount > 0;
 }
 
+/**
+ * ข้อความประกาศ + ลิงก์สมัครทุกอันของงาน (ลิงก์หลัก + ลิงก์แยกกลุ่ม) — ใช้ยืนยันว่าโพสต์ที่เปิดเป็นของงานนี้จริง
+ * (Jarvis 17 พ.ย. 2569 ลิงก์ "เปิดดูโพสต์" ของ สวก. ชี้โพสต์นายไทยเก่า · group-post-link.js postLinkVerdict)
+ * @returns {Promise<Record<string, string>>} job_id → ข้อความ
+ */
+async function getJobOwnApplyTexts(jobIds = []) {
+  const ids = [...new Set(jobIds.map((x) => String(x || '').trim()).filter(Boolean))];
+  if (!ids.length) return {};
+  await query(`ALTER TABLE jobs ADD COLUMN IF NOT EXISTS group_links JSONB`);
+  const { rows } = await query(`SELECT id, caption, apply_link, group_links FROM jobs WHERE id = ANY($1::varchar[])`, [ids]);
+  const out = {};
+  for (const r of rows) {
+    const links = Array.isArray(r.group_links) ? r.group_links.map((g) => (g && g.apply_link) || '') : [];
+    out[String(r.id)] = [r.caption || '', r.apply_link || '', ...links].filter(Boolean).join('\n');
+  }
+  return out;
+}
+
+/** ลิงก์โพสต์ที่ตรวจแล้วว่าเป็นโพสต์ของงานอื่น → ล้างทิ้ง ให้รอบเก็บคอมเมนต์หาโพสต์ที่ถูกใหม่ (เฉพาะแถวที่ลิงก์ยังเป็นตัวเดิม) */
+async function clearWrongPostLink(id, wrongLink) {
+  const { rowCount } = await query(
+    `UPDATE post_logs SET post_link = NULL, post_status = 'ไม่พบลิงก์หลังโพสต์' WHERE id = $1 AND post_link = $2`,
+    [String(id), String(wrongLink || '')],
+  );
+  return rowCount > 0;
+}
+
 /** เวลาที่ตัวเก็บคอมเมนต์เช็กแท็บ "เนื้อหาของคุณ" ของโพสต์นี้ล่าสุด (เพิ่มคอลัมน์อย่างเดียว) */
 async function ensurePostLogStatusCheckColumn() {
   await query(`ALTER TABLE post_logs ADD COLUMN IF NOT EXISTS status_checked_at TIMESTAMPTZ`);
@@ -3297,6 +3324,8 @@ module.exports = {
   getPostLogs,
   getPostLogsForCommentCollect,
   updatePostLogFoundLink,
+  getJobOwnApplyTexts,
+  clearWrongPostLink,
   updatePostLogContentStatus,
   getPostLogsDueStatusCheck,
   releaseOrphanedJobs,

@@ -1823,6 +1823,13 @@ app.post('/api/worker/collect/claim', async (req, res) => {
         created_at: r.created_at ? new Date(r.created_at).toISOString() : '',
       }));
     // โพสต์ที่ยังไม่มีลิงก์: แนบข้อความประกาศ + ลิงก์ที่แถวอื่นใช้แล้วในกลุ่มนั้น ให้ worker เลือกโพสต์ให้ถูกตัว
+
+    // ใบสั่งจาก Jarvis: แนบลิงก์สมัครของงานไว้ตรวจว่าโพสต์ที่เปิดเป็นของงานนี้จริง (17 พ.ย. 2569)
+    const jarvisIds = posts.filter((p) => p.job_id.startsWith('jv-')).map((p) => p.job_id);
+    if (jarvisIds.length) {
+      const own = await db.getJobOwnApplyTexts(jarvisIds).catch(() => ({}));
+      for (const p of posts) if (own[p.job_id]) p.own_apply_text = own[p.job_id];
+    }
     const missing = posts.filter((p) => !p.post_link);
     if (missing.length) {
       const hints = await db

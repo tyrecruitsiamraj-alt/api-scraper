@@ -23,6 +23,9 @@ import type { ContentTabRead } from '../src/helpers/contentTabs';
 const commentLeads = require('../server/comment-leads');
 const leadsDb = process.env.DATABASE_URL ? require('../server/db') : null;
 const contentStatus = require('../server/post-content-status');
+const groupPostLink = require('../server/group-post-link') as {
+  postLinkVerdict: (postText: string, ourText: string) => 'ours' | 'other' | 'unknown';
+};
 /**
  * เช็กแท็บ "เนื้อหาของคุณ" ได้กี่กลุ่มต่อรอบ (เจ้าของ 12 พ.ย. 2569: อยากรู้ปฏิเสธแล้ว/ลบออกแล้ว แต่ไม่ให้บัญชีโดนจำกัดเพิ่ม)
  * พ่วงไปกับรอบเก็บคอมเมนต์ที่ล็อกอินอยู่แล้ว ไม่เปิดรอบ Facebook ใหม่ · 0 = ปิด
@@ -47,6 +50,8 @@ type CollectPlan = {
     caption?: string;
     /** ลิงก์ที่แถวอื่นใช้แล้วในกลุ่มนี้ ห้ามหยิบซ้ำ */
     known_links?: string[];
+    /** ใบสั่งจาก Jarvis: ข้อความ + ลิงก์สมัครของงาน — โพสต์ที่มีลิงก์สมัครของงานอื่น = ลิงก์ผิด (17 พ.ย. 2569) */
+    own_apply_text?: string;
     job_id?: string;
     job_title?: string;
     owner?: string;
@@ -248,7 +253,7 @@ test('collectComments', async ({ page }) => {
           ...plan.posts.filter((p) => p.post_link && p.group_id === item.group_id).map((p) => p.post_link),
         ];
         const diag: Record<string, unknown> = {};
-        const found = await findMyPostLink(active, item.group_id, { jobTitle: item.job_title, caption: item.caption, knownLinks, diag });
+        const found = await findMyPostLink(active, item.group_id, { jobTitle: item.job_title, caption: item.caption, knownLinks, diag, ownText: item.own_apply_text });
         if (!found) {
           // ไม่อยู่ในเผยแพร่แล้ว/รอดำเนินการ — ดูแท็บปฏิเสธแล้ว/ลบออกแล้วต่อ
           await checkContentStatus(item, ['declined', 'removed'], `[${idx}/${plan.posts.length}]`);
@@ -277,6 +282,23 @@ test('collectComments', async ({ page }) => {
       const { phones, commentCount, postBodyPhones, reactions, shares, comments, diag } = await scrapeCommentsAndPhones(active, item.post_link, {
         excludeAuthorNames: ownerNames,
       });
+      // ลิงก์ที่บันทึกไว้ชี้โพสต์ของงานอื่น (เดิมตอนโพสต์หาไม่เจอแล้วหยิบโพสต์บนสุด) → ล้างลิงก์ ไม่เก็บคอมเมนต์ของโพสต์ผิด
+      if (item.own_apply_text && leadsDb) {
+        const postText =
+          (await active.locator('[role="main"] [role="article"]').first().innerText({ timeout: 5000 }).catch(() => '')) ||
+          (await active.locator('[role="main"]').first().innerText({ timeout: 5000 }).catch(() => ''));
+        if (groupPostLink.postLinkVerdict(postText, item.own_apply_text) === 'other') {
+          const cleared = await leadsDb.clearWrongPostLink(item.post_log_id, item.post_link).catch(() => false);
+          await runLog({
+            level: 'warn',
+            message: `[${idx}/${plan.posts.length}] ลิงก์โพสต์ที่บันทึกไว้เป็นโพสต์ของงานอื่น — ${cleared ? 'ล้างลิงก์แล้ว รอบหน้าจะหาโพสต์ที่ถูก' : 'ล้างไม่ได้'}`,
+            user_id: user.id,
+            meta: { kind: 'link_mismatch', post_log_id: item.post_log_id, group_id: item.group_id, wrong_link: item.post_link, cleared },
+          });
+          noCollectResult.add(item.post_log_id);
+          continue;
+        }
+      }
       // เปิดโพสต์ที่เคยเผยแพร่แล้วไม่ได้ = อาจถูกแอดมินลบ — ยืนยันจากแท็บลบออกแล้วก่อนเปลี่ยนสถานะ
       if (!commentCount && !reactions && item.group_id) {
         const bodyText = await active.locator('body').innerText({ timeout: 5000 }).catch(() => '');
