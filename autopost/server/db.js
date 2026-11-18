@@ -1342,14 +1342,19 @@ async function ensurePostLogsEngagementColumns() {
   try {
     await query(`ALTER TABLE post_logs ADD COLUMN IF NOT EXISTS reactions INT DEFAULT 0`);
     await query(`ALTER TABLE post_logs ADD COLUMN IF NOT EXISTS shares INT DEFAULT 0`);
+    await query(`ALTER TABLE post_logs ADD COLUMN IF NOT EXISTS last_collected_at TIMESTAMPTZ`);
+    await query(`ALTER TABLE post_logs ADD COLUMN IF NOT EXISTS collect_count INT DEFAULT 0`);
   } catch (_) {
     // ignore if no permission / table variation
   }
 }
 
 /**
- * บันทึกผลเก็บคอมเมนต์ลง post_logs. reactions/shares เป็น optional (backward-compatible —
- * ผู้เรียกเก่าที่ส่งแค่ 3 ตัวยังทำงานเหมือนเดิม, ไม่ทับค่า reactions/shares เดิม).
+ * บันทึกผลเก็บคอมเมนต์ลง post_logs + เวลานับยอดล่าสุด (หน้า "นับยอดล่าสุด" เดิมว่างทุกโพสต์ เพราะไม่เคยจด)
+ * อ่านไม่ขึ้นห้ามลบของเดิม (18 พ.ย. 2569): Facebook โหลดไม่ทันได้ 0 → เดิมทับยอดจริงเป็น 0
+ * (โพสต์ที่เก็บคอมเมนต์ได้ 19 รายการ ยอดคอมเมนต์ขึ้น 0) จึง:
+ * - ยอดคอมเมนต์ ไม่น้อยกว่าคอมเมนต์ที่เก็บไว้ใน comment_leads ของโพสต์นี้ — ตัวเลขกดดูรายการได้ครบ
+ * - ไลก์/แชร์ อ่านได้ 0 = คงค่าเดิม · เบอร์ อ่านไม่เจอ = คงค่าเดิม
  */
 async function updatePostLogCollectResult(id, commentCount, customerPhone, reactions, shares) {
   const phoneStr =
@@ -1357,9 +1362,14 @@ async function updatePostLogCollectResult(id, commentCount, customerPhone, react
   const toInt = (v) => (v == null ? null : Math.max(0, parseInt(String(v), 10) || 0));
   await ensurePostLogsEngagementColumns();
   await query(
-    `UPDATE post_logs SET comment_count = $2, customer_phone = $3,
-            reactions = COALESCE($4, reactions), shares = COALESCE($5, shares)
-      WHERE id = $1`,
+    `UPDATE post_logs pl
+        SET comment_count = GREATEST($2, (SELECT count(*)::int FROM comment_leads cl WHERE cl.post_log_id = pl.id)),
+            customer_phone = COALESCE($3, pl.customer_phone),
+            reactions = COALESCE(NULLIF($4, 0), pl.reactions),
+            shares = COALESCE(NULLIF($5, 0), pl.shares),
+            last_collected_at = NOW(),
+            collect_count = COALESCE(pl.collect_count, 0) + 1
+      WHERE pl.id = $1`,
     [
       String(id),
       commentCount == null ? 0 : Math.max(0, parseInt(String(commentCount), 10) || 0),

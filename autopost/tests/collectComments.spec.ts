@@ -155,6 +155,7 @@ async function patchCollectResult(
   postLogId: string,
   body: { comment_count: number; customer_phone: string; reactions?: number; shares?: number }
 ): Promise<void> {
+  if (leadsDb) return leadsDb.updatePostLogCollectResult(postLogId, body.comment_count, body.customer_phone, body.reactions, body.shares);
   const base = (process.env.RUN_LOG_API_URL || 'http://127.0.0.1:3000').replace(/\/$/, '');
   const token = process.env.COLLECT_PATCH_TOKEN || '';
   const workerToken = process.env.COLLECT_WORKER_TOKEN || '';
@@ -289,10 +290,14 @@ test('collectComments', async ({ page }) => {
           sessionKey: String(user.env_key || user.id || user.email || 'default'),
         });
       }
-      // โพสต์ที่ยังรอดำเนินการ: เช็กแท็บก่อน ผ่านแล้วค่อยเก็บคอมเมนต์ · ยังรอ/ปฏิเสธ/ลบ = ไม่มีคอมเมนต์ให้เก็บ
-      if (item.post_link && item.post_status === contentStatus.STATUS_PENDING && item.group_id) {
-        const st = await checkContentStatus(item, ['pending', 'posted', 'declined', 'removed'], `[${idx}/${plan.posts.length}]`);
-        if (st && st !== 'skipped' && st !== contentStatus.STATUS_POSTED) {
+      // โพสต์ที่ยังรอดำเนินการ: เช็กแท็บก่อน ยืนยันว่าเผยแพร่แล้วเท่านั้นจึงเก็บ
+      // เดิมเช็กไม่ได้ (เกินโควตากลุ่ม/ไม่เจอในแท็บ) ก็เปิดลิงก์ต่อ — โพสต์ที่ยังรอคนอื่นมองไม่เห็น หน้าเปิดเป็นฟีดกลุ่ม
+      // ระบบจึงอ่านไลก์/คอมเมนต์ของโพสต์อื่นมาใส่ (18 พ.ย. 2569: โพสต์รออนุมัติ 46 โพสต์มีไลก์ ค่ากลาง 26 สูงสุด 8,126)
+      if (item.post_link && item.post_status === contentStatus.STATUS_PENDING) {
+        const st = item.group_id
+          ? await checkContentStatus(item, ['pending', 'posted', 'declined', 'removed'], `[${idx}/${plan.posts.length}]`)
+          : null;
+        if (st !== contentStatus.STATUS_POSTED) {
           noCollectResult.add(item.post_log_id);
           continue;
         }
@@ -480,7 +485,9 @@ test('collectComments', async ({ page }) => {
   for (const item of plan.posts) {
     if (!item.post_link) continue; // ยังหาลิงก์ไม่เจอ ไม่มีอะไรให้บันทึก
     if (noCollectResult.has(item.post_log_id)) continue;
-    const st = pendingByPost.get(item.post_log_id) || { commentCount: 0, phones: [], reactions: 0, shares: 0, item };
+    // เปิดโพสต์ไม่สำเร็จรอบนี้ = ไม่มีผลให้บันทึก (เดิมส่ง 0 ทับยอดเดิม)
+    const st = pendingByPost.get(item.post_log_id);
+    if (!st) continue;
     const phonesFinal = st.phones || [];
     const phoneStr = phonesFinal.length ? phonesFinal.join(', ').slice(0, CUSTOMER_PHONE_MAX_LEN) : '';
     await patchCollectResult(item.post_log_id, {
