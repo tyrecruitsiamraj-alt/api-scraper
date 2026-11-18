@@ -26,6 +26,7 @@ const leadsDb = process.env.DATABASE_URL ? require('../server/db') : null;
 const contentStatus = require('../server/post-content-status');
 const groupPostLink = require('../server/group-post-link') as {
   postLinkVerdict: (postText: string, ourText: string) => 'ours' | 'other' | 'unknown';
+  applyPaths: (text: string) => Set<string>;
 };
 /**
  * เช็กแท็บ "เนื้อหาของคุณ" ได้กี่กลุ่มต่อรอบ (เจ้าของ 12 พ.ย. 2569: อยากรู้ปฏิเสธแล้ว/ลบออกแล้ว แต่ไม่ให้บัญชีโดนจำกัดเพิ่ม)
@@ -37,18 +38,9 @@ const groupPostLink = require('../server/group-post-link') as {
  * → ตัดสินไม่ได้ (unknown) แล้วปล่อยผ่าน · ตอนนี้กด "ดูเพิ่มเติม" ในโพสต์ก่อน (กดแค่ขยายข้อความ ไม่ไปหน้าอื่น)
  * และอ่านลิงก์ในโพสต์ด้วย (Facebook ห่อเป็น l.facebook.com/l.php?u=…) — ได้ลิงก์สมัครแม้ข้อความยังถูกตัด
  */
-async function readPostForVerdict(page: Page): Promise<string> {
-  const article = page.locator('[role="main"] [role="article"]').first();
-  const more = article.locator('div[role="button"]:text-is("ดูเพิ่มเติม"), div[role="button"]:text-is("See more")').first();
-  if (await more.isVisible({ timeout: 1500 }).catch(() => false)) await more.click({ timeout: 3000 }).catch(() => {});
-  const text =
-    (await article.innerText({ timeout: 5000 }).catch(() => '')) ||
-    (await page.locator('[role="main"]').first().innerText({ timeout: 5000 }).catch(() => ''));
-  const hrefs = await article
-    .locator('a[href]')
-    .evaluateAll((as) => as.map((a) => a.getAttribute('href') || ''))
-    .catch(() => [] as string[]);
-  const links = hrefs.map((h) => {
+/** ลิงก์ของ Facebook (l.facebook.com/l.php?u=…) → ลิงก์จริง */
+const unwrapFbLinks = (hrefs: string[]) =>
+  hrefs.map((h) => {
     try {
       const u = new URL(h, 'https://www.facebook.com');
       return u.hostname.startsWith('l.facebook.com') ? u.searchParams.get('u') || '' : h;
@@ -56,7 +48,37 @@ async function readPostForVerdict(page: Page): Promise<string> {
       return h;
     }
   });
-  return [text, ...links].filter(Boolean).join('\n');
+
+/**
+ * 18 พ.ย. 2569 ตรวจย้อนหลัง 141 โพสต์ "ไม่เห็นลิงก์สมัคร" ทุกโพสต์ (อ่านข้อความได้ 1,400–1,800 ตัว) — กล่อง article แรกอาจไม่ใช่ตัวโพสต์
+ * → คืนทั้งข้อความกล่องแรก (ใช้ตัดสินได้ทั้งของเรา/ของงานอื่น) และข้อความ+ลิงก์ทั้งหน้า (ใช้ยืนยันว่า "ของเรา" เท่านั้น
+ *   เพราะคอมเมนต์อาจมีลิงก์งานอื่น — ห้ามใช้ล้างลิงก์) + ข้อมูลไว้ดูว่าอ่านอะไรมา
+ */
+async function readPostForVerdict(page: Page): Promise<{ article: string; whole: string; diag: Record<string, unknown> }> {
+  const main = page.locator('[role="main"]').first();
+  const article = page.locator('[role="main"] [role="article"]').first();
+  const more = article.locator('div[role="button"]:text-is("ดูเพิ่มเติม"), div[role="button"]:text-is("See more")').first();
+  const moreShown = await more.isVisible({ timeout: 1500 }).catch(() => false);
+  if (moreShown) await more.click({ timeout: 3000 }).catch(() => {});
+  const articleText = await article.innerText({ timeout: 5000 }).catch(() => '');
+  const mainText = await main.innerText({ timeout: 5000 }).catch(() => '');
+  const articleHrefs = unwrapFbLinks(await article.locator('a[href]').evaluateAll((as) => as.map((a) => a.getAttribute('href') || '')).catch(() => [] as string[]));
+  const mainHrefs = unwrapFbLinks(await main.locator('a[href]').evaluateAll((as) => as.map((a) => a.getAttribute('href') || '')).catch(() => [] as string[]));
+  const articleAll = [articleText || mainText, ...articleHrefs].filter(Boolean).join('\n');
+  const whole = [mainText, ...mainHrefs].filter(Boolean).join('\n');
+  return {
+    article: articleAll,
+    whole,
+    diag: {
+      more_clicked: moreShown,
+      article_len: articleText.length,
+      main_len: mainText.length,
+      article_hrefs: articleHrefs.length,
+      main_hrefs: mainHrefs.length,
+      article_tail: articleText.replace(/\s+/g, ' ').slice(-160),
+      apply_in_main: [...groupPostLink.applyPaths(whole)].slice(0, 5),
+    },
+  };
 }
 
 const CONTENT_CHECK_MAX_GROUPS = Math.max(0, Math.min(20, Number(process.env.CONTENT_CHECK_MAX_GROUPS ?? 5)));
@@ -313,15 +335,18 @@ test('collectComments', async ({ page }) => {
       });
       // ลิงก์ที่บันทึกไว้ชี้โพสต์ของงานอื่น (เดิมตอนโพสต์หาไม่เจอแล้วหยิบโพสต์บนสุด) → ล้างลิงก์ ไม่เก็บคอมเมนต์ของโพสต์ผิด
       if (item.own_apply_text && leadsDb) {
-        const postText = await readPostForVerdict(active);
-        const verdict = groupPostLink.postLinkVerdict(postText, item.own_apply_text);
+        const read = await readPostForVerdict(active);
+        const first = groupPostLink.postLinkVerdict(read.article, item.own_apply_text);
+        // กล่องแรกตัดสินไม่ได้ → หาในทั้งหน้า แต่รับได้แค่ "ของเรา" (ทั้งหน้ามีคอมเมนต์ ห้ามใช้ล้างลิงก์)
+        const verdict = first === 'unknown' && groupPostLink.postLinkVerdict(read.whole, item.own_apply_text) === 'ours' ? 'ours' : first;
+        const postText = read.article;
         // ตัดสินไม่ได้ = จดไว้ให้นับได้ (เดิมเงียบ — ตรวจย้อนหลังบอก 0 ทั้งที่มีโพสต์ที่อ่านไม่ออก)
         if (verdict === 'unknown') {
           await runLog({
             level: 'info',
             message: `[${idx}/${plan.posts.length}] ตรวจไม่ได้ว่าลิงก์โพสต์เป็นของงานนี้ไหม (ไม่เห็นลิงก์สมัครในโพสต์)`,
             user_id: user.id,
-            meta: { kind: 'link_unverified', post_log_id: item.post_log_id, group_id: item.group_id, post_link: item.post_link, text_len: postText.length },
+            meta: { kind: 'link_unverified', post_log_id: item.post_log_id, group_id: item.group_id, post_link: item.post_link, text_len: postText.length, ...read.diag },
           });
         }
         if (verdict === 'other') {
