@@ -42,7 +42,7 @@ import { acceptedPositionsForTitle, keepLevelTerms, suggestAdjacentPositions, po
 import { resolveSearchIdentityFromDescription } from '../web/lib/scrape-intake.js';
 import { filterZeroYieldExpansionTerms } from './core/scrape-failure-learning.js';
 import { isZeroYieldRound, zeroYieldNote } from './core/zero-yield.js';
-import { matchBankCandidates } from './core/candidate-bank.js';
+import { bankLimit, matchBankCandidates, webSearchTarget } from './core/candidate-bank.js';
 
 /**
  * Tasks worker — runs queued/due tasks as a full auto pipeline with live phases:
@@ -292,27 +292,21 @@ export async function runTask(t, runtime) {
     };
   }
 
-  // ---- phase 0: คลังผู้สมัคร — คนที่เรามีอยู่แล้วและผ่านเกณฑ์ ผูกเข้าใบก่อนออกไปค้นเว็บ ----
+  // ---- phase 0: คลังผู้สมัคร — คนที่เจอบนเว็บไม่เกิน 30 วันและยังไม่ได้ส่งใบอื่น เติมได้ไม่เกินครึ่งเป้า ----
+  // ที่เหลือทุกใบต้องค้นเว็บใหม่ (เจ้าของ 18 พ.ย. 2569: โทรไปคนจากคลังหลายคนได้งานแล้ว)
   if (t.mode === 'count') {
-    try {
-      const bank = await matchBankCandidates({ taskId: t.id, criteria, qualificationSpec, target: remainingTarget });
-      console.log(`  📚 คลังผู้สมัคร: ดู ${bank.scanned} คน · ผ่านเกณฑ์เพิ่ม ${bank.qualified} คน`);
-    } catch (e) {
-      console.warn(`  📚 คลังผู้สมัคร: ค้นไม่สำเร็จ (${e.message}) — ไปค้นเว็บต่อ`);
+    const bankRoom = Math.min(remainingTarget, Math.max(0, bankLimit(target) - alreadyMatched));
+    if (bankRoom > 0) {
+      try {
+        const bank = await matchBankCandidates({ taskId: t.id, criteria, qualificationSpec, target: bankRoom });
+        console.log(`  📚 คลังผู้สมัคร: ดู ${bank.scanned} คน · ผ่านเกณฑ์เพิ่ม ${bank.qualified} คน (เติมได้ไม่เกิน ${bankRoom})`);
+      } catch (e) {
+        console.warn(`  📚 คลังผู้สมัคร: ค้นไม่สำเร็จ (${e.message}) — ไปค้นเว็บต่อ`);
+      }
     }
-    const afterBank = await countTaskCandidates(t.id).catch(() => alreadyMatched);
-    if (afterBank >= target) {
-      await setTaskPhase(t.id, 'done', target);
-      await bumpTaskProgress(t.id, afterBank);
-      await finishTask(t.id, { status: 'done', phase: 'done', runId: t.last_run_id, error: null });
-      console.log(`  ${t.name}: ได้ครบเป้าจากคลังผู้สมัคร ${afterBank}/${target} (ไม่ออกไปค้นเว็บ)`);
-      return { status: 'done', taskId: t.id, matchedTotal: afterBank, target, fromBank: true };
-    }
-    if (afterBank > alreadyMatched) {
-      alreadyMatched = afterBank;
-      remainingTarget = Math.max(1, target - alreadyMatched);
-      criteria.maxCandidates = remainingTarget;
-    }
+    alreadyMatched = await countTaskCandidates(t.id).catch(() => alreadyMatched);
+    remainingTarget = webSearchTarget(target, alreadyMatched);
+    criteria.maxCandidates = remainingTarget;
   }
 
   // ---- phase 1: scrape ----

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { bankSearchTerms, rankBankCandidates } from '../src/core/candidate-bank.js';
+import { bankLimit, bankSearchTerms, rankBankCandidates, webSearchTarget } from '../src/core/candidate-bank.js';
 
 test('คำค้นในคลังรวมตำแหน่ง คำค้น และตำแหน่งที่ AI เสนอ ไม่ซ้ำ', () => {
   assert.deepEqual(
@@ -10,14 +10,14 @@ test('คำค้นในคลังรวมตำแหน่ง คำค�
   assert.deepEqual(bankSearchTerms({}, {}), []);
 });
 
-test('คนในคลังที่ตกเพศ อายุ จังหวัด ไม่ถูกผูก · ตำแหน่งตรงขึ้นก่อน แล้วใหม่สุดก่อน', () => {
+test('คนในคลังที่ตกเพศ อายุ จังหวัด ไม่ถูกผูก · ตำแหน่งตรงขึ้นก่อน แล้วเจอบนเว็บล่าสุดก่อน', () => {
   const criteria = { province: 'กรุงเทพมหานคร', gender: 'ชาย', ageMin: '25', ageMax: '45' };
   const qualificationSpec = { accepted_positions: ['พนักงานขับรถ'] };
   const base = { gender: 'ชาย', age: '30', desired_work_area: 'กรุงเทพมหานคร' };
   const rows = [
-    { id: 'old-driver', full_name: 'ก', desired_positions: 'พนักงานขับรถ', last_updated_at: '2026-09-01', ...base },
-    { id: 'new-driver', full_name: 'ข', desired_positions: 'พนักงานขับรถ', last_updated_at: '2026-11-01', ...base },
-    { id: 'helper', full_name: 'ค', desired_positions: 'พนักงานส่งของ', work_experience: [{ position: 'ขับรถส่งของ' }], last_updated_at: '2026-11-03', ...base },
+    { id: 'old-driver', full_name: 'ก', desired_positions: 'พนักงานขับรถ', last_seen_at: '2026-09-01', ...base },
+    { id: 'new-driver', full_name: 'ข', desired_positions: 'พนักงานขับรถ', last_seen_at: '2026-11-01', ...base },
+    { id: 'helper', full_name: 'ค', desired_positions: 'พนักงานส่งของ', work_experience: [{ position: 'ขับรถส่งของ' }], last_seen_at: '2026-11-03', ...base },
     { id: 'woman', full_name: 'ง', desired_positions: 'พนักงานขับรถ', ...base, gender: 'หญิง' },
     { id: 'too-old', full_name: 'จ', desired_positions: 'พนักงานขับรถ', ...base, age: '52' },
     { id: 'chiangmai', full_name: 'ฉ', desired_positions: 'พนักงานขับรถ', ...base, desired_work_area: 'เชียงใหม่' },
@@ -30,4 +30,19 @@ test('คนในคลังที่ตกเพศ อายุ จังห
 test('ผูกไม่เกินจำนวนที่ขอ', () => {
   const rows = Array.from({ length: 8 }, (_, i) => ({ id: String(i), full_name: `คน ${i}`, desired_positions: 'ธุรการ' }));
   assert.equal(rankBankCandidates(rows, { qualificationSpec: { accepted_positions: ['ธุรการ'] }, limit: 3 }).length, 3);
+});
+
+test('คลังเติมได้ไม่เกินครึ่งเป้า ที่เหลือต้องค้นเว็บ', () => {
+  assert.equal(bankLimit(20), 10);
+  assert.equal(bankLimit(5), 2);
+  assert.equal(bankLimit(1), 0);
+  assert.equal(bankLimit(0), 0);
+});
+
+test('ทุกใบค้นเว็บอย่างน้อยครึ่งเป้า แม้คลังให้มาแล้ว', () => {
+  assert.equal(webSearchTarget(20, 0), 20);
+  assert.equal(webSearchTarget(20, 10), 10);
+  assert.equal(webSearchTarget(20, 15), 10);
+  assert.equal(webSearchTarget(5, 2), 3);
+  assert.equal(webSearchTarget(1, 0), 1);
 });
