@@ -1,6 +1,7 @@
 import { ChevronsUpDownIcon } from 'lucide-react';
 import { AutopostFrame } from '@/components/AutopostFrame';
 import { NoticeDialog } from '@/components/NoticeDialog';
+import { AccountGroupCoverage } from '@/components/AccountGroupCoverage';
 import { PostingGroupsManager } from '@/components/PostingGroupsManager';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
@@ -29,7 +30,7 @@ async function autopostIsReady() {
   }
 }
 
-export default async function SettingsPostingPage({ searchParams }: { searchParams: Promise<{ sector?: string; q?: string; province?: string; job?: string; notice?: string; ok?: string }> }) {
+export default async function SettingsPostingPage({ searchParams }: { searchParams: Promise<{ account?: string; sector?: string; q?: string; province?: string; job?: string; notice?: string; ok?: string }> }) {
   const params = await searchParams;
   const ready = await autopostIsReady();
   return (
@@ -40,6 +41,8 @@ export default async function SettingsPostingPage({ searchParams }: { searchPara
       </div>
 
       {params.notice && <NoticeDialog key={params.notice} title={params.ok ? 'เพิ่มกลุ่มแล้ว' : 'เพิ่มกลุ่มไม่ได้'} notice={params.notice} />}
+
+      <AccountGroupCoverage accountId={params.account ?? ''} />
 
       <PostingGroupsManager sector={params.sector ?? 'private'} query={params.q ?? ''} province={params.province ?? ''} jobType={params.job ?? ''} />
 

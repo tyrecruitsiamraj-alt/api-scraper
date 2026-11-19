@@ -61,7 +61,7 @@ function createLocalWorkerApi({ db, workerId, workerName = null, env = process.e
       });
       if (!row) throw new Error('job not found');
       if (row.status === 'failed' && sendAlert) {
-        const what = String(row.mode || 'post') === 'warmup' ? 'อุ่นเครื่องบัญชี Facebook ไม่สำเร็จ' : 'โพสต์ Facebook ไม่สำเร็จ';
+        const what = { warmup: 'อุ่นเครื่องบัญชี Facebook ไม่สำเร็จ', groupcheck: 'เช็กกลุ่มของบัญชี Facebook ไม่สำเร็จ' }[String(row.mode || 'post')] || 'โพสต์ Facebook ไม่สำเร็จ';
         sendAlert(`❌ ${what} (คิว ${row.id})\nบัญชี: ${row.user_id || '-'}\nสาเหตุ: ${row.error || '-'}`).catch(() => {});
       }
       return { ok: true, job: row };
@@ -103,6 +103,12 @@ function createLocalWorkerApi({ db, workerId, workerName = null, env = process.e
     // = POST /api/worker/post/enqueue-warmup — อุ่นเครื่องบัญชีใหม่วันละรอบ (idempotent ต่อวัน)
     async '/api/worker/post/enqueue-warmup'() {
       const rows = await db.enqueueDailyWarmupJobs();
+      return { ok: true, created: rows.map((r) => ({ id: r.id, user_id: r.user_id })) };
+    },
+
+    // = POST /api/worker/post/enqueue-groupcheck — เช็กกลุ่มของบัญชีวันละรอบ (idempotent ต่อวัน)
+    async '/api/worker/post/enqueue-groupcheck'() {
+      const rows = await db.enqueueDailyGroupCheckJobs();
       return { ok: true, created: rows.map((r) => ({ id: r.id, user_id: r.user_id })) };
     },
 
@@ -211,7 +217,7 @@ function createLocalWorkerApi({ db, workerId, workerName = null, env = process.e
 
 const LOCAL_WORKER_PATHS = [
   '/api/worker/post/claim', '/api/worker/post/complete', '/api/worker/post/heartbeat', '/api/worker/post/sweep-stale',
-  '/api/worker/post/enqueue-daily', '/api/worker/post/enqueue-warmup', '/api/worker/release-orphans', '/api/worker/collect/claim',
+  '/api/worker/post/enqueue-daily', '/api/worker/post/enqueue-warmup', '/api/worker/post/enqueue-groupcheck', '/api/worker/release-orphans', '/api/worker/collect/claim',
   '/api/worker/collect/complete', '/api/worker/collect/sweep-stale', '/api/worker/collect/enqueue-recent',
 ];
 

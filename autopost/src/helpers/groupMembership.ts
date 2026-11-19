@@ -102,3 +102,18 @@ export async function readGroupPageHint(page: Page): Promise<string> {
   // วงเล็บตัดท้ายข้อความในหน้าเว็บ — เปลี่ยนเป็นวงเล็บเหลี่ยม
   return hint.replace(/[()]/g, (c) => (c === '(' ? '[' : ']')).slice(0, 160);
 }
+
+/**
+ * จดสถานะสมาชิกกลุ่มของบัญชีลงตาราง group_memberships (หน้าเว็บนับ "บัญชีนี้เข้าร่วมแล้วกี่กลุ่ม")
+ * เครื่องที่ไม่ต่อฐานตรง / บันทึกไม่ได้ = ข้ามเงียบ ๆ ไม่ให้งานโพสต์พัง
+ */
+export async function rememberMembership(userId: string, fbGroupId: string, state: MembershipState, note: string | null = null): Promise<void> {
+  if (state === 'limit' || !process.env.DATABASE_URL) return;
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const db = require('../../server/db');
+    await db.recordGroupMembership(userId, fbGroupId, state === 'joined' ? 'member' : state, note, { joinTried: state !== 'member' });
+  } catch (e) {
+    console.warn(`[membership] บันทึกสถานะสมาชิกกลุ่ม ${fbGroupId} ไม่ได้: ${(e as Error).message}`);
+  }
+}

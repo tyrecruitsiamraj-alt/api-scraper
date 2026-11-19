@@ -23,6 +23,7 @@ import {
   handoffRemainingGroups,
 } from '../src/helpers';
 import type { PostDelaySettings, DailyPlanItem } from '../src/helpers';
+import { rememberMembership, type MembershipState } from '../src/helpers/groupMembership';
 
 /** ลิงก์สมัครแยกกลุ่มจาก Jarvis — นิยามเดียวกับฝั่งเว็บ (server/group-apply-link.js) */
 // eslint-disable-next-line @typescript-eslint/no-var-requires
@@ -422,6 +423,9 @@ test('Dynamic Post: รันโพสต์ตาม Assignments', async ({ pag
           console.log(`⚠️ [${userLabel}] browser ปิดระหว่างโพสต์กลุ่ม ${gID} — เตรียม retry อัตโนมัติ`);
         }
       }
+      // หน้าเว็บนับว่าบัญชีนี้เข้าร่วมกลุ่มไหนแล้ว (19 พ.ย. 2569) — โพสต์ได้ = เป็นสมาชิก · ยังไม่เป็น = จดเหตุ
+      if (posted) await rememberMembership(user.id, gID, 'member');
+      else if (membership && membership.state !== 'member') await rememberMembership(user.id, gID, membership.state as MembershipState, membership.message);
       if (posted) {
         totalPosted += 1;
         failStreak = 0;

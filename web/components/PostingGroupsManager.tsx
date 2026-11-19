@@ -1,6 +1,6 @@
 import { ExternalLinkIcon } from 'lucide-react';
 import { createGroupAction, deleteGroupAction, setGroupDepartmentAction, setGroupProvinceAction, setGroupSectorAction } from '@/lib/actions';
-import { listPostingGroups } from '@/lib/repo';
+import { groupMemberCounts, listPostingGroups } from '@/lib/repo';
 import type { PostingGroup } from '@/lib/repo';
 import { GROUP_SECTORS, groupSectorLabel, isGroupSector } from '@/lib/group-sectors';
 import { groupByBusinessUnit } from '@/lib/business-units';
@@ -33,7 +33,7 @@ function provincesOf(group: PostingGroup): string[] {
 }
 
 export async function PostingGroupsManager({ sector = 'private', query = '', province = '', jobType = '' }: { sector?: string; query?: string; province?: string; jobType?: string }) {
-  const groups = await listPostingGroups();
+  const [groups, memberCounts] = await Promise.all([listPostingGroups(), groupMemberCounts()]);
   // แยกราชการ/เอกชนเสมอ ไม่ปนกัน (เจ้าของ 4 พ.ย. 2569) — ค่าเริ่มต้นเอกชน
   const sectorFilter = isGroupSector(sector) ? sector : 'private';
   const needle = query.trim().toLowerCase();
@@ -186,6 +186,7 @@ export async function PostingGroupsManager({ sector = 'private', query = '', pro
                 <ItemDescription>
                   <span className="font-mono">{group.fb_group_id}</span>
                   {group.province ? ` · ${group.province}` : ' · ยังไม่ระบุจังหวัด'}
+                  {` · บัญชีที่เข้าแล้ว ${memberCounts.get(group.fb_group_id) ?? 0}`}
                 </ItemDescription>
               </ItemContent>
               <ItemActions className="flex-wrap justify-end">

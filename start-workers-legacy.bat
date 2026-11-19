@@ -57,7 +57,7 @@ echo.
 
 echo [3/3] เปิด Worker 2 หน้าต่าง...
 set "WORKER_BUILD_SHA=%WORKER_BUILD_SHA%"
-set "WORKER_CAPABILITIES=post,preflight,warmup"
+set "WORKER_CAPABILITIES=post,preflight,warmup,groupcheck"
 set "AUTO_POST_DAILY_ENABLED=0"
 
 REM ห้ามใส่ quote ซ้อนใน cmd /k — จะทำให้หน้าต่างไม่เปิด

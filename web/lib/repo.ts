@@ -4343,6 +4343,119 @@ export async function listPostingGroups(): Promise<PostingGroup[]> {
   }
 }
 
+/**
+ * สมาชิกกลุ่มต่อบัญชี (เจ้าของ 19 พ.ย. 2569: "บัญชี ก เข้าร่วมแล้วกี่กลุ่ม กลุ่มไหนยังไม่เข้า")
+ * ที่มา: ตาราง group_memberships (รอบเช็กกลุ่มอ่านหน้า "กลุ่มของคุณ" + รอบโพสต์จดผล)
+ * ยังไม่มีแถว แต่เคยโพสต์ลงกลุ่มนั้นได้ = นับเป็นสมาชิก · ไม่มีทั้งสองอย่าง = ยังไม่ได้เช็ก
+ */
+export type GroupMembershipState = 'member' | 'pending' | 'questions' | 'not_member' | 'unknown' | 'unchecked';
+
+export type AccountGroupCoverage = {
+  user_id: string;
+  label: string;
+  status: 'ok' | 'paused' | 'retired' | 'verify';
+  total: number;
+  member: number;
+  pending: number;
+  questions: number;
+  not_member: number;
+  unknown: number;
+  unchecked: number;
+  /** อ่านหน้า "กลุ่มของคุณ" ครั้งล่าสุด — null = ยังไม่เคย ตัวเลขยังมาจากการโพสต์อย่างเดียว */
+  list_checked_at: string | null;
+};
+
+async function membershipCellsSql(): Promise<string> {
+  const rows = await q<{ t: string | null }>(`SELECT to_regclass('${AP_SCHEMA}.group_memberships')::text AS t`);
+  const gm = rows[0]?.t
+    ? `SELECT user_id, fb_group_id, state, note, checked_at FROM ${AP}.group_memberships`
+    : `SELECT NULL::text AS user_id, NULL::text AS fb_group_id, NULL::text AS state, NULL::text AS note, NULL::timestamptz AS checked_at WHERE false`;
+  return `WITH gm AS (${gm}),
+     posted AS (SELECT DISTINCT user_id, group_id FROM ${AP}.post_logs WHERE group_id IS NOT NULL),
+     cells AS (
+       SELECT u.id AS user_id, g.fb_group_id, COALESCE(NULLIF(TRIM(g.name), ''), g.fb_group_id) AS group_name,
+              COALESCE(gm.state, CASE WHEN p.user_id IS NOT NULL THEN 'member' END, 'unchecked') AS state,
+              gm.note, gm.checked_at, (gm.state IS NULL AND p.user_id IS NOT NULL) AS from_posts
+         FROM ${AP}.users u
+        CROSS JOIN ${AP}.groups g
+         LEFT JOIN gm ON gm.user_id = u.id AND gm.fb_group_id = g.fb_group_id
+         LEFT JOIN posted p ON p.user_id = u.id AND p.group_id = g.fb_group_id
+        WHERE g.fb_group_id IS NOT NULL)`;
+}
+
+export async function listAccountGroupCoverage(): Promise<AccountGroupCoverage[]> {
+  try {
+    const cells = await membershipCellsSql();
+    const rows = await q<AccountGroupCoverage>(
+      `${cells}
+       SELECT u.id AS user_id, COALESCE(NULLIF(TRIM(u.name), ''), u.env_key, u.id) AS label,
+              CASE WHEN COALESCE(u.pause_reason, '') LIKE 'เลิกใช้โพสต์%' THEN 'retired'
+                   WHEN u.paused_until > now() THEN 'paused'
+                   WHEN u.needs_verification_since IS NOT NULL THEN 'verify'
+                   ELSE 'ok' END AS status,
+              count(c.*)::int AS total,
+              count(*) FILTER (WHERE c.state = 'member')::int AS member,
+              count(*) FILTER (WHERE c.state = 'pending')::int AS pending,
+              count(*) FILTER (WHERE c.state = 'questions')::int AS questions,
+              count(*) FILTER (WHERE c.state = 'not_member')::int AS not_member,
+              count(*) FILTER (WHERE c.state = 'unknown')::int AS unknown,
+              count(*) FILTER (WHERE c.state = 'unchecked')::int AS unchecked,
+              (SELECT max(r.created_at) FROM ${AP}.run_logs r
+                WHERE r.user_id = u.id AND r.meta->>'kind' = 'group_check' AND (r.meta->>'read')::int > 0) AS list_checked_at
+         FROM ${AP}.users u
+         LEFT JOIN cells c ON c.user_id = u.id
+        GROUP BY u.id
+        ORDER BY (CASE WHEN COALESCE(u.pause_reason, '') LIKE 'เลิกใช้โพสต์%' THEN 2
+                       WHEN u.paused_until > now() OR u.needs_verification_since IS NOT NULL THEN 1 ELSE 0 END),
+                 member DESC, label`,
+    );
+    return rows;
+  } catch (e) {
+    console.warn(`[groups] นับกลุ่มต่อบัญชีไม่ได้: ${(e as Error).message}`);
+    return [];
+  }
+}
+
+export type AccountGroupRow = {
+  fb_group_id: string;
+  group_name: string;
+  state: GroupMembershipState;
+  note: string | null;
+  checked_at: string | null;
+  from_posts: boolean;
+};
+
+/** ทุกกลุ่มในระบบ กับสถานะของบัญชีนี้ — ยังไม่เข้าอยู่บน เข้าแล้วอยู่ล่าง */
+export async function listAccountGroups(userId: string): Promise<AccountGroupRow[]> {
+  try {
+    const cells = await membershipCellsSql();
+    return await q<AccountGroupRow>(
+      `${cells}
+       SELECT fb_group_id, group_name, state, note, checked_at, from_posts FROM cells
+        WHERE user_id = $1
+        ORDER BY array_position(ARRAY['not_member','unknown','questions','pending','unchecked','member'], state), group_name`,
+      [userId],
+    );
+  } catch (e) {
+    console.warn(`[groups] อ่านกลุ่มของบัญชี ${userId} ไม่ได้: ${(e as Error).message}`);
+    return [];
+  }
+}
+
+/** จำนวนบัญชีที่เป็นสมาชิกต่อกลุ่ม (คลังกลุ่มโชว์ "สมาชิก N บัญชี") */
+export async function groupMemberCounts(): Promise<Map<string, number>> {
+  try {
+    const cells = await membershipCellsSql();
+    const rows = await q<{ fb_group_id: string; n: number }>(
+      `${cells}
+       SELECT fb_group_id, count(*) FILTER (WHERE state = 'member')::int AS n FROM cells GROUP BY fb_group_id`,
+    );
+    return new Map(rows.map((r) => [r.fb_group_id, r.n]));
+  } catch {
+    return new Map();
+  }
+}
+
 /** กลุ่มที่มีเลข Facebook นี้อยู่แล้ว — เลขกลุ่มซ้ำไม่ได้ (unique) */
 export async function findPostingGroupByFbId(
   fbGroupId: string,

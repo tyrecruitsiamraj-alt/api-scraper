@@ -1983,7 +1983,7 @@ async function enqueuePostRunJob(data = {}) {
       data.requested_by || null,
       data.message || 'queued from web',
       Math.max(0, Math.floor(Number(data.delay_minutes) || 0)),
-      data.mode === 'warmup' ? 'warmup' : 'post',
+      ['warmup', 'groupcheck'].includes(data.mode) ? data.mode : 'post',
       data.not_before || null,
     ]
   );
@@ -2118,6 +2118,163 @@ async function enqueueDailyWarmupJobs() {
 }
 
 /**
+ * สมาชิกกลุ่มต่อบัญชี (เจ้าของ 19 พ.ย. 2569: "บัญชี ก เข้าร่วมแล้วกี่กลุ่ม กลุ่มไหนยังไม่เข้า")
+ * เดิมระบบรู้แค่กลุ่มที่บัญชีเคยโพสต์ได้ (36 จาก 174 กลุ่ม) · รอบเช็กกลุ่ม (โหมด groupcheck) อ่านหน้า
+ * "กลุ่มของคุณ" ของบัญชีแล้วจดที่นี่ · รอบโพสต์จดผลตอนเจอว่ายังไม่เป็นสมาชิกด้วย
+ * state: member | pending (รอแอดมินอนุมัติ) | questions (ต้องตอบคำถามเอง) | not_member | unknown (เปิดแล้วไม่เจอทั้งช่องโพสต์และปุ่มเข้าร่วม)
+ */
+async function ensureGroupMembershipTable() {
+  await query(
+    `CREATE TABLE IF NOT EXISTS group_memberships (
+       user_id VARCHAR(50) NOT NULL,
+       fb_group_id VARCHAR(64) NOT NULL,
+       state VARCHAR(20) NOT NULL,
+       note TEXT,
+       checked_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+       join_tried_at TIMESTAMPTZ,
+       PRIMARY KEY (user_id, fb_group_id)
+     )`
+  );
+  /** ชื่อกลุ่มใน URL ที่แอดมินตั้ง (เช่น hangankhabrot) — หน้ารายชื่อกลุ่มบางกลุ่มลิงก์ด้วยชื่อนี้แทนเลข */
+  await query(`ALTER TABLE groups ADD COLUMN IF NOT EXISTS fb_slug TEXT`);
+}
+
+const MEMBERSHIP_STATES = new Set(['member', 'pending', 'questions', 'not_member', 'unknown']);
+
+/** จดสถานะสมาชิกของบัญชีในกลุ่มนี้ · joinTried = รอบนี้กดเข้าร่วม (ไม่กดซ้ำกลุ่มเดิมภายใน 7 วัน) */
+async function recordGroupMembership(userId, fbGroupId, state, note = null, { joinTried = false } = {}) {
+  if (!MEMBERSHIP_STATES.has(state) || !userId || !fbGroupId) return false;
+  await ensureGroupMembershipTable();
+  await query(
+    `INSERT INTO group_memberships (user_id, fb_group_id, state, note, checked_at, join_tried_at)
+     VALUES ($1, $2, $3, $4, NOW(), CASE WHEN $5 THEN NOW() END)
+     ON CONFLICT (user_id, fb_group_id) DO UPDATE
+       SET state = EXCLUDED.state, note = EXCLUDED.note, checked_at = NOW(),
+           join_tried_at = COALESCE(EXCLUDED.join_tried_at, group_memberships.join_tried_at)`,
+    [String(userId), String(fbGroupId), state, note ? String(note).slice(0, 300) : null, Boolean(joinTried)]
+  );
+  return true;
+}
+
+/**
+ * บันทึกรายชื่อกลุ่มที่บัญชีเป็นสมาชิก (จากหน้า "กลุ่มของคุณ") เทียบกับทุกกลุ่มในระบบ
+ * กลุ่มในระบบที่ไม่อยู่ในรายชื่อ = not_member · ยกเว้นที่ขอเข้าไว้ (pending/questions) ไม่เกิน 14 วัน ให้คงไว้
+ * รายชื่อว่าง = อ่านหน้าไม่สำเร็จ ไม่เขียนอะไร (ไม่ตีว่าไม่ได้เป็นสมาชิกทุกกลุ่ม)
+ */
+async function saveJoinedGroupsList(userId, entries) {
+  const list = Array.isArray(entries) ? entries : [];
+  if (!userId || list.length === 0) return null;
+  await ensureGroupMembershipTable();
+  const { matchJoinedGroups } = require('./joined-groups');
+  const { rows: groups } = await query(`SELECT fb_group_id, fb_slug, name FROM groups WHERE fb_group_id IS NOT NULL`);
+  const m = matchJoinedGroups(list, groups);
+  const client = await getPool().connect();
+  try {
+    await client.query('BEGIN');
+    await client.query(
+      `INSERT INTO group_memberships (user_id, fb_group_id, state, note, checked_at)
+       SELECT $1, g, 'member', NULL, NOW() FROM unnest($2::text[]) AS g
+       ON CONFLICT (user_id, fb_group_id) DO UPDATE SET state = 'member', note = NULL, checked_at = NOW()`,
+      [String(userId), m.memberIds]
+    );
+    await client.query(
+      `INSERT INTO group_memberships (user_id, fb_group_id, state, note, checked_at)
+       SELECT $1, g.fb_group_id, 'not_member', NULL, NOW() FROM groups g
+        WHERE g.fb_group_id IS NOT NULL AND NOT (g.fb_group_id = ANY($2::text[]))
+       ON CONFLICT (user_id, fb_group_id) DO UPDATE SET state = 'not_member', note = NULL, checked_at = NOW()
+        WHERE NOT (group_memberships.state IN ('pending', 'questions')
+                   AND group_memberships.checked_at > NOW() - INTERVAL '14 days')`,
+      [String(userId), m.memberIds]
+    );
+    for (const u of m.nameUpdates) {
+      await client.query(`UPDATE groups SET name = $2 WHERE fb_group_id = $1 AND name ~* '^Group\\s+\\d+$'`, [u.fb_group_id, u.name]);
+    }
+    for (const u of m.slugUpdates) {
+      await client.query(`UPDATE groups SET fb_slug = $2 WHERE fb_group_id = $1 AND fb_slug IS NULL`, [u.fb_group_id, u.slug]);
+    }
+    await client.query('COMMIT');
+  } catch (e) {
+    await client.query('ROLLBACK').catch(() => {});
+    throw e;
+  } finally {
+    client.release();
+  }
+  return { member: m.memberIds.length, total: groups.length, unmatched: m.unmatched, names: m.nameUpdates.length };
+}
+
+/** จำชื่อกลุ่มใน URL ตอนเปิดหน้ากลุ่ม (Facebook พาไป /groups/<ชื่อ>/ เอง) */
+async function saveGroupSlug(fbGroupId, slug) {
+  const s = String(slug || '').trim().toLowerCase();
+  if (!s || /^\d+$/.test(s) || s === String(fbGroupId)) return false;
+  await ensureGroupMembershipTable();
+  const { rowCount } = await query(`UPDATE groups SET fb_slug = $2 WHERE fb_group_id = $1 AND fb_slug IS DISTINCT FROM $2`, [String(fbGroupId), s]);
+  return rowCount > 0;
+}
+
+/**
+ * กลุ่มที่บัญชีนี้จะกดเข้าร่วมรอบนี้: รู้แน่แล้วว่ายังไม่เป็นสมาชิก (not_member จากรายชื่อ หรือ unknown)
+ * และไม่ได้กดในกลุ่มนี้มาภายใน 7 วัน · กลุ่มที่ยังไม่มีบัญชีไหนเป็นสมาชิก และกลุ่มที่ยังไม่มีชื่อจริง ก่อน
+ */
+async function pickGroupsToJoin(userId, limit) {
+  const n = Math.max(0, Math.min(10, Math.floor(Number(limit) || 0)));
+  if (!userId || n === 0) return [];
+  await ensureGroupMembershipTable();
+  const { rows } = await query(
+    `SELECT g.fb_group_id, g.name
+       FROM group_memberships gm
+       JOIN groups g ON g.fb_group_id = gm.fb_group_id
+      WHERE gm.user_id = $1 AND gm.state IN ('not_member', 'unknown')
+        AND (gm.join_tried_at IS NULL OR gm.join_tried_at < NOW() - INTERVAL '7 days')
+      ORDER BY (SELECT count(*) FROM group_memberships o WHERE o.fb_group_id = g.fb_group_id AND o.state = 'member') ASC,
+               (g.name ~* '^Group\\s+\\d+$') DESC,
+               g.created_at ASC
+      LIMIT $2`,
+    [String(userId), n]
+  );
+  return rows;
+}
+
+/** เช็กกลุ่มวันละรอบ เวลาสุ่ม 09:00–17:00 · บัญชีที่ถูกพัก/ติดยืนยันตัวตนไม่ทำ · งานค้างจากวันก่อนยกเลิก */
+async function enqueueDailyGroupCheckJobs() {
+  await ensurePostRunQueueUserColumn();
+  await ensureUsersPostControlColumns();
+  await ensureVerificationColumns();
+  await ensureGroupMembershipTable();
+  await query(
+    `UPDATE post_run_queue
+        SET status = 'cancelled', finished_at = NOW(), updated_at = NOW(),
+            message = 'ไม่ได้เช็กกลุ่มในวันนั้น (เครื่องไม่ได้หยิบงาน)'
+      WHERE mode = 'groupcheck' AND status = 'queued'
+        AND (created_at AT TIME ZONE 'Asia/Bangkok')::date < (NOW() AT TIME ZONE 'Asia/Bangkok')::date`
+  );
+  const { rows } = await query(
+    `SELECT u.id FROM users u
+      WHERE (u.paused_until IS NULL OR u.paused_until <= NOW())
+        AND u.needs_verification_since IS NULL
+        AND NOT EXISTS (
+          SELECT 1 FROM post_run_queue q
+           WHERE q.user_id = u.id AND q.mode = 'groupcheck'
+             AND (q.created_at AT TIME ZONE 'Asia/Bangkok')::date = (NOW() AT TIME ZONE 'Asia/Bangkok')::date
+        )`
+  );
+  const day = bangkokDay();
+  const created = [];
+  for (const u of rows) {
+    const at = Date.parse(`${day}T08:00:00+07:00`) + warmupStartOffsetMin(u.id, `${day}|groups`) * 60_000;
+    const row = await enqueuePostRunJob({
+      assignment_ids: [],
+      user_id: u.id,
+      mode: 'groupcheck',
+      requested_by: 'auto-groupcheck',
+      message: 'เช็กกลุ่มที่บัญชีเข้าร่วมแล้ว + กดเข้าร่วมกลุ่มที่ยังไม่เข้า (ไม่โพสต์)',
+      not_before: new Date(at > Date.now() ? at : Date.now() + Math.floor(Math.random() * 30) * 60_000).toISOString(),
+    });
+    if (row) created.push(row);
+  }
+  return created;
+}
+
+/**
  * Worker heartbeat — เว็บใช้เช็คว่า "เครื่องโพสต์ยังมีชีวิต" (เคสโพสต์ fail เงียบ 2 วันไม่มีใครรู้).
  * remote worker เรียก /api/worker/post/claim ทุก ~5 วิอยู่แล้ว → server แตะแถวให้ที่นั่น
  * (เครื่อง Mac ไม่ต้องแก้โค้ดเอง). fail-soft: heartbeat พังห้ามทำให้ claim พัง.
@@ -2197,6 +2354,7 @@ async function claimNextPostRunJob(workerId, runId, workerName, capabilities = [
              (COALESCE(q.mode, 'post') = 'preflight' AND $4::jsonb ? 'preflight')
              OR (COALESCE(q.mode, 'post') = 'post' AND $4::jsonb ? 'post')
              OR (COALESCE(q.mode, 'post') = 'warmup' AND $4::jsonb ? 'warmup')
+             OR (COALESCE(q.mode, 'post') = 'groupcheck' AND $4::jsonb ? 'groupcheck')
            )
            /** งานโพสต์จริงไม่ต้องรอผลทดสอบแบบไม่โพสต์ (preflight) แล้ว — เจ้าของสั่งเอาออก 28 ต.ค. 2569
                ถ้าบัญชีล็อกอินไม่ได้ จะรู้จากผลรอบโพสต์ */
@@ -2888,7 +3046,7 @@ async function completePostRunJob(id, data = {}) {
   const completed = rows[0] || null;
   if (completed) await recordRunStop(completed, data.error).catch((e) => console.warn('[stop] บันทึกเหตุที่รอบหยุดไม่สำเร็จ:', e.message));
   // อุ่นเครื่องก็ล็อกอินบัญชีจริง — ติดยืนยันตัวตนให้รู้เหมือนรอบโพสต์
-  if (completed && ['post', 'warmup'].includes(String(completed.mode || 'post'))) {
+  if (completed && ['post', 'warmup', 'groupcheck'].includes(String(completed.mode || 'post'))) {
     await rememberLoginState(completed.user_id, ok, data.error).catch((e) => {
       console.warn('[verify] จำสถานะยืนยันตัวตนไม่สำเร็จ:', e.message);
     });
@@ -3360,6 +3518,12 @@ module.exports = {
   enqueuePostRunJobsPerUser,
   enqueueDailyPostRunJobs,
   enqueueDailyWarmupJobs,
+  enqueueDailyGroupCheckJobs,
+  ensureGroupMembershipTable,
+  recordGroupMembership,
+  saveJoinedGroupsList,
+  saveGroupSlug,
+  pickGroupsToJoin,
   claimNextPostRunJob,
   touchWorkerHeartbeat,
   completePostRunJob,

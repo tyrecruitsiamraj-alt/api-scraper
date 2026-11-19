@@ -77,11 +77,12 @@ const workerBuildSha = String(process.env.WORKER_BUILD_SHA || '').trim() || work
 // แบบ `WORKER_CAPABILITIES=preflight` ได้อย่างปลอดภัยเพื่อทดสอบ session/group
 // โดยไม่ claim งาน post จริง. ค่า default รักษาพฤติกรรม production เดิม.
 // warmup = อุ่นเครื่องบัญชีใหม่ (เลื่อนฟีด/ดูกลุ่ม/กดถูกใจ ไม่โพสต์) — เจ้าของเคาะ 9 พ.ย. 2569
+// groupcheck = เช็กกลุ่มที่บัญชีเข้าร่วมแล้ว + กดเข้าร่วมกลุ่มที่ยังไม่เข้า วันละไม่กี่กลุ่ม (ไม่โพสต์) — เจ้าของ 19 พ.ย. 2569
 const WORKER_CAPABILITIES = [...new Set(
-  String(process.env.WORKER_CAPABILITIES || 'post,preflight,warmup')
+  String(process.env.WORKER_CAPABILITIES || 'post,preflight,warmup,groupcheck')
     .split(',')
     .map((item) => item.trim())
-    .filter((item) => ['post', 'preflight', 'warmup'].includes(item))
+    .filter((item) => ['post', 'preflight', 'warmup', 'groupcheck'].includes(item))
 )];
 if (WORKER_CAPABILITIES.length === 0) {
   console.error('[post-worker] WORKER_CAPABILITIES ต้องมี post หรือ preflight อย่างน้อยหนึ่งรายการ');
@@ -172,13 +173,14 @@ async function runPlaywrightForJob(job) {
     const mode = String(job.mode || 'post');
     if (mode === 'preflight') env.PREFLIGHT_USER_ID = String(job.user_id || '');
     if (mode === 'warmup') env.WARMUP_USER_ID = String(job.user_id || '');
+    if (mode === 'groupcheck') env.GROUPCHECK_USER_ID = String(job.user_id || '');
     // โปรไฟล์ Chrome ถาวรของบัญชีนี้ (tests/humanBrowser.fixture.ts) — งานไม่มีบัญชี = Chrome ใหม่แบบเดิม
     if (job.user_id) env.FB_PROFILE_ID = String(job.user_id);
     else delete env.FB_PROFILE_ID;
     // ทุกงานนับเพดานต่อวัน (เจ้าของ 8 พ.ย. 2569) — เดิมงานที่ไม่ใช่รอบ 8:00 ตั้ง IGNORE_DAILY_CAP=1
     // ใบจาก Jarvis ทุกใบจึงโพสต์ได้เต็มเพดานใหม่ บางบัญชีโพสต์ 25 กลุ่ม/วัน แล้ว Facebook จำกัดบัญชี
     delete env.IGNORE_DAILY_CAP;
-    const testName = { preflight: 'facebookPreflight', warmup: 'facebookWarmup' }[mode] || 'postAll';
+    const testName = { preflight: 'facebookPreflight', warmup: 'facebookWarmup', groupcheck: 'facebookGroupCheck' }[mode] || 'postAll';
     const args = ['playwright', 'test', testName, '--headed', '--project=GoogleChrome'];
     const isWin = process.platform === 'win32';
     let outputTail = '';
@@ -253,7 +255,7 @@ async function processJob(job) {
         job_id: job.id,
         run_id: job.run_id,
         ok: true,
-        message: { preflight: 'Facebook preflight completed (no post)', warmup: 'อุ่นเครื่องบัญชีเสร็จ (ไม่โพสต์)' }[String(job.mode || 'post')] || 'Worker run completed',
+        message: { preflight: 'Facebook preflight completed (no post)', warmup: 'อุ่นเครื่องบัญชีเสร็จ (ไม่โพสต์)', groupcheck: 'เช็กกลุ่มของบัญชีเสร็จ (ไม่โพสต์)' }[String(job.mode || 'post')] || 'Worker run completed',
       });
       console.log(`[post-worker] job ${job.id} completed`);
     } catch (e) {
@@ -461,6 +463,30 @@ async function autoEnqueueWarmup() {
 }
 setInterval(autoEnqueueWarmup, 60_000);
 autoEnqueueWarmup();
+
+/**
+ * เช็กกลุ่มของบัญชีวันละรอบ (เจ้าของ 19 พ.ย. 2569) — อ่านหน้า "กลุ่มของคุณ" แล้วกดเข้าร่วมกลุ่มที่ยังไม่เข้าไม่กี่กลุ่ม
+ * รอบนี้เขียนฐานตรง จึงทำเฉพาะเครื่องที่มี DATABASE_URL · ปิดด้วย AUTO_GROUPCHECK_ENABLED=0
+ */
+const AUTO_GROUPCHECK_ENABLED = Boolean(localApi) && WORKER_CAPABILITIES.includes('groupcheck')
+  && String(process.env.AUTO_GROUPCHECK_ENABLED ?? '1').trim() !== '0';
+let lastGroupCheckEnqueueDate = '';
+
+async function autoEnqueueGroupCheck() {
+  if (!AUTO_GROUPCHECK_ENABLED) return;
+  const now = bangkokNow();
+  if (now.date === lastGroupCheckEnqueueDate || now.minutes < 8 * 60) return;
+  try {
+    const out = await callApi('/api/worker/post/enqueue-groupcheck', {});
+    lastGroupCheckEnqueueDate = now.date;
+    const n = Array.isArray(out.created) ? out.created.length : 0;
+    console.log(`[post-worker] เช็กกลุ่มของบัญชี ${now.date} — เข้าคิว ${n} บัญชี (เวลาสุ่ม 09:00–17:00)`);
+  } catch (e) {
+    console.error(`[post-worker] เข้าคิวเช็กกลุ่มไม่สำเร็จ จะลองใหม่: ${e.message || e}`);
+  }
+}
+setInterval(autoEnqueueGroupCheck, 60_000);
+autoEnqueueGroupCheck();
 
 setInterval(tick, INTERVAL_MS);
 releaseOrphansOnce().then(() => tick());

@@ -1594,7 +1594,7 @@ app.post('/api/worker/post/complete', async (req, res) => {
     };
     // แจ้งเตือนทันทีที่โพสต์ fail (fail-soft — ไม่มี ALERT_WEBHOOK_URL = เงียบ)
     if (row.status === 'failed') {
-      sendAlert(`❌ ${String(row.mode || 'post') === 'warmup' ? 'อุ่นเครื่องบัญชี Facebook ไม่สำเร็จ' : 'โพสต์ Facebook ไม่สำเร็จ'} (คิว ${row.id})\nบัญชี: ${row.user_id || '-'}\nสาเหตุ: ${row.error || 'ไม่ทราบ'}`)
+      sendAlert(`❌ ${{ warmup: 'อุ่นเครื่องบัญชี Facebook ไม่สำเร็จ', groupcheck: 'เช็กกลุ่มของบัญชี Facebook ไม่สำเร็จ' }[String(row.mode || 'post')] || 'โพสต์ Facebook ไม่สำเร็จ'} (คิว ${row.id})\nบัญชี: ${row.user_id || '-'}\nสาเหตุ: ${row.error || 'ไม่ทราบ'}`)
         .catch(() => {});
     }
     return res.json({ ok: true, job: row });
