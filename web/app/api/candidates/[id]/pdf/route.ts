@@ -2,7 +2,7 @@ import { getServerSession } from 'next-auth';
 import { NextResponse } from 'next/server';
 import { authOptions } from '@/lib/auth';
 import { getAssetBytes, getCandidate } from '@/lib/repo';
-import { buildResumeHtml, htmlToPdf, resumeFileName } from '@/lib/resumePdf';
+import { buildResumeHtml, htmlToImage, htmlToPdf, resumeFileNameAs } from '@/lib/resumePdf';
 import { getResumeTemplate } from '@/lib/resume-templates';
 import { applyResumeFields, parseResumeFields, parseResumeTrim, trimResumeCandidate } from '@/lib/resume-template';
 
@@ -51,13 +51,15 @@ export async function GET(req: Request, props: { params: Promise<{ id: string }>
     if (search.get('format') === 'html') {
       return new NextResponse(html, { status: 200, headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'private, no-store' } });
     }
-    const pdf = await htmlToPdf(html);
-    const filename = resumeFileName(c.full_name);
-    return new NextResponse(new Uint8Array(pdf), {
+    // ?format=jpg|png = รูป · ไม่ส่ง = PDF
+    const format = search.get('format');
+    const image = format === 'jpg' || format === 'png' ? format : null;
+    const file = image ? await htmlToImage(html, image === 'jpg' ? 'jpeg' : 'png') : await htmlToPdf(html);
+    return new NextResponse(new Uint8Array(file), {
       status: 200,
       headers: {
-        'Content-Type': 'application/pdf',
-        'Content-Disposition': contentDisposition(filename),
+        'Content-Type': image === 'jpg' ? 'image/jpeg' : image === 'png' ? 'image/png' : 'application/pdf',
+        'Content-Disposition': contentDisposition(resumeFileNameAs(c.full_name, image ?? 'pdf')),
         'Cache-Control': 'private, no-store',
       },
     });

@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
 import { SAMPLE_CANDIDATE, applyResumeFields, buildResumeHtml, defaultResumeFields, parseResumeFields } from '../web/lib/resume-template.ts';
 
 // 19 พ.ย. 2569: เจ้าของอยากเลือกทีละช่องตอนโหลดว่าจะโชว์อะไรใน Resume
@@ -37,4 +38,14 @@ test('ไม่ส่ง ?fields = ใช้ตามแบบฟอร์ม ·
   assert.equal(parseResumeFields(new URLSearchParams('template=profile')), null);
   assert.deepEqual([...parseResumeFields(new URLSearchParams('fields=age,bogus,phone'))], ['age', 'phone']);
   assert.deepEqual([...parseResumeFields(new URLSearchParams('fields='))], []);
+});
+
+test('โหลดเป็นรูปได้: ?format=jpg|png → รูปกว้างเท่า A4 · ไม่ส่ง = PDF', () => {
+  const route = fs.readFileSync(new URL('../web/app/api/candidates/[id]/pdf/route.ts', import.meta.url), 'utf8');
+  assert.match(route, /const image = format === 'jpg' \|\| format === 'png' \? format : null;/);
+  assert.match(route, /image === 'jpg' \? 'image\/jpeg' : image === 'png' \? 'image\/png' : 'application\/pdf'/);
+  const lib = fs.readFileSync(new URL('../web/lib/resumePdf.ts', import.meta.url), 'utf8');
+  assert.match(lib, /\{ width: 794, height: 1123, deviceScaleFactor: 2 \}/);
+  const dialog = fs.readFileSync(new URL('../web/components/PdfDownloadDialog.tsx', import.meta.url), 'utf8');
+  assert.match(dialog, /<NativeSelectOption value="jpg">JPG \(รูป\)<\/NativeSelectOption>/);
 });

@@ -55,6 +55,8 @@ export function PdfDownloadDialog({
   const fieldsOf = (id: string) => templates.find((t) => t.id === id)?.fields ?? null;
   const [shown, setShown] = useState<string[] | null>(() => fieldsOf(templateId));
   const [mode, setMode] = useState<'flow' | 'trim'>('flow');
+  // ชนิดไฟล์ที่โหลด (เจ้าของ 19 พ.ย. 2569: "อยากโหลดได้หลายสกุลไฟล์ เช่น jpg png")
+  const [fileType, setFileType] = useState<'pdf' | 'jpg' | 'png'>('pdf');
   const [hidden, setHidden] = useState<number[]>([]);
   const [details, setDetails] = useState(true);
   const [pages, setPages] = useState<number | null>(null);
@@ -71,7 +73,8 @@ export function PdfDownloadDialog({
     }
     return q.toString();
   }, [templateId, shown, mode, hidden, details]);
-  const pdfUrl = `${href}${query ? `?${query}` : ''}`;
+  const fileQuery = [query, fileType === 'pdf' ? '' : `format=${fileType}`].filter(Boolean).join('&');
+  const pdfUrl = `${href}${fileQuery ? `?${fileQuery}` : ''}`;
   const previewUrl = `${href}?${query ? `${query}&` : ''}format=html`;
 
   // นับหน้า: ความสูงเนื้อหาหักขอบกระดาษ หารด้วยพื้นที่พิมพ์ต่อหน้า (ขอบเท่ากับ @page ของแบบฟอร์มนั้น)
@@ -112,7 +115,7 @@ export function PdfDownloadDialog({
       </DialogTrigger>
       <DialogContent className="sm:max-w-3xl">
         <DialogHeader>
-          <DialogTitle>ดาวน์โหลด PDF</DialogTitle>
+          <DialogTitle>ดาวน์โหลด Resume</DialogTitle>
           <DialogDescription>{pages === null ? 'กำลังนับหน้า…' : `ไฟล์นี้ ${pages} หน้า`}</DialogDescription>
         </DialogHeader>
         <div className="grid gap-5 sm:grid-cols-[auto_1fr]">
@@ -197,11 +200,19 @@ export function PdfDownloadDialog({
             </FieldSet>
           </div>
         </div>
-        <DialogFooter>
+        <DialogFooter className="items-center gap-3 sm:justify-end">
+          <Field orientation="horizontal" className="w-auto">
+            <FieldLabel htmlFor="pdf-file-type" className="shrink-0 font-normal">ชนิดไฟล์</FieldLabel>
+            <NativeSelect id="pdf-file-type" value={fileType} onChange={(e) => setFileType(e.target.value as 'pdf' | 'jpg' | 'png')}>
+              <NativeSelectOption value="pdf">PDF</NativeSelectOption>
+              <NativeSelectOption value="jpg">JPG (รูป)</NativeSelectOption>
+              <NativeSelectOption value="png">PNG (รูป)</NativeSelectOption>
+            </NativeSelect>
+          </Field>
           <Button asChild>
             <a href={pdfUrl}>
               <DownloadIcon data-icon="inline-start" />
-              ดาวน์โหลด
+              ดาวน์โหลด {fileType.toUpperCase()}
             </a>
           </Button>
         </DialogFooter>

@@ -14,7 +14,13 @@ export function resumeFileName(fullName: unknown): string {
   return `${base || 'resume'}.pdf`;
 }
 
-export async function htmlToPdf(html: string): Promise<Buffer> {
+/** ชื่อไฟล์ตามชนิด (resume.pdf → resume.jpg / resume.png) */
+export function resumeFileNameAs(fullName: unknown, ext: 'pdf' | 'jpg' | 'png'): string {
+  return resumeFileName(fullName).replace(/\.pdf$/, `.${ext}`);
+}
+
+/** เปิด HTML เรซูเม่ใน Chrome (รอฟอนต์) แล้วให้ use ทำไฟล์จากหน้านั้น */
+async function withResumePage<T>(html: string, use: (page: any) => Promise<T>, viewport?: { width: number; height: number; deviceScaleFactor: number }): Promise<T> {
   const isServerless = Boolean(process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME);
   const puppeteer = await import('puppeteer-core');
 
@@ -63,6 +69,7 @@ export async function htmlToPdf(html: string): Promise<Buffer> {
 
   try {
     const page = await browser.newPage();
+    if (viewport) await page.setViewport(viewport);
     await page.setContent(html, { waitUntil: 'load', timeout: 60_000 });
     // Wait for Google Fonts (Kanit) if network available; don't hang forever offline.
     await page.evaluate(() => document.fonts.ready).catch(() => {});
@@ -71,10 +78,27 @@ export async function htmlToPdf(html: string): Promise<Buffer> {
     await page.evaluate(async () => {
       await new Promise((r) => setTimeout(r, 300));
     }).catch(() => {});
-    // ขอบกระดาษมาจาก @page ของแต่ละแบบฟอร์ม (แบบแถบข้างไม่มีขอบ แถบสีชิดกระดาษ)
-    const pdf = await page.pdf({ format: 'A4', printBackground: true, preferCSSPageSize: true });
-    return Buffer.from(pdf);
+    return await use(page);
   } finally {
     await browser.close().catch(() => {});
   }
+}
+
+export async function htmlToPdf(html: string): Promise<Buffer> {
+  // ขอบกระดาษมาจาก @page ของแต่ละแบบฟอร์ม (แบบแถบข้างไม่มีขอบ แถบสีชิดกระดาษ)
+  return withResumePage(html, async (page) => Buffer.from(await page.pdf({ format: 'A4', printBackground: true, preferCSSPageSize: true })));
+}
+
+export type ResumeImageType = 'png' | 'jpeg';
+
+/**
+ * เรซูเม่เป็นรูป (เจ้าของ 19 พ.ย. 2569: "อยากโหลดได้หลายสกุลไฟล์ เช่น jpg png")
+ * กว้างเท่า A4 (794px) ความละเอียด 2 เท่า · เกินหนึ่งหน้า = รูปยาวต่อกันลงไป หน้าตาเดียวกับตัวอย่างในหน้าต่างดาวน์โหลด
+ */
+export async function htmlToImage(html: string, type: ResumeImageType): Promise<Buffer> {
+  return withResumePage(
+    html,
+    async (page) => Buffer.from(await page.screenshot({ type, fullPage: true, ...(type === 'jpeg' ? { quality: 92 } : {}) })),
+    { width: 794, height: 1123, deviceScaleFactor: 2 },
+  );
 }
