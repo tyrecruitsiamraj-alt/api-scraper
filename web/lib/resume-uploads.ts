@@ -131,15 +131,18 @@ export type UploadRow = {
   mime: string | null;
   /** ตัวหนังสือที่ AI อ่านได้จากไฟล์ที่อ่านไม่ผ่าน (โชว์ว่าทำไมไม่ผ่าน) — ไฟล์อื่น = null */
   read_text: string | null;
+  /** ประวัติงานของคนที่บันทึกแล้ว (หน้าต่างตัวอย่างก่อนโหลด Resume เลือกตัดงานได้) */
+  works: { position: string; company: string; period: string }[];
   diff: CandidateDiffRow[];
 };
 
 export async function getUploadBatch(batchId: string): Promise<UploadRow[]> {
   await ensureResumeUploads();
-  const rows = await q<Omit<UploadRow, 'diff'> & { parsed: Record<string, unknown> | null; current: Record<string, unknown> | null }>(
+  const rows = await q<Omit<UploadRow, 'diff' | 'works'> & { parsed: Record<string, unknown> | null; current: Record<string, unknown> | null; work_raw: unknown }>(
     `SELECT u.id, u.file_name, u.status, u.error, u.candidate_id, c.full_name AS candidate_name,
             u.parsed->>'full_name' AS parsed_name, u.uploaded_by_name, u.created_at, u.finished_at,
             u.mime, CASE WHEN u.status = 'failed' THEN left(u.raw_text, 4000) END AS read_text,
+            CASE WHEN u.status IN ('saved', 'merged') THEN c.work_experience END AS work_raw,
             CASE WHEN t.id IS NULL THEN NULL
                  ELSE concat_ws(' · ', t.source_request_no, COALESCE(NULLIF(t.criteria->>'position', ''), t.name)) END AS task_label,
             CASE WHEN u.status = 'review' THEN u.parsed END AS parsed,
@@ -151,7 +154,12 @@ export async function getUploadBatch(batchId: string): Promise<UploadRow[]> {
       ORDER BY u.created_at, u.file_name`,
     [batchId],
   );
-  return rows.map(({ parsed, current, ...r }) => ({ ...r, diff: parsed ? diffCandidate(current, parsed) : [] }));
+  const text = (v: unknown) => String(v ?? '').trim();
+  return rows.map(({ parsed, current, work_raw, ...r }) => ({
+    ...r,
+    works: (Array.isArray(work_raw) ? work_raw : []).map((w) => ({ position: text(w?.position), company: text(w?.company), period: text(w?.period ?? w?.year) })),
+    diff: parsed ? diffCandidate(current, parsed) : [],
+  }));
 }
 
 /** ไฟล์ต้นฉบับที่อัปโหลด (เปิดดูจากหน้าผลอัปโหลด) — ต้องอยู่ในรอบอัปโหลดนั้น */

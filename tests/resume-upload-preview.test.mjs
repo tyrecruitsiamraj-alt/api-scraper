@@ -18,3 +18,10 @@ test('เปิดไฟล์ต้นฉบับต้องล็อกอ�
   const web = fs.readFileSync(new URL('../web/lib/resume-uploads.ts', import.meta.url), 'utf8');
   assert.match(web, /FROM resume_uploads WHERE id = \$1 AND batch_id = \$2/);
 });
+
+test('หน้าผลอัปโหลด: ปุ่มโหลด Resume เปิดตัวอย่างก่อน ตั้งแบบฟอร์มตามที่เลือกตอนอัป', () => {
+  const page = fs.readFileSync(new URL('../web/app/(app)/candidates/upload/[batchId]/page.tsx', import.meta.url), 'utf8');
+  assert.match(page, /<PdfDownloadDialog[\s\S]*?initialTemplateId=\{chosen\?\.id\}[\s\S]*?label="ดาวน์โหลด Resume"/);
+  const dialog = fs.readFileSync(new URL('../web/components/PdfDownloadDialog.tsx', import.meta.url), 'utf8');
+  assert.match(dialog, /templates\.find\(\(t\) => t\.id === initialTemplateId\)/);
+});

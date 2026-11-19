@@ -1,9 +1,10 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
-import { ArrowLeftIcon, DownloadIcon, RotateCcwIcon } from 'lucide-react';
+import { ArrowLeftIcon, RotateCcwIcon } from 'lucide-react';
 import { AutoSubmitSelect } from '@/components/AutoSubmitSelect';
 import { AutoRefresh } from '@/components/AutoRefresh';
 import { PdfDownloadButton } from '@/components/PdfDownloadButton';
+import { PdfDownloadDialog } from '@/components/PdfDownloadDialog';
 import { listResumeTemplates } from '@/lib/resume-templates';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -143,7 +144,6 @@ export default async function UploadBatchPage(props: { params: Promise<{ batchId
   const templates = allTemplates.map((t) => ({ id: t.id, name: t.name, isDefault: t.isDefault }));
   // แบบฟอร์มที่เลือกตอนอัปโหลด (?form=) · ไม่มี = แบบเริ่มต้น · เปลี่ยนได้ที่หัวหน้านี้
   const chosen = templates.find((t) => t.id === formParam) ?? templates.find((t) => t.isDefault) ?? templates[0];
-  const pdfUrl = (candidateId: string) => `/api/candidates/${candidateId}/pdf${chosen ? `?template=${encodeURIComponent(chosen.id)}` : ''}`;
 
   const count = (...s: UploadStatus[]) => rows.filter((r) => s.includes(r.status)).length;
   const waiting = count('queued', 'reading');
@@ -251,12 +251,16 @@ export default async function UploadBatchPage(props: { params: Promise<{ batchId
                       <span className="text-sm text-muted-foreground">{r.error}</span>
                     ) : (r.status === 'saved' || r.status === 'merged') && r.candidate_id ? (
                       <div className="flex flex-wrap items-center gap-2">
-                        <Button size="sm" asChild>
-                          <a href={pdfUrl(r.candidate_id)}>
-                            <DownloadIcon data-icon="inline-start" />
-                            ดาวน์โหลด Resume
-                          </a>
-                        </Button>
+                        {/* ดูตัวอย่างก่อนโหลด (เจ้าของ 19 พ.ย. 2569) · ตั้งแบบฟอร์มตามที่เลือกตอนอัปโหลด */}
+                        <PdfDownloadDialog
+                          key={`${r.id}-${chosen?.id ?? ''}`}
+                          href={`/api/candidates/${r.candidate_id}/pdf`}
+                          templates={templates}
+                          works={r.works}
+                          initialTemplateId={chosen?.id}
+                          label="ดาวน์โหลด Resume"
+                          size="sm"
+                        />
                         <Button size="sm" variant="outline" asChild>
                           <Link href={`/candidates/${r.candidate_id}/edit`}>แก้ข้อมูล</Link>
                         </Button>

@@ -30,9 +30,26 @@ const SCALE = 0.45;
  * เกินหน้าเดียวเลือกได้ว่าจะปล่อยไหลลงหน้า 2 หรือเอางานบางรายการ/รายละเอียดหน้าที่ออก (เจ้าของ 16 พ.ย. 2569)
  * ตัวอย่างคือ HTML ชุดเดียวกับที่ใช้ทำ PDF (?format=html) จำนวนหน้าจึงตรงกับไฟล์
  */
-export function PdfDownloadDialog({ href, templates, works }: { href: string; templates: PdfTemplateOption[]; works: PdfWorkItem[] }) {
+export function PdfDownloadDialog({
+  href,
+  templates,
+  works,
+  initialTemplateId,
+  label = 'ดาวน์โหลด PDF',
+  size = 'default',
+}: {
+  href: string;
+  templates: PdfTemplateOption[];
+  works: PdfWorkItem[];
+  /** แบบที่เลือกไว้แล้ว (เช่น เลือกตอนอัปโหลดเรซูเม่) · ไม่ส่ง = แบบเริ่มต้น */
+  initialTemplateId?: string;
+  label?: string;
+  size?: 'default' | 'sm';
+}) {
   const [open, setOpen] = useState(false);
-  const [templateId, setTemplateId] = useState(() => (templates.find((t) => t.isDefault) ?? templates[0])?.id ?? '');
+  const [templateId, setTemplateId] = useState(
+    () => (templates.find((t) => t.id === initialTemplateId) ?? templates.find((t) => t.isDefault) ?? templates[0])?.id ?? '',
+  );
   const [mode, setMode] = useState<'flow' | 'trim'>('flow');
   const [hidden, setHidden] = useState<number[]>([]);
   const [details, setDetails] = useState(true);
@@ -75,9 +92,9 @@ export function PdfDownloadDialog({ href, templates, works }: { href: string; te
   return (
     <Dialog open={open} onOpenChange={(v) => { setOpen(v); if (v) setPages(null); }}>
       <DialogTrigger asChild>
-        <Button>
+        <Button size={size}>
           <DownloadIcon data-icon="inline-start" />
-          ดาวน์โหลด PDF
+          {label}
         </Button>
       </DialogTrigger>
       <DialogContent className="sm:max-w-3xl">
