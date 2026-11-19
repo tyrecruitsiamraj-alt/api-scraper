@@ -12,7 +12,8 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 
-export type PdfTemplateOption = { id: string; name: string; isDefault: boolean };
+/** fields = ช่องที่แบบฟอร์มนี้โชว์ (ค่าตั้งต้นของช่องติ๊กในหน้าต่างตัวอย่าง) */
+export type PdfTemplateOption = { id: string; name: string; isDefault: boolean; fields?: string[] };
 
 /**
  * ปุ่มดาวน์โหลด PDF เรซูเม่ — มีแบบฟอร์มแบบเดียว = ปุ่มธรรมดา · หลายแบบ = กดแล้วเลือกแบบ (แบบเริ่มต้นอยู่บนสุด)

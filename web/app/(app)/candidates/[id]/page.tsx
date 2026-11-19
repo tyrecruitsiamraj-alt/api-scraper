@@ -6,6 +6,7 @@ import { AttachmentViewer } from '@/components/AttachmentViewer';
 import { uploadersByCandidate } from '@/lib/resume-uploads';
 import { PdfDownloadDialog } from '@/components/PdfDownloadDialog';
 import { listResumeTemplates } from '@/lib/resume-templates';
+import { defaultResumeFields } from '@/lib/resume-template';
 import { markCandidateCalledAction, markCandidateViewedAction } from '@/lib/actions';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth';
@@ -69,7 +70,7 @@ export default async function CandidateDetail(props: { params: Promise<{ id: str
   ));
 
   const uploadedBy = (await uploadersByCandidate([c.id])).get(c.id) ?? null;
-  const templates = (await listResumeTemplates()).map((t) => ({ id: t.id, name: t.name, isDefault: t.isDefault }));
+  const templates = (await listResumeTemplates()).map((t) => ({ id: t.id, name: t.name, isDefault: t.isDefault, fields: defaultResumeFields(t.settings) }));
   const sourceLabel = (platform: string) =>
     `${PLATFORM_LABEL[platform] ?? platform}${platform === 'upload' && uploadedBy ? ` · ${uploadedBy}` : ''}`;
   const education: any[] = Array.isArray(c.education) ? c.education : [];

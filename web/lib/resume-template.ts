@@ -345,6 +345,8 @@ function profileLayout(
         ['เพศ', c.gender], ['อายุ', c.age && `${txt(c.age)} ปี`], ['สัญชาติ', c.nationality], ['ศาสนา', c.religion],
         ['ส่วนสูง', c.height], ['น้ำหนัก', c.weight], ['สถานภาพ', c.marital_status], ['ทหาร', c.military_status],
         ['ใบขับขี่', c.driving_license], ['จังหวัด', c.province],
+        // ที่อยู่นับเป็นช่องทางติดต่อ: ขึ้นเมื่อแบบฟอร์ม/ตัวเลือกตอนโหลดให้โชว์ช่องทางติดต่อ
+        ['ที่อยู่', t.showContacts ? c.address : ''],
       ])),
     wanted: () =>
       bullets(h.wanted, kv([
@@ -390,6 +392,94 @@ export function trimResumeCandidate<T extends { work_experience?: unknown }>(c: 
     .filter((_, i) => !trim.hideWork.includes(i))
     .map((w) => (trim.hideDetails && w && typeof w === 'object' ? { ...w, responsibilities: '' } : w));
   return { ...c, work_experience: work };
+}
+
+/**
+ * ช่องที่เลือกโชว์/ซ่อนได้ทีละช่องตอนโหลด (เจ้าของ 19 พ.ย. 2569: "ให้เลือกหน่อยว่าจะให้โชว์อะไร ไม่โชว์อะไร")
+ * ค่าตั้งต้นมาจากแบบฟอร์ม (defaultResumeFields) · ส่งรายการที่โชว์มาทาง ?fields=a,b,c
+ */
+export const RESUME_FIELD_GROUPS = [
+  {
+    label: 'หัวข้อ',
+    fields: [
+      { key: 'intro', label: 'แนะนำตัว' },
+      { key: 'work', label: 'ประสบการณ์ทำงาน' },
+      { key: 'education', label: 'การศึกษา' },
+      { key: 'skills', label: 'ทักษะและภาษา' },
+      { key: 'wanted', label: 'งานที่ต้องการ' },
+    ],
+  },
+  {
+    label: 'ข้อมูลส่วนตัว',
+    fields: [
+      { key: 'photo', label: 'รูปผู้สมัคร' },
+      { key: 'gender', label: 'เพศ' },
+      { key: 'age', label: 'อายุ' },
+      { key: 'birth_date', label: 'วันเกิด' },
+      { key: 'nationality', label: 'สัญชาติ' },
+      { key: 'religion', label: 'ศาสนา' },
+      { key: 'height', label: 'ส่วนสูง' },
+      { key: 'weight', label: 'น้ำหนัก' },
+      { key: 'marital_status', label: 'สถานภาพ' },
+      { key: 'military_status', label: 'สถานะทางทหาร' },
+      { key: 'driving_license', label: 'ใบขับขี่' },
+      { key: 'province', label: 'จังหวัด' },
+    ],
+  },
+  {
+    label: 'ช่องทางติดต่อ',
+    fields: [
+      { key: 'phone', label: 'เบอร์โทร' },
+      { key: 'line_id', label: 'LINE' },
+      { key: 'email', label: 'อีเมล' },
+      { key: 'address', label: 'ที่อยู่' },
+    ],
+  },
+] as const;
+
+const TOGGLE_SECTIONS = ['intro', 'work', 'education', 'skills', 'wanted'] as const;
+const PERSONAL_FIELDS = ['gender', 'age', 'birth_date', 'nationality', 'religion', 'height', 'weight', 'marital_status', 'military_status', 'driving_license', 'province'];
+const CONTACT_FIELDS = ['phone', 'line_id', 'email', 'address'];
+const ALL_FIELDS = new Set<string>(RESUME_FIELD_GROUPS.flatMap((g) => g.fields.map((f) => f.key)));
+
+/** ช่องที่แบบฟอร์มนี้โชว์อยู่แล้ว (ค่าตั้งต้นของช่องติ๊กตอนโหลด) */
+export function defaultResumeFields(raw: Partial<ResumeTemplateSettings> | null | undefined): string[] {
+  const t = normalizeTemplateSettings({ ...DEFAULT_RESUME_TEMPLATE, ...(raw ?? {}) });
+  const out: string[] = TOGGLE_SECTIONS.filter((k) => t.sections.includes(k));
+  if (t.showPhoto) out.push('photo');
+  if (t.sections.includes('personal')) out.push(...PERSONAL_FIELDS);
+  if (t.showContacts) out.push('phone', 'line_id', 'email');
+  // แบบอื่นโชว์ที่อยู่ในหัวข้อข้อมูลส่วนตัวเสมอ · แบบแถบขวาโชว์เมื่อโชว์ช่องทางติดต่อ
+  if (t.sections.includes('personal') && (t.layout !== 'profile' || t.showContacts)) out.push('address');
+  return out;
+}
+
+/** อ่าน ?fields= · ไม่ส่งมา = null (ใช้ตามแบบฟอร์ม) */
+export function parseResumeFields(params: URLSearchParams): Set<string> | null {
+  const raw = params.get('fields');
+  if (raw === null) return null;
+  return new Set(raw.split(',').map((v) => v.trim()).filter((v) => ALL_FIELDS.has(v)));
+}
+
+/** สำเนาผู้สมัคร + แบบฟอร์มที่โชว์เฉพาะช่องที่เลือก (ไม่แก้ข้อมูลเดิม) */
+export function applyResumeFields<T extends Record<string, any>>(
+  c: T,
+  raw: Partial<ResumeTemplateSettings> | null | undefined,
+  shown: Set<string>,
+): { candidate: T; settings: ResumeTemplateSettings } {
+  const t = normalizeTemplateSettings({ ...DEFAULT_RESUME_TEMPLATE, ...(raw ?? {}) });
+  const wantPersonal = PERSONAL_FIELDS.some((k) => shown.has(k)) || (shown.has('address') && t.layout !== 'profile');
+  const keep = (k: ResumeSectionKey) => ((TOGGLE_SECTIONS as readonly string[]).includes(k) ? shown.has(k) : k === 'personal' ? wantPersonal : true);
+  const sections: ResumeSectionKey[] = t.sections.filter(keep);
+  for (const { key } of RESUME_SECTIONS) if (!sections.includes(key) && keep(key) && (key !== 'personal' || wantPersonal)) sections.push(key);
+  const candidate: Record<string, any> = { ...c };
+  for (const k of [...PERSONAL_FIELDS, ...CONTACT_FIELDS]) if (!shown.has(k)) candidate[k] = '';
+  if (!shown.has('driving_license')) candidate.vehicle = '';
+  candidate.facebook = '';
+  return {
+    candidate: candidate as T,
+    settings: { ...t, sections, showPhoto: shown.has('photo'), showContacts: CONTACT_FIELDS.some((k) => shown.has(k)) },
+  };
 }
 
 /** ตำแหน่งข้อความลายน้ำแบบซ้ำเต็มหน้า: 6 แถว แถวเว้นแถวเยื้องครึ่งช่อง (ตามรูปตัวอย่าง) */

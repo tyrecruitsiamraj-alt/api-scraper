@@ -17,6 +17,7 @@ import { Field, FieldLabel, FieldLegend, FieldSet } from '@/components/ui/field'
 import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import type { PdfTemplateOption } from '@/components/PdfDownloadButton';
+import { RESUME_FIELD_GROUPS } from '@/lib/resume-template';
 
 export type PdfWorkItem = { position: string; company: string; period: string };
 
@@ -50,6 +51,9 @@ export function PdfDownloadDialog({
   const [templateId, setTemplateId] = useState(
     () => (templates.find((t) => t.id === initialTemplateId) ?? templates.find((t) => t.isDefault) ?? templates[0])?.id ?? '',
   );
+  // ช่องที่โชว์ในไฟล์ ตั้งต้นตามแบบฟอร์ม · เปลี่ยนแบบฟอร์ม = กลับไปค่าของแบบนั้น (เจ้าของ 19 พ.ย. 2569)
+  const fieldsOf = (id: string) => templates.find((t) => t.id === id)?.fields ?? null;
+  const [shown, setShown] = useState<string[] | null>(() => fieldsOf(templateId));
   const [mode, setMode] = useState<'flow' | 'trim'>('flow');
   const [hidden, setHidden] = useState<number[]>([]);
   const [details, setDetails] = useState(true);
@@ -60,12 +64,13 @@ export function PdfDownloadDialog({
   const query = useMemo(() => {
     const q = new URLSearchParams();
     if (templateId) q.set('template', templateId);
+    if (shown) q.set('fields', shown.join(','));
     if (mode === 'trim') {
       if (hidden.length) q.set('hide_work', [...hidden].sort((a, b) => a - b).join(','));
       if (!details) q.set('details', '0');
     }
     return q.toString();
-  }, [templateId, mode, hidden, details]);
+  }, [templateId, shown, mode, hidden, details]);
   const pdfUrl = `${href}${query ? `?${query}` : ''}`;
   const previewUrl = `${href}?${query ? `${query}&` : ''}format=html`;
 
@@ -82,6 +87,14 @@ export function PdfDownloadDialog({
     setPages(Math.max(1, Math.ceil((height - padTop - padBottom) / area - 0.01)));
     setFrameH(Math.max(PAGE_H, height));
   }, []);
+
+  const toggleField = (key: string, on: boolean) => {
+    setPages(null);
+    setShown((prev) => {
+      const list = prev ?? [];
+      return on ? [...list.filter((k) => k !== key), key] : list.filter((k) => k !== key);
+    });
+  };
 
   const toggleWork = (i: number, keep: boolean) => {
     setPages(null);
@@ -118,16 +131,34 @@ export function PdfDownloadDialog({
               )}
             </div>
           </div>
-          <div className="flex flex-col gap-5">
+          <div className="flex max-h-[60vh] flex-col gap-5 overflow-y-auto pr-1">
             {templates.length > 1 && (
               <Field>
                 <FieldLabel htmlFor="pdf-template">แบบฟอร์ม</FieldLabel>
-                <NativeSelect id="pdf-template" value={templateId} onChange={(e) => { setPages(null); setTemplateId(e.target.value); }} className="w-full">
+                <NativeSelect id="pdf-template" value={templateId} onChange={(e) => { setPages(null); setTemplateId(e.target.value); setShown(fieldsOf(e.target.value)); }} className="w-full">
                   {templates.map((t) => (
                     <NativeSelectOption key={t.id} value={t.id}>{t.isDefault ? `${t.name} (เริ่มต้น)` : t.name}</NativeSelectOption>
                   ))}
                 </NativeSelect>
               </Field>
+            )}
+            {shown && (
+              <FieldSet>
+                <FieldLegend variant="label">แสดงในไฟล์</FieldLegend>
+                {RESUME_FIELD_GROUPS.map((g) => (
+                  <div key={g.label} className="flex flex-col gap-2">
+                    <span className="text-xs text-muted-foreground">{g.label}</span>
+                    <div className="grid grid-cols-2 gap-x-4 gap-y-2">
+                      {g.fields.map((f) => (
+                        <Field key={f.key} orientation="horizontal">
+                          <Checkbox id={`pdf-field-${f.key}`} checked={shown.includes(f.key)} onCheckedChange={(v) => toggleField(f.key, v === true)} />
+                          <FieldLabel htmlFor={`pdf-field-${f.key}`} className="font-normal">{f.label}</FieldLabel>
+                        </Field>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </FieldSet>
             )}
             <FieldSet>
               <FieldLegend variant="label">ถ้าเกินหน้าเดียว</FieldLegend>

@@ -4,7 +4,7 @@ import { authOptions } from '@/lib/auth';
 import { getAssetBytes, getCandidate } from '@/lib/repo';
 import { buildResumeHtml, htmlToPdf, resumeFileName } from '@/lib/resumePdf';
 import { getResumeTemplate } from '@/lib/resume-templates';
-import { parseResumeTrim, trimResumeCandidate } from '@/lib/resume-template';
+import { applyResumeFields, parseResumeFields, parseResumeTrim, trimResumeCandidate } from '@/lib/resume-template';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -43,7 +43,11 @@ export async function GET(req: Request, props: { params: Promise<{ id: string }>
     // ?hide_work=0,3&details=0 = ตัดให้จบหน้าเดียว · ?format=html = หน้าตัวอย่างในหน้าต่างดาวน์โหลด (ใช้นับหน้า) HTML ชุดเดียวกับที่ทำ PDF
     const search = new URL(req.url).searchParams;
     const template = await getResumeTemplate(search.get('template'));
-    const html = buildResumeHtml(trimResumeCandidate(c, parseResumeTrim(search)), profileDataUrl, template.settings);
+    // ?fields=a,b = โชว์เฉพาะช่องที่ติ๊กในหน้าต่างตัวอย่าง · ไม่ส่ง = ตามแบบฟอร์ม
+    const fields = parseResumeFields(search);
+    const trimmed = trimResumeCandidate(c, parseResumeTrim(search));
+    const chosen = fields ? applyResumeFields(trimmed, template.settings, fields) : { candidate: trimmed, settings: template.settings };
+    const html = buildResumeHtml(chosen.candidate, profileDataUrl, chosen.settings);
     if (search.get('format') === 'html') {
       return new NextResponse(html, { status: 200, headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'private, no-store' } });
     }

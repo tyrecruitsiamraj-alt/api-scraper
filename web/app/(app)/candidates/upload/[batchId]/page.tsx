@@ -6,6 +6,7 @@ import { AutoRefresh } from '@/components/AutoRefresh';
 import { PdfDownloadButton } from '@/components/PdfDownloadButton';
 import { PdfDownloadDialog } from '@/components/PdfDownloadDialog';
 import { listResumeTemplates } from '@/lib/resume-templates';
+import { defaultResumeFields } from '@/lib/resume-template';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
@@ -141,7 +142,7 @@ export default async function UploadBatchPage(props: { params: Promise<{ batchId
   if (!/^[0-9a-f-]{36}$/i.test(batchId)) notFound();
   const [rows, allTemplates] = await Promise.all([getUploadBatch(batchId), listResumeTemplates()]);
   if (!rows.length) notFound();
-  const templates = allTemplates.map((t) => ({ id: t.id, name: t.name, isDefault: t.isDefault }));
+  const templates = allTemplates.map((t) => ({ id: t.id, name: t.name, isDefault: t.isDefault, fields: defaultResumeFields(t.settings) }));
   // แบบฟอร์มที่เลือกตอนอัปโหลด (?form=) · ไม่มี = แบบเริ่มต้น · เปลี่ยนได้ที่หัวหน้านี้
   const chosen = templates.find((t) => t.id === formParam) ?? templates.find((t) => t.isDefault) ?? templates[0];
 
