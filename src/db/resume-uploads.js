@@ -79,23 +79,42 @@ async function photoFromFile(row, kind) {
   return null;
 }
 
+/** บันทึกรูปหน้าคนเป็นรูปโปรไฟล์ของผู้สมัคร */
+async function savePhoto(client, candidateId, sourceId, photo) {
+  await saveAsset(client, candidateId, sourceId, {
+    kind: 'profile',
+    title: 'รูปจากเรซูเม่ที่อัปโหลด',
+    file_type: 'png',
+    mime: 'image/png',
+    byte_size: photo.length,
+    sha256: createHash('sha256').update(photo).digest('hex'),
+    content: photo,
+    download_status: 'success',
+  });
+}
+
+/**
+ * คนที่มีในคลังแล้วแต่ยังไม่มีรูป: ใส่รูปจากไฟล์ที่อัปให้เลย · มีรูปอยู่แล้ว = ไม่ทับ (ไม่ต้องถามใคร)
+ * เจ้าของ 19 พ.ย. 2569: อัปคนเดิมซ้ำแล้วฟอร์มยังไม่มีรูป
+ */
+async function addPhotoIfMissing(candidateId, row, kind) {
+  const { rows } = await query(
+    `SELECT 1 FROM candidate_assets WHERE candidate_id = $1 AND kind = 'profile' AND download_status = 'success' LIMIT 1`,
+    [candidateId],
+  );
+  if (rows.length) return false;
+  const photo = await photoFromFile(row, kind);
+  if (!photo) return false;
+  await withTransaction((client) => savePhoto(client, candidateId, null, photo));
+  return true;
+}
+
 async function saveNewCandidate(row, parsed, text, photo = null) {
   return withTransaction(async (client) => {
     const { id: candidateId } = await upsertCandidate(client, { ...parsed, name: parsed.full_name }, { platform: 'upload', externalId: row.id });
     const sourceId = await upsertSource(client, candidateId, { platform: 'upload', externalId: row.id, parseStatus: 'upload', rawText: text });
     await attachFile(client, candidateId, sourceId, row, text);
-    if (photo) {
-      await saveAsset(client, candidateId, sourceId, {
-        kind: 'profile',
-        title: 'รูปจากเรซูเม่ที่อัปโหลด',
-        file_type: 'png',
-        mime: 'image/png',
-        byte_size: photo.length,
-        sha256: createHash('sha256').update(photo).digest('hex'),
-        content: photo,
-        download_status: 'success',
-      });
-    }
+    if (photo) await savePhoto(client, candidateId, sourceId, photo);
     if (row.task_id) {
       await linkCandidateToTask(client, {
         taskId: row.task_id,
@@ -149,6 +168,7 @@ export async function processResumeUpload(id) {
     if (missing) throw new ResumeReadError(missing);
     const existing = await findExistingCandidate(parsed);
     if (existing) {
+      await addPhotoIfMissing(existing, row, kind).catch((e) => console.warn(`[resume-upload] ใส่รูปให้คนเดิมไม่ได้: ${String(e?.message ?? e).slice(0, 120)}`));
       await setStatus(id, 'review', { candidateId: existing, parsed, rawText: text });
       return 'review';
     }

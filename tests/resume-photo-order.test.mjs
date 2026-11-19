@@ -37,6 +37,9 @@ test('AI ไม่ตัดงานที่ไม่มีตำแหน่�
   assert.match(strips, /overlapRatio = 0\.08/);
   const db = fs.readFileSync(new URL('../src/db/resume-uploads.js', import.meta.url), 'utf8');
   assert.match(db, /kind: 'profile',\n\s+title: 'รูปจากเรซูเม่ที่อัปโหลด'/);
+  // คนเดิมที่ยังไม่มีรูป ได้รูปจากไฟล์ที่อัปซ้ำ · มีรูปแล้วไม่ทับ
+  assert.match(db, /WHERE candidate_id = \$1 AND kind = 'profile' AND download_status = 'success' LIMIT 1/);
+  assert.match(db, /await addPhotoIfMissing\(existing, row, kind\)/);
   const models = fs.readFileSync(new URL('../src/core/ai-models.js', import.meta.url), 'utf8');
   assert.match(models, /filter\(\(m\) => !isCloudModel\(m\) && !isOcrModel\(m\)/, 'รูปผู้สมัครห้ามส่งไป cloud');
 });
