@@ -7,6 +7,9 @@ import { query, withTransaction } from './pool.js';
 import { RESUME_UPLOADS_DDL } from './resume-uploads-ddl.js';
 import { SHARED_PHONE_MIN, linkCandidateToTask, saveAsset, upsertCandidate, upsertSource } from './repositories.js';
 import { ResumeReadError, extractResumeText, fileKind, missingEssentials, structureResume } from '../core/resume-upload.js';
+import { extractResumePhoto } from '../core/resume-photo.js';
+import { hasPdfTool } from '../core/ai-models.js';
+import { pdfToPngs } from '../core/ollama.js';
 
 let ensured = false;
 async function ensureTable() {
@@ -59,11 +62,40 @@ async function setStatus(id, status, fields = {}) {
 }
 
 /** บันทึกคนใหม่ + แนบไฟล์ต้นฉบับ + ผูกใบ (ผูกใบ = นับว่าผ่านของใบนั้น) */
-async function saveNewCandidate(row, parsed, text) {
+/**
+ * รูปหน้าคนจากไฟล์ (รูป หรือหน้าแรกของ PDF ถ้าเครื่องมีตัวแปลง PDF) · ไม่เจอ = null ไม่ทำให้การอ่านล้ม
+ * เจ้าของ 19 พ.ย. 2569: อ่านผ่านแล้วฟอร์มเรซูเม่ไม่มีรูปผู้สมัคร
+ */
+async function photoFromFile(row, kind) {
+  try {
+    if (kind === 'image') return await extractResumePhoto(row.content);
+    if (kind === 'pdf' && (await hasPdfTool())) {
+      const [first] = await pdfToPngs(row.content, 1);
+      return first ? await extractResumePhoto(first) : null;
+    }
+  } catch (e) {
+    console.warn(`[resume-upload] หารูปหน้าคนไม่ได้: ${String(e?.message ?? e).slice(0, 120)}`);
+  }
+  return null;
+}
+
+async function saveNewCandidate(row, parsed, text, photo = null) {
   return withTransaction(async (client) => {
     const { id: candidateId } = await upsertCandidate(client, { ...parsed, name: parsed.full_name }, { platform: 'upload', externalId: row.id });
     const sourceId = await upsertSource(client, candidateId, { platform: 'upload', externalId: row.id, parseStatus: 'upload', rawText: text });
     await attachFile(client, candidateId, sourceId, row, text);
+    if (photo) {
+      await saveAsset(client, candidateId, sourceId, {
+        kind: 'profile',
+        title: 'รูปจากเรซูเม่ที่อัปโหลด',
+        file_type: 'png',
+        mime: 'image/png',
+        byte_size: photo.length,
+        sha256: createHash('sha256').update(photo).digest('hex'),
+        content: photo,
+        download_status: 'success',
+      });
+    }
     if (row.task_id) {
       await linkCandidateToTask(client, {
         taskId: row.task_id,
@@ -120,7 +152,7 @@ export async function processResumeUpload(id) {
       await setStatus(id, 'review', { candidateId: existing, parsed, rawText: text });
       return 'review';
     }
-    const candidateId = await saveNewCandidate(row, parsed, text);
+    const candidateId = await saveNewCandidate(row, parsed, text, await photoFromFile(row, kind));
     await setStatus(id, 'saved', { candidateId, parsed, rawText: text });
     return 'saved';
   } catch (e) {

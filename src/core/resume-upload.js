@@ -95,6 +95,7 @@ const SYSTEM = [
   '- intro ข้อความแนะนำตัว/เป้าหมายอาชีพ (ถ้ามี)',
   '- education ทุกระดับที่เขียน เรียงล่าสุดก่อน: degree วุฒิ · major คณะ/สาขา · institution สถานศึกษา · graduation_year ปีที่จบ · gpa เกรดเฉลี่ย',
   '- work_experience ทุกงาน เรียงล่าสุดก่อน: position ตำแหน่ง · company บริษัท · period ช่วงเวลา · salary เงินเดือน · responsibilities หน้าที่',
+  '  งานที่มีบริษัทหรือช่วงเวลาแต่ไม่เห็นตำแหน่ง ให้ใส่ด้วย position เว้นว่าง ห้ามตัดทิ้ง · ข้อความอาจมาจากการอ่านรูปทีละช่วง บางบรรทัดซ้ำกัน ให้รวมเป็นรายการเดียว',
   '- hard_skills ทักษะเฉพาะทาง/โปรแกรม/เครื่องมือ (เช่น Excel, ขับรถยนต์, พิมพ์ดีด) · soft_skills ทักษะทั่วไป (เช่น ทำงานเป็นทีม)',
   '- language_skills เฉพาะภาษาที่เรซูเม่เขียนถึง: language ภาษา · level ระดับ',
   'ตอบเป็น JSON เท่านั้น ห้ามอธิบาย',
@@ -163,6 +164,37 @@ export async function structureResume(text) {
 const clean = (v) => String(v ?? '').replace(/\s+/g, ' ').trim();
 const list = (v) => (Array.isArray(v) ? v : []);
 
+/** ปีล่าสุดในช่วงเวลางาน (พ.ศ. แปลงเป็น ค.ศ.) · "ปัจจุบัน" = ล่าสุดเสมอ · ไม่มีปี = null */
+function latestYear(period) {
+  const p = String(period ?? '');
+  if (/ปัจจุบัน|present|current|now/i.test(p)) return Infinity;
+  const years = (p.match(/\d{4}/g) ?? []).map(Number).map((y) => (y > 2400 ? y - 543 : y)).filter((y) => y > 1950 && y < 2100);
+  return years.length ? Math.max(...years) : null;
+}
+
+/**
+ * งานเรียงล่าสุดก่อนเสมอ (หัวเรซูเม่ใช้ตำแหน่งงานแรกเป็นตำแหน่งปัจจุบัน) · งานซ้ำ (บริษัท+ช่วงเวลาเดียวกัน) เหลืออันเดียว
+ * 19 พ.ย. 2569: อ่านรูปทีละแถบแล้ว AI วางงานล่าสุด "2567-2568 C1 Property" ไว้ท้าย ตำแหน่งใต้ชื่อเลยเป็นงานเก่า
+ */
+export function orderWork(work) {
+  const seen = new Map();
+  for (const w of work) {
+    const key = `${w.company.toLowerCase().replace(/[^\p{L}\p{N}]/gu, '')}|${w.period.replace(/\s/g, '')}`;
+    const prev = seen.get(key);
+    if (!prev || (w.position + w.responsibilities).length > (prev.position + prev.responsibilities).length) seen.set(key, w);
+  }
+  // งานที่ไม่มีปี ติดอยู่ใต้งานก่อนหน้ามัน
+  let last = -Infinity;
+  return [...seen.values()]
+    .map((w, i) => {
+      const y = latestYear(w.period);
+      if (y !== null) last = y;
+      return { w, i, y: y ?? last };
+    })
+    .sort((a, b) => (b.y === a.y ? a.i - b.i : b.y > a.y ? 1 : -1))
+    .map((x) => x.w);
+}
+
 /** จัดค่าที่ AI ตอบให้อยู่ในรูปเดียวกับคนที่ได้จาก Scrap */
 export function normalizeParsed(out, rawText = '') {
   const r = {};
@@ -182,6 +214,7 @@ export function normalizeParsed(out, rawText = '') {
   r.work_experience = list(out?.work_experience)
     .map((w) => ({ position: clean(w?.position), company: clean(w?.company), period: clean(w?.period), salary: clean(w?.salary), responsibilities: String(w?.responsibilities ?? '').trim() }))
     .filter((w) => w.position || w.company);
+  r.work_experience = orderWork(r.work_experience);
   r.hard_skills = list(out?.hard_skills).map(clean).filter(Boolean);
   r.soft_skills = list(out?.soft_skills).map(clean).filter(Boolean);
   r.language_skills = list(out?.language_skills)

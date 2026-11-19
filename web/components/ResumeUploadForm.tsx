@@ -16,11 +16,21 @@ const ACCEPT = '.pdf,.docx,.jpg,.jpeg,.png,.webp';
 
 type FileState = { name: string; state: 'waiting' | 'sending' | 'sent' | 'error'; error?: string };
 
-/** เลือกไฟล์ → ส่งทีละไฟล์ (เห็นว่าไฟล์ไหนส่งแล้ว ไฟล์ไหนไม่รับเพราะอะไร) → ส่งครบแล้วไปหน้าผลของรอบนี้ */
-export function ResumeUploadForm({ tasks }: { tasks: { id: string; label: string }[] }) {
+/**
+ * เลือกไฟล์ + แบบฟอร์ม Resume → ส่งทีละไฟล์ (เห็นว่าไฟล์ไหนส่งแล้ว ไฟล์ไหนไม่รับเพราะอะไร) → ส่งครบแล้วไปหน้าผลของรอบนี้
+ * หน้าผลมีปุ่มโหลด Resume ตามแบบที่เลือกไว้ทันทีที่อ่านเสร็จ (เจ้าของ 19 พ.ย. 2569: "ควรเอาลงแล้วโหลดได้เลย")
+ */
+export function ResumeUploadForm({
+  tasks,
+  templates,
+}: {
+  tasks: { id: string; label: string }[];
+  templates: { id: string; name: string; isDefault: boolean }[];
+}) {
   const router = useRouter();
   const inputRef = useRef<HTMLInputElement>(null);
   const [taskId, setTaskId] = useState('');
+  const [formId, setFormId] = useState(templates.find((t) => t.isDefault)?.id ?? templates[0]?.id ?? '');
   const [files, setFiles] = useState<File[]>([]);
   const [states, setStates] = useState<FileState[]>([]);
   const [busy, setBusy] = useState(false);
@@ -76,7 +86,7 @@ export function ResumeUploadForm({ tasks }: { tasks: { id: string; label: string
       setError(json.error || 'ส่งไฟล์แล้ว แต่สั่งให้เริ่มอ่านไม่สำเร็จ ลองกดอัปโหลดใหม่');
       return;
     }
-    router.push(json.url);
+    router.push(formId ? `${json.url}?form=${encodeURIComponent(formId)}` : json.url);
   };
 
   return (
@@ -104,6 +114,16 @@ export function ResumeUploadForm({ tasks }: { tasks: { id: string; label: string
         </NativeSelect>
         <FieldDescription>ผูกแล้ว ทุกคนในไฟล์นับเป็นคนที่ผ่านของใบนั้น</FieldDescription>
       </Field>
+      {templates.length > 0 && (
+        <Field className="md:max-w-xl">
+          <FieldLabel htmlFor="resume-form">แบบฟอร์ม Resume ที่จะโหลด</FieldLabel>
+          <NativeSelect id="resume-form" value={formId} onChange={(e) => setFormId(e.target.value)} disabled={busy} className="w-full">
+            {templates.map((t) => (
+              <NativeSelectOption key={t.id} value={t.id}>{t.isDefault ? `${t.name} (แบบเริ่มต้น)` : t.name}</NativeSelectOption>
+            ))}
+          </NativeSelect>
+        </Field>
+      )}
       {error && <FieldError>{error}</FieldError>}
       <div>
         <Button type="button" onClick={upload} disabled={busy || files.length === 0}>

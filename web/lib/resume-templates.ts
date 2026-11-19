@@ -58,10 +58,11 @@ const BUILTINS: { id: string; name: string; settings: ResumeTemplateSettings }[]
       watermarkImageSize: 29,
       watermarkImageOpacity: 17,
       headingLang: 'en',
+      // ข้อมูลส่วนตัว (อายุ สัญชาติ ศาสนา จังหวัด) ขึ้นในแถบขวา · เบอร์/LINE/ที่อยู่ยังซ่อน กันลูกค้าติดต่อผู้สมัครเองไม่ผ่านบริษัท (เจ้าของ 19 พ.ย. 2569)
       showContacts: false,
       showSources: false,
       footerText: '',
-      sections: ['intro', 'work', 'education', 'skills'],
+      sections: ['intro', 'work', 'education', 'skills', 'personal'],
     }),
   },
 ];

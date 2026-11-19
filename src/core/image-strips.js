@@ -13,8 +13,9 @@ export function imageMime(buffer) {
   return 'image/png';
 }
 
-/** ขอบบน-ล่างของแต่ละแถบ (ซ้อนกันเล็กน้อย กันบรรทัดที่อยู่ตรงรอยตัดหาย) */
-export function stripBounds(height, count, overlapRatio = 0.04) {
+/** ขอบบน-ล่างของแต่ละแถบ ซ้อนกัน 8% ของความสูง: บรรทัดตรงรอยตัดต้องครบในแถบใดแถบหนึ่ง
+ * (19 พ.ย. 2569 ซ้อน 4% แล้วงานล่าสุด "2567-2568 C1 Property" ขาดบรรทัดตำแหน่ง AI ตัดงานนั้นทิ้ง) */
+export function stripBounds(height, count, overlapRatio = 0.08) {
   const n = Math.max(1, Math.floor(count));
   const step = Math.ceil(height / n);
   const overlap = Math.round(height * overlapRatio);
@@ -53,6 +54,38 @@ export async function splitImageStrips(buffer, count = 3) {
       });
     }, stripBounds(height, count));
     return parts.map((b64) => Buffer.from(b64, 'base64'));
+  } finally {
+    await browser.close().catch(() => {});
+  }
+}
+
+/** ตัดรูปตามกรอบ (พิกัด 0–1000 ของกว้าง/สูง) → PNG */
+export async function cropImage(buffer, box) {
+  const { chromium } = await import('playwright');
+  const browser = await chromium.launch({ headless: true, args: ['--disable-gpu'] });
+  try {
+    const page = await browser.newPage();
+    const dataUrl = `data:${imageMime(buffer)};base64,${Buffer.from(buffer).toString('base64')}`;
+    const b64 = await page.evaluate(
+      async ({ src, box }) => {
+        const img = new Image();
+        img.src = src;
+        await img.decode();
+        const sx = img.naturalWidth / 1000;
+        const sy = img.naturalHeight / 1000;
+        const x = Math.round(box[0] * sx);
+        const y = Math.round(box[1] * sy);
+        const w = Math.round((box[2] - box[0]) * sx);
+        const h = Math.round((box[3] - box[1]) * sy);
+        const canvas = document.createElement('canvas');
+        canvas.width = w;
+        canvas.height = h;
+        canvas.getContext('2d').drawImage(img, x, y, w, h, 0, 0, w, h);
+        return canvas.toDataURL('image/png').split(',')[1];
+      },
+      { src: dataUrl, box },
+    );
+    return Buffer.from(b64, 'base64');
   } finally {
     await browser.close().catch(() => {});
   }

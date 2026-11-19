@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { listRecentBatches, listUploadTaskOptions, resumeReaderStatus } from '@/lib/resume-uploads';
+import { listResumeTemplates } from '@/lib/resume-templates';
 
 export const dynamic = 'force-dynamic';
 
@@ -15,7 +16,7 @@ function when(iso: string) {
 
 /** อัปโหลดเรซูเม่เข้าคลังผู้สมัคร (เจ้าของ 12 พ.ย. 2569) */
 export default async function ResumeUploadPage() {
-  const [tasks, batches, reader] = await Promise.all([listUploadTaskOptions(), listRecentBatches(10), resumeReaderStatus()]);
+  const [tasks, batches, reader, templates] = await Promise.all([listUploadTaskOptions(), listRecentBatches(10), resumeReaderStatus(), listResumeTemplates()]);
   const problem = !reader.online
     ? 'ตอนนี้เครื่องอ่านไฟล์ (RM009) ไม่ได้เปิดอยู่ อัปโหลดได้ แต่ไฟล์จะรออ่านจนกว่าเครื่องจะเปิด'
     : !reader.textModel
@@ -45,7 +46,7 @@ export default async function ResumeUploadPage() {
 
       <Card>
         <CardContent>
-          <ResumeUploadForm tasks={tasks} />
+          <ResumeUploadForm tasks={tasks} templates={templates.map((t) => ({ id: t.id, name: t.name, isDefault: t.isDefault }))} />
         </CardContent>
       </Card>
 

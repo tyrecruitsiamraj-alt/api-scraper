@@ -144,7 +144,7 @@ async function ocrPage(png, model) {
 }
 
 /** Rasterize a PDF to PNG page buffers using poppler (pdftoppm). */
-async function pdfToPngs(pdf, maxPages) {
+export async function pdfToPngs(pdf, maxPages) {
   const dir = await mkdtemp(join(tmpdir(), 'ocr-'));
   try {
     const pdfPath = join(dir, 'in.pdf');

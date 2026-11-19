@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
-import { ArrowLeftIcon, RotateCcwIcon } from 'lucide-react';
+import { ArrowLeftIcon, DownloadIcon, RotateCcwIcon } from 'lucide-react';
+import { AutoSubmitSelect } from '@/components/AutoSubmitSelect';
 import { AutoRefresh } from '@/components/AutoRefresh';
 import { PdfDownloadButton } from '@/components/PdfDownloadButton';
 import { listResumeTemplates } from '@/lib/resume-templates';
@@ -133,12 +134,16 @@ function ReviewCard({ row }: { row: UploadRow }) {
   );
 }
 
-export default async function UploadBatchPage(props: { params: Promise<{ batchId: string }> }) {
+export default async function UploadBatchPage(props: { params: Promise<{ batchId: string }>; searchParams?: Promise<{ form?: string }> }) {
   const { batchId } = await props.params;
+  const formParam = String((await props.searchParams)?.form ?? '');
   if (!/^[0-9a-f-]{36}$/i.test(batchId)) notFound();
   const [rows, allTemplates] = await Promise.all([getUploadBatch(batchId), listResumeTemplates()]);
   if (!rows.length) notFound();
   const templates = allTemplates.map((t) => ({ id: t.id, name: t.name, isDefault: t.isDefault }));
+  // แบบฟอร์มที่เลือกตอนอัปโหลด (?form=) · ไม่มี = แบบเริ่มต้น · เปลี่ยนได้ที่หัวหน้านี้
+  const chosen = templates.find((t) => t.id === formParam) ?? templates.find((t) => t.isDefault) ?? templates[0];
+  const pdfUrl = (candidateId: string) => `/api/candidates/${candidateId}/pdf${chosen ? `?template=${encodeURIComponent(chosen.id)}` : ''}`;
 
   const count = (...s: UploadStatus[]) => rows.filter((r) => s.includes(r.status)).length;
   const waiting = count('queued', 'reading');
@@ -176,10 +181,20 @@ export default async function UploadBatchPage(props: { params: Promise<{ batchId
               </Button>
             </form>
           )}
+          {templates.length > 1 && (
+            <form method="get" className="w-56" aria-label="แบบฟอร์ม Resume">
+              <AutoSubmitSelect
+                id="batch-form"
+                name="form"
+                defaultValue={chosen?.id ?? ''}
+                options={templates.map((t) => ({ value: t.id, label: `แบบฟอร์ม: ${t.name}` }))}
+              />
+            </form>
+          )}
           <PdfDownloadButton
             href={`/api/candidates/uploads/${batchId}/zip`}
-            label={saved > 0 ? `โหลด PDF ทั้งหมด ${saved} คน (zip)` : 'โหลด PDF ทั้งหมด (zip)'}
-            templates={templates}
+            label={saved > 0 ? `โหลด Resume ทั้งหมด ${saved} คน (zip)` : 'โหลด Resume ทั้งหมด (zip)'}
+            templates={chosen ? [chosen] : templates}
             disabled={saved === 0}
           />
         </div>
@@ -212,7 +227,7 @@ export default async function UploadBatchPage(props: { params: Promise<{ batchId
                 <TableHead>ไฟล์</TableHead>
                 <TableHead>สถานะ</TableHead>
                 <TableHead>ผู้สมัคร</TableHead>
-                <TableHead>เหตุ / ไฟล์ PDF</TableHead>
+                <TableHead>Resume / เหตุ</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -235,7 +250,17 @@ export default async function UploadBatchPage(props: { params: Promise<{ batchId
                     {r.status === 'failed' ? (
                       <span className="text-sm text-muted-foreground">{r.error}</span>
                     ) : (r.status === 'saved' || r.status === 'merged') && r.candidate_id ? (
-                      <a href={`/api/candidates/${r.candidate_id}/pdf`} className="text-sm underline-offset-4 hover:underline">ดาวน์โหลด PDF</a>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <Button size="sm" asChild>
+                          <a href={pdfUrl(r.candidate_id)}>
+                            <DownloadIcon data-icon="inline-start" />
+                            ดาวน์โหลด Resume
+                          </a>
+                        </Button>
+                        <Button size="sm" variant="outline" asChild>
+                          <Link href={`/candidates/${r.candidate_id}/edit`}>แก้ข้อมูล</Link>
+                        </Button>
+                      </div>
                     ) : (
                       <span className="text-muted-foreground">-</span>
                     )}

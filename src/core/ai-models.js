@@ -140,6 +140,41 @@ export async function ocrModel() {
   return orderOcrModels(available, configured('OCR_MODELS', 'OCR_MODEL', DEFAULT_OCR_MODEL))[0] ?? null;
 }
 
+const visionCache = new Map();
+
+/** โมเดลนี้ดูรูปได้ไหม (ถามเซิร์ฟเวอร์ครั้งเดียวต่อโมเดล) */
+async function canSeeImages(base, model) {
+  if (visionCache.has(model)) return visionCache.get(model);
+  let ok = false;
+  try {
+    const res = await fetch(`${base}/api/show`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ model }),
+      signal: AbortSignal.timeout(8000),
+    });
+    ok = res.ok && ((await res.json())?.capabilities ?? []).includes('vision');
+  } catch {
+    return false;
+  }
+  visionCache.set(model, ok);
+  return ok;
+}
+
+/**
+ * โมเดลในบริษัทที่ดูรูปได้ (ไม่ใช่โมเดล OCR) — ใช้หาตำแหน่งรูปหน้าคนในเรซูเม่ · ห้าม cloud เพราะเป็นรูปผู้สมัคร
+ * ลำดับ: RESUME_PHOTO_MODELS ที่ตั้งไว้ → ตัวอื่นในบริษัทที่ดูรูปได้ · ไม่มี = null (ข้ามการใส่รูป)
+ */
+export async function photoModel() {
+  const base = ollamaBase();
+  const available = (await listOllamaModels(base)).filter((m) => !isCloudModel(m) && !isOcrModel(m) && !isEmbeddingModel(m) && isUsable(m));
+  const pref = configured('RESUME_PHOTO_MODELS', 'RESUME_PHOTO_MODEL', '').filter((m) => available.includes(m));
+  for (const m of [...pref, ...available.filter((x) => !pref.includes(x))]) {
+    if (await canSeeImages(base, m)) return m;
+  }
+  return null;
+}
+
 /** เครื่องนี้มีตัวแปลง PDF (poppler: pdftoppm) ไหม */
 export async function hasPdfTool() {
   if (pdfToolCache !== null) return pdfToolCache;
