@@ -81,6 +81,68 @@ async function ocrImage(png, model) {
   return kept;
 }
 
+/**
+ * ข้อความที่โมเดลอ่านรูปพิมพ์ออกมาแต่ไม่ใช่ของในเอกสาร: แบบฟอร์มที่โมเดลจำมาตอนฝึก (RAW_TEXT_START / Page dimensions)
+ * และคำสั่งที่โมเดลพิมพ์ทวน · 19 พ.ย. 2569 เรซูเม่รูป 2 คอลัมน์ได้แค่ชื่อบนสุด + บรรทัดพวกนี้ 107 ตัวอักษร
+ */
+const OCR_JUNK_LINE =
+  /^(RAW_TEXT_(START|END)|Page dimensions:.*|\[Image \d+x\d+ to \d+x\d+\]|NA|\**Extract all text from the image\.?\**|Instructions:|- (Only return the clean Markdown|Do not include any explanation).*)$/i;
+
+export function cleanOcrText(text) {
+  return String(text ?? '')
+    .split('\n')
+    .filter((line) => !OCR_JUNK_LINE.test(line.trim()))
+    .join('\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
+/**
+ * อ่านทั้งหน้าแล้วดูเหมือนไม่ครบ: มีบรรทัดขยะของโมเดล หรือแทบไม่ได้ตัวหนังสือ
+ * (ไม่ดูความยาวอย่างเดียว — ไฟล์แนบอย่างบัตร/ใบรับรองมีตัวหนังสือน้อยจริง ไม่ต้องอ่านซ้ำเป็นแถบ)
+ */
+export function ocrLooksCut(raw, cleaned) {
+  const junk = String(raw ?? '').split('\n').some((line) => OCR_JUNK_LINE.test(line.trim()) && line.trim() !== 'NA');
+  return junk || cleaned.replace(/\s+/g, '').length < 30;
+}
+
+/**
+ * อ่านรูปหนึ่งหน้า: อ่านทั้งหน้าก่อน ถ้าดูเหมือนอ่านไม่ครบ ตัดเป็นแถบแนวนอนแล้วอ่านทีละแถบ ใช้ผลที่ได้ตัวหนังสือมากกว่า
+ * ทดลองเรซูเม่รูปจริง 19 พ.ย. 2569: ทั้งหน้า 107 ตัว (ชื่อ + ขยะ) · 3 แถบ ~1,900 ตัว (การศึกษา การทำงาน เบอร์โทร)
+ */
+async function ocrPage(png, model) {
+  let raw = '';
+  try {
+    raw = await ocrImage(png, model);
+  } catch (e) {
+    // ทั้งหน้าอ่านวนซ้ำ — ลองทีละแถบก่อน ได้ไม่ถึง 30 ตัวค่อยบอกว่าอ่านวน
+    if (String(e.message) !== 'ocr_loop') throw e;
+  }
+  const whole = cleanOcrText(raw);
+  if (!ocrLooksCut(raw, whole)) return whole;
+  let strips = [];
+  try {
+    const { splitImageStrips } = await import('./image-strips.js');
+    strips = await splitImageStrips(png, envInt('OCR_STRIPS', 3));
+  } catch (e) {
+    console.warn(`  [ocr] ตัดรูปเป็นแถบไม่ได้ ใช้ผลอ่านทั้งหน้า: ${String(e?.message ?? e).slice(0, 120)}`);
+    if (!raw) throw new Error('ocr_loop');
+    return whole;
+  }
+  const parts = [];
+  for (const strip of strips) {
+    try {
+      parts.push(cleanOcrText(await ocrImage(strip, model)));
+    } catch (e) {
+      if (String(e.message) !== 'ocr_loop') throw e;
+    }
+  }
+  const joined = parts.filter(Boolean).join('\n').trim();
+  const best = joined.replace(/\s+/g, '').length > whole.replace(/\s+/g, '').length ? joined : whole;
+  if (!raw && best.replace(/\s+/g, '').length < 30) throw new Error('ocr_loop');
+  return best;
+}
+
 /** Rasterize a PDF to PNG page buffers using poppler (pdftoppm). */
 async function pdfToPngs(pdf, maxPages) {
   const dir = await mkdtemp(join(tmpdir(), 'ocr-'));
@@ -111,7 +173,7 @@ export async function extractAttachment(buffer, fileType) {
   if (t === 'pdf' && !(await hasPdfTool())) return { text: '', status: OCR_WAITING, waiting: 'no_pdf_tool' };
   try {
     if (isImage) {
-      const text = await ocrImage(buffer, model);
+      const text = await ocrPage(buffer, model);
       return { text, status: text ? 'success' : 'error:empty', model };
     }
     if (t === 'pdf') {
@@ -119,7 +181,7 @@ export async function extractAttachment(buffer, fileType) {
       if (!pages.length) return { text: '', status: 'error:no_pages' };
       const parts = [];
       for (let i = 0; i < pages.length; i += 1) {
-        parts.push(await ocrImage(pages[i], model));
+        parts.push(await ocrPage(pages[i], model));
       }
       const text = parts.filter(Boolean).join('\n\n').trim();
       return { text, status: text ? 'success' : 'error:empty', model };
