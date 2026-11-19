@@ -104,11 +104,13 @@ export async function processResumeUpload(id) {
   const row = rows[0];
   if (!row || !['queued', 'reading'].includes(row.status)) return row?.status ?? 'missing';
   await setStatus(id, 'reading');
+  // ตัวหนังสือที่อ่านได้ เก็บไว้แม้อ่านไม่ผ่าน — หน้าผลอัปโหลดโชว์ให้เห็นว่าทำไม (เจ้าของ 19 พ.ย. 2569: อัปแล้วขึ้นอ่านไม่ได้ ไม่รู้ว่าเพราะอะไร)
+  let text = '';
   try {
     const kind = fileKind(row.file_name, row.mime);
     if (!kind) throw new ResumeReadError('รับเฉพาะไฟล์ PDF, Word (.docx) และรูป (JPG, PNG)');
     // เว็บอ่านตัวหนังสือจาก PDF/Word ไว้ตั้งแต่ตอนรับไฟล์ (raw_text) — ไม่มี = PDF สแกน/รูป ต้องให้ AI อ่านรูป
-    const text = String(row.raw_text ?? '').trim() || (await extractResumeText(row.content, kind)).text;
+    text = String(row.raw_text ?? '').trim() || (await extractResumeText(row.content, kind)).text;
     if (!text || text.replace(/\s+/g, '').length < 30) throw new ResumeReadError('ในไฟล์แทบไม่มีตัวหนังสือ อาจเป็นไฟล์ว่างหรือภาพไม่ชัด');
     const { parsed } = await structureResume(text);
     const missing = missingEssentials(parsed);
@@ -123,7 +125,7 @@ export async function processResumeUpload(id) {
     return 'saved';
   } catch (e) {
     const reason = e instanceof ResumeReadError ? e.message : `ระบบขัดข้องตอนอ่านไฟล์ (${String(e?.message ?? e).slice(0, 160)})`;
-    await setStatus(id, 'failed', { error: reason });
+    await setStatus(id, 'failed', { error: reason, rawText: String(text ?? '').trim() || null });
     return 'failed';
   }
 }

@@ -30,6 +30,52 @@ function StatusBadge({ status }: { status: UploadStatus }) {
   );
 }
 
+const fileUrl = (batchId: string, uploadId: string) => `/api/candidates/uploads/${batchId}/files/${uploadId}`;
+
+/**
+ * ไฟล์ที่อ่านไม่ได้: โชว์ไฟล์ต้นฉบับคู่กับตัวหนังสือที่อ่านได้ ให้เห็นว่าทำไมไม่ผ่าน
+ * (เจ้าของ 19 พ.ย. 2569: อัปรูปแล้วขึ้นอ่านไม่ได้ ไม่มีตัวอย่างให้ดู)
+ */
+function FailedFileCard({ batchId, row }: { batchId: string; row: UploadRow }) {
+  const url = fileUrl(batchId, row.id);
+  const mime = String(row.mime ?? '').toLowerCase();
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="truncate" title={row.file_name}>{row.file_name}</CardTitle>
+        <CardDescription>{row.error}</CardDescription>
+      </CardHeader>
+      <CardContent className="grid gap-4 md:grid-cols-2">
+        <div className="flex flex-col gap-2">
+          <span className="text-sm font-medium">ไฟล์ที่อัปโหลด</span>
+          <div className="overflow-hidden rounded-xl border bg-muted">
+            {mime === 'application/pdf' ? (
+              <iframe src={url} className="h-[60vh] w-full" title={row.file_name} />
+            ) : mime.startsWith('image/') ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={url} alt={row.file_name} className="mx-auto max-h-[60vh]" />
+            ) : (
+              <p className="p-4 text-sm text-muted-foreground">
+                แสดงตัวอย่างไฟล์ชนิดนี้ไม่ได้ <a href={url} className="underline underline-offset-4">ดาวน์โหลดไฟล์</a>
+              </p>
+            )}
+          </div>
+        </div>
+        <div className="flex flex-col gap-2">
+          <span className="text-sm font-medium">ตัวหนังสือที่อ่านได้จากไฟล์</span>
+          {row.read_text ? (
+            <pre className="max-h-[60vh] overflow-auto rounded-xl border bg-muted p-3 font-sans text-sm whitespace-pre-wrap">{row.read_text}</pre>
+          ) : (
+            <p className="rounded-xl border bg-muted p-3 text-sm text-muted-foreground">
+              ไม่มีตัวหนังสือที่อ่านได้ · ไฟล์ที่อ่านก่อน 19 พ.ย. 2569 ระบบยังไม่ได้เก็บไว้ กด &ldquo;อ่านใหม่&rdquo; ด้านบนเพื่อดู
+            </p>
+          )}
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
 /** คนที่มีในระบบแล้ว: ตารางเทียบเฉพาะช่องที่ต่าง ติ๊กช่องที่จะเอาจากไฟล์ใหม่ */
 function ReviewCard({ row }: { row: UploadRow }) {
   return (
@@ -172,7 +218,9 @@ export default async function UploadBatchPage(props: { params: Promise<{ batchId
             <TableBody>
               {rows.map((r) => (
                 <TableRow key={r.id}>
-                  <TableCell className="max-w-64 truncate" title={r.file_name}>{r.file_name}</TableCell>
+                  <TableCell className="max-w-64 truncate" title={r.file_name}>
+                    <a href={fileUrl(batchId, r.id)} target="_blank" rel="noreferrer" className="underline-offset-4 hover:underline">{r.file_name}</a>
+                  </TableCell>
                   <TableCell><StatusBadge status={r.status} /></TableCell>
                   <TableCell>
                     {r.candidate_id ? (
@@ -198,6 +246,8 @@ export default async function UploadBatchPage(props: { params: Promise<{ batchId
           </Table>
         </CardContent>
       </Card>
+
+      {rows.filter((r) => r.status === 'failed').map((r) => <FailedFileCard key={r.id} batchId={batchId} row={r} />)}
     </div>
   );
 }

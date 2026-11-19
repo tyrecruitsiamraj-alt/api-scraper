@@ -128,6 +128,9 @@ export type UploadRow = {
   uploaded_by_name: string | null;
   created_at: string;
   finished_at: string | null;
+  mime: string | null;
+  /** ตัวหนังสือที่ AI อ่านได้จากไฟล์ที่อ่านไม่ผ่าน (โชว์ว่าทำไมไม่ผ่าน) — ไฟล์อื่น = null */
+  read_text: string | null;
   diff: CandidateDiffRow[];
 };
 
@@ -136,6 +139,7 @@ export async function getUploadBatch(batchId: string): Promise<UploadRow[]> {
   const rows = await q<Omit<UploadRow, 'diff'> & { parsed: Record<string, unknown> | null; current: Record<string, unknown> | null }>(
     `SELECT u.id, u.file_name, u.status, u.error, u.candidate_id, c.full_name AS candidate_name,
             u.parsed->>'full_name' AS parsed_name, u.uploaded_by_name, u.created_at, u.finished_at,
+            u.mime, CASE WHEN u.status = 'failed' THEN left(u.raw_text, 4000) END AS read_text,
             CASE WHEN t.id IS NULL THEN NULL
                  ELSE concat_ws(' · ', t.source_request_no, COALESCE(NULLIF(t.criteria->>'position', ''), t.name)) END AS task_label,
             CASE WHEN u.status = 'review' THEN u.parsed END AS parsed,
@@ -148,6 +152,15 @@ export async function getUploadBatch(batchId: string): Promise<UploadRow[]> {
     [batchId],
   );
   return rows.map(({ parsed, current, ...r }) => ({ ...r, diff: parsed ? diffCandidate(current, parsed) : [] }));
+}
+
+/** ไฟล์ต้นฉบับที่อัปโหลด (เปิดดูจากหน้าผลอัปโหลด) — ต้องอยู่ในรอบอัปโหลดนั้น */
+export async function getUploadFile(batchId: string, uploadId: string) {
+  const rows = await q<{ file_name: string; mime: string | null; content: Buffer | null }>(
+    `SELECT file_name, mime, content FROM resume_uploads WHERE id = $1 AND batch_id = $2`,
+    [uploadId, batchId],
+  );
+  return rows[0] ?? null;
 }
 
 export async function listRecentBatches(limit = 10) {
@@ -168,9 +181,10 @@ export async function listRecentBatches(limit = 10) {
 }
 
 /** ไฟล์ที่อ่านไม่ได้ ส่งให้อ่านใหม่ทั้งรอบ (เช่นหลัง IT ลงโมเดล AI แล้ว) */
+// ล้างตัวหนังสือที่อ่านได้รอบก่อน (เก็บไว้โชว์ตอนอ่านไม่ผ่าน) ให้เครื่องอ่านไฟล์อ่านจากไฟล์ใหม่ทั้งหมด
 export async function retryFailedUploads(batchId: string, owner: string | null): Promise<number> {
   const rows = await q<{ id: string }>(
-    `UPDATE resume_uploads SET status = 'queued', error = NULL, finished_at = NULL
+    `UPDATE resume_uploads SET status = 'queued', error = NULL, finished_at = NULL, raw_text = NULL
       WHERE batch_id = $1 AND status = 'failed' RETURNING id`,
     [batchId],
   );
