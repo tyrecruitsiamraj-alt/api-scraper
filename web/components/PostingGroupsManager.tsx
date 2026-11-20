@@ -19,7 +19,10 @@ import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Item, ItemActions, ItemContent, ItemDescription, ItemGroup, ItemTitle } from '@/components/ui/item';
 
-/** แสดงได้สูงสุดต่อหน้า — คลังมี 2,000+ กลุ่มหลังนำเข้าชีตราชการ ต้องพิมพ์ค้นหาแทนการเลื่อนดูทั้งหมด */
+/**
+ * รายการในแต่ละก้อนธุรกิจแสดงได้สูงสุดเท่านี้ (ก้อนพับไว้ตอนเปิดหน้า) — หัวก้อนพร้อมจำนวนกลุ่มขึ้นเสมอ
+ * 20 พ.ย. 2569: คลังเกิน 200 กลุ่ม (227) แล้วหัวก้อน LBD/LBA/LM พร้อมจำนวนหายทั้งหมด เหลือแค่ "เลือกจังหวัดหรือพิมพ์ค้นหาก่อน"
+ */
 const MAX_ROWS = 200;
 
 /**
@@ -53,9 +56,6 @@ export async function PostingGroupsManager({ sector = 'private', query = '', pro
     (!jobTypeFilter || (jobTypeFilter === '__none__' ? g.job_types.length === 0 : (g.job_types as string[]).includes(jobTypeFilter)))
     && (!provinceFilter || (provinceFilter === '__none__' ? provincesOf(g).length === 0 : provincesOf(g).includes(provinceFilter)))
     && (!needle || `${g.name} ${g.fb_group_id} ${g.province ?? ''}`.toLowerCase().includes(needle)));
-  // ราชการมี 2,400 กลุ่ม: ต้องเลือกจังหวัดหรือค้นก่อนถึงแสดงรายการ เอกชนมีน้อยแสดงเลย
-  const mustNarrow = !provinceFilter && !needle && !jobTypeFilter && inSector.length > MAX_ROWS;
-  const shown = mustNarrow ? [] : visible.slice(0, MAX_ROWS);
   const countBySector = (code: string) => groups.filter((g) => g.sector === code).length;
 
   return (
@@ -156,13 +156,11 @@ export async function PostingGroupsManager({ sector = 'private', query = '', pro
         </Field>
         <Button variant="outline" size="sm">ค้นหา</Button>
         <span className="text-xs text-muted-foreground">
-          {mustNarrow
-            ? `${groupSectorLabel(sectorFilter)} มี ${inSector.length} กลุ่ม เลือกจังหวัด ประเภทงาน หรือพิมพ์ค้นหาก่อน`
-            : `ตรงเงื่อนไข ${visible.length} กลุ่ม${visible.length > MAX_ROWS ? ` · แสดง ${MAX_ROWS} กลุ่มแรก พิมพ์ค้นหาให้แคบลง` : ''}`}
+          {`ตรงเงื่อนไข ${visible.length} กลุ่ม`}
         </span>
       </form>
 
-      {!mustNarrow && groupByBusinessUnit(shown, (g) => g.department).map((bu) => (
+      {groupByBusinessUnit(visible, (g) => g.department).map((bu) => (
         <BusinessUnitSection
           key={`${bu.code ?? 'none'}-${filtering ? 'open' : 'closed'}`}
           code={bu.code}
@@ -176,7 +174,10 @@ export async function PostingGroupsManager({ sector = 'private', query = '', pro
             <p className="px-4 py-3 text-sm text-muted-foreground">ไม่มีกลุ่มของ {bu.code ?? 'ก้อนนี้'} ตามเงื่อนไขที่ค้น</p>
           ) : (
         <ItemGroup className="gap-2 p-3">
-          {bu.items.map((group: PostingGroup) => (
+          {bu.items.length > MAX_ROWS && (
+            <p className="text-sm text-muted-foreground">แสดง {MAX_ROWS} กลุ่มแรกจาก {bu.items.length} กลุ่ม เลือกจังหวัด ประเภทงาน หรือพิมพ์ค้นหาให้แคบลง</p>
+          )}
+          {bu.items.slice(0, MAX_ROWS).map((group: PostingGroup) => (
             <Item key={group.id} variant="outline" size="sm">
               <ItemContent className="min-w-0">
                 <ItemTitle>

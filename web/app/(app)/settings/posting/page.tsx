@@ -42,9 +42,10 @@ export default async function SettingsPostingPage({ searchParams }: { searchPara
 
       {params.notice && <NoticeDialog key={params.notice} title={params.ok ? 'เพิ่มกลุ่มแล้ว' : 'เพิ่มกลุ่มไม่ได้'} notice={params.notice} />}
 
-      <AccountGroupCoverage accountId={params.account ?? ''} />
-
       <PostingGroupsManager sector={params.sector ?? 'private'} query={params.q ?? ''} province={params.province ?? ''} jobType={params.job ?? ''} />
+
+      {/* คลังกลุ่มอยู่บนสุดตามชื่อแท็บ "กลุ่มโพสต์" · ตารางบัญชี 35 แถวเคยดันคลังลงไปจนหาไม่เจอ (20 พ.ย. 2569) */}
+      <AccountGroupCoverage accountId={params.account ?? ''} />
 
       <Collapsible asChild>
         <Card>
