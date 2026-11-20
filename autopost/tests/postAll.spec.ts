@@ -379,7 +379,7 @@ test('Dynamic Post: รันโพสต์ตาม Assignments', async ({ pag
       });
 
       let posted = false;
-      let membership: { state: string; message: string | null } | undefined;
+      let membership: { state: string; message: string | null; visitor?: boolean } | undefined;
       let postError: string | undefined;
       const maxAttempts = 2;
       for (let attempt = 1; attempt <= maxAttempts; attempt++) {
@@ -424,7 +424,7 @@ test('Dynamic Post: รันโพสต์ตาม Assignments', async ({ pag
         }
       }
       // หน้าเว็บนับว่าบัญชีนี้เข้าร่วมกลุ่มไหนแล้ว (19 พ.ย. 2569) — โพสต์ได้ = เป็นสมาชิก · ยังไม่เป็น = จดเหตุ
-      if (posted) await rememberMembership(user.id, gID, 'member');
+      if (posted) await rememberMembership(user.id, gID, membership?.visitor ? 'visitor' : 'member');
       else if (membership && membership.state !== 'member') await rememberMembership(user.id, gID, membership.state as MembershipState, membership.message);
       if (posted) {
         totalPosted += 1;

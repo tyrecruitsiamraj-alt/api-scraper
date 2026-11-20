@@ -4348,7 +4348,7 @@ export async function listPostingGroups(): Promise<PostingGroup[]> {
  * ที่มา: ตาราง group_memberships (รอบเช็กกลุ่มอ่านหน้า "กลุ่มของคุณ" + รอบโพสต์จดผล)
  * ยังไม่มีแถว แต่เคยโพสต์ลงกลุ่มนั้นได้ = นับเป็นสมาชิก · ไม่มีทั้งสองอย่าง = ยังไม่ได้เช็ก
  */
-export type GroupMembershipState = 'member' | 'pending' | 'questions' | 'not_member' | 'unknown' | 'unchecked';
+export type GroupMembershipState = 'member' | 'visitor' | 'pending' | 'questions' | 'not_member' | 'unknown' | 'unchecked';
 
 export type AccountGroupCoverage = {
   user_id: string;
@@ -4356,6 +4356,8 @@ export type AccountGroupCoverage = {
   status: 'ok' | 'paused' | 'retired' | 'verify';
   total: number;
   member: number;
+  /** ยังไม่ได้เข้า แต่กลุ่มให้โพสต์ได้ (กลุ่มสาธารณะ) — รวมกลุ่มที่รายชื่อบอกว่ายังไม่เข้าแต่บัญชีเคยโพสต์ลงได้ */
+  visitor: number;
   pending: number;
   questions: number;
   not_member: number;
@@ -4374,7 +4376,8 @@ async function membershipCellsSql(): Promise<string> {
      posted AS (SELECT DISTINCT user_id, group_id FROM ${AP}.post_logs WHERE group_id IS NOT NULL),
      cells AS (
        SELECT u.id AS user_id, g.fb_group_id, COALESCE(NULLIF(TRIM(g.name), ''), g.fb_group_id) AS group_name,
-              COALESCE(gm.state, CASE WHEN p.user_id IS NOT NULL THEN 'member' END, 'unchecked') AS state,
+              CASE WHEN gm.state = 'not_member' AND p.user_id IS NOT NULL THEN 'visitor'
+                   ELSE COALESCE(gm.state, CASE WHEN p.user_id IS NOT NULL THEN 'member' END, 'unchecked') END AS state,
               gm.note, gm.checked_at, (gm.state IS NULL AND p.user_id IS NOT NULL) AS from_posts
          FROM ${AP}.users u
         CROSS JOIN ${AP}.groups g
@@ -4395,6 +4398,7 @@ export async function listAccountGroupCoverage(): Promise<AccountGroupCoverage[]
                    ELSE 'ok' END AS status,
               count(c.*)::int AS total,
               count(*) FILTER (WHERE c.state = 'member')::int AS member,
+              count(*) FILTER (WHERE c.state = 'visitor')::int AS visitor,
               count(*) FILTER (WHERE c.state = 'pending')::int AS pending,
               count(*) FILTER (WHERE c.state = 'questions')::int AS questions,
               count(*) FILTER (WHERE c.state = 'not_member')::int AS not_member,
@@ -4433,7 +4437,7 @@ export async function listAccountGroups(userId: string): Promise<AccountGroupRow
       `${cells}
        SELECT fb_group_id, group_name, state, note, checked_at, from_posts FROM cells
         WHERE user_id = $1
-        ORDER BY array_position(ARRAY['not_member','unknown','questions','pending','unchecked','member'], state), group_name`,
+        ORDER BY array_position(ARRAY['not_member','unknown','questions','pending','visitor','unchecked','member'], state), group_name`,
       [userId],
     );
   } catch (e) {

@@ -51,7 +51,7 @@ test('บันทึกรายชื่อ: อ่านไม่ได้ไ
   const db = fs.readFileSync(require.resolve('../server/db.js'), 'utf8');
   const save = db.slice(db.indexOf('async function saveJoinedGroupsList'), db.indexOf('async function saveGroupSlug'));
   assert.match(save, /if \(!userId \|\| list\.length === 0\) return null;/);
-  assert.match(save, /WHERE NOT \(group_memberships\.state IN \('pending', 'questions'\)/);
+  assert.match(save, /AND NOT \(group_memberships\.state IN \('pending', 'questions'\)/);
   const pick = db.slice(db.indexOf('async function pickGroupsToJoin'), db.indexOf('async function enqueueDailyGroupCheckJobs'));
   assert.match(pick, /gm\.join_tried_at < NOW\(\) - INTERVAL '7 days'/);
   assert.match(db, /COALESCE\(q\.mode, 'post'\) = 'groupcheck' AND \$4::jsonb \? 'groupcheck'/);
@@ -60,4 +60,20 @@ test('บันทึกรายชื่อ: อ่านไม่ได้ไ
   assert.match(spec, /if \(!entries\.length\) \{[\s\S]*?return;\n  \}/);
   assert.match(spec, /level: 'info'/);
   assert.doesNotMatch(spec, /level: 'success'/);
+});
+
+// 20 พ.ย. 2569: รอบเช็กกลุ่ม 12 รอบไม่เคยกดเข้าร่วม — เห็นช่องเขียนโพสต์ = ตีว่าเป็นสมาชิก ทั้งที่กลุ่มสาธารณะโพสต์ได้โดยไม่ต้องเข้า
+test('ช่องเขียนโพสต์อย่างเดียวไม่พอ ต้องไม่มีปุ่มเข้าร่วมที่หัวกลุ่ม · รอบเช็กกลุ่มกดเข้าร่วม รอบโพสต์ไม่กด', () => {
+  const src = fs.readFileSync(require.resolve('../src/helpers/groupMembership.ts'), 'utf8');
+  assert.match(src, /if \(canPost && !join\) return 'member';\n\s+if \(canPost && !opts\.joinWhenVisitor\) return 'visitor';/);
+  assert.match(src, /if \(top < 900\) return btn;/, 'ปุ่มเข้าร่วมของกลุ่มแนะนำในฟีดไม่นับ');
+  assert.match(src, /return stillJoin \? 'visitor' : 'joined';/);
+  const check = fs.readFileSync(require.resolve('./facebookGroupCheck.spec.ts'), 'utf8');
+  assert.match(check, /ensureGroupMembership\(activePage, budget, String\(label\), \{ joinWhenVisitor: true \}\)/);
+  const post = fs.readFileSync(require.resolve('../src/helpers/postToGroup.ts'), 'utf8');
+  assert.match(post, /ensureGroupMembership\(page, options\.joinBudget, userLabel\);/);
+  assert.match(post, /if \(!canPost && state !== 'joined'\) return false;/, 'โพสต์ได้โดยไม่ต้องเข้า = โพสต์ต่อ');
+  const db = fs.readFileSync(require.resolve('../server/db.js'), 'utf8');
+  assert.match(db, /gm\.state IN \('not_member', 'visitor', 'unknown'\)/);
+  assert.match(db, /WHERE group_memberships\.state <> 'visitor'/);
 });

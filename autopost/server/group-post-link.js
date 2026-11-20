@@ -92,4 +92,27 @@ function postLinkVerdict(postText, ourText) {
   return 'other';
 }
 
-module.exports = { groupSlugFromUrl, groupAliases, postIdForGroup, canonicalGroupPostLink, canonicalPostLink, applyPaths, postLinkVerdict };
+/**
+ * หลังเปิดลิงก์โพสต์ หน้าที่ได้ยังเป็นโพสต์นั้นอยู่ไหม — ดูจากที่อยู่ของหน้า
+ *   'same'    = ที่อยู่ยังชี้โพสต์เลขเดิม
+ *   'left'    = Facebook พาไปหน้าอื่น (หน้ากลุ่ม/ฟีด หรือโพสต์เลขอื่น) → ห้ามเก็บยอด/คอมเมนต์ของหน้านั้น
+ *   'unknown' = บอกไม่ได้ (ลิงก์ที่เก็บไว้ไม่ใช่แบบเลขโพสต์ หรือที่อยู่เป็นรูปแบบที่ไม่รู้จัก)
+ * 20 พ.ย. 2569: ตัวตรวจลิงก์อ่านโพสต์คนอื่นในฟีด 512 ครั้งใน 3 วัน — ต้องรู้ก่อนว่าหน้าที่เปิดคือโพสต์เราจริง
+ */
+function openedPostCheck(currentUrl, postLink, gID) {
+  const aliases = [...new Set([...groupAliases(gID, currentUrl), groupSlugFromUrl(postLink)].filter(Boolean))];
+  const want = postIdForGroup(postLink, aliases);
+  if (!want) return 'unknown';
+  const got = postIdForGroup(currentUrl, aliases);
+  if (got) return got === want ? 'same' : 'left';
+  let path = '';
+  try {
+    path = new URL(String(currentUrl || '')).pathname;
+  } catch {
+    return 'unknown';
+  }
+  // หน้ากลุ่มเปล่า ๆ (/groups/<กลุ่ม>/ หรือแท็บของกลุ่ม) = ถูกพาออกจากโพสต์ · ที่อยู่แบบอื่น (pfbid, permalink.php, photo) = ไม่ตัดสิน
+  return /^\/groups\/[^/]+\/?(?:(?:discussion|buy_sell_discussion|about|members|media|my_posted_content|my_pending_content)\/?)?$/i.test(path) ? 'left' : 'unknown';
+}
+
+module.exports = { groupSlugFromUrl, groupAliases, postIdForGroup, canonicalGroupPostLink, canonicalPostLink, applyPaths, postLinkVerdict, openedPostCheck };

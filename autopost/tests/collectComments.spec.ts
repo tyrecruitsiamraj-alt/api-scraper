@@ -27,6 +27,7 @@ const contentStatus = require('../server/post-content-status');
 const groupPostLink = require('../server/group-post-link') as {
   postLinkVerdict: (postText: string, ourText: string) => 'ours' | 'other' | 'unknown';
   applyPaths: (text: string) => Set<string>;
+  openedPostCheck: (currentUrl: string, postLink: string, gID: string) => 'same' | 'left' | 'unknown';
 };
 /**
  * เช็กแท็บ "เนื้อหาของคุณ" ได้กี่กลุ่มต่อรอบ (เจ้าของ 12 พ.ย. 2569: อยากรู้ปฏิเสธแล้ว/ลบออกแล้ว แต่ไม่ให้บัญชีโดนจำกัดเพิ่ม)
@@ -54,28 +55,58 @@ const unwrapFbLinks = (hrefs: string[]) =>
  * → คืนทั้งข้อความกล่องแรก (ใช้ตัดสินได้ทั้งของเรา/ของงานอื่น) และข้อความ+ลิงก์ทั้งหน้า (ใช้ยืนยันว่า "ของเรา" เท่านั้น
  *   เพราะคอมเมนต์อาจมีลิงก์งานอื่น — ห้ามใช้ล้างลิงก์) + ข้อมูลไว้ดูว่าอ่านอะไรมา
  */
+/** หน้าต่างโพสต์ที่ซ้อนบนฟีดกลุ่ม (dialog ที่มีช่องความคิดเห็น) — ตัวเดียวกับที่ตัวอ่านยอดไลก์/คอมเมนต์ใช้ */
+const POST_DIALOG = '[role="dialog"]:has([aria-label*="ความคิดเห็น"], [aria-label*="comment" i])';
+const COMMENT_NODES =
+  '[aria-label^="ความคิดเห็นจาก"], [aria-label^="ความคิดเห็นโดย"], [aria-label^="Comment by" i], [aria-label^="Comment from" i], [aria-label^="ตอบกลับ"], [aria-label^="Reply by" i]';
+
+/**
+ * 20 พ.ย. 2569: ลิงก์โพสต์เปิดเป็นหน้าต่างซ้อนบนฟีดกลุ่ม แต่ตัวนี้เคยอ่านกล่องแรกของ [role="main"] = โพสต์คนอื่นในฟีดด้านหลัง
+ * (ตรวจไม่ได้ 512 ครั้งใน 3 วัน ข้อความที่อ่านเป็น "ขออนุญาตฝาก CV ครับ" ซ้ำกัน 5 โพสต์ของเรา)
+ * → มีหน้าต่างโพสต์ = อ่านในหน้าต่างนั้น: ตัวโพสต์ = หน้าต่างตัดคอมเมนต์ออก · ทั้งหน้าต่าง (มีคอมเมนต์) ใช้ยืนยัน "ของเรา" เท่านั้น
+ *   ไม่มีหน้าต่าง = หน้าโพสต์เดี่ยว อ่านกล่องแรกของเนื้อหาหลักแบบเดิม
+ */
 async function readPostForVerdict(page: Page): Promise<{ article: string; whole: string; diag: Record<string, unknown> }> {
-  const main = page.locator('[role="main"]').first();
-  const article = page.locator('[role="main"] [role="article"]').first();
+  const dialog = page.locator(POST_DIALOG).first();
+  const inDialog = await dialog.isVisible({ timeout: 1500 }).catch(() => false);
+  const main = inDialog ? dialog : page.locator('[role="main"]').first();
+  const article = inDialog ? dialog : page.locator('[role="main"] [role="article"]').first();
   const more = article.locator('div[role="button"]:text-is("ดูเพิ่มเติม"), div[role="button"]:text-is("See more")').first();
   const moreShown = await more.isVisible({ timeout: 1500 }).catch(() => false);
   if (moreShown) await more.click({ timeout: 3000 }).catch(() => {});
-  const articleText = await article.innerText({ timeout: 5000 }).catch(() => '');
   const mainText = await main.innerText({ timeout: 5000 }).catch(() => '');
-  const articleHrefs = unwrapFbLinks(await article.locator('a[href]').evaluateAll((as) => as.map((a) => a.getAttribute('href') || '')).catch(() => [] as string[]));
   const mainHrefs = unwrapFbLinks(await main.locator('a[href]').evaluateAll((as) => as.map((a) => a.getAttribute('href') || '')).catch(() => [] as string[]));
+  let articleText = '';
+  let articleHrefsRaw: string[] = [];
+  if (inDialog) {
+    const body = await dialog
+      .evaluate((root, commentSel) => {
+        const clone = root.cloneNode(true) as HTMLElement;
+        clone.querySelectorAll(commentSel).forEach((n) => n.remove());
+        return { text: clone.textContent || '', hrefs: Array.from(clone.querySelectorAll('a[href]')).map((a) => a.getAttribute('href') || '') };
+      }, COMMENT_NODES)
+      .catch(() => ({ text: '', hrefs: [] as string[] }));
+    articleText = body.text;
+    articleHrefsRaw = body.hrefs;
+  } else {
+    articleText = await article.innerText({ timeout: 5000 }).catch(() => '');
+    articleHrefsRaw = await article.locator('a[href]').evaluateAll((as) => as.map((a) => a.getAttribute('href') || '')).catch(() => [] as string[]);
+  }
+  const articleHrefs = unwrapFbLinks(articleHrefsRaw);
   const articleAll = [articleText || mainText, ...articleHrefs].filter(Boolean).join('\n');
   const whole = [mainText, ...mainHrefs].filter(Boolean).join('\n');
   return {
     article: articleAll,
     whole,
     diag: {
+      in_dialog: inDialog,
       more_clicked: moreShown,
       article_len: articleText.length,
       main_len: mainText.length,
       article_hrefs: articleHrefs.length,
       main_hrefs: mainHrefs.length,
-      article_tail: articleText.replace(/\s+/g, ' ').slice(-160),
+      // หัวข้อความ (ตัวโพสต์อยู่ต้นกล่อง) — เดิมเก็บท้ายข้อความ ดูไม่ออกว่าเป็นโพสต์ไหน
+      article_head: articleText.replace(/\s+/g, ' ').slice(0, 160),
       apply_in_main: [...groupPostLink.applyPaths(whole)].slice(0, 5),
     },
   };
@@ -338,6 +369,22 @@ test('collectComments', async ({ page }) => {
       const { phones, commentCount, postBodyPhones, reactions, shares, comments, diag } = await scrapeCommentsAndPhones(active, item.post_link, {
         excludeAuthorNames: ownerNames,
       });
+      // Facebook พาออกจากโพสต์ไปหน้ากลุ่ม (โพสต์ถูกลบ/ซ่อน/ยังไม่ผ่าน) และไม่มีหน้าต่างโพสต์ = ที่อ่านมาเป็นของโพสต์อื่นในฟีด
+      // → ไม่เก็บยอด ไม่เก็บคอมเมนต์ แล้วเช็กแท็บ "เนื้อหาของคุณ" ว่าโพสต์ไปอยู่สถานะไหน (20 พ.ย. 2569)
+      if (item.group_id && groupPostLink.openedPostCheck(active.url(), item.post_link, item.group_id) === 'left') {
+        const dialogOpen = await active.locator(POST_DIALOG).first().isVisible({ timeout: 1000 }).catch(() => false);
+        if (!dialogOpen) {
+          await runLog({
+            level: 'warn',
+            message: `[${idx}/${plan.posts.length}] เปิดลิงก์โพสต์แล้ว Facebook พาไปหน้ากลุ่ม ไม่เก็บยอดของรอบนี้`,
+            user_id: user.id,
+            meta: { kind: 'post_not_opened', post_log_id: item.post_log_id, group_id: item.group_id, post_link: item.post_link, landed: active.url().slice(0, 200) },
+          });
+          await checkContentStatus(item, ['posted', 'pending', 'declined', 'removed'], `[${idx}/${plan.posts.length}]`);
+          noCollectResult.add(item.post_log_id);
+          continue;
+        }
+      }
       // ลิงก์ที่บันทึกไว้ชี้โพสต์ของงานอื่น (เดิมตอนโพสต์หาไม่เจอแล้วหยิบโพสต์บนสุด) → ล้างลิงก์ ไม่เก็บคอมเมนต์ของโพสต์ผิด
       if (item.own_apply_text && leadsDb) {
         const read = await readPostForVerdict(active);

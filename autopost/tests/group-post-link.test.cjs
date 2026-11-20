@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { groupSlugFromUrl, groupAliases, postIdForGroup, canonicalPostLink, applyPaths, postLinkVerdict } = require('../server/group-post-link');
+const { groupSlugFromUrl, groupAliases, postIdForGroup, canonicalPostLink, applyPaths, postLinkVerdict, openedPostCheck } = require('../server/group-post-link');
 
 const G = '1486494998623206';
 
@@ -72,4 +72,28 @@ test('ตรวจลิงก์ย้อนหลัง: รอบเก็บ
   assert.match(db, /SET post_link = NULL, post_status = 'ไม่พบลิงก์หลังโพสต์' WHERE id = \$1 AND post_link = \$2/);
   const find = fs.readFileSync(require.resolve('../src/helpers/saveToSheet.ts'), 'utf8');
   assert.match(find, /if \(verdict === 'other'\) continue;/);
+});
+
+// 20 พ.ย. 2569: ตัวตรวจลิงก์อ่านโพสต์คนอื่นในฟีด — ต้องรู้ว่าหน้าที่เปิดยังเป็นโพสต์เราไหม
+test('หลังเปิดลิงก์โพสต์: ยังเป็นโพสต์เดิม / ถูกพาไปหน้ากลุ่ม / บอกไม่ได้', () => {
+  const link = `https://www.facebook.com/groups/${G}/posts/2202160973723268/`;
+  assert.equal(openedPostCheck(link, link, G), 'same');
+  assert.equal(openedPostCheck('https://www.facebook.com/groups/hangankhabrot/posts/2202160973723268/?comment_id=1', link, G), 'same');
+  assert.equal(openedPostCheck(`https://www.facebook.com/groups/${G}/permalink/2202160973723268/`, link, G), 'same');
+  assert.equal(openedPostCheck(`https://www.facebook.com/groups/${G}/`, link, G), 'left');
+  assert.equal(openedPostCheck('https://www.facebook.com/groups/hangankhabrot', link, G), 'left');
+  assert.equal(openedPostCheck(`https://www.facebook.com/groups/${G}/posts/999/`, link, G), 'left');
+  assert.equal(openedPostCheck(`https://www.facebook.com/groups/${G}/posts/pfbid02abc/`, link, G), 'unknown');
+  assert.equal(openedPostCheck('https://www.facebook.com/login/?next=x', link, G), 'unknown');
+  assert.equal(openedPostCheck(link, 'https://www.facebook.com/share/p/abc/', G), 'unknown');
+});
+
+test('ตัวตรวจลิงก์อ่านในหน้าต่างโพสต์ ไม่อ่านฟีดด้านหลัง · ถูกพาออกจากโพสต์ = ไม่เก็บยอดรอบนั้น', () => {
+  const fs = require('node:fs');
+  const spec = fs.readFileSync(require.resolve('./collectComments.spec.ts'), 'utf8');
+  assert.match(spec, /const dialog = page\.locator\(POST_DIALOG\)\.first\(\);/);
+  assert.match(spec, /const article = inDialog \? dialog : page\.locator\('\[role="main"\] \[role="article"\]'\)\.first\(\);/);
+  assert.match(spec, /clone\.querySelectorAll\(commentSel\)\.forEach\(\(n\) => n\.remove\(\)\);/, 'ตัวโพสต์ = หน้าต่างตัดคอมเมนต์ออก');
+  assert.match(spec, /openedPostCheck\(active\.url\(\), item\.post_link, item\.group_id\) === 'left'/);
+  assert.match(spec, /kind: 'post_not_opened'[\s\S]{0,400}noCollectResult\.add\(item\.post_log_id\);\s+continue;/);
 });

@@ -60,6 +60,7 @@ async function readJoinedGroups(page: Page): Promise<{ entries: { token: string;
 
 const JOIN_TO_STATE: Record<Exclude<MembershipState, 'limit'>, string> = {
   member: 'member',
+  visitor: 'visitor',
   joined: 'member',
   pending: 'pending',
   questions: 'questions',
@@ -127,7 +128,8 @@ test('เช็กกลุ่มของบัญชี: อ่านกลุ
       if (!g.name || PLACEHOLDER_GROUP_NAME.test(String(g.name).trim())) {
         await rememberGroupName(g.fb_group_id, await readGroupName(activePage));
       }
-      const state = await ensureGroupMembership(activePage, budget, String(label));
+      // โพสต์ได้โดยไม่ต้องเข้า ก็กดเข้าร่วมด้วย (เจ้าของเคาะ 20 พ.ย. 2569) — โพสต์ของสมาชิกมักไม่ต้องรออนุมัติ
+      const state = await ensureGroupMembership(activePage, budget, String(label), { joinWhenVisitor: true });
       if (state === 'limit') break;
       const hint = state === 'unknown' ? await readGroupPageHint(activePage) : '';
       await db.recordGroupMembership(user.id, g.fb_group_id, JOIN_TO_STATE[state], hint || null, { joinTried: true });
@@ -144,7 +146,7 @@ test('เช็กกลุ่มของบัญชี: อ่านกลุ
     }
   }
   if (targets.length) {
-    const words: Record<string, string> = { member: 'เป็นสมาชิกอยู่แล้ว', joined: 'เข้าร่วมได้เลย', pending: 'รอแอดมินอนุมัติ', questions: 'ต้องตอบคำถามเอง', unknown: 'ไม่เจอปุ่มเข้าร่วม' };
+    const words: Record<string, string> = { member: 'เป็นสมาชิกอยู่แล้ว', visitor: 'กดแล้วยังไม่ได้เข้า', joined: 'เข้าร่วมได้เลย', pending: 'รอแอดมินอนุมัติ', questions: 'ต้องตอบคำถามเอง', unknown: 'ไม่เจอปุ่มเข้าร่วม' };
     const parts = Object.entries(tally).map(([k, n]) => `${words[k] || k} ${n}`);
     const msg = `เช็กกลุ่มของบัญชี: กดเข้าร่วม ${budget.used} กลุ่ม${parts.length ? ` (${parts.join(' · ')})` : ''} (ไม่โพสต์)`;
     console.log(`🤝 [${label}] ${msg}`);

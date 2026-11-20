@@ -41,7 +41,8 @@ export interface PostToGroupOptions {
   /** โควต้ากดเข้าร่วมกลุ่มของรอบนี้ (ไม่ส่ง = ไม่กดเข้าร่วมให้) */
   joinBudget?: { used: number; max: number };
   /** ผลตรวจสมาชิกกลุ่มของการโพสต์ครั้งนี้ — postAll ใช้เขียน log */
-  membership?: { state: MembershipState; message: string | null };
+  /** visitor = กลุ่มที่โพสต์ได้โดยไม่ต้องเป็นสมาชิก (state รายงานเป็น member ให้รอบโพสต์ทำต่อเหมือนเดิม) */
+  membership?: { state: MembershipState; message: string | null; visitor?: boolean };
   /** Facebook ไม่รับโพสต์หลังกดปุ่ม — ข้อความที่ Facebook แสดง (postAll ใช้เขียน log) */
   postError?: string;
 }
@@ -417,7 +418,9 @@ export async function postToGroup(
     // ยังไม่ได้เป็นสมาชิก = ไม่มีช่องเขียนโพสต์: กดเข้าร่วมให้ (มีโควต้าต่อรอบ) ถ้าเข้าไม่ได้ทันทีก็ข้ามกลุ่มนี้
     if (options.joinBudget) {
       const state = await ensureGroupMembership(page, options.joinBudget, userLabel);
-      let message: string | null = state === 'member' ? null : MEMBERSHIP_MESSAGE[state];
+      // โพสต์ได้โดยไม่ต้องเข้าร่วม (visitor) = โพสต์ต่อเหมือนสมาชิก ไม่กดเข้าร่วมกลางรอบโพสต์ — รอบเช็กกลุ่มเป็นคนกด
+      const canPost = state === 'member' || state === 'visitor';
+      let message: string | null = state === 'member' || state === 'visitor' ? null : MEMBERSHIP_MESSAGE[state];
       if (state === 'unknown') {
         // ไม่เจอทั้งช่องโพสต์และปุ่มเข้าร่วม: เก็บภาพ/HTML ไว้ที่ artifacts/ และข้อความบนหน้าไว้ใน log
         const hint = await readGroupPageHint(page);
@@ -431,9 +434,9 @@ export async function postToGroup(
           assignmentId: options.assignmentId,
         });
       }
-      options.membership = { state, message };
-      if (state !== 'member') console.log(`👥 [${userLabel}] กลุ่ม ${gID}: ${message}`);
-      if (state !== 'member' && state !== 'joined') return false;
+      options.membership = { state: canPost ? 'member' : state, message, visitor: state === 'visitor' };
+      if (!canPost) console.log(`👥 [${userLabel}] กลุ่ม ${gID}: ${message}`);
+      if (!canPost && state !== 'joined') return false;
     }
 
     let composerDialog!: Locator;

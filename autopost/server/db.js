@@ -2121,7 +2121,7 @@ async function enqueueDailyWarmupJobs() {
  * สมาชิกกลุ่มต่อบัญชี (เจ้าของ 19 พ.ย. 2569: "บัญชี ก เข้าร่วมแล้วกี่กลุ่ม กลุ่มไหนยังไม่เข้า")
  * เดิมระบบรู้แค่กลุ่มที่บัญชีเคยโพสต์ได้ (36 จาก 174 กลุ่ม) · รอบเช็กกลุ่ม (โหมด groupcheck) อ่านหน้า
  * "กลุ่มของคุณ" ของบัญชีแล้วจดที่นี่ · รอบโพสต์จดผลตอนเจอว่ายังไม่เป็นสมาชิกด้วย
- * state: member | pending (รอแอดมินอนุมัติ) | questions (ต้องตอบคำถามเอง) | not_member | unknown (เปิดแล้วไม่เจอทั้งช่องโพสต์และปุ่มเข้าร่วม)
+ * state: member | visitor (ยังไม่ได้เข้า แต่กลุ่มให้โพสต์ได้) | pending (รอแอดมินอนุมัติ) | questions (ต้องตอบคำถามเอง) | not_member | unknown (เปิดแล้วไม่เจอทั้งช่องโพสต์และปุ่มเข้าร่วม)
  */
 async function ensureGroupMembershipTable() {
   await query(
@@ -2139,7 +2139,7 @@ async function ensureGroupMembershipTable() {
   await query(`ALTER TABLE groups ADD COLUMN IF NOT EXISTS fb_slug TEXT`);
 }
 
-const MEMBERSHIP_STATES = new Set(['member', 'pending', 'questions', 'not_member', 'unknown']);
+const MEMBERSHIP_STATES = new Set(['member', 'visitor', 'pending', 'questions', 'not_member', 'unknown']);
 
 /** จดสถานะสมาชิกของบัญชีในกลุ่มนี้ · joinTried = รอบนี้กดเข้าร่วม (ไม่กดซ้ำกลุ่มเดิมภายใน 7 วัน) */
 async function recordGroupMembership(userId, fbGroupId, state, note = null, { joinTried = false } = {}) {
@@ -2159,6 +2159,7 @@ async function recordGroupMembership(userId, fbGroupId, state, note = null, { jo
 /**
  * บันทึกรายชื่อกลุ่มที่บัญชีเป็นสมาชิก (จากหน้า "กลุ่มของคุณ") เทียบกับทุกกลุ่มในระบบ
  * กลุ่มในระบบที่ไม่อยู่ในรายชื่อ = not_member · ยกเว้นที่ขอเข้าไว้ (pending/questions) ไม่เกิน 14 วัน ให้คงไว้
+ * และที่รู้แล้วว่าโพสต์ได้โดยไม่ต้องเข้า (visitor) คงไว้ — รายชื่อบอกแค่ว่ายังไม่ได้เข้า ซึ่งตรงกับ visitor อยู่แล้ว
  * รายชื่อว่าง = อ่านหน้าไม่สำเร็จ ไม่เขียนอะไร (ไม่ตีว่าไม่ได้เป็นสมาชิกทุกกลุ่ม)
  */
 async function saveJoinedGroupsList(userId, entries) {
@@ -2182,7 +2183,8 @@ async function saveJoinedGroupsList(userId, entries) {
        SELECT $1, g.fb_group_id, 'not_member', NULL, NOW() FROM groups g
         WHERE g.fb_group_id IS NOT NULL AND NOT (g.fb_group_id = ANY($2::text[]))
        ON CONFLICT (user_id, fb_group_id) DO UPDATE SET state = 'not_member', note = NULL, checked_at = NOW()
-        WHERE NOT (group_memberships.state IN ('pending', 'questions')
+        WHERE group_memberships.state <> 'visitor'
+          AND NOT (group_memberships.state IN ('pending', 'questions')
                    AND group_memberships.checked_at > NOW() - INTERVAL '14 days')`,
       [String(userId), m.memberIds]
     );
@@ -2212,7 +2214,7 @@ async function saveGroupSlug(fbGroupId, slug) {
 }
 
 /**
- * กลุ่มที่บัญชีนี้จะกดเข้าร่วมรอบนี้: รู้แน่แล้วว่ายังไม่เป็นสมาชิก (not_member จากรายชื่อ หรือ unknown)
+ * กลุ่มที่บัญชีนี้จะกดเข้าร่วมรอบนี้: รู้แน่แล้วว่ายังไม่เป็นสมาชิก (not_member จากรายชื่อ · visitor โพสต์ได้แต่ยังไม่เข้า · unknown)
  * และไม่ได้กดในกลุ่มนี้มาภายใน 7 วัน · กลุ่มที่ยังไม่มีบัญชีไหนเป็นสมาชิก และกลุ่มที่ยังไม่มีชื่อจริง ก่อน
  */
 async function pickGroupsToJoin(userId, limit) {
@@ -2223,7 +2225,7 @@ async function pickGroupsToJoin(userId, limit) {
     `SELECT g.fb_group_id, g.name
        FROM group_memberships gm
        JOIN groups g ON g.fb_group_id = gm.fb_group_id
-      WHERE gm.user_id = $1 AND gm.state IN ('not_member', 'unknown')
+      WHERE gm.user_id = $1 AND gm.state IN ('not_member', 'visitor', 'unknown')
         AND (gm.join_tried_at IS NULL OR gm.join_tried_at < NOW() - INTERVAL '7 days')
       ORDER BY (SELECT count(*) FROM group_memberships o WHERE o.fb_group_id = g.fb_group_id AND o.state = 'member') ASC,
                (g.name ~* '^Group\\s+\\d+$') DESC,

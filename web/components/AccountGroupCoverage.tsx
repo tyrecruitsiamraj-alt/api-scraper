@@ -19,6 +19,7 @@ const STATE_LABEL: Record<GroupMembershipState, string> = {
   unknown: 'เปิดแล้วไม่เจอปุ่มเข้าร่วม',
   questions: 'ต้องตอบคำถามเอง',
   pending: 'รอแอดมินอนุมัติ',
+  visitor: 'โพสต์ได้ ยังไม่เข้า',
   unchecked: 'ยังไม่ได้เช็ก',
   member: 'เข้าแล้ว',
 };
@@ -55,6 +56,7 @@ export async function AccountGroupCoverage({ accountId = '' }: { accountId?: str
               <TableRow>
                 <TableHead>บัญชี</TableHead>
                 <TableHead className="text-right">เข้าแล้ว</TableHead>
+                <TableHead className="text-right">โพสต์ได้ ยังไม่เข้า</TableHead>
                 <TableHead className="text-right">รออนุมัติ</TableHead>
                 <TableHead className="text-right">ต้องตอบคำถาม</TableHead>
                 <TableHead className="text-right">ยังไม่เข้า</TableHead>
@@ -65,7 +67,7 @@ export async function AccountGroupCoverage({ accountId = '' }: { accountId?: str
             <TableBody>
               {rows.length === 0 && (
                 <TableRow>
-                  <TableCell colSpan={7} className="text-muted-foreground">ยังไม่มีบัญชี Facebook</TableCell>
+                  <TableCell colSpan={8} className="text-muted-foreground">ยังไม่มีบัญชี Facebook</TableCell>
                 </TableRow>
               )}
               {rows.map((r) => (
@@ -77,6 +79,7 @@ export async function AccountGroupCoverage({ accountId = '' }: { accountId?: str
                     {ACCOUNT_STATUS[r.status] && <Badge variant="outline" className="ml-2">{ACCOUNT_STATUS[r.status]}</Badge>}
                   </TableCell>
                   <TableCell className="text-right tabular-nums">{r.member} / {r.total}</TableCell>
+                  <TableCell className="text-right tabular-nums">{r.visitor}</TableCell>
                   <TableCell className="text-right tabular-nums">{r.pending}</TableCell>
                   <TableCell className="text-right tabular-nums">{r.questions}</TableCell>
                   <TableCell className="text-right tabular-nums">{r.not_member + r.unknown}</TableCell>
