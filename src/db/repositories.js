@@ -708,8 +708,25 @@ export const SHARED_PHONE_MIN = 5;
  * คีย์บอกว่าเป็นคนเดียวกัน: เบอร์ → อีเมล → ชื่อ+วันเกิด (ต้องมีทั้งคู่)
  * ไม่มีอะไรเลย = คีย์ของเรซูเม่นั้นเอง ห้ามใช้ "name::" ร่วมกัน (เคยรวมเรซูเม่คนละคน 686 ใบเป็นแถวเดียว)
  */
+/**
+ * เบอร์ที่ใช้บอกว่าเป็นคนเดียวกันได้ = เบอร์มือถือไทยเท่านั้น (06/08/09 + 8 หลัก หรือขึ้นต้น 66)
+ * เบอร์บ้าน/สำนักงาน (02…) ใช้รวมคนไม่ได้: 30 ต.ค.–20 พ.ย. 2569 เบอร์ call center ของ JobThai 02-480-9999
+ * ทำให้โปรไฟล์ JobThai 824 ใบถูกรวมเป็นผู้สมัครคนเดียว (กติกา "เบอร์กลาง ≥ 5 คน" ไม่ทำงานเพราะรวมแล้วเหลือแถวเดียว)
+ */
+export const isMergeablePhone = (phoneNorm) => /^(?:0|66)[689]\d{8}$/.test(String(phoneNorm || ''));
+
+const nameKey = (v) => String(v ?? '').toLowerCase().replace(/^(นาย|นางสาว|นาง|น\.ส\.|mr\.?|mrs\.?|ms\.?|miss)\s*/i, '').replace(/[^\p{L}\p{N}]/gu, '');
+
+/** ชื่อสองชื่อ "ต่างคนชัดเจน": มีครบทั้งคู่ และไม่มีอันไหนเป็นส่วนของอีกอัน (เผื่อมี/ไม่มีนามสกุล) */
+export function namesClearlyDiffer(a, b) {
+  const x = nameKey(a);
+  const y = nameKey(b);
+  if (x.length < 3 || y.length < 3) return false;
+  return !(x === y || x.includes(y) || y.includes(x));
+}
+
 export function candidateDedupeKey({ phoneNorm, emailNorm, name, birthDate, source }) {
-  if (phoneNorm) return `phone:${phoneNorm}`;
+  if (isMergeablePhone(phoneNorm)) return `phone:${phoneNorm}`;
   if (emailNorm) return `email:${emailNorm}`;
   const n = String(name ?? '').trim();
   const b = String(birthDate ?? '').trim();
@@ -746,20 +763,37 @@ export async function upsertCandidate(client, parsed, source = null) {
     );
     if ((shared.rows[0]?.n ?? 0) >= SHARED_PHONE_MIN) row = buildRow({ ...parsed, phone: '' }, source);
   }
-  const { phoneNorm, emailNorm, dedupeKey, text, json } = row;
+  let { phoneNorm, emailNorm, dedupeKey, text, json } = row;
+  // เบอร์ที่ไม่ใช่มือถือ ไม่ใช้หาคนเดิม (ยังเก็บไว้แสดง)
+  const matchPhone = isMergeablePhone(phoneNorm) ? phoneNorm : '';
 
   // เบอร์เดียวกันที่เขียนต่างกัน (0812345678 / 66812345678) ให้ถือเป็นคนเดียวกัน: เทียบ 9 หลักท้าย
   // เรียงให้แถวที่เบอร์ตรงเป๊ะมาก่อน แล้วค่อยเบอร์ 9 หลักท้าย แล้วอีเมล
-  const found = await q(
-    `SELECT id FROM candidates
+  const findExisting = (phone, email, key) => q(
+    `SELECT id, full_name FROM candidates
       WHERE ($1 <> '' AND phone_norm = $1)
          OR (length($1) >= 9 AND length(phone_norm) >= 9 AND right(phone_norm, 9) = right($1, 9))
          OR ($2 <> '' AND email_norm = $2)
          OR dedupe_key = $3
       ORDER BY (phone_norm = $1) DESC, (length($1) >= 9 AND right(COALESCE(phone_norm, ''), 9) = right($1, 9)) DESC
       LIMIT 1`,
-    [phoneNorm, emailNorm, dedupeKey],
+    [phone, email, key],
   );
+  let found = await findExisting(matchPhone, emailNorm, dedupeKey);
+
+  // กันรวมคนละคน: คนเดิมมีโปรไฟล์อื่นบนเว็บเดียวกันอยู่แล้ว และชื่อต่างกันชัดเจน = เบอร์/อีเมลนี้ใช้ร่วมกัน ไม่ใช่คนเดียวกัน
+  // → ไม่รวม ไม่เก็บเบอร์/อีเมลนั้นกับคนใหม่ (คนใหม่ได้คีย์ของโปรไฟล์ตัวเอง)
+  if (found.rows[0] && source?.platform && source?.externalId && namesClearlyDiffer(found.rows[0].full_name, parsed.name)) {
+    const other = await q(
+      `SELECT 1 FROM candidate_sources WHERE candidate_id = $1 AND platform = $2 AND external_id IS DISTINCT FROM $3 LIMIT 1`,
+      [found.rows[0].id, source.platform, String(source.externalId)],
+    );
+    if (other.rows[0]) {
+      row = buildRow({ ...parsed, phone: '', email: '' }, source);
+      ({ phoneNorm, emailNorm, dedupeKey, text, json } = row);
+      found = await findExisting('', '', dedupeKey);
+    }
+  }
 
   if (found.rows[0]) {
     const id = found.rows[0].id;

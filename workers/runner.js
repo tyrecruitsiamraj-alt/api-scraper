@@ -28,7 +28,7 @@ import { generateDraftForCampaign, regenerateImageForContent } from '../src/core
 import { measureCampaign } from '../src/core/orchestrator-measure.js';
 import { processResumeBatch } from '../src/db/resume-uploads.js';
 import { sendAlert } from '../src/core/alert.js';
-import { CLOSE_JARVIS_SCRAPE_SQL, FINISHED_JARVIS_SCRAPES_SQL, REJECT_JARVIS_SCRAPE_SQL, rejectJarvisScrapeParams, scrapeOutcome } from '../src/core/jarvis-scrape-status.js';
+import { CLOSE_JARVIS_SCRAPE_SQL, FINISHED_JARVIS_SCRAPES_SQL, REJECT_JARVIS_SCRAPE_SQL, WAIT_JARVIS_SCRAPE_SQL, rejectJarvisScrapeParams, scrapeOutcome } from '../src/core/jarvis-scrape-status.js';
 import { classifyScrapeTaskResult, cooldownError, requireSuccessfulScrapeTaskResult } from '../src/core/scrape-task-result.js';
 import { imageGenerationCapability } from '../src/core/ai-image.js';
 import { scraperSlotLockName } from '../src/core/worker-selection.js';
@@ -342,7 +342,23 @@ async function runWithLease(job, handler) {
   }
 }
 
-async function retryOrFail(job, error, retryAt = null) {
+async function retryOrFail(job, error, retryAt = null, { waiting = false } = {}) {
+  // รอโควต้าวันถัดไป (waiting) ไม่ใช่งานล้ม: เข้าคิวรอถึงเวลานั้นโดยไม่นับรอบลองใหม่ และไม่ตีกลับใบใน Jarvis
+  // 20 พ.ย. 2569: โควต้าเต็มแล้วลองซ้ำ 3 รอบทุกใบ (688 แถวเปล่า) แล้วตีกลับ 229 คำสั่ง
+  if (waiting && retryAt) {
+    const waitSeconds = Math.max(60, Math.ceil((retryAt.getTime() - Date.now()) / 1000));
+    await query(
+      `UPDATE work_queue
+          SET status='queued', worker_id=NULL, locked_at=NULL,
+              available_at=now() + ($3 || ' seconds')::interval, last_error=$4
+        WHERE id=$1 AND worker_id=$2 AND status='running'`,
+      [job.id, WORKER_ID, String(waitSeconds), error],
+    );
+    if (job.type === 'scrape' && job.ref_id) {
+      await query(WAIT_JARVIS_SCRAPE_SQL, [String(job.ref_id), error.slice(0, 500)]).catch((e) => console.warn(`  จดเหตุรอคิวลง Jarvis ไม่ได้: ${e.message}`));
+    }
+    return true;
+  }
   const attempts = Number(job.attempts || 0) + 1;
   const maxAttempts = Math.max(1, Number(job.max_attempts || 3));
   if (attempts >= maxAttempts) {
@@ -510,8 +526,9 @@ async function runOne() {
   } catch (e) {
     const errMsg = String(e?.message ?? e).slice(0, 1500);
     const retryAt = e?.retryAt instanceof Date && !Number.isNaN(e.retryAt.getTime()) ? e.retryAt : null;
-    const retrying = await retryOrFail(job, errMsg, retryAt);
-    console.error(`  ✗ ${retrying ? 'retry scheduled' : 'error'}: ${e?.message ?? e}`);
+    const waiting = e?.waiting === true && Boolean(retryAt);
+    const retrying = await retryOrFail(job, errMsg, retryAt, { waiting });
+    console.error(`  ✗ ${waiting ? 'waiting for quota' : retrying ? 'retry scheduled' : 'error'}: ${e?.message ?? e}`);
     // แจ้งเตือนทันทีที่งานพัง (fail-soft — ไม่มี ALERT_WEBHOOK_URL = เงียบ)
     if (!retrying) {
       await sendAlert(`งาน ${job.type} ไม่สำเร็จบนเครื่อง ${WORKER_NAME}\nงาน: ${job.connector_key}\nสาเหตุ: ${errMsg}`);

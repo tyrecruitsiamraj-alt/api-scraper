@@ -103,6 +103,22 @@ export function humanizeOperatorError(value: string | null | undefined): {
       technical,
     };
   }
+  if (technical.startsWith('รอคิว: โควต้า')) {
+    return {
+      title: 'รอคิว โควต้าค้นหาวันนี้เต็มแล้ว',
+      detail: technical.replace(/^รอคิว:\s*/, ''),
+      next: 'ไม่ต้องสั่งใหม่ ระบบจะค้นต่อเองตามคิวหลังเที่ยงคืน',
+      technical,
+    };
+  }
+  if (technical.includes('CONTACT_REVEAL_BLOCKED')) {
+    return {
+      title: 'เว็บหางานไม่เปิดเบอร์ผู้สมัคร',
+      detail: 'ระบบเปิดโปรไฟล์ได้ แต่เว็บหางานไม่แสดงเบอร์โทรและอีเมลของผู้สมัคร จึงหยุดก่อนเปิดโปรไฟล์เพิ่มให้เปลืองโควต้า',
+      next: 'ให้ผู้ดูแลล็อกอินบัญชีเว็บหางานตรวจแพ็กเกจหรือโควต้าดูเบอร์ แล้วกดรันใหม่',
+      technical,
+    };
+  }
   if (lower.includes('daily cap reached') || lower.includes('provider daily cap')) {
     return {
       title: 'โควต้าค้นหาวันนี้เต็มแล้ว',

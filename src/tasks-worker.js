@@ -326,6 +326,13 @@ export async function runTask(t, runtime) {
   });
 
   if (r.status === 'stopped') return finishStopped(t, r.runId);
+  // โควต้าค้นหาวันนี้เต็ม = งานรอคิว (ไม่ใช่ไม่สำเร็จ) คิวจะหยิบต่อเองหลังโควต้านับใหม่ — เจ้าของเคาะ 20 พ.ย. 2569
+  if (r.status === 'cooldown' && r.waitReason === 'daily_cap' && r.cooldownUntil) {
+    const error = `รอคิว: โควต้าค้นหาวันนี้เต็มแล้ว จะค้นต่อเอง ${bangkokTime(r.cooldownUntil)}`;
+    await finishTask(t.id, { status: 'queued', phase: 'idle', runId: r.runId, error });
+    console.log(`  ${t.name}: ${error}`);
+    return { status: 'error', runStatus: 'cooldown', waitReason: 'daily_cap', cooldownUntil: r.cooldownUntil, error, runId: r.runId, taskId: t.id };
+  }
   if (r.status === 'failed' || r.status === 'cooldown') {
     const until = r.status === 'cooldown' && r.cooldownUntil ? bangkokTime(r.cooldownUntil) : null;
     const error = until

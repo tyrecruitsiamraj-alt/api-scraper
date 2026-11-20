@@ -13,8 +13,15 @@ const isReal = (v) => v && !/x{3,}|click|กรุณา|ดูข้อมู�
  * (เคยติดไปกับผู้สมัคร 268 คน ตรวจพบ 28 ต.ค. 2569)
  */
 export function isHiddenContactBlob(blob) {
-  return /เพื่อความปลอดภัย|ติดต่อเจ้าหน้าที่|@example\.(com|org|net)\b/i.test(String(blob || ''));
+  const s = String(blob || '');
+  // 20 พ.ย. 2569: JobThai ตอบ "Error" พร้อมเบอร์ call center 02-480-9999 (ไม่มีประโยคเดิม) — เบอร์นี้ถูกเก็บเป็นเบอร์ผู้สมัคร
+  // แล้วโปรไฟล์ JobThai 824 ใบถูกรวมเป็นคนเดียวตั้งแต่ 30 ต.ค. · คำตอบที่มีท่อน Error = ยังไม่เปิดข้อมูลติดต่อ
+  if (s.split('####').some((seg) => /^error$/i.test(seg.trim()))) return true;
+  return /เพื่อความปลอดภัย|ติดต่อเจ้าหน้าที่|@example\.(com|org|net)\b/i.test(s);
 }
+
+/** เบอร์มือถือไทย (06/08/09 + 8 หลัก หรือขึ้นต้น 66) — เบอร์บ้าน/เบอร์สำนักงานจากคำตอบของเว็บไม่ใช่เบอร์ผู้สมัคร */
+export const isThaiMobile = (digits) => /^(?:0|66)[689]\d{8}$/.test(String(digits || ''));
 
 export const jobthaiProvider = {
   id: 'jobthai',
@@ -41,15 +48,20 @@ export const jobthaiProvider = {
   async enrichContacts(request, id, record) {
     const blob = await revealContact(request, id, 'mobile');
     if (!blob) return record;
-    if (isHiddenContactBlob(blob)) return record;
+    // contact_hidden = เว็บไม่ยอมเปิดข้อมูลติดต่อ (ให้ตัวรันนับ แล้วหยุดถ้าโดนติดกัน ไม่เปิดโปรไฟล์ต่อให้เปลืองโควต้า)
+    if (isHiddenContactBlob(blob)) {
+      record.contact_hidden = true;
+      return record;
+    }
     const segs = blob.split('####').map((s) => s.trim()).filter(isReal);
-    const phone = segs.find((s) => /^\+?\d[\d\s-]{7,}$/.test(s));
+    const phone = segs.find((s) => /^\+?\d[\d\s-]{7,}$/.test(s) && isThaiMobile(s.replace(/\D/g, '')));
     const email = segs.find((s) => /^[^@\s]+@[^@\s]+\.[^@\s]{2,}$/.test(s));
     // line id: a non-numeric token that isn't phone/email (exclude internal codes like "20.225", "1618")
     const line = segs.find((s) => s !== phone && s !== email && !/^\d+(\.\d+)?$/.test(s) && !/^\+?\d[\d\s-]{7,}$/.test(s));
     if (phone) record.phone = phone.replace(/\D/g, '');
     if (email) record.email = email;
     if (line) record.line_id = line;
+    if (!phone && !email) record.contact_hidden = true;
     if (record.name && (record.phone || record.email)) record.parse_status = 'success';
     return record;
   },

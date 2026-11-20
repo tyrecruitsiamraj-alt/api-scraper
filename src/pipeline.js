@@ -1,4 +1,5 @@
 import { resolveProvider } from './connectors/registry.js';
+import { nextQuotaReset } from './core/scrape-task-result.js';
 import { RateLimiter } from './core/anti-ban.js';
 import { splitCriteria } from './core/candidate-match.js';
 import { classifyScrapeOutcome, lessonRowsToLogHits, rememberedPreventionLog } from './core/scrape-failure-learning.js';
@@ -36,6 +37,8 @@ import {
 } from './db/repositories.js';
 
 const COOLDOWN_MS = 2 * 60 * 60 * 1000; // 2h after a soft-ban
+// เว็บไม่เปิดเบอร์ผู้สมัครกี่คนติดกัน (โดยยังไม่เคยได้เบอร์ในรอบนี้) ถึงหยุดรอบ — ไม่เปิดโปรไฟล์ต่อให้เปลืองโควต้า
+const CONTACT_HIDDEN_STOP = envInt('CONTACT_HIDDEN_STOP', 3);
 const CANDIDATE_TIMEOUT_MS = envInt('CANDIDATE_TIMEOUT_MS', 180_000); // skip hung resume fetches
 const LOGIN_TIMEOUT_MS = envInt('LOGIN_TIMEOUT_MS', 300_000); // browser login must finish within 5 min
 // Provider search can hang while its browser/page is technically alive. A DB
@@ -118,6 +121,11 @@ export async function runConnector(connector, criteria, runtime, opts = {}) {
   const reasonCounts = {};
   let status = 'success';
   let cooldownUntil = null; // ISO — บัญชีถูกพักถึงเมื่อไร (ให้คิวรอจนพ้นแทนการลองใหม่ทันที)
+  let waitReason = null; // 'daily_cap' = โควต้าวันนี้เต็ม รอคิววันถัดไป (ไม่ใช่งานล้ม)
+  // เว็บไม่ยอมเปิดเบอร์/อีเมลผู้สมัคร (provider ตั้ง record.contact_hidden) — โดนติดกันโดยยังไม่เคยได้เบอร์เลย = หยุดรอบ
+  let contactHidden = 0;
+  let contactShown = 0;
+  let stopHiddenContacts = false;
   let error = null;
   let browser = null;
   let activeContext = null; // tracked so the finally can log out to free the session
@@ -166,7 +174,10 @@ export async function runConnector(connector, criteria, runtime, opts = {}) {
         providerRemaining <= 0 && providerCap != null
           ? `provider daily cap reached for ${connector.platform} (cap ${providerCap})`
           : `connector daily cap reached (${today}/${connector.daily_cap})`;
-      console.warn(`  [${connector.label}] ${error}`);
+      // โควต้าเต็ม = รอคิวจนโควต้านับใหม่ (หลังเที่ยงคืนเวลาไทย) ไม่ลองซ้ำ ไม่ตีกลับ
+      cooldownUntil = nextQuotaReset().toISOString();
+      waitReason = 'daily_cap';
+      console.warn(`  [${connector.label}] ${error} — รอคิวถึง ${cooldownUntil}`);
       return finalize();
     }
 
@@ -290,6 +301,12 @@ export async function runConnector(connector, criteria, runtime, opts = {}) {
       // this search result set is exhausted. Rejected/needs-review resumes must
       // not consume the requested delivery count.
       if (saved >= target) break;
+      if (stopHiddenContacts) {
+        status = 'failed';
+        error = `CONTACT_REVEAL_BLOCKED: ${connector.label} ไม่เปิดเบอร์ผู้สมัคร ${contactHidden} คนติดกัน หยุดก่อนเปิดโปรไฟล์เพิ่ม`;
+        console.error(`  ⛔ ${error}`);
+        break;
+      }
       // คนกดปิดงานระหว่างรัน — หยุดก่อนเปิดเรซูเม่ถัดไป (ไม่เปลืองโควต้า/เครดิตดูเบอร์)
       if (opts.taskId && !(await isTaskEnabled(opts.taskId).catch(() => true))) {
         status = 'stopped';
@@ -360,7 +377,16 @@ export async function runConnector(connector, criteria, runtime, opts = {}) {
         // เปิดเผยข้อมูลติดต่อสำหรับคนที่ผ่านหรือต้องตรวจเพิ่ม — คนที่ reject ไม่เสียโควตา.
         if (['qualified', 'needs_review'].includes(qualification.status) && provider.enrichContacts) {
           await provider.enrichContacts(sess.request, id, parsed, runtime);
+          const hidden = parsed.contact_hidden === true;
           if (provider.finalizeCandidateRecord) parsed = provider.finalizeCandidateRecord(parsed);
+          if (hidden) {
+            contactHidden += 1;
+            reasonCounts.contact_hidden = (reasonCounts.contact_hidden || 0) + 1;
+            // 20 พ.ย. 2569: JobThai ตอบ Error แทนเบอร์ทุกคนตั้งแต่ 30 ต.ค. รอบหนึ่งเปิดไปถึง 51 โปรไฟล์โดยไม่ได้เบอร์สักคน
+            if (contactHidden >= CONTACT_HIDDEN_STOP && contactShown === 0) stopHiddenContacts = true;
+          } else if (!resumeContactGaps(parsed).length) {
+            contactShown += 1;
+          }
         }
         // Qualified delivery must also have contact; otherwise demote — never ship blank ☎.
         let finalQualification = qualification;
@@ -517,6 +543,6 @@ export async function runConnector(connector, criteria, runtime, opts = {}) {
       }).catch((e) => console.warn(`  [lesson] บันทึกบทเรียนความล้มเหลวไม่สำเร็จ: ${e.message}`));
       console.log(`  [lesson] จำแล้ว ${hit.key}: ${hit.prevention}`);
     }
-    return { runId, status, found, newCount, updatedCount, failed, error, opened, qualified, needsReview, rejected, duplicate, reasonCounts, cooldownUntil };
+    return { runId, status, found, newCount, updatedCount, failed, error, opened, qualified, needsReview, rejected, duplicate, reasonCounts, cooldownUntil, waitReason };
   }
 }

@@ -10,7 +10,7 @@ export function requireSuccessfulScrapeTaskResult(result) {
     throw new Error(`scrape task was not executed: ${result.reason || 'already running'}`);
   }
   if (result?.runStatus === 'cooldown' && result.cooldownUntil) {
-    throw cooldownError(result.error || 'connector cooling down', result.cooldownUntil);
+    throw cooldownError(result.error || 'connector cooling down', result.cooldownUntil, { waiting: result.waitReason === 'daily_cap' });
   }
   if (!result || result.status === 'error') {
     throw new Error(result?.error || 'scrape task failed without a terminal result');
@@ -18,11 +18,27 @@ export function requireSuccessfulScrapeTaskResult(result) {
   return result;
 }
 
-/** บัญชีถูกพัก: คิวต้องรอจนพ้นเวลาพัก (retryAt) ไม่ลองใหม่ใน 30 วินาที */
-export function cooldownError(message, cooldownUntil) {
+/**
+ * บัญชีถูกพัก: คิวต้องรอจนพ้นเวลาพัก (retryAt) ไม่ลองใหม่ใน 30 วินาที
+ * waiting = รอโควต้าวันถัดไป ไม่ใช่งานล้ม — คิวไม่นับเป็นรอบลองใหม่ และไม่ตีกลับใบใน Jarvis
+ */
+export function cooldownError(message, cooldownUntil, { waiting = false } = {}) {
   const err = new Error(message);
   err.retryAt = new Date(cooldownUntil);
+  err.waiting = waiting;
   return err;
+}
+
+/**
+ * เวลาที่โควต้าค้นหาต่อวันนับใหม่: เที่ยงคืนถัดไปตามเวลาไทย + 5 นาที (ตัวนับ countScrapedToday ตัดวันตามเวลาไทย)
+ * 20 พ.ย. 2569: โควต้า JobThai เต็มตั้งแต่ 08:55 คำสั่ง 229 รายการถูกตีกลับ คนสั่งต้องกดสั่งใหม่เองทุกใบ
+ * เจ้าของเคาะ: โควต้าเต็ม = รอคิว ทำต่อวันถัดไปเอง
+ */
+export function nextQuotaReset(now = Date.now()) {
+  const BKK_MS = 7 * 60 * 60 * 1000;
+  const local = new Date(now + BKK_MS);
+  const nextMidnightUtc = Date.UTC(local.getUTCFullYear(), local.getUTCMonth(), local.getUTCDate() + 1) - BKK_MS;
+  return new Date(nextMidnightUtc + 5 * 60 * 1000);
 }
 
 /**

@@ -65,6 +65,7 @@ export function scrapeFailNote(error) {
   }
   if (raw.includes('รหัสผ่านไม่ถูกต้อง') || lower.includes('wrong password')) return 'รหัสบัญชีเว็บหางานไม่ถูกต้อง';
   if (lower.includes('daily cap reached') || lower.includes('provider daily cap')) return 'โควต้าค้นหาวันนี้เต็มแล้ว';
+  if (raw.includes('CONTACT_REVEAL_BLOCKED')) return 'เว็บหางานไม่เปิดเบอร์ผู้สมัคร ต้องให้คนตรวจบัญชีและแพ็กเกจดูเบอร์ของเว็บหางานก่อน';
   if (lower.includes('locator.click') || lower.includes('timeout')) return 'กดช่องค้นหาบนเว็บหางานไม่สำเร็จ';
   const first = raw.split(' · ')[0];
   return (first || 'ค้นหาไม่สำเร็จ').slice(0, 200);
@@ -85,3 +86,15 @@ export const REJECT_JARVIS_SCRAPE_SQL = `UPDATE "jarvis_rm".job_posting_requests
 export function rejectJarvisScrapeParams(taskId, error) {
   return [taskId, `ตีกลับ: ${scrapeFailNote(error)}`];
 }
+
+/**
+ * งาน Scrap ที่รอคิวเพราะโควต้าค้นหาวันนี้เต็ม: ใบใน Jarvis คง "กำลังทำ" แต่จดเหตุไว้ใน notes (ไม่ตีกลับ ไม่ต้องสั่งใหม่)
+ * $1 = scrape task id · $2 = notes
+ */
+export const WAIT_JARVIS_SCRAPE_SQL = `UPDATE "jarvis_rm".job_posting_requests r
+    SET notes = $2, updated_at = now()
+   FROM scrape_tasks t
+  WHERE t.id::text = $1 AND r.request_no = t.source_request_no
+    AND r.status = 'in_progress'
+    AND to_jsonb(r)->>'request_type' = 'scraping'
+  RETURNING r.request_no`;
