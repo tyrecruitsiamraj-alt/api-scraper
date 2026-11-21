@@ -862,6 +862,32 @@ export function isResumeProfileThin(parsed = {}) {
   return !(hasContact || hasGenderOrAge) || !(hasEdu || hasWork);
 }
 
+const MARITAL_WORDS = '(?:โสด|สมรส|แต่งงาน(?:แล้ว)?|หย่า(?:ร้าง)?|หม้าย|แยกกันอยู่|ไม่ระบุ)';
+const GENDER_PAGE_PATTERNS = [
+  /เพศ\s*[-:：]?\s*(ชาย|หญิง)(?![ก-๙])/gu,
+  new RegExp(`(?<![ก-๙])(ชาย|หญิง)\\s*${MARITAL_WORDS}`, 'gu'),
+  /(?<![ก-๙])(ชาย|หญิง)\s*วันเดือนปีเกิด/gu,
+];
+
+/**
+ * เพศจากข้อความหน้าโปรไฟล์ JobBKK — หน้าแบบใหม่ไม่มีป้าย "เพศ" เขียนติดกับสถานภาพ ("…ชายโสดวันเดือนปีเกิด…")
+ * รับเฉพาะรูปแบบที่ติดป้าย/ติดสถานภาพ/ติดวันเกิด และทุกจุดที่เจอต้องตรงกัน ไม่งั้นไม่เดา
+ * 21 พ.ย. 2569: ผู้สมัคร JobBKK 810 คนไม่มีเพศ ทั้งที่หน้าที่เก็บไว้มีอยู่ · เทียบกับคนที่มีเพศแล้ว 591 คน ตรง 590
+ */
+export function genderFromPageText(text) {
+  const found = new Set();
+  for (const re of GENDER_PAGE_PATTERNS) for (const m of String(text || '').matchAll(re)) found.add(m[1]);
+  return found.size === 1 ? [...found][0] : '';
+}
+
+const PAGE_NAME_RE = /(?:©\s*All Rights Reserved|ดูมุมมองผู้สมัครงาน)\s*((?:นาย|นางสาว|นาง|น\.ส\.|Mr\.?|Mrs\.?|Ms\.?|Miss)?\s*[ก-๙A-Za-z.]{2,40}(?:\s+[ก-๙A-Za-z.]{2,40}){1,2}?)\s*ความสมบูรณ์ของ/u;
+
+/** ชื่อ-นามสกุลที่หัวโปรไฟล์ JobBKK (อยู่ก่อน "ความสมบูรณ์ของใบสมัครงาน") — เทียบกับคนที่มีชื่อแล้ว 846 คน ตรง 843 */
+export function nameFromPageText(text) {
+  const m = PAGE_NAME_RE.exec(String(text || ''));
+  return m ? m[1].replace(/\s+/g, ' ').trim() : '';
+}
+
 /**
  * Fill blank resume fields from stored / collapsed body text.
  * Safe to re-run on existing candidates — never overwrites a non-empty value.
@@ -880,7 +906,7 @@ export function fillMissingFromRawText(record, rawText) {
   set('phone', normalizePhone(extractPhoneFromText(text)));
   set('email', validEmail(extractEmailFromText(text)));
   if (!clean(record.line_id)) record.line_id = validLineId(extractLineFromText(text));
-  set('gender', firstMatch(text, [/เพศ\s*[:：]?\s*(ชาย|หญิง)/u]));
+  set('gender', firstMatch(text, [/เพศ\s*[:：]?\s*(ชาย|หญิง)/u]) || genderFromPageText(rawText));
   set('age', extractAge(text));
   set('birth_date', extractBirthDate(text));
   set('nationality', firstMatch(text, [new RegExp(`สัญชาติ\\s*[:：]?\\s*(.+?)${STOP}`, 'u')]));
