@@ -836,12 +836,20 @@ export async function updateScraperConnector(
     await q('ALTER TABLE connectors ADD COLUMN IF NOT EXISTS department text');
     await q('UPDATE connectors SET department=$2, updated_at=now() WHERE id=$1', [id, c.department]);
   }
+  // เปลี่ยนชื่อผู้ใช้หรือรหัส = ล้างการล็อกอินที่จำไว้ ไม่งั้นรอบถัดไปยังใช้บัญชีเดิม
+  // (23 พ.ย. 2569: บัญชี JobThai เดิมหมดอายุ เปลี่ยนเป็นบัญชีใหม่แล้วระบบยังล็อกอินค้างด้วยบัญชีเก่า)
   if (c.passwordEnc) {
-    await q('UPDATE connectors SET label=$2, username=$3, password_enc=$4, updated_at=now() WHERE id=$1', [
+    await q('UPDATE connectors SET label=$2, username=$3, password_enc=$4, session_state=NULL, updated_at=now() WHERE id=$1', [
       id, c.label, c.username, c.passwordEnc,
     ]);
   } else {
-    await q('UPDATE connectors SET label=$2, username=$3, updated_at=now() WHERE id=$1', [id, c.label, c.username]);
+    await q(
+      `UPDATE connectors SET label=$2, username=$3,
+              session_state = CASE WHEN username IS DISTINCT FROM $3 THEN NULL ELSE session_state END,
+              updated_at=now()
+        WHERE id=$1`,
+      [id, c.label, c.username],
+    );
   }
 }
 

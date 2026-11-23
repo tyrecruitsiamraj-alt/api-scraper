@@ -140,6 +140,8 @@ export type JarvisScrapeAccountOption = {
   id: string;
   platform: string;
   label: string;
+  /** ธุรกิจเจ้าของบัญชี (LBA · LBD …) ให้ Jarvis จัดหมวดและเลือกบัญชีของ BU ใบขอก่อน · null = ไม่ระบุ */
+  department: string | null;
   enabled: boolean;
   cooldown_until: string | null;
   /** โควต้าเปิดดูโปรไฟล์ต่อวันของเว็บนั้น (นับรวมทุกบัญชีของเว็บเดียวกัน) */
@@ -352,10 +354,11 @@ export async function getJarvisOptions(opts: { requestNo?: string | null } = {})
         GROUP BY 1, 2, 3`,
     ).catch(() => []),
     q<{
-      id: string; platform: string; label: string; enabled: boolean; cooldown_until: string | null;
+      id: string; platform: string; label: string; department: string | null; enabled: boolean; cooldown_until: string | null;
       platform_cap: number | null; platform_used_today: number;
     }>(
-      `SELECT c.id, c.platform, COALESCE(NULLIF(TRIM(c.label), ''), c.platform) AS label, c.enabled, c.cooldown_until,
+      `SELECT c.id, c.platform, COALESCE(NULLIF(TRIM(c.label), ''), c.platform) AS label,
+              NULLIF(TRIM(to_jsonb(c)->>'department'), '') AS department, c.enabled, c.cooldown_until,
               pl.daily_cap AS platform_cap,
               COALESCE((SELECT SUM(r.opened_count)::int FROM scrape_runs r
                          WHERE r.platform = c.platform AND r.started_at >= ${BANGKOK_DAY_START}), 0) AS platform_used_today
@@ -564,7 +567,7 @@ export async function getJarvisOptions(opts: { requestNo?: string | null } = {})
       warning = `${c.platform} เปิดดูโปรไฟล์ครบโควต้าวันนี้แล้ว (${used}/${cap})`;
     }
     return {
-      id: String(c.id), platform: c.platform, label: c.label, enabled: c.enabled, cooldown_until: c.cooldown_until,
+      id: String(c.id), platform: c.platform, label: c.label, department: c.department, enabled: c.enabled, cooldown_until: c.cooldown_until,
       platform_cap: cap, platform_used_today: used, queue, status, warning,
     };
   });

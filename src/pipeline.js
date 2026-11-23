@@ -200,7 +200,8 @@ export async function runConnector(connector, criteria, runtime, opts = {}) {
       );
     };
 
-    let sess = await openSession(false);
+    // ไม่มีการล็อกอินที่จำไว้ (เพิ่งเปลี่ยนบัญชี) = ล็อกอินใหม่ด้วยชื่อผู้ใช้/รหัสของบัญชีนี้ ไม่หยิบไฟล์ล็อกอินเก่าในเครื่อง
+    let sess = await openSession(!connector.session_state && Boolean(connector.username));
     browser = sess.browser;
     activeContext = sess.context;
     await saveConnectorSession(connector.id, await sess.dumpState());
