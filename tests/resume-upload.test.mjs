@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { deflateRawSync } from 'node:zlib';
 import { makeZip, readZipEntry, crc32 } from '../src/core/zip.js';
-import { docxText, extractResumeText, fileKind, missingEssentials, normalizeParsed } from '../src/core/resume-upload.js';
+import { addWorkLinesAiDropped, docxText, extractResumeText, fileKind, missingEssentials, normalizeParsed, workLinesFromText } from '../src/core/resume-upload.js';
 import { diffCandidate, listLines } from '../src/core/resume-fields.js';
 
 test('zip: เขียนแล้วอ่านกลับได้ ชื่อไฟล์ภาษาไทยได้', () => {
@@ -108,4 +108,44 @@ test('ตารางเทียบ: โชว์เฉพาะช่องท
   assert.deepEqual(d[1].current, []);
   assert.deepEqual(d[2].incoming, ['ปริญญาตรี · ม.เกษตรศาสตร์']);
   assert.deepEqual(listLines('work_experience', [{ position: 'ธุรการ', company: 'บจก. เอ', period: '2565-2567' }]), ['ธุรการ · บจก. เอ · 2565-2567']);
+});
+
+// 23 พ.ย. 2569: เรซูเม่ 9 งาน งานล่าสุดไม่มีบรรทัดตำแหน่ง AI ตอบมา 8 งาน
+const NINE_JOBS = `สมศักดิ์ ตัวอย่าง
+
+## ประวัติการทำงาน
+
+*   **2549-2550** Plus property
+    *   ตำแหน่ง ช่างเทคนิค ฝ่ายวิศวกรรม
+*   **2551-2552** Muang Thai Management Co., Ltd.
+    *   ตำแหน่ง ช่างซ่อมบำรุง
+*   **2565-2566** First Pacific Harrison Co.,LTD
+    *   ตำแหน่ง รองผู้ช่วยหัวหน้าช่างอาคาร
+*   **2567-2568** CI Property Management Co.,LTD
+
+## ข้อมูลส่วนตัว
+
+*   **อายุ :** 44 ปี
+*   จัดตั้ง : 2550-2551 ไม่ใช่งาน`;
+
+test('a job the text lists but the AI dropped is added back, with its position when the next line has one', () => {
+  const ai = {
+    full_name: 'สมศักดิ์ ตัวอย่าง',
+    work_experience: [
+      { position: 'รองผู้ช่วยหัวหน้าช่างอาคาร', company: 'First Pacific Harrison Co.,LTD', period: '2565-2566' },
+      { position: 'ช่างซ่อมบำรุง', company: 'Muang Thai Management Co., Ltd.', period: '2551 - 2552' },
+      { position: 'ช่างเทคนิค ฝ่ายวิศวกรรม', company: 'Plus property', period: '2549-2550' },
+    ],
+  };
+  const work = normalizeParsed(ai, NINE_JOBS).work_experience;
+  assert.deepEqual(work.map((w) => w.period), ['2567-2568', '2565-2566', '2551 - 2552', '2549-2550']);
+  assert.equal(work[0].company, 'CI Property Management Co.,LTD');
+  assert.equal(work[0].position, '');
+  assert.deepEqual(workLinesFromText(NINE_JOBS).map((w) => w.position), ['ช่างเทคนิค ฝ่ายวิศวกรรม', 'ช่างซ่อมบำรุง', 'รองผู้ช่วยหัวหน้าช่างอาคาร', '']);
+});
+
+test('no work heading in the text = nothing is guessed from year lines', () => {
+  assert.deepEqual(workLinesFromText('ประวัติการศึกษา\n2550-2553 มหาวิทยาลัยตัวอย่าง'), []);
+  const work = addWorkLinesAiDropped([], 'ประสบการณ์ทำงาน\n- 2560-2562 บริษัท เอ จำกัด\n  ติดต่อประสานงานลูกค้า\n- 2562-ปัจจุบัน บริษัท บี จำกัด\nการศึกษา\n2555-2559 มหาวิทยาลัยตัวอย่าง');
+  assert.deepEqual(work.map((w) => w.company), ['บริษัท เอ จำกัด', 'บริษัท บี จำกัด']);
 });

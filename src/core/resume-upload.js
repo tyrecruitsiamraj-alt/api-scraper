@@ -195,6 +195,52 @@ export function orderWork(work) {
     .map((x) => x.w);
 }
 
+const YEAR = '(?:19|20|25)\\d{2}';
+const WORK_HEAD = /ประวัติการทำงาน|ประสบการณ์(?:การ)?ทำงาน|work\s*experience|employment\s*history/i;
+// หัวข้อส่วนถัดไป: บรรทัด markdown "#" หรือบรรทัดสั้นที่เป็นชื่อหัวข้อทั้งบรรทัด (กันบรรทัดหน้าที่งานที่ขึ้นต้นด้วย "ติดต่อ..." ตัดส่วนก่อนจบ)
+const OTHER_HEAD = /^#|^(?:ข้อมูลส่วนตัว|ประวัติ(?:การ|ส่วนตัว)?ศึกษา|การศึกษา|ทักษะ|คุณสมบัติ|ช่องทางการติดต่อ|ข้อมูลการติดต่อ|ความสามารถ|education|skills|contact|personal)[^\d]{0,25}$/i;
+const WORK_LINE = new RegExp(`^[*•\\-\\s]*(?:\\*\\*)?\\s*(${YEAR}\\s*[-–—]\\s*(?:${YEAR}|ปัจจุบัน|present|current))\\s*(?:\\*\\*)?\\s*[:：-]?\\s*(.+)$`, 'i');
+const POSITION_LINE = /^[*•\-\s]*ตำแหน่ง\s*[:：-]?\s*(.+)$/;
+const workKey = (s) => String(s ?? '').toLowerCase().replace(/[^\p{L}\p{N}]/gu, '');
+
+/**
+ * งานในส่วน "ประวัติการทำงาน" ของข้อความที่อ่านจากไฟล์ แบบบรรทัด "ปี-ปี บริษัท" (+ บรรทัด "ตำแหน่ง ..." ถัดไป)
+ * ไม่เจอหัวข้อประวัติการทำงาน = ไม่เดา คืนค่าว่าง
+ */
+export function workLinesFromText(rawText) {
+  const lines = String(rawText ?? '').split('\n').map((l) => l.trim());
+  const start = lines.findIndex((l) => WORK_HEAD.test(l));
+  if (start < 0) return [];
+  const out = [];
+  for (let i = start + 1; i < lines.length; i++) {
+    const line = lines[i];
+    if (!line) continue;
+    if (OTHER_HEAD.test(line.replace(/^[*•\-\s]+|\*\*/g, '')) && !WORK_HEAD.test(line)) break;
+    const m = line.match(WORK_LINE);
+    if (!m) continue;
+    const company = clean(m[2].replace(/\*\*/g, ''));
+    if (company.length < 2) continue;
+    const next = lines.slice(i + 1).find(Boolean) ?? '';
+    const position = next.match(POSITION_LINE)?.[1] ?? '';
+    out.push({ position: clean(position), company, period: m[1].replace(/\s/g, ''), salary: '', responsibilities: '' });
+  }
+  return out;
+}
+
+/**
+ * งานที่ข้อความในไฟล์มี แต่ AI ไม่ตอบกลับมา → เติมจากข้อความ (นับว่ามีแล้วเมื่อช่วงเวลาหรือบริษัทตรงกัน)
+ * 23 พ.ย. 2569: งานล่าสุด "2567-2568 CI Property Management" ไม่มีบรรทัดตำแหน่ง AI ตัดทิ้ง ทั้งที่สั่งไว้ว่าห้ามตัด — ขึ้น 8 จาก 9 งาน
+ */
+export function addWorkLinesAiDropped(work, rawText) {
+  const have = work.map((w) => ({ p: w.period.replace(/\D/g, ''), c: workKey(w.company) }));
+  const extra = workLinesFromText(rawText).filter((t) => {
+    const p = t.period.replace(/\D/g, '');
+    const c = workKey(t.company);
+    return !have.some((h) => (p && h.p === p) || (c && h.c && (h.c.includes(c) || c.includes(h.c))));
+  });
+  return [...work, ...extra];
+}
+
 /** จัดค่าที่ AI ตอบให้อยู่ในรูปเดียวกับคนที่ได้จาก Scrap */
 export function normalizeParsed(out, rawText = '') {
   const r = {};
@@ -214,7 +260,7 @@ export function normalizeParsed(out, rawText = '') {
   r.work_experience = list(out?.work_experience)
     .map((w) => ({ position: clean(w?.position), company: clean(w?.company), period: clean(w?.period), salary: clean(w?.salary), responsibilities: String(w?.responsibilities ?? '').trim() }))
     .filter((w) => w.position || w.company);
-  r.work_experience = orderWork(r.work_experience);
+  r.work_experience = orderWork(addWorkLinesAiDropped(r.work_experience, rawText));
   r.hard_skills = list(out?.hard_skills).map(clean).filter(Boolean);
   r.soft_skills = list(out?.soft_skills).map(clean).filter(Boolean);
   r.language_skills = list(out?.language_skills)
