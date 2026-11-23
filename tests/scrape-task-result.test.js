@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import { classifyScrapeTaskResult, nextQuotaReset, requireSuccessfulScrapeTaskResult } from '../src/core/scrape-task-result.js';
+import { classifyScrapeTaskResult, dailyRemaining, nextQuotaReset, requireSuccessfulScrapeTaskResult } from '../src/core/scrape-task-result.js';
 
 test('queue accepts a completed or partial scrape task result', () => {
   const done = { status: 'done', matchedTotal: 15, target: 15 };
@@ -76,4 +76,17 @@ test('โควต้าเต็ม = รอคิว ไม่นับเป�
   assert.match(pipeline, /cooldownUntil = nextQuotaReset\(\)\.toISOString\(\);\s+waitReason = 'daily_cap';/);
   const worker = fs.readFileSync(new URL('../src/tasks-worker.js', import.meta.url), 'utf8');
   assert.match(worker, /await finishTask\(t\.id, \{ status: 'queued', phase: 'idle', runId: r\.runId, error \}\);/);
+});
+
+// 23 พ.ย. 2569: ตั้ง JobThai 1,000 ในแท็บโควต้า แต่ระบบหยุดที่เพดานบัญชี 200
+test('the quota-tab limit is the real daily limit; the account limit only applies when the tab has none', () => {
+  assert.deepEqual(
+    dailyRemaining({ connectorCap: 200, connectorToday: 207, providerCap: 1000, platformToday: 207 }),
+    { remaining: 793, cap: 1000, used: 207, by: 'provider' },
+  );
+  assert.equal(dailyRemaining({ connectorCap: 200, connectorToday: 0, providerCap: 1000, platformToday: 1000 }).remaining, 0);
+  assert.deepEqual(
+    dailyRemaining({ connectorCap: 200, connectorToday: 150, providerCap: null, platformToday: 0 }),
+    { remaining: 50, cap: 200, used: 150, by: 'connector' },
+  );
 });

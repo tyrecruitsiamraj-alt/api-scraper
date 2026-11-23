@@ -54,3 +54,13 @@ export function classifyScrapeTaskResult(result) {
   if (result.status === 'partial') return 'market_insufficient';
   return 'completed';
 }
+
+/**
+ * วันนี้เปิดดูโปรไฟล์ได้อีกกี่คน
+ * เพดานของเว็บ (แท็บ "โควต้าการใช้งาน" รวมทุกบัญชีของเว็บนั้น) คือเพดานจริงเมื่อตั้งไว้ · เพดานของบัญชีใช้เฉพาะเว็บที่ยังไม่ได้ตั้ง
+ * 23 พ.ย. 2569: เจ้าของตั้ง JobThai 1,000 แต่บัญชี JobThai-Main มีเพดาน 200 ซ่อนอยู่ ระบบหยุดที่ 200 ขณะที่ Jarvis บอกเหลือ 964
+ */
+export function dailyRemaining({ connectorCap, connectorToday, providerCap, platformToday }) {
+  if (providerCap != null) return { remaining: Math.max(0, providerCap - platformToday), cap: providerCap, used: platformToday, by: 'provider' };
+  return { remaining: Math.max(0, connectorCap - connectorToday), cap: connectorCap, used: connectorToday, by: 'connector' };
+}

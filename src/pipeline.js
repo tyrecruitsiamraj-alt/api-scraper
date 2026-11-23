@@ -1,5 +1,5 @@
 import { resolveProvider } from './connectors/registry.js';
-import { nextQuotaReset } from './core/scrape-task-result.js';
+import { dailyRemaining, nextQuotaReset } from './core/scrape-task-result.js';
 import { RateLimiter } from './core/anti-ban.js';
 import { splitCriteria } from './core/candidate-match.js';
 import { classifyScrapeOutcome, lessonRowsToLogHits, rememberedPreventionLog } from './core/scrape-failure-learning.js';
@@ -137,20 +137,16 @@ export async function runConnector(connector, criteria, runtime, opts = {}) {
     console.log(`  [${connector.label}] กรองในระบบ: ${Object.entries(localFilters).map(([k, v]) => `${k}=${v}`).join(' ')} (เว็บค้นด้วยตำแหน่ง/คำค้นอย่างเดียว)`);
   }
 
-  // per-round limit ∩ connector daily cap ∩ PROVIDER daily cap (strict)
+  // per-round limit ∩ เพดานต่อวัน (เพดานของเว็บในแท็บโควต้าเมื่อตั้งไว้ ไม่งั้นเพดานของบัญชี)
   const today = await countScrapedToday(connector.id);
-  const connectorRemaining = Math.max(0, connector.daily_cap - today);
   const providerCap = await getProviderCap(connector.platform);
-  let providerRemaining = Infinity;
-  if (providerCap != null) {
-    const platformToday = await platformScrapedToday(connector.platform);
-    providerRemaining = Math.max(0, providerCap - platformToday);
-  }
+  const platformToday = providerCap != null ? await platformScrapedToday(connector.platform) : 0;
+  const daily = dailyRemaining({ connectorCap: connector.daily_cap, connectorToday: today, providerCap, platformToday });
   // Honor an explicitly requested count (count-mode tasks set criteria.maxCandidates);
   // fall back to the connector's per-round scrape_limit when none is given.
   // The daily caps below still bound the result strictly (anti-ban).
   const requested = criteria.maxCandidates ?? connector.scrape_limit;
-  const target = Math.min(requested, connectorRemaining, providerRemaining);
+  const target = Math.min(requested, daily.remaining);
   if (opts.onTarget) await opts.onTarget(target);
 
   try {
@@ -170,10 +166,9 @@ export async function runConnector(connector, criteria, runtime, opts = {}) {
     }
     if (target <= 0) {
       status = 'cooldown';
-      error =
-        providerRemaining <= 0 && providerCap != null
-          ? `provider daily cap reached for ${connector.platform} (cap ${providerCap})`
-          : `connector daily cap reached (${today}/${connector.daily_cap})`;
+      error = daily.by === 'provider'
+        ? `provider daily cap reached for ${connector.platform} (${daily.used}/${daily.cap})`
+        : `connector daily cap reached (${daily.used}/${daily.cap})`;
       // โควต้าเต็ม = รอคิวจนโควต้านับใหม่ (หลังเที่ยงคืนเวลาไทย) ไม่ลองซ้ำ ไม่ตีกลับ
       cooldownUntil = nextQuotaReset().toISOString();
       waitReason = 'daily_cap';

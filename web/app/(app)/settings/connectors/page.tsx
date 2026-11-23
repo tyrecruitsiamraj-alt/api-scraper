@@ -197,7 +197,6 @@ export default async function SettingsConnectorsPage({ searchParams }: { searchP
                         ) : (
                           <>
                             <span className="text-sm tabular-nums">{c.scrape_limit}<span className="text-muted-foreground"> / รอบ</span></span>
-                            <span className="text-xs text-muted-foreground">{c.daily_cap} / วัน</span>
                           </>
                         )}
                       </div>
