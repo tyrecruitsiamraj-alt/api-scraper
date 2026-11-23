@@ -13,6 +13,9 @@
 
 import { splitThaiFullName } from './thai-name.js';
 
+/** dedupe_key ของแถวที่สคริปต์ซ่อมตั้งไว้เก็บข้อมูลที่รวมผิด */
+export const REPAIR_HOLDER_PREFIX = 'none:merged-';
+
 /** ชื่อ+นามสกุล ไม่มีคำนำหน้า ไม่มีช่องว่าง · ต้องมีทั้งชื่อและนามสกุล ไม่งั้นคืนค่าว่าง */
 export function nameKey(fullName) {
   const { first_name: first, last_name: last } = splitThaiFullName(fullName ?? '');
@@ -33,7 +36,7 @@ export function emailKey(email) {
 }
 
 /**
- * @param {{ id: string; phone_norm?: string | null; email_norm?: string | null; last_updated_at?: string | Date | null; full_name?: string | null; has_source?: boolean }[]} rows
+ * @param {{ id: string; phone_norm?: string | null; email_norm?: string | null; last_updated_at?: string | Date | null; full_name?: string | null; has_source?: boolean; dedupe_key?: string | null }[]} rows
  * @param {number} [maxShared]
  * @returns {{ leaderOf: Map<string, string>; membersOf: Map<string, string[]>; hiddenIds: string[] }}
  */
@@ -107,6 +110,10 @@ export function groupDuplicateCandidates(rows, maxShared = 5) {
       leaderOf.set(m.id, leader);
       if (m.id !== leader) hiddenIds.push(m.id);
     }
+  }
+  // แถวที่การซ่อมเก็บไว้เป็นหลักฐาน ไม่ใช่ผู้สมัคร (20 พ.ย. 2569: โปรไฟล์ JobThai 824 ใบที่ถูกรวมผิด) — ไม่แสดง ไม่นับ
+  for (const r of rows) {
+    if (String(r.dedupe_key ?? '').startsWith(REPAIR_HOLDER_PREFIX) && !leaderOf.has(r.id)) hiddenIds.push(r.id);
   }
   return { leaderOf, membersOf, hiddenIds };
 }

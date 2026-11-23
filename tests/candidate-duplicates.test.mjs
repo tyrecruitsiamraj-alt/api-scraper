@@ -64,3 +64,11 @@ test('rows without has_source keep the old rule (newest leads)', () => {
   ];
   assert.equal(groupDuplicateCandidates(rows).leaderOf.get('a'), 'b');
 });
+
+test('the row a repair keeps as evidence is hidden, not shown as a candidate', () => {
+  const rows = [
+    { id: 'blob', full_name: 'ข้อมูลรวมผิด JobThai', has_source: true, dedupe_key: 'none:merged-jobthai-20261120-blob' },
+    { id: 'p', full_name: 'มานี มีนา', has_source: true, dedupe_key: 'p:0811111111' },
+  ];
+  assert.deepEqual(groupDuplicateCandidates(rows).hiddenIds, ['blob']);
+});
