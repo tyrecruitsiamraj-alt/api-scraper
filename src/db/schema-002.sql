@@ -18,7 +18,7 @@ INSERT INTO provider_limits (platform, daily_cap) VALUES ('jobbkk', 200), ('jobt
 CREATE TABLE IF NOT EXISTS scrape_tasks (
   id              uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   name            text NOT NULL,
-  connector_id    uuid NOT NULL REFERENCES connectors(id) ON DELETE CASCADE,
+  connector_id    uuid NOT NULL REFERENCES connectors(id) ON DELETE RESTRICT,  -- ลบบัญชีห้ามลากงานไปด้วย (schema-031)
   mode            text NOT NULL DEFAULT 'count',     -- count | date_range
   target_count    integer,                            -- mode=count
   updated_since   date,                               -- mode=date_range: scrape profiles updated today → back to this date

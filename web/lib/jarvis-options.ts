@@ -363,7 +363,7 @@ export async function getJarvisOptions(opts: { requestNo?: string | null } = {})
               COALESCE((SELECT SUM(r.opened_count)::int FROM scrape_runs r
                          WHERE r.platform = c.platform AND r.started_at >= ${BANGKOK_DAY_START}), 0) AS platform_used_today
          FROM connectors c LEFT JOIN provider_limits pl ON pl.platform = c.platform
-        WHERE c.platform IN ('jobthai', 'jobbkk')
+        WHERE c.platform IN ('jobthai', 'jobbkk') AND to_jsonb(c)->>'deleted_at' IS NULL
         ORDER BY c.platform, 3`,
     ).catch(() => []),
     // สถานะบัญชี × กลุ่ม อ่านไม่ได้ = ไม่ส่งสถานะ (ทุกกลุ่มเป็น "ยังไม่เคยลอง") ไม่ทำให้ป๊อปทั้งป๊อปล่ม

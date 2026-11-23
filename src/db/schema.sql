@@ -31,7 +31,7 @@ CREATE TABLE IF NOT EXISTS connectors (
 -- ---- scrape_runs: one row per scrape execution ----
 CREATE TABLE IF NOT EXISTS scrape_runs (
   id           uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  connector_id uuid NOT NULL REFERENCES connectors(id) ON DELETE CASCADE,
+  connector_id uuid NOT NULL REFERENCES connectors(id) ON DELETE RESTRICT,  -- ลบบัญชีห้ามลากประวัติการค้นไปด้วย (schema-031)
   platform     text NOT NULL,
   criteria     jsonb NOT NULL DEFAULT '{}'::jsonb,
   status       text NOT NULL DEFAULT 'running',         -- running|success|partial|failed|cooldown

@@ -552,11 +552,14 @@ export type ConnectorRow = {
   created_at: string;
 };
 
+/** บัญชีค้นหาผู้สมัครที่ยังไม่ถูกลบ (deleted_at ว่าง) · ใช้ to_jsonb กันฐานที่ยังไม่มีคอลัมน์ */
+const NOT_DELETED = `to_jsonb(connectors)->>'deleted_at' IS NULL`;
+
 export async function listConnectors() {
   return q<ConnectorRow>(
     `SELECT id, platform, label, username, scrape_limit, daily_cap, enabled,
             last_login_at, cooldown_until, created_at
-       FROM connectors ORDER BY platform, label`,
+       FROM connectors WHERE ${NOT_DELETED} ORDER BY platform, label`,
   );
 }
 
@@ -623,7 +626,7 @@ export async function listAllConnectors() {
             NULLIF(to_jsonb(connectors)->>'province', '') AS province,
             NULL::boolean AS needs_verification,
             NULL::boolean AS worker_online
-       FROM connectors`,
+       FROM connectors WHERE ${NOT_DELETED}`,
   );
 
   let facebook: UnifiedConnectorRow[] = [];
@@ -823,8 +826,13 @@ export async function setConnectorEnabled(id: string, enabled: boolean) {
   await q('UPDATE connectors SET enabled = $2, updated_at = now() WHERE id = $1', [id, enabled]);
 }
 
+/**
+ * "ลบ" บัญชีค้นหาผู้สมัคร = ปิดและซ่อนจากทุกหน้า ข้อมูลที่ผูกอยู่ (งาน Scrap · รายชื่อที่ได้ · ประวัติการค้น) อยู่ครบ
+ * 23 พ.ย. 2569: เดิมลบแถวจริง ฐานลบงานตาม (ON DELETE CASCADE) งาน 39 ใบกับประวัติการค้น JobBKK หายทั้งหมด
+ */
 export async function deleteConnector(id: string) {
-  await q('DELETE FROM connectors WHERE id = $1', [id]);
+  await q('ALTER TABLE connectors ADD COLUMN IF NOT EXISTS deleted_at timestamptz');
+  await q('UPDATE connectors SET enabled = false, deleted_at = now(), session_state = NULL, updated_at = now() WHERE id = $1', [id]);
 }
 
 /** แก้ข้อมูล Scraper connector (jobbkk/jobthai). password ว่าง = ไม่เปลี่ยนรหัสเดิม. */

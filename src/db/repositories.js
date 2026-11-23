@@ -16,7 +16,8 @@ export async function createConnector({ platform, label, username, password, scr
 }
 
 export async function listConnectors({ platform, enabledOnly = false } = {}) {
-  const where = [];
+  // บัญชีที่กดลบแล้ว (deleted_at) ไม่ขึ้นที่ไหนอีก — ข้อมูลที่ผูกอยู่ยังเก็บไว้
+  const where = [`to_jsonb(connectors)->>'deleted_at' IS NULL`];
   const params = [];
   if (platform) { params.push(platform); where.push(`platform = $${params.length}`); }
   if (enabledOnly) where.push('enabled = true');
