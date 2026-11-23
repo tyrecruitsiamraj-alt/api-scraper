@@ -241,7 +241,7 @@ export default async function CandidatesPage(
                           {c.full_name || '(ไม่มีชื่อ)'}
                         </Link>
                         {c.duplicate_ids.length > 0 && (
-                          <Badge variant="outline" title="เบอร์หรืออีเมลตรงกัน รวมเป็นแถวเดียว">รวม {c.duplicate_ids.length + 1} ประวัติ</Badge>
+                          <Badge variant="outline" title="เบอร์หรืออีเมลตรงกัน หรือแถวเก่าที่ชื่อ-นามสกุลตรงกัน รวมเป็นแถวเดียว">รวม {c.duplicate_ids.length + 1} ประวัติ</Badge>
                         )}
                       </div>
                     </TableCell>

@@ -138,7 +138,7 @@ export default async function CandidateDetail(props: { params: Promise<{ id: str
         <Card>
           <CardHeader>
             <CardTitle>ประวัติอื่นของคนนี้</CardTitle>
-            <CardDescription>เบอร์หรืออีเมลตรงกัน ระบบเก็บไว้เป็นคนละแถว ในคลังผู้สมัครจะรวมเป็นแถวเดียว</CardDescription>
+            <CardDescription>เบอร์หรืออีเมลตรงกัน หรือเป็นแถวเก่าที่ไม่มีแหล่งที่มาแต่ชื่อ-นามสกุลตรงกัน ในคลังผู้สมัครรวมเป็นแถวเดียว</CardDescription>
           </CardHeader>
           <CardContent className="flex flex-col gap-2">
             {samePerson.map((p) => (

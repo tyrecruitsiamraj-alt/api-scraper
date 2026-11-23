@@ -215,7 +215,7 @@ export async function countCandidates(opts: CandidateFilter = {}) {
   return rows[0]?.n ?? 0;
 }
 
-/** ประวัติอื่นที่เป็นคนเดียวกับผู้สมัครนี้ (เบอร์ 9 หลักท้าย หรืออีเมลตรงกัน) */
+/** ประวัติอื่นที่เป็นคนเดียวกับผู้สมัครนี้ (กติกาใน src/core/candidate-duplicates.js) */
 export async function listSamePersonCandidates(candidateId: string) {
   const dups = await getCandidateDuplicates();
   const leader = dups.leaderOf.get(candidateId);
@@ -1980,13 +1980,18 @@ export async function taskStatuses() {
 // Dashboard
 // ---------------------------------------------------------------------------
 export async function dashboardStats() {
+  // คนเดียวกันที่ซ้ำหลายแถว นับครั้งเดียว (กติกาเดียวกับหน้าผู้สมัคร)
+  const hidden = (await getCandidateDuplicates()).hiddenIds;
   const [totals] = await q<{ candidates: number; sources: number; assets: number }>(
-    `SELECT (SELECT count(*)::int FROM candidates)        AS candidates,
+    `SELECT (SELECT count(*)::int FROM candidates WHERE id <> ALL($1::uuid[])) AS candidates,
             (SELECT count(*)::int FROM candidate_sources) AS sources,
             (SELECT count(*)::int FROM candidate_assets)  AS assets`,
+    [hidden],
   );
   const byPlatform = await q<{ platform: string; n: number }>(
-    `SELECT platform, count(DISTINCT candidate_id)::int n FROM candidate_sources GROUP BY platform ORDER BY n DESC`,
+    `SELECT platform, count(DISTINCT candidate_id)::int n FROM candidate_sources
+      WHERE candidate_id <> ALL($1::uuid[]) GROUP BY platform ORDER BY n DESC`,
+    [hidden],
   );
   const [completeness] = await q<{
     total: number; with_phone: number; with_email: number; with_attachment: number; extracted: number;
@@ -1996,7 +2001,8 @@ export async function dashboardStats() {
             count(*) FILTER (WHERE email IS NOT NULL AND email <> '')::int AS with_email,
             (SELECT count(DISTINCT candidate_id)::int FROM candidate_assets WHERE kind='attachment') AS with_attachment,
             (SELECT count(*)::int FROM candidate_assets WHERE extract_status='success') AS extracted
-       FROM candidates`,
+       FROM candidates WHERE id <> ALL($1::uuid[])`,
+    [hidden],
   );
   return { totals, byPlatform, completeness };
 }

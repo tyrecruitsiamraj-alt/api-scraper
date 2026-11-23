@@ -5,9 +5,20 @@
  *   - เบอร์โทร 9 หลักท้ายตรงกัน (0812345678 กับ +66812345678 = เบอร์เดียวกัน) หรือ
  *   - อีเมลตรงกัน
  * ค่าที่ซ้ำกันเกิน maxShared แถวถือว่าไม่ใช่ของผู้สมัคร (เช่นเบอร์ call center ของเว็บ อีเมลตัวอย่าง) — ไม่ใช้จับคู่
- * ชื่อซ้ำอย่างเดียวไม่นับ (คนชื่อซ้ำกันมีจริง)
- * แถวหลักของกลุ่ม = แถวที่อัปเดตล่าสุด
+ * ชื่อซ้ำอย่างเดียวไม่นับ (คนชื่อซ้ำกันมีจริง) ยกเว้นแถวที่ไม่มีแหล่งที่มาเลย (has_source = false):
+ *   ชื่อ-นามสกุลตรงกับแถวที่มีแหล่งที่มา "แถวเดียว" และเบอร์ไม่ขัดกัน = แถวค้างของคนเดียวกัน
+ *   (23 พ.ย. 2569: แถวไม่มีแหล่ง 282 แถว 228 แถวชื่อตรงกับคนที่มีอยู่แล้ว)
+ * แถวหลักของกลุ่ม = แถวที่มีแหล่งที่มา แล้วค่อยแถวที่อัปเดตล่าสุด
  */
+
+import { splitThaiFullName } from './thai-name.js';
+
+/** ชื่อ+นามสกุล ไม่มีคำนำหน้า ไม่มีช่องว่าง · ต้องมีทั้งชื่อและนามสกุล ไม่งั้นคืนค่าว่าง */
+export function nameKey(fullName) {
+  const { first_name: first, last_name: last } = splitThaiFullName(fullName ?? '');
+  if (!first || !last) return '';
+  return `${first}${last}`.replace(/\s+/g, '').toLowerCase();
+}
 
 export function phoneKey(phoneNorm) {
   const d = String(phoneNorm ?? '').replace(/\D/g, '');
@@ -22,7 +33,7 @@ export function emailKey(email) {
 }
 
 /**
- * @param {{ id: string; phone_norm?: string | null; email_norm?: string | null; last_updated_at?: string | Date | null }[]} rows
+ * @param {{ id: string; phone_norm?: string | null; email_norm?: string | null; last_updated_at?: string | Date | null; full_name?: string | null; has_source?: boolean }[]} rows
  * @param {number} [maxShared]
  * @returns {{ leaderOf: Map<string, string>; membersOf: Map<string, string[]>; hiddenIds: string[] }}
  */
@@ -58,7 +69,25 @@ export function groupDuplicateCandidates(rows, maxShared = 5) {
     }
   }
 
+  // แถวไม่มีแหล่งที่มา → ต่อกับแถวที่มีแหล่งที่ชื่อตรงกันแถวเดียว (เบอร์ต่างกัน = คนละคน ไม่ต่อ)
+  const sourcedByName = new Map();
+  for (const r of rows) {
+    if (r.has_source === false) continue;
+    const k = nameKey(r.full_name);
+    if (k) sourcedByName.set(k, sourcedByName.has(k) ? null : r);
+  }
+  for (const r of rows) {
+    if (r.has_source !== false) continue;
+    const twin = sourcedByName.get(nameKey(r.full_name));
+    if (!twin) continue;
+    const a = phoneKey(r.phone_norm);
+    const b = phoneKey(twin.phone_norm);
+    if (a && b && a !== b) continue;
+    parent.set(find(r.id), find(twin.id));
+  }
+
   const ts = (v) => (v ? new Date(v).getTime() || 0 : 0);
+  const sourced = (r) => (r.has_source === false ? 0 : 1);
   const groups = new Map();
   for (const r of rows) {
     const root = find(r.id);
@@ -71,7 +100,7 @@ export function groupDuplicateCandidates(rows, maxShared = 5) {
   const hiddenIds = [];
   for (const members of groups.values()) {
     if (members.length < 2) continue;
-    members.sort((a, b) => ts(b.last_updated_at) - ts(a.last_updated_at) || String(a.id).localeCompare(String(b.id)));
+    members.sort((a, b) => sourced(b) - sourced(a) || ts(b.last_updated_at) - ts(a.last_updated_at) || String(a.id).localeCompare(String(b.id)));
     const leader = members[0].id;
     membersOf.set(leader, members.map((m) => m.id));
     for (const m of members) {
