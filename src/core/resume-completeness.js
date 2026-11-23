@@ -47,6 +47,14 @@ export function resumeContactGaps(record = {}) {
 }
 
 /**
+ * ไม่มีทั้งชื่อและเบอร์ = ติดต่อไม่ได้และเรียกไม่ถูก → เก็บเข้าคลังได้ แต่ไม่ใส่ในใบงาน (ไม่ส่ง Jarvis)
+ * เจ้าของเลือก 23 พ.ย. 2569: คนที่ซ่อนชื่อบน JobThai ส่งเมื่อมีเบอร์
+ */
+export function lacksNameAndPhone(record = {}) {
+  return !clean(record.name || record.full_name) && !clean(record.phone);
+}
+
+/**
  * Attachment completeness against listed resume links + downloaded assets.
  * Every JobBKK desk row must end with every listed file downloaded successfully
  * and at least one attachment. JobThai has no separate file attachments — profile

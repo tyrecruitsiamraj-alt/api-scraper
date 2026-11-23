@@ -9,6 +9,7 @@ import {
   isResumeAttachmentsComplete,
   isResumeBodyComplete,
   isResumeDeliveryComplete,
+  lacksNameAndPhone,
   resumeAttachmentGaps,
   resumeBodyGaps,
   resumeContactGaps,
@@ -24,6 +25,7 @@ import {
   saveAsset,
   saveConnectorSession,
   linkCandidateToTask,
+  markCandidateNameHidden,
   recordResumeSearchAttempt,
   listScrapeFailureLessons,
   recordScrapeFailureLesson,
@@ -424,9 +426,13 @@ export async function runConnector(connector, criteria, runtime, opts = {}) {
           console.warn(`  ⚠ resume ${id}: ไฟล์แนบไม่ครบ (${attachmentGaps.join(',')}) — เก็บไว้ให้คนตรวจ`);
         }
         finalQualification = applyCompletenessGaps(finalQualification, { bodyGaps, attachmentGaps });
+        // ไม่มีทั้งชื่อและเบอร์ (เช่นซ่อนชื่อบน JobThai แล้วเว็บไม่เปิดเบอร์) — เก็บเข้าคลัง แต่ไม่ใส่ใบงาน
+        const keepOutOfTask = lacksNameAndPhone(parsed);
+        if (keepOutOfTask) reasonCounts.no_name_no_phone = (reasonCounts.no_name_no_phone || 0) + 1;
 
         const { isNew, taskLink } = await withTransaction(async (client) => {
           const cand = await upsertCandidate(client, parsed, { platform: connector.platform, externalId: provider.externalId(url) });
+          if (parsed.name_hidden) await markCandidateNameHidden(client, cand.id);
           const sourceId = await upsertSource(client, cand.id, {
             platform: connector.platform,
             connectorId: connector.id,
@@ -437,7 +443,7 @@ export async function runConnector(connector, criteria, runtime, opts = {}) {
             rawText: parsed.raw_text,
             searchRank: sourceRankById.get(String(id)) ?? i + 1,
           });
-          const taskLink = await linkCandidateToTask(client, {
+          const taskLink = keepOutOfTask ? null : await linkCandidateToTask(client, {
             taskId: opts.taskId ?? null,
             candidateId: cand.id,
             sourceId,
@@ -452,6 +458,11 @@ export async function runConnector(connector, criteria, runtime, opts = {}) {
 
         if (isNew) newCount += 1;
         else updatedCount += 1;
+        if (!taskLink) {
+          filteredOut += 1;
+          console.log(`  [${id}] ไม่มีทั้งชื่อและเบอร์ — เก็บเข้าคลัง ไม่ใส่ใบงาน`);
+          return;
+        }
         if (finalQualification.status === 'qualified') qualified += 1;
         else if (finalQualification.status === 'needs_review') { needsReview += 1; filteredOut += 1; }
         else { rejected += 1; filteredOut += 1; }

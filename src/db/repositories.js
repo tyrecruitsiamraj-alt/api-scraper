@@ -296,6 +296,25 @@ export async function taskExternalIds(taskId, platform) {
   return rows.map((r) => String(r.external_id));
 }
 
+let nameHiddenColumnReady = null;
+/**
+ * เจ้าของเรซูเม่ซ่อนชื่อบนเว็บ (JobThai "เจ้าของเรซูเม่ปิดข้อมูลนี้") — Jarvis ขึ้น "ผู้สมัครซ่อนชื่อ" แทน "ไม่มีชื่อ"
+ * ตั้งเฉพาะแถวที่ยังไม่มีชื่อ (ได้ชื่อจากที่อื่นแล้วไม่ต้องติดป้าย) · คอลัมน์เพิ่มอย่างเดียว (schema-032)
+ */
+export async function markCandidateNameHidden(client, candidateId) {
+  // เช็กก่อนค่อย ALTER — ALTER TABLE ล็อกทั้งตารางแม้คอลัมน์มีอยู่แล้ว (Jarvis อ่านตารางนี้ตลอด)
+  nameHiddenColumnReady ??= query(
+    `SELECT 1 FROM information_schema.columns WHERE table_schema = current_schema() AND table_name = 'candidates' AND column_name = 'name_hidden'`,
+  )
+    .then(({ rows }) => (rows.length ? null : query('ALTER TABLE candidates ADD COLUMN IF NOT EXISTS name_hidden boolean NOT NULL DEFAULT false')))
+    .catch((e) => { nameHiddenColumnReady = null; throw e; });
+  await nameHiddenColumnReady;
+  await client.query(
+    `UPDATE candidates SET name_hidden = true WHERE id = $1 AND COALESCE(TRIM(full_name), '') = ''`,
+    [candidateId],
+  );
+}
+
 export async function linkCandidateToTask(client, { taskId, candidateId, sourceId, matchedPosition, qualification = { status: 'qualified', reasons: [], score: 100, evidence: {} } }) {
   if (!taskId || !candidateId) return { isNewForTask: true, becameQualified: true, previousStatus: null };
   const status = ['qualified', 'needs_review', 'rejected'].includes(qualification?.status) ? qualification.status : 'needs_review';

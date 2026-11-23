@@ -59,3 +59,21 @@ test('parseResumeHtml keeps JobThai คำนำหน้า on the saved record
   assert.equal(rec.last_name, 'ดีมาก');
   assert.match(rec.name, /^นางสาว /);
 });
+
+// 23 พ.ย. 2569: เปิดหน้าจริงแล้ว ช่องชื่อขึ้น "เจ้าของเรซูเม่ปิดข้อมูลนี้" — คนซ่อนชื่อเอง ไม่ใช่ระบบอ่านไม่ออก
+test('a resume whose owner hid the name is blank and flagged name_hidden', () => {
+  const html = `<html><body><div id="detailshow">
+    <table><tr><td>ชื่อ</td><td>เจ้าของเรซูเม่ปิดข้อมูลนี้ เจ้าของเรซูเม่ปิดข้อมูลนี้</td></tr>
+    <tr><td>ที่อยู่</td><td>อาคารพาณิชย์ หมู่ 3 ต.เทพารักษ์ อ.เมือง สมุทรปราการ 10270</td></tr>
+    <tr><td>Mobile</td><td>เจ้าของเรซูเม่ปิดข้อมูลนี้</td></tr></table></div></body></html>`;
+  const rec = parseResumeHtml(html, { sourceUrl: 'https://www3.jobthai.com/resume/0,1.html', index: 1 });
+  assert.equal(rec.name, '');
+  assert.equal(rec.first_name, '');
+  assert.equal(rec.name_hidden, true);
+});
+
+test('a normal resume is not flagged name_hidden', () => {
+  const html = '<html><body><div id="detailshow"><div>ชื่อ สมชาย</div><div>นามสกุล ใจดี</div></div></body></html>';
+  const rec = parseResumeHtml(html, { sourceUrl: 'https://www3.jobthai.com/resume/0,2.html', index: 1 });
+  assert.equal(rec.name_hidden, undefined);
+});

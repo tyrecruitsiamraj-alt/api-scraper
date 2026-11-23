@@ -395,6 +395,9 @@ export function parseResumeHtml(html, { sourceUrl, index, focusPosition = '-' })
   } else {
     applyThaiNameSplit(rec, text);
   }
+  // ช่อง "ชื่อ" ขึ้น "เจ้าของเรซูเม่ปิดข้อมูลนี้" = เจ้าของซ่อนชื่อเอง ไม่ใช่ระบบอ่านไม่ออก — Jarvis ขึ้น "ผู้สมัครซ่อนชื่อ" (23 พ.ย. 2569)
+  // ดูจากช่องชื่อเท่านั้น: ข้อความเดียวกันมีในสคริปต์ alert ของทุกหน้า
+  if (!rec.name && /ชื่อ\s*[:：]?\s*(?:\n\s*)?เจ้าของเรซูเม่ปิดข้อมูลนี้/u.test(text)) rec.name_hidden = true;
   rec.address = firstMatch(text, [/ที่อยู่\s*[:：]?\s*([^\n]+(?:\n[^\n]+)?)/u]);
   rec.province = extractProvince(rec.address);
 
