@@ -20,7 +20,20 @@ import { sleep } from '../src/config.js';
 import { loadRuntime } from '../src/config.js';
 import { query, closePool, withTransaction } from '../src/db/pool.js';
 import { syncJarvisPostOrders } from '../src/core/jarvis-post-sync.js';
-import { getConnector, getTaskById, recoverStaleRunningTasks } from '../src/db/repositories.js';
+import {
+  countScrapedToday,
+  fillCandidateContacts,
+  finishRun,
+  getConnector,
+  getProviderCap,
+  getTaskById,
+  platformScrapedToday,
+  recoverStaleRunningTasks,
+  saveConnectorSession,
+  startRun,
+  touchRun,
+} from '../src/db/repositories.js';
+import { refreshJobthaiContacts } from '../src/core/jobthai-contact-refresh.js';
 import { runConnector } from '../src/pipeline.js';
 import { ocrBacklog, runTask } from '../src/tasks-worker.js';
 import { aiStatus } from '../src/core/ai-models.js';
@@ -175,6 +188,19 @@ const HANDLERS = {
     if (r.status === 'cooldown' && r.cooldownUntil) throw cooldownError(r.error || 'connector cooling down', r.cooldownUntil);
     if (r.status === 'failed' || r.status === 'cooldown') throw new Error(r.error || `run ${r.status}`);
     return r;
+  },
+  // ดึงเบอร์คืนให้ผู้สมัคร JobThai ที่ค้าง "ต้องตรวจเพิ่ม" เพราะไม่มีช่องทางติดต่อ (24 พ.ย. 2569)
+  // connector_key = 'jobthai:<connectorId>' — ล็อกบัญชีเดียวกับงานค้น ไม่รันซ้อนกัน · payload.externalIds = รหัสเรซูเม่
+  async contact_refresh(job) {
+    const { platform, id: connectorId } = splitConnectorKey(job.connector_key);
+    if (platform !== 'jobthai') throw new Error(`contact_refresh รองรับเฉพาะ JobThai (ได้ ${platform})`);
+    const connector = await getConnector(connectorId);
+    if (!connector) throw new Error(`connector not found: ${job.connector_key}`);
+    const ids = Array.isArray(job.payload?.externalIds) ? job.payload.externalIds.map(String) : [];
+    return refreshJobthaiContacts(connector, ids, {
+      query, runtime: loadRuntime(), fillCandidateContacts, startRun, finishRun, touchRun, saveConnectorSession,
+      countScrapedToday, getProviderCap, platformScrapedToday,
+    });
   },
   // Content Orchestrator draft: AI คิด caption + รูป + brief สำหรับ 1 campaign
   // (ใบขอที่หาคนไม่ได้) → เก็บ campaign_contents (draft) → campaign 'pending_approval'.
