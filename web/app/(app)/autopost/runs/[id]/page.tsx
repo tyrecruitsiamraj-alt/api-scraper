@@ -2,6 +2,7 @@ import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { ChevronDownIcon, ExternalLinkIcon } from 'lucide-react';
 import { getPostTask, getPostTaskLogs } from '@/lib/post-tasks';
+import { isPostRemoved } from '../../../../../../src/core/post-task-state.js';
 import { listJarvisPostOrders } from '@/lib/repo';
 import { AutoRefresh } from '@/components/AutoRefresh';
 import { GroupDetailDialog } from '@/components/post/GroupDetailDialog';
@@ -217,8 +218,16 @@ export default async function PostTaskPage(props: { params: Promise<{ id: string
                       </div>
                     </TableCell>
                     <TableCell className="hidden md:table-cell text-muted-foreground">{g.approval ?? '-'}</TableCell>
-                    <TableCell className="text-right tabular-nums">{num(g.reactions)}</TableCell>
-                    <TableCell className="text-right tabular-nums">{num(g.comments)}</TableCell>
+                    {isPostRemoved(g.approval) ? (
+                      <TableCell colSpan={2} className="text-right text-muted-foreground">
+                        โพสต์ถูกลบ
+                      </TableCell>
+                    ) : (
+                      <>
+                        <TableCell className="text-right tabular-nums">{num(g.reactions)}</TableCell>
+                        <TableCell className="text-right tabular-nums">{num(g.comments)}</TableCell>
+                      </>
+                    )}
                     <TableCell className="hidden lg:table-cell text-muted-foreground">{thaiTime(g.finished_at ?? g.started_at)}</TableCell>
                     <TableCell className="text-right">
                       <GroupDetailDialog group={g} worker={task.worker} />

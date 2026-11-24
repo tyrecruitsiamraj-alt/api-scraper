@@ -24,6 +24,7 @@ import type { Page } from '@playwright/test';
 const commentLeads = require('../server/comment-leads');
 const leadsDb = process.env.DATABASE_URL ? require('../server/db') : null;
 const contentStatus = require('../server/post-content-status');
+const postEngagement = require('../server/post-engagement');
 const groupPostLink = require('../server/group-post-link') as {
   postLinkVerdict: (postText: string, ourText: string) => 'ours' | 'other' | 'unknown';
   applyPaths: (text: string) => Set<string>;
@@ -413,15 +414,33 @@ test('collectComments', async ({ page }) => {
           continue;
         }
       }
-      // เปิดโพสต์ที่เคยเผยแพร่แล้วไม่ได้ = อาจถูกแอดมินลบ — ยืนยันจากแท็บลบออกแล้วก่อนเปลี่ยนสถานะ
+      // เปิดโพสต์ที่เคยเผยแพร่แล้วไม่ได้ = อาจถูกลบ — ยืนยันจากแท็บ "เนื้อหาของคุณ" ก่อนเปลี่ยนสถานะ
+      // ไม่อยู่ทั้งแท็บเผยแพร่แล้วและลบออกแล้ว = โพสต์หายจาก Facebook → บันทึก "ถูกลบ" เลิกนับยอด
+      // (ตรวจ 24 พ.ย. 2569: 13 โพสต์หายจาก Facebook แล้วแต่ระบบยังโชว์ยอดเดิม บางโพสต์ไลก์ 9,873)
+      // ไม่ว่าผลไหน รอบนี้ไม่บันทึกยอด — หน้าที่เปิดไม่ใช่โพสต์ ตัวเลขที่อ่านได้ไม่ใช่ของโพสต์นี้
       if (!commentCount && !reactions && item.group_id) {
         const bodyText = await active.locator('body').innerText({ timeout: 5000 }).catch(() => '');
         if (POST_UNAVAILABLE.test(bodyText)) {
-          const st = await checkContentStatus(item, ['removed'], `[${idx}/${plan.posts.length}]`);
-          if (st === contentStatus.STATUS_REMOVED) {
-            noCollectResult.add(item.post_log_id);
-            continue;
+          const st = await checkContentStatus(item, ['posted', 'removed'], `[${idx}/${plan.posts.length}]`);
+          const gid = String(item.group_id || '').trim();
+          const tab = (t: string) => {
+            const read = tabCache.get(`${gid}:${t}`);
+            return read ? { ok: read.ok, found: st === contentStatus.CONTENT_TABS.find((c: { tab: string }) => c.tab === t)?.status } : undefined;
+          };
+          const verdict = postEngagement.goneVerdict({ unavailable: true, posted: tab('posted'), removed: tab('removed') });
+          if (verdict === 'removed' && st !== contentStatus.STATUS_REMOVED) {
+            await patchContentStatus(item.post_log_id, { post_status: contentStatus.STATUS_REMOVED, post_link: '' });
           }
+          await runLog({
+            level: verdict === 'removed' ? 'warn' : 'info',
+            message: `[${idx}/${plan.posts.length}] Facebook ขึ้นว่าโพสต์ไม่พร้อมใช้งาน — ${
+              verdict === 'removed' ? 'ไม่อยู่ในแท็บเผยแพร่แล้ว บันทึกว่าโพสต์ถูกลบ เลิกนับยอด' : verdict === 'still_posted' ? 'ยังอยู่แท็บเผยแพร่แล้ว คงยอดเดิม' : 'เช็กแท็บไม่ได้ คงยอดเดิม'
+            }`,
+            user_id: user.id,
+            meta: { kind: 'post_unavailable', post_log_id: item.post_log_id, group_id: item.group_id, post_link: item.post_link, verdict },
+          });
+          noCollectResult.add(item.post_log_id);
+          continue;
         }
       }
       if (!comments.length || !reactions) {

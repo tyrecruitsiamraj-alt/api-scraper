@@ -8,6 +8,14 @@ export type PostGroupStatus =
   | 'waiting'
   | 'skipped';
 
+export const POST_REMOVED_STATUS: 'ถูกลบ';
+export function isPostRemoved(postStatus: unknown): boolean;
+export function liveCounts(log: { post_status?: unknown; comment_count?: unknown; reactions?: unknown; shares?: unknown } | null | undefined): {
+  comments: number | null;
+  reactions: number | null;
+  shares: number | null;
+};
+
 export function postedOutcome(postStatus: unknown, postLink: unknown): 'posted' | 'pending_approval' | 'unconfirmed' | 'failed';
 
 export type PostTaskGroup = {

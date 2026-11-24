@@ -3,6 +3,7 @@ import { ArrowDownIcon, ArrowUpIcon, ChevronLeftIcon, ChevronRightIcon, External
 import { AutopostNav } from '@/components/AutopostNav';
 import { PrintButton } from '@/components/PrintButton';
 import { weeklyReport, type ReportMetric } from '@/lib/repo';
+import { isPostRemoved } from '../../../../../src/core/post-task-state.js';
 import { cn } from '@/lib/utils';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -234,8 +235,16 @@ export default async function WeeklyReportPage(props: { searchParams?: Promise<{
                         <TableCell className="text-right">
                           <Badge variant="secondary" className="tabular-nums">{t.lead_count}</Badge>
                         </TableCell>
-                        <TableCell className="text-right tabular-nums">{t.comment_count}</TableCell>
-                        <TableCell className="text-right tabular-nums">{t.reactions}</TableCell>
+                        {isPostRemoved(t.post_status) ? (
+                          <TableCell colSpan={2} className="text-right text-muted-foreground">
+                            โพสต์ถูกลบ
+                          </TableCell>
+                        ) : (
+                          <>
+                            <TableCell className="text-right tabular-nums">{t.comment_count}</TableCell>
+                            <TableCell className="text-right tabular-nums">{t.reactions}</TableCell>
+                          </>
+                        )}
                         <TableCell className="text-right print:hidden">
                           {t.post_link && (
                             <Button asChild variant="ghost" size="sm">

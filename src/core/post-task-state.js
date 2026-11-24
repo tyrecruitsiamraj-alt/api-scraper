@@ -37,6 +37,22 @@ function num(value) {
  *   unconfirmed      = กดโพสต์แล้ว แต่ยังไม่เจอโพสต์ในกลุ่ม (ไม่มีลิงก์) — ห้ามนับเป็นสำเร็จ
  *   failed           = แอดมินกลุ่มปฏิเสธหรือลบโพสต์
  */
+/** สถานะในกลุ่มที่แปลว่าโพสต์หายจาก Facebook แล้ว (แอดมินลบ หรือเปิดลิงก์แล้วไม่พร้อมใช้งาน) */
+export const POST_REMOVED_STATUS = 'ถูกลบ';
+
+export function isPostRemoved(postStatus) {
+  return String(postStatus ?? '').trim() === POST_REMOVED_STATUS;
+}
+
+/**
+ * ยอดคอมเมนต์/ไลก์/แชร์ที่โชว์และนับรวม — โพสต์ที่ถูกลบเป็น null (หน้าเว็บขึ้น "โพสต์ถูกลบ" แทนตัวเลข ยอดรวมไม่นับ)
+ * ตรวจ 24 พ.ย. 2569: 13 โพสต์หายจาก Facebook แล้วยังโชว์ยอดเดิม บางโพสต์ไลก์ 9,873
+ */
+export function liveCounts(log) {
+  if (!log || isPostRemoved(log.post_status)) return { comments: null, reactions: null, shares: null };
+  return { comments: num(log.comment_count) ?? 0, reactions: num(log.reactions) ?? 0, shares: num(log.shares) ?? 0 };
+}
+
 export function postedOutcome(postStatus, postLink) {
   // แอดมินปฏิเสธ/ลบโพสต์ (ตัวเก็บคอมเมนต์เช็กจากแท็บ "เนื้อหาของคุณ" · 12 พ.ย. 2569) — มีลิงก์ก็ไม่นับว่าขึ้น
   if (/ถูกปฏิเสธ|ถูกลบ/.test(String(postStatus ?? ''))) return 'failed';
@@ -97,9 +113,7 @@ export function buildPostTaskGroups({ plan = [], attempts = [], postLogs = [], r
       error,
       post_link: log?.post_link ? String(log.post_link) : null,
       approval: log?.post_status ? String(log.post_status) : null,
-      comments: log ? num(log.comment_count) ?? 0 : null,
-      reactions: log ? num(log.reactions) ?? 0 : null,
-      shares: log ? num(log.shares) ?? 0 : null,
+      ...liveCounts(log),
       collected_at: log?.last_collected_at ?? null,
     };
   });

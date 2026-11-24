@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { CheckIcon, CopyIcon, ExternalLinkIcon, PencilLineIcon } from 'lucide-react';
 import type { LeadPostRow } from '@/lib/repo';
+import { isPostRemoved } from '../../src/core/post-task-state.js';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { ButtonGroup } from '@/components/ui/button-group';
@@ -94,7 +95,9 @@ export function LeadPostCard({ post }: { post: LeadPostRow }) {
           {post.group_name || 'ไม่ระบุกลุ่ม'}
           {post.account ? ` · ${post.account}` : ''} · {timeAgo(post.created_at)}
           <span className="block text-xs tabular-nums">
-            คอมเมนต์ {post.comment_count} · ถูกใจ {post.reactions} · แชร์ {post.shares}
+            {isPostRemoved(post.post_status)
+              ? 'โพสต์ถูกลบ'
+              : `คอมเมนต์ ${post.comment_count} · ถูกใจ ${post.reactions} · แชร์ ${post.shares}`}
           </span>
         </CardDescription>
         {post.post_link && (

@@ -9,7 +9,7 @@ import {
   DialogTitle,
   DialogTrigger,
 } from '@/components/ui/dialog';
-import type { PostTaskGroup } from '../../../src/core/post-task-state.js';
+import { isPostRemoved, type PostTaskGroup } from '../../../src/core/post-task-state.js';
 import { GroupStatusBadge, thaiTime } from './post-ui';
 
 function shortError(message: string | null): string {
@@ -54,11 +54,15 @@ export function GroupDetailDialog({ group, worker }: { group: PostTaskGroup; wor
             {group.approval && <span className="text-sm text-muted-foreground">ในกลุ่ม: {group.approval}</span>}
           </div>
           {group.error && <p className="text-sm text-destructive">{shortError(group.error)}</p>}
-          <dl className="grid grid-cols-3 gap-3">
-            <Count label="ไลก์" value={group.reactions} />
-            <Count label="คอมเมนต์" value={group.comments} />
-            <Count label="แชร์" value={group.shares} />
-          </dl>
+          {isPostRemoved(group.approval) ? (
+            <p className="rounded-lg border p-3 text-sm text-muted-foreground">โพสต์ถูกลบ ไม่นับยอดไลก์ คอมเมนต์ แชร์</p>
+          ) : (
+            <dl className="grid grid-cols-3 gap-3">
+              <Count label="ไลก์" value={group.reactions} />
+              <Count label="คอมเมนต์" value={group.comments} />
+              <Count label="แชร์" value={group.shares} />
+            </dl>
+          )}
           {!group.post_link && (group.status === 'unconfirmed' || group.status === 'pending_approval') && (
             <p className="text-sm text-muted-foreground">
               {group.status === 'pending_approval'

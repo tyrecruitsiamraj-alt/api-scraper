@@ -1,4 +1,9 @@
 import type { Page } from '@playwright/test';
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const postEngagement = require('../../server/post-engagement') as {
+  commentSummaryCount: (text: unknown) => number;
+  commentTotal: (captured: number, summary: number) => number;
+};
 
 /** รอโดยไม่ throw เมื่อแท็บ/Browser ถูกปิดระหว่างเก็บ Comment (กันหยุดทั้งงาน 142 โพสต์) */
 /** คอมเมนต์ 1 รายการที่อ่านจากหน้าโพสต์ (aria ใช้หาคอมเมนต์เดิมตอนตอบกลับ) */
@@ -422,8 +427,16 @@ export async function scrapeCommentsAndPhones(
           const lab = (el.getAttribute('aria-label') || '').trim();
           if (lab) labels.add(`${el.getAttribute('role') || el.tagName.toLowerCase()}: ${maskLabel(lab)}`);
         });
-      const rootText = (rootArticle as HTMLElement | null)?.innerText || '';
-      const summaryMatch = rootText.match(/([\d,.]+\s*[KMพัน]*)\s*(ความคิดเห็น|comments?)\b/i);
+      // ยอด "N ความคิดเห็น" ใต้โพสต์: อ่านทั้งบรรทัดในหน้าต่างโพสต์ (กล่องโพสต์แรกในหน้าต่างมักว่าง lines=0)
+      // เดิม `ความคิดเห็น\b` ไม่เคยตรงกับภาษาไทย — 231 รอบใน 5 วันอ่านยอดนี้ไม่ได้เลย (24 พ.ย. 2569)
+      const summaryRoot = (postDialog as HTMLElement | undefined) || (rootArticle as HTMLElement | null);
+      const SUMMARY_LINE =
+        /^(?:[\d][\d,.]*\s*(?:K|M|พัน|หมื่น)?\s*(?:comments?|ความคิดเห็น)|ความคิดเห็น\s*[\d][\d,.]*\s*(?:K|M|พัน|หมื่น)?\s*รายการ)$/i;
+      const summaryLine =
+        String(summaryRoot?.innerText || '')
+          .split('\n')
+          .map((l) => l.trim())
+          .find((l) => SUMMARY_LINE.test(l)) || null;
       // โครงกล่อง article แต่ละกล่อง: aria (ปิดชื่อ) · จำนวนบรรทัด · มีลิงก์คอมเมนต์ไหม
       const articleShapes = Array.from(document.querySelectorAll('[role="article"]'))
         .slice(0, 12)
@@ -435,7 +448,7 @@ export async function scrapeCommentsAndPhones(
       const diag = {
         articles: document.querySelectorAll('[role="article"]').length,
         labels: [...labels, ...articleShapes.map((a) => `article: ${a}`)],
-        summary: summaryMatch ? summaryMatch[0] : null,
+        summary: summaryLine,
         commentLinks: document.querySelectorAll('a[href*="comment_id="]').length,
       };
 
@@ -469,10 +482,12 @@ export async function scrapeCommentsAndPhones(
 
   // นับจากคอมเมนต์ที่จับได้ ถ้าจับไม่ได้ใช้ยอด "N ความคิดเห็น" ใต้โพสต์ ไม่งั้น 0 (ไม่เดาจากจำนวนกล่องบนหน้า)
   const diag = evaluated?.diag ?? { articles: n, labels: [], summary: null, commentLinks: 0 };
-  const summaryCount = diag.summary ? Number(String(diag.summary).replace(/[^\d]/g, '')) || 0 : 0;
+  const summaryCount = postEngagement.commentSummaryCount(diag.summary);
   const comments = Array.isArray(evaluated?.comments) ? evaluated.comments : [];
   // นับคอมเมนต์จากรายคนที่ไม่ซ้ำ (กล่องเดียวกันมีหลายชั้นที่ติด aria เดียวกัน เดิมนับซ้ำเป็น 2)
-  const commentCount = comments.length > 0 ? comments.length : commentBlocks.length > 0 ? commentBlocks.length : summaryCount;
+  // แล้วใช้ค่าที่มากกว่ากับยอดใต้โพสต์ — การตอบกลับที่ยังพับอยู่ Facebook นับรวม แต่จับรายคนไม่ได้
+  const captured = comments.length > 0 ? comments.length : commentBlocks.length;
+  const commentCount = postEngagement.commentTotal(captured, summaryCount);
   const { reactions, shares, labels: reactionLabels } = await readReactionsAndShares(page);
   if (reactionLabels.length) diag.labels = [...diag.labels, ...reactionLabels.map((l) => `react: ${l}`)];
   return { phones, commentCount, postBodyPhones, reactions, shares, comments, diag };

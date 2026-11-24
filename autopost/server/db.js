@@ -1524,6 +1524,55 @@ async function getPostLogsDueStatusCheck(userId, limit) {
   return rows.map((r) => String(r.id));
 }
 
+/**
+ * นับยอดโพสต์ที่เลยช่วงเก็บปกติ (3 วันล่าสุด) ซ้ำ (เจ้าของ 24 พ.ย. 2569)
+ * ตรวจทั้งระบบ: 363 จาก 404 โพสต์ไม่เคยถูกนับซ้ำหลังพ้น 3 วัน ยอดค้าง 62 โพสต์ต่ำกว่า Facebook
+ * กติกา: โพสต์อายุไม่เกิน 14 วัน นับวันละครั้ง · เกินนั้นสัปดาห์ละครั้ง · เฉพาะโพสต์ที่อนุมัติแล้วและมีลิงก์
+ * จดเวลาเข้าคิวไว้ (recount_queued_at) — โพสต์ที่เปิดไม่ได้ไม่ถูกหยิบซ้ำทุกรอบจนโพสต์อื่นไม่ได้คิว
+ */
+const RECOUNT_PER_USER = Math.max(0, Math.min(50, Number(process.env.RECOUNT_PER_USER ?? 15)));
+let recountColumnReady = false;
+
+async function ensureRecountColumn() {
+  if (recountColumnReady) return;
+  const { rows } = await query(
+    `SELECT 1 FROM information_schema.columns
+      WHERE table_schema = current_schema() AND table_name = 'post_logs' AND column_name = 'recount_queued_at'`,
+  );
+  if (!rows.length) await query(`ALTER TABLE post_logs ADD COLUMN IF NOT EXISTS recount_queued_at TIMESTAMPTZ`);
+  recountColumnReady = true;
+}
+
+/** SQL เงื่อนไข "ถึงรอบนับซ้ำ" — ใช้ร่วมกับเทสต์ ห้ามเขียนซ้ำที่อื่น */
+const RECOUNT_DUE_SQL = `
+  post_status = $2
+  AND NULLIF(TRIM(COALESCE(post_link, '')), '') IS NOT NULL
+  AND created_at < $3::date
+  AND GREATEST(COALESCE(last_collected_at, 'epoch'), COALESCE(recount_queued_at, 'epoch'))
+      < NOW() - CASE WHEN created_at > NOW() - INTERVAL '14 days' THEN INTERVAL '20 hours' ELSE INTERVAL '7 days' END`;
+
+/**
+ * โพสต์เก่าของบัญชีนี้ที่ถึงรอบนับซ้ำ (เก่ากว่า startDate = ไม่ซ้ำกับช่วงเก็บปกติ) แล้วจดเวลาเข้าคิว
+ * เรียงโพสต์ที่ไม่ได้นับนานสุดก่อน
+ */
+async function takePostLogsDueRecount(userId, startDate, limit = RECOUNT_PER_USER) {
+  const n = Math.max(0, Math.min(50, Number(limit) || 0));
+  if (!n || !/^\d{4}-\d{2}-\d{2}$/.test(String(startDate || ''))) return [];
+  await ensurePostLogsEngagementColumns();
+  await ensureRecountColumn();
+  const { rows } = await query(
+    `UPDATE post_logs SET recount_queued_at = NOW()
+      WHERE id IN (
+        SELECT id FROM post_logs
+         WHERE user_id = $1 AND ${RECOUNT_DUE_SQL}
+         ORDER BY GREATEST(COALESCE(last_collected_at, 'epoch'), COALESCE(recount_queued_at, 'epoch')), created_at DESC
+         LIMIT $4)
+      RETURNING id`,
+    [String(userId), contentStatus.STATUS_POSTED, String(startDate), n],
+  );
+  return rows.map((r) => String(r.id));
+}
+
 /** รายงานโพสต์: JOIN users + assignments (ผู้ทำ) + นับ total + แยกตามวัน/เจ้าของงาน */
 async function getPostReports(opts = {}) {
   const { start_date, end_date, owner, doer, department, limit = 8000 } = opts;
@@ -3234,6 +3283,10 @@ async function enqueueRecentCollectJobs({ start_date, end_date, requested_by = '
       // พ่วงโพสต์เก่าที่ยังรอดำเนินการ/หาไม่เจอ ไปเช็กแท็บในรอบเดียวกัน — ไม่เปิดรอบ Facebook ใหม่ให้บัญชีที่ไม่มีงานเก็บ
       const due = await getPostLogsDueStatusCheck(uid, STATUS_CHECK_PER_USER).catch(() => []);
       for (const id of due) if (!ids.includes(id)) ids.push(id);
+      // โพสต์ที่เลยช่วงเก็บปกติ: นับยอดซ้ำ (≤ 14 วันวันละครั้ง · เกินนั้นสัปดาห์ละครั้ง)
+      // พ่วงไปกับรอบที่บัญชีนี้มีอยู่แล้ว — บัญชีที่ไม่มีโพสต์ใหม่ (เช่น พักโพสต์) ไม่ถูกเปิด Facebook เพื่อนับยอดอย่างเดียว
+      const recount = await takePostLogsDueRecount(uid, start_date).catch(() => []);
+      for (const id of recount) if (!ids.includes(id)) ids.push(id);
       const row = await enqueueCollectRunJob({
         user_id: uid,
         post_log_ids: ids,
@@ -3498,6 +3551,8 @@ module.exports = {
   clearWrongPostLink,
   updatePostLogContentStatus,
   getPostLogsDueStatusCheck,
+  takePostLogsDueRecount,
+  RECOUNT_DUE_SQL,
   releaseOrphanedJobs,
   getFindLinkHints,
   postLinkUsedElsewhere,

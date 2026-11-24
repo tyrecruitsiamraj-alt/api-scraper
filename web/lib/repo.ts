@@ -5,7 +5,7 @@ import { normalizeGroupJobTypes } from './group-job-types';
 import type { GroupJobType } from './group-job-types';
 import { pool, q } from './db';
 import { getCandidateDuplicates } from './candidate-duplicates';
-import { postedOutcome } from '../../src/core/post-task-state.js';
+import { liveCounts, postedOutcome } from '../../src/core/post-task-state.js';
 import { TEXT_FIELDS } from '../../src/core/resume-fields.js';
 import { syncJarvisPostOrders } from '../../src/core/jarvis-post-sync.js';
 import { evaluateContentQuality, operatorFacingQuality, qualityFailureMessages } from '../../src/core/content-quality.js';
@@ -3966,9 +3966,7 @@ export async function listJarvisPostOrders(opts: { requestNos?: string[]; skipSy
         error: latest && latest.level !== 'success' ? latest.message : null,
         post_link: log?.post_link || null,
         approval: log?.post_status || null,
-        comments: log ? Number(log.comment_count ?? 0) : null,
-        reactions: log ? Number(log.reactions ?? 0) : null,
-        shares: log ? Number(log.shares ?? 0) : null,
+        ...liveCounts(log),
         collected_at: log?.last_collected_at ?? null,
       };
     });

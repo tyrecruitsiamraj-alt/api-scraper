@@ -134,3 +134,26 @@ test('a finished run reports approval and unconfirmed groups, not just success',
   assert.equal(counts.unconfirmed, 1);
   assert.equal(postTaskStage('completed', counts).label, 'เสร็จ · รออนุมัติ 1 · ยังไม่เจอในกลุ่ม 1');
 });
+
+test('โพสต์ที่ถูกลบ: ไม่โชว์ยอด (null) และยอดรวมไม่นับ', async () => {
+  const { buildPostTaskGroups, liveCounts, isPostRemoved } = await import('../src/core/post-task-state.js');
+  assert.equal(isPostRemoved('ถูกลบ'), true);
+  assert.equal(isPostRemoved('อนุมัติเเล้ว'), false);
+  assert.deepEqual(liveCounts({ post_status: 'ถูกลบ', comment_count: 3, reactions: 9873, shares: 1 }), { comments: null, reactions: null, shares: null });
+  assert.deepEqual(liveCounts({ post_status: 'อนุมัติเเล้ว', comment_count: '2', reactions: 5, shares: null }), { comments: 2, reactions: 5, shares: 0 });
+  assert.deepEqual(liveCounts(null), { comments: null, reactions: null, shares: null });
+  const { groups } = buildPostTaskGroups({
+    plan: [{ group_id: '111' }, { group_id: '222' }],
+    attempts: [
+      { group_id: '111', level: 'success', at: '2026-11-20T01:00:00Z' },
+      { group_id: '222', level: 'success', at: '2026-11-20T01:05:00Z' },
+    ],
+    postLogs: [
+      { group_id: '111', post_status: 'ถูกลบ', post_link: 'https://www.facebook.com/groups/111/posts/1/', reactions: 9873, comment_count: 0, shares: 0 },
+      { group_id: '222', post_status: 'อนุมัติเเล้ว', post_link: 'https://www.facebook.com/groups/222/posts/2/', reactions: 4, comment_count: 1, shares: 0 },
+    ],
+    runStatus: 'completed',
+  });
+  assert.equal(groups[0].reactions, null);
+  assert.equal(groups[1].reactions, 4);
+});
