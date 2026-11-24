@@ -34,6 +34,7 @@ import {
   touchRun,
   taskExternalIds,
   upsertCandidate,
+  connectorRevealedRecently,
   upsertSource,
   withTransaction,
 } from './db/repositories.js';
@@ -41,6 +42,9 @@ import {
 const COOLDOWN_MS = 2 * 60 * 60 * 1000; // 2h after a soft-ban
 // เว็บไม่เปิดเบอร์ผู้สมัครกี่คนติดกัน (โดยยังไม่เคยได้เบอร์ในรอบนี้) ถึงหยุดรอบ — ไม่เปิดโปรไฟล์ต่อให้เปลืองโควต้า
 const CONTACT_HIDDEN_STOP = envInt('CONTACT_HIDDEN_STOP', 3);
+// บัญชีเพิ่งเปิดเบอร์ได้ในรอบก่อน ๆ = บัญชียังใช้ได้ คนที่ไม่เปิดเบอร์เป็นรายคน → ข้ามไปเปิดคนถัดไป ไม่ล้มทั้งใบ
+// (24 พ.ย. 2569: OPL6909099/073/092 ล้มเพราะ 3 คนแรกไม่เปิดเบอร์ ทั้งที่ชั่วโมงเดียวกันบัญชีนี้ได้เบอร์คนอื่น)
+const CONTACT_HIDDEN_STOP_ALIVE = envInt('CONTACT_HIDDEN_STOP_ALIVE', 10);
 const CANDIDATE_TIMEOUT_MS = envInt('CANDIDATE_TIMEOUT_MS', 180_000); // skip hung resume fetches
 const LOGIN_TIMEOUT_MS = envInt('LOGIN_TIMEOUT_MS', 300_000); // browser login must finish within 5 min
 // Provider search can hang while its browser/page is technically alive. A DB
@@ -210,6 +214,9 @@ export async function runConnector(connector, criteria, runtime, opts = {}) {
 
     // ขอผลค้นให้เลยคนที่ task นี้เคยเก็บแล้ว เพื่อให้ retry วิ่งต่อไปหาคนใหม่
     // โดยไม่เปิด Resume เดิมซ้ำและไม่กิน daily cap โดยเปล่าประโยชน์.
+    const hiddenStopAt = (await connectorRevealedRecently(connector.id).catch(() => false))
+      ? CONTACT_HIDDEN_STOP_ALIVE
+      : CONTACT_HIDDEN_STOP;
     const priorExternalIds = new Set(
       opts.taskId ? await taskExternalIds(opts.taskId, connector.platform).catch(() => []) : [],
     );
@@ -381,9 +388,10 @@ export async function runConnector(connector, criteria, runtime, opts = {}) {
             contactHidden += 1;
             reasonCounts.contact_hidden = (reasonCounts.contact_hidden || 0) + 1;
             // 20 พ.ย. 2569: JobThai ตอบ Error แทนเบอร์ทุกคนตั้งแต่ 30 ต.ค. รอบหนึ่งเปิดไปถึง 51 โปรไฟล์โดยไม่ได้เบอร์สักคน
-            if (contactHidden >= CONTACT_HIDDEN_STOP && contactShown === 0) stopHiddenContacts = true;
+            if (contactHidden >= hiddenStopAt && contactShown === 0) stopHiddenContacts = true;
           } else if (!resumeContactGaps(parsed).length) {
             contactShown += 1;
+            reasonCounts.contact_shown = (reasonCounts.contact_shown || 0) + 1;
           }
         }
         // Qualified delivery must also have contact; otherwise demote — never ship blank ☎.

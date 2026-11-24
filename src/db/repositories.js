@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { query, withTransaction } from './pool.js';
 import { decryptSecret, encryptSecret } from './crypto.js';
+import { dropUnstorablePhone, isSitePhone } from '../core/candidate-phone.js';
 import { POSTER_TEMPLATE_ID, normalizePosterStandard } from '../core/poster-template.js';
 
 // ---------------------------------------------------------------------------
@@ -284,6 +285,22 @@ export async function taskCandidateStats(taskId) {
 }
 
 /** Platform resume IDs already counted for this task, so retries can search past them without reopening them. */
+/**
+ * บัญชีนี้เพิ่งเปิดเบอร์ผู้สมัครได้ (ภายใน 3 ชม.) — ใช้แยก "บัญชีเปิดเบอร์ไม่ได้ทั้งบัญชี" ออกจาก "ผู้สมัครบางคนไม่เปิดเบอร์"
+ * นับจาก scrape_runs.reason_counts.contact_shown ที่ตัวรันบันทึกทุกรอบ
+ */
+export async function connectorRevealedRecently(connectorId, hours = 3) {
+  if (!connectorId) return false;
+  const { rows } = await query(
+    `SELECT 1 FROM scrape_runs
+      WHERE connector_id = $1 AND started_at > now() - make_interval(hours => $2::int)
+        AND COALESCE((reason_counts->>'contact_shown')::int, 0) > 0
+      LIMIT 1`,
+    [connectorId, hours],
+  );
+  return rows.length > 0;
+}
+
 export async function taskExternalIds(taskId, platform) {
   if (!taskId) return [];
   const { rows } = await query(
@@ -551,6 +568,8 @@ async function candidatesWhere(where, params) {
  * overwrites non-empty text. Also replaces year-only work/education stubs.
  */
 export async function patchCandidateFromParsed(id, parsed) {
+  // ข้อความหน้าเรซูเม่ที่ไม่เปิดเบอร์มีเบอร์ call center ของเว็บ — ห้ามเติมเป็นเบอร์ผู้สมัคร (24 พ.ย. 2569)
+  parsed = await dropUnstorablePhone(query, id, parsed, SHARED_PHONE_MIN);
   const sets = [];
   const params = [id];
   for (const col of TEXT_COLS) {
@@ -611,6 +630,7 @@ export async function extractedTextForCandidate(candidateId) {
 
 /** Fill ONLY missing contact fields (never overwrite existing scraped values). */
 export async function fillCandidateContacts(id, { email, phone, line_id }) {
+  ({ phone } = await dropUnstorablePhone(query, id, { phone }, SHARED_PHONE_MIN));
   const sets = [];
   const params = [id];
   const add = (col, val, norm) => {
@@ -756,6 +776,7 @@ export function candidateDedupeKey({ phoneNorm, emailNorm, name, birthDate, sour
 }
 
 function buildRow(parsed, source) {
+  if (isSitePhone(parsed?.phone)) parsed = { ...parsed, phone: '' };
   const phoneNorm = String(parsed.phone ?? '').replace(/\D/g, '');
   const emailNorm = validEmail(parsed.email);
   const dedupeKey = candidateDedupeKey({ phoneNorm, emailNorm, name: parsed.name, birthDate: parsed.birth_date, source });

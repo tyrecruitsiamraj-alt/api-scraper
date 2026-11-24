@@ -7,6 +7,7 @@ import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { contactsFromText } from './contacts.js';
+import { dropUnstorablePhone } from './candidate-phone.js';
 import {
   applyThaiNameSplit,
   namePrefixNeedsFix,
@@ -207,6 +208,7 @@ function jsonbFillExpression(col, paramIndex) {
 }
 
 async function patchCandidateById(client, id, parsed) {
+  parsed = await dropUnstorablePhone((sql, params) => client.query(sql, params), id, parsed);
   const phoneNorm = String(parsed.phone ?? '').replace(/\D/g, '');
   const emailNorm = validEmail(parsed.email);
   const sets = [];

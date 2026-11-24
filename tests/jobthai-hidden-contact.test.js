@@ -50,6 +50,30 @@ test('เบอร์ที่รับเป็นของผู้สมั�
   assert.equal(rec.phone, '');
   assert.equal(rec.contact_hidden, true);
   const pipeline = fs.readFileSync(new URL('../src/pipeline.js', import.meta.url), 'utf8');
-  assert.match(pipeline, /if \(contactHidden >= CONTACT_HIDDEN_STOP && contactShown === 0\) stopHiddenContacts = true;/);
+  assert.match(pipeline, /if \(contactHidden >= hiddenStopAt && contactShown === 0\) stopHiddenContacts = true;/);
   assert.match(pipeline, /CONTACT_REVEAL_BLOCKED/);
+});
+
+// 24 พ.ย. 2569: หน้าเรซูเม่ตอนเบอร์ยังปิดมีข้อความ "ติดต่อเจ้าหน้าที่ 02-480-9999" ตัวเติมช่องที่ขาดหยิบไปเป็นเบอร์ผู้สมัคร
+// ผู้สมัคร 846 คนใน 2 วันได้เบอร์นี้ 151 คนอยู่ในรายชื่อผ่านเกณฑ์
+test('JobThai: เบอร์จากข้อความหน้าเรซูเม่รับเฉพาะมือถือ ทุกครั้งที่เติมช่องที่ขาด', () => {
+  const page = { name: 'สมชาย ใจดี', phone: '', raw_text: 'สมชาย ใจดี เพศ ชาย กรุณาติดต่อเจ้าหน้าที่ โทร 02-480-9999' };
+  assert.equal(jobthaiProvider.finalizeCandidateRecord({ ...page }).phone, '');
+  const revealed = jobthaiProvider.finalizeCandidateRecord({ ...page, phone: '0812345678' });
+  assert.equal(revealed.phone, '0812345678');
+});
+
+test('เปิดเบอร์ไม่ได้: ล้างเบอร์ที่ติดมาจากหน้าเรซูเม่ทิ้ง', async () => {
+  const request = { get: async () => ({ ok: () => true, text: async () => ERROR_REPLY }) };
+  const rec = await jobthaiProvider.enrichContacts(request, 'R1', { name: 'สมชาย', phone: '024809999', email: '' });
+  assert.equal(rec.phone, '');
+  assert.equal(rec.contact_hidden, true);
+});
+
+test('ล้มทั้งใบเฉพาะตอนบัญชีเปิดเบอร์ไม่ได้ทั้งบัญชี · บัญชีเพิ่งเปิดเบอร์ได้ = ข้ามคนที่ไม่เปิดไปคนถัดไป', () => {
+  const pipeline = fs.readFileSync(new URL('../src/pipeline.js', import.meta.url), 'utf8');
+  assert.match(pipeline, /connectorRevealedRecently\(connector\.id\)[\s\S]{0,80}\? CONTACT_HIDDEN_STOP_ALIVE[\s\S]{0,20}: CONTACT_HIDDEN_STOP/);
+  assert.match(pipeline, /reasonCounts\.contact_shown = \(reasonCounts\.contact_shown \|\| 0\) \+ 1/);
+  const repo = fs.readFileSync(new URL('../src/db/repositories.js', import.meta.url), 'utf8');
+  assert.match(repo, /reason_counts->>'contact_shown'/);
 });

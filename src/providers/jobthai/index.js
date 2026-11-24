@@ -23,6 +23,16 @@ export function isHiddenContactBlob(blob) {
 /** เบอร์มือถือไทย (06/08/09 + 8 หลัก หรือขึ้นต้น 66) — เบอร์บ้าน/เบอร์สำนักงานจากคำตอบของเว็บไม่ใช่เบอร์ผู้สมัคร */
 export const isThaiMobile = (digits) => /^(?:0|66)[689]\d{8}$/.test(String(digits || ''));
 
+/**
+ * เบอร์ของผู้สมัคร JobThai มาจากปุ่มเปิดเบอร์เท่านั้น — ข้อความหน้าเรซูเม่ตอนเบอร์ยังปิดมีเบอร์ call center ของเว็บ
+ * (ตัวอ่านข้อความหยิบเบอร์แรกที่เจอ) จึงเก็บจากหน้าได้เฉพาะเบอร์มือถือ (24 พ.ย. 2569)
+ */
+export function jobthaiPhoneFromRevealOnly(record) {
+  if (!record) return record;
+  if (!isThaiMobile(String(record.phone || '').replace(/\D/g, ''))) record.phone = '';
+  return record;
+}
+
 export const jobthaiProvider = {
   id: 'jobthai',
   label: 'JobThai',
@@ -32,9 +42,10 @@ export const jobthaiProvider = {
   fetchResumeHtml,
   resumeDetailUrl,
   parseResumeHtml(html, opts) {
-    return finalizeCandidateRecord(parseJobthaiResumeHtml(html, opts));
+    return jobthaiPhoneFromRevealOnly(finalizeCandidateRecord(parseJobthaiResumeHtml(html, opts)));
   },
-  finalizeCandidateRecord,
+  // ตัวรันเรียกซ้ำหลังเปิดเบอร์ — ตัวเติมช่องที่ขาดจากข้อความหน้าจะหยิบเบอร์ call center กลับมา ต้องกรองทุกครั้ง
+  finalizeCandidateRecord: (record) => jobthaiPhoneFromRevealOnly(finalizeCandidateRecord(record)),
   isResumeBodyComplete,
   collectAssetsForDb,
   externalId,
@@ -51,6 +62,7 @@ export const jobthaiProvider = {
     // contact_hidden = เว็บไม่ยอมเปิดข้อมูลติดต่อ (ให้ตัวรันนับ แล้วหยุดถ้าโดนติดกัน ไม่เปิดโปรไฟล์ต่อให้เปลืองโควต้า)
     if (isHiddenContactBlob(blob)) {
       record.contact_hidden = true;
+      if (!isThaiMobile(String(record.phone || '').replace(/\D/g, ''))) record.phone = '';
       return record;
     }
     const segs = blob.split('####').map((s) => s.trim()).filter(isReal);

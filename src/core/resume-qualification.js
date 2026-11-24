@@ -253,7 +253,7 @@ const REJECTION_LABEL = {
 };
 
 // โปรไฟล์/ไฟล์แนบไม่ครบไม่ใช่เหตุตัดแล้ว (เก็บเป็น "ต้องตรวจเพิ่ม") — ไม่นับเป็นเหตุ "ถูกคัดออก"
-const NOT_A_REJECTION = new Set(['duplicate', 'incomplete_profile', 'incomplete_attachments', 'missing_contact', 'off_role']);
+const NOT_A_REJECTION = new Set(['duplicate', 'incomplete_profile', 'incomplete_attachments', 'missing_contact', 'off_role', 'contact_shown']);
 
 export function summarizeRejections(found, opened, reasonCounts = {}, needsReview = 0) {
   const parts = Object.entries(reasonCounts)
