@@ -362,9 +362,41 @@ export function sectionBetween(text, startKw, endKws) {
   return text.slice(start + startKw.length, end);
 }
 
+const MOBILE_RE = /^(?:\+?66|0)[689]\d{8}$/;
+const EMAIL_RE = /^[^@\s]+@[^@\s]+\.[^@\s]{2,}$/;
+
 /**
- * Parse a JobThai resume detail page. Contacts are revealed separately
- * (enrichContacts → ajaxCheckViewStatusV2.php), not here.
+ * ข้อมูลติดต่อที่อยู่ในหน้าเรซูเม่แล้ว — เรซูเม่ที่บัญชีนี้ปลดล็อกเบอร์ไปแล้ว (isViewMobileStatus = 1)
+ * JobThai ใส่เบอร์/อีเมลไว้ในหน้าเลย (ป้าย #tagMobile_N / #tagMail_N / #tagLineID_N ตามด้วยค่า)
+ * และปุ่มเปิดเบอร์ (ajaxCheckViewStatusV2) ตอบ "Error####Error####Error" แทน
+ * 24 พ.ย. 2569: ผู้สมัคร 219 จาก 271 คนที่ "เปิดเบอร์ไม่ได้" เป็นแบบนี้ (สุ่มเปิดหน้าจริง 6/6 มีเบอร์ในหน้า)
+ * รับเฉพาะค่าที่หน้าตาเป็นมือถือ/อีเมลจริง — ตอนยังล็อกค่าในช่องเป็นตัวปิด (xxx) จึงไม่ติดมา
+ */
+export function pageContacts($) {
+  const valueAfter = (sel) => {
+    for (const el of $(sel).toArray()) {
+      const v = clean($(el).next().text());
+      if (v) return v;
+    }
+    return '';
+  };
+  const digits = (v) => String(v || '').replace(/\D/g, '');
+  const mobiles = $('[id^="tagMobile_"]').toArray().map((el) => digits($(el).next().text())).filter((d) => MOBILE_RE.test(d));
+  const emails = $('[id^="tagMail_"]').toArray().map((el) => clean($(el).next().text())).filter((e) => EMAIL_RE.test(e) && !/@example\.|x{4,}/i.test(e));
+  const line = valueAfter('[id^="tagLineID_"]');
+  const status = String($('#isViewMobileStatus').attr('value') ?? '').trim();
+  return {
+    phone: mobiles[0] || '',
+    email: emails[0] || '',
+    line_id: line && !/x{3,}|กรุณา|ดูข้อมูล/i.test(line) && !MOBILE_RE.test(digits(line)) ? line : '',
+    unlocked: status === '1',
+  };
+}
+
+/**
+ * Parse a JobThai resume detail page. Contacts come from the page when this account
+ * already unlocked them (pageContacts); otherwise they are revealed separately
+ * (enrichContacts → ajaxCheckViewStatusV2.php).
  */
 export function parseResumeHtml(html, { sourceUrl, index, focusPosition = '-' }) {
   const $ = cheerio.load(html);
@@ -444,11 +476,17 @@ export function parseResumeHtml(html, { sourceUrl, index, focusPosition = '-' })
 
   if (!rec.province && rec.desired_work_area) rec.province = rec.desired_work_area;
 
+  const contacts = pageContacts($);
+  if (contacts.phone) rec.phone = contacts.phone;
+  if (contacts.email) rec.email = contacts.email;
+  if (contacts.line_id) rec.line_id = contacts.line_id;
+
   return {
     index,
     scraped_at: new Date().toISOString(),
     focus_position: focusPosition,
     source: 'jobthai_api',
+    contact_unlocked: contacts.unlocked,
     platform: 'jobthai',
     source_url: sourceUrl,
     ...rec,

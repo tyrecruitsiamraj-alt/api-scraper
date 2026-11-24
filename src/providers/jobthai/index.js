@@ -57,6 +57,11 @@ export const jobthaiProvider = {
    * so we make a single request (not three) and split it.
    */
   async enrichContacts(request, id, record) {
+    // เรซูเม่ที่บัญชีนี้ปลดล็อกแล้ว เบอร์อยู่ในหน้าแล้ว (parser อ่านมา) — ไม่กดเปิดซ้ำ: JobThai ตอบ Error และเสียรอบเปล่า
+    if (isThaiMobile(String(record.phone || '').replace(/\D/g, ''))) {
+      if (record.name) record.parse_status = 'success';
+      return record;
+    }
     const blob = await revealContact(request, id, 'mobile');
     if (!blob) return record;
     // contact_hidden = เว็บไม่ยอมเปิดข้อมูลติดต่อ (ให้ตัวรันนับ แล้วหยุดถ้าโดนติดกัน ไม่เปิดโปรไฟล์ต่อให้เปลืองโควต้า)

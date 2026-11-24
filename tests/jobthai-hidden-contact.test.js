@@ -77,3 +77,32 @@ test('ล้มทั้งใบเฉพาะตอนบัญชีเป�
   const repo = fs.readFileSync(new URL('../src/db/repositories.js', import.meta.url), 'utf8');
   assert.match(repo, /reason_counts->>'contact_shown'/);
 });
+
+// 24 พ.ย. 2569: เรซูเม่ที่บัญชีปลดล็อกแล้ว เบอร์อยู่ในหน้า ปุ่มเปิดเบอร์ตอบ "Error####Error####Error"
+// (ตรวจหน้าจริงด้วยบัญชี LBA: สุ่ม 6 คนที่ "เปิดเบอร์ไม่ได้" มีเบอร์ในหน้าครบ 6) — โครงหน้าจำลอง ค่าเป็นของสมมติ
+const unlockedPage = (mobile, mail) => `<html><body>
+<input type="hidden" id="isViewMobileStatus" value="1">
+<div id="detailshow"><span class="head1 gray">ชื่อ</span><span class="head1 black">สมชาย</span>
+<span id="tagMail_2" class="head1 gray">Email</span><a class="searchjob blue">${mail}</a><br>
+<span id="tagMobile_2" class="head1 gray">Mobile</span><span class="head1 black">${mobile}</span><br>
+<span id="tagLineID_2" class="head1 gray">Line ID</span><span class="head1 black">somchai.line</span></div>
+<script>alert('กรุณาติดต่อเจ้าหน้าที่ โทร 02-480-9999');</script></body></html>`;
+
+test('เรซูเม่ที่ปลดล็อกแล้ว: อ่านเบอร์/อีเมลจากหน้า และไม่กดเปิดเบอร์ซ้ำ', async () => {
+  const rec = jobthaiProvider.parseResumeHtml(unlockedPage('081-234-5678', 'somchai.test@gmail.com'), { sourceUrl: 'https://www3.jobthai.com/resume/0,1.html', index: 1 });
+  assert.equal(rec.phone, '0812345678');
+  assert.equal(rec.email, 'somchai.test@gmail.com');
+  assert.equal(rec.contact_unlocked, true);
+  let called = 0;
+  const request = { get: async () => { called += 1; return { ok: () => true, text: async () => 'Error####Error####Error' }; } };
+  const out = await jobthaiProvider.enrichContacts(request, '1', rec);
+  assert.equal(called, 0);
+  assert.equal(out.phone, '0812345678');
+  assert.equal(out.contact_hidden, undefined);
+});
+
+test('เจ้าของเรซูเม่ปิดเบอร์: ไม่มีเบอร์ (ไม่หยิบเบอร์ call center) แต่ยังได้อีเมล', () => {
+  const rec = jobthaiProvider.parseResumeHtml(unlockedPage('เจ้าของเรซูเม่ปิดข้อมูลนี้', 'somying.test@gmail.com'), { sourceUrl: 'https://www3.jobthai.com/resume/0,2.html', index: 1 });
+  assert.equal(rec.phone, '');
+  assert.equal(rec.email, 'somying.test@gmail.com');
+});
