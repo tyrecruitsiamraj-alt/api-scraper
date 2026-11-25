@@ -7,6 +7,7 @@ import {
   hasUsefulWorkExperience,
 } from '../providers/jobbkk/parser.js';
 import { isRealEmail } from './candidate-email.js';
+import { splitThaiFullName } from './thai-name.js';
 
 function clean(value) {
   return value == null ? '' : String(value).replace(/\s+/g, ' ').trim();
@@ -48,12 +49,29 @@ export function resumeContactGaps(record = {}) {
   return gaps;
 }
 
+/** มีทั้งชื่อและนามสกุล (อ่านจากช่องแยก หรือแยกจากชื่อเต็ม) */
+export function hasFullName(record = {}) {
+  let first = clean(record.first_name);
+  let last = clean(record.last_name);
+  if (!first || !last) {
+    const split = splitThaiFullName(clean(record.name || record.full_name));
+    first = first || clean(split.first_name);
+    last = last || clean(split.last_name);
+  }
+  return Boolean(first && last);
+}
+
 /**
- * ไม่มีทั้งชื่อและเบอร์ = ติดต่อไม่ได้และเรียกไม่ถูก → เก็บเข้าคลังได้ แต่ไม่ใส่ในใบงาน (ไม่ส่ง Jarvis)
- * เจ้าของเลือก 23 พ.ย. 2569: คนที่ซ่อนชื่อบน JobThai ส่งเมื่อมีเบอร์
+ * คนที่จะเข้าใบงาน (และส่งให้ Jarvis) ต้องมีชื่อ นามสกุล และเบอร์หรืออีเมลจริงอย่างน้อยหนึ่งอย่าง
+ * ขาดข้อไหน = เก็บเข้าคลังอย่างเดียว ไม่ใส่ใบงาน — เจ้าของสั่ง 25 พ.ย. 2569
+ * (แทนกติกา 23 พ.ย. ที่ส่งคนซ่อนชื่อเมื่อมีเบอร์)
+ * @returns {string[]} ช่องที่ขาด: 'name' | 'contact' · ว่าง = เข้าใบงานได้
  */
-export function lacksNameAndPhone(record = {}) {
-  return !clean(record.name || record.full_name) && !clean(record.phone);
+export function taskEntryGaps(record = {}) {
+  const gaps = [];
+  if (!hasFullName(record)) gaps.push('name');
+  if (resumeContactGaps(record).length) gaps.push('contact');
+  return gaps;
 }
 
 /**

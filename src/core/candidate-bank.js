@@ -12,6 +12,7 @@
 import { query, withTransaction } from '../db/pool.js';
 import { linkCandidateToTask } from '../db/repositories.js';
 import { evaluateResumeQualification } from './resume-qualification.js';
+import { taskEntryGaps } from './resume-completeness.js';
 
 export const BANK_MATCH_LABEL = 'จากคลังผู้สมัคร';
 const SCAN_LIMIT = 400;
@@ -46,6 +47,8 @@ export function rankBankCandidates(rows, { criteria = {}, qualificationSpec = {}
   const ranked = [];
   for (const row of rows) {
     const candidate = { ...row, name: row.name || row.full_name };
+    // คลังก็ใช้กติกาเดียวกับคนที่เพิ่งค้น: ต้องมีชื่อ นามสกุล และเบอร์หรืออีเมลจริง (เจ้าของ 25 พ.ย. 2569)
+    if (taskEntryGaps(candidate).length) continue;
     const qualification = evaluateResumeQualification(candidate, { criteria, sourcingSpec: qualificationSpec });
     if (qualification.status !== 'qualified') continue;
     ranked.push({ row, qualification });

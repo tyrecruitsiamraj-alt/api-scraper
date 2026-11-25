@@ -9,7 +9,8 @@ import {
   isResumeAttachmentsComplete,
   isResumeBodyComplete,
   isResumeDeliveryComplete,
-  lacksNameAndPhone,
+  hasFullName,
+  taskEntryGaps,
   resumeAttachmentGaps,
   resumeBodyGaps,
   resumeContactGaps,
@@ -380,7 +381,8 @@ export async function runConnector(connector, criteria, runtime, opts = {}) {
         for (const reason of qualification.reasons) reasonCounts[reason] = (reasonCounts[reason] || 0) + 1;
 
         // เปิดเผยข้อมูลติดต่อสำหรับคนที่ผ่านหรือต้องตรวจเพิ่ม — คนที่ reject ไม่เสียโควตา.
-        if (['qualified', 'needs_review'].includes(qualification.status) && provider.enrichContacts) {
+        // ไม่มีชื่อ นามสกุล = ไม่เข้าใบงานอยู่แล้ว (taskEntryGaps) ไม่ต้องเสียโควต้าเปิดเบอร์ (เจ้าของ 25 พ.ย. 2569)
+        if (['qualified', 'needs_review'].includes(qualification.status) && provider.enrichContacts && hasFullName(parsed)) {
           await provider.enrichContacts(sess.request, id, parsed, runtime);
           const hidden = parsed.contact_hidden === true;
           if (provider.finalizeCandidateRecord) parsed = provider.finalizeCandidateRecord(parsed);
@@ -434,9 +436,10 @@ export async function runConnector(connector, criteria, runtime, opts = {}) {
           console.warn(`  ⚠ resume ${id}: ไฟล์แนบไม่ครบ (${attachmentGaps.join(',')}) — เก็บไว้ให้คนตรวจ`);
         }
         finalQualification = applyCompletenessGaps(finalQualification, { bodyGaps, attachmentGaps });
-        // ไม่มีทั้งชื่อและเบอร์ (เช่นซ่อนชื่อบน JobThai แล้วเว็บไม่เปิดเบอร์) — เก็บเข้าคลัง แต่ไม่ใส่ใบงาน
-        const keepOutOfTask = lacksNameAndPhone(parsed);
-        if (keepOutOfTask) reasonCounts.no_name_no_phone = (reasonCounts.no_name_no_phone || 0) + 1;
+        // เข้าใบงานได้ต้องมีชื่อ นามสกุล และเบอร์หรืออีเมลจริง — ขาดข้อไหนเก็บเข้าคลังอย่างเดียว (เจ้าของ 25 พ.ย. 2569)
+        const entryGaps = taskEntryGaps(parsed);
+        const keepOutOfTask = entryGaps.length > 0;
+        for (const gap of entryGaps) reasonCounts[`not_in_task:${gap}`] = (reasonCounts[`not_in_task:${gap}`] || 0) + 1;
 
         const { isNew, taskLink } = await withTransaction(async (client) => {
           const cand = await upsertCandidate(client, parsed, { platform: connector.platform, externalId: provider.externalId(url) });
@@ -468,7 +471,7 @@ export async function runConnector(connector, criteria, runtime, opts = {}) {
         else updatedCount += 1;
         if (!taskLink) {
           filteredOut += 1;
-          console.log(`  [${id}] ไม่มีทั้งชื่อและเบอร์ — เก็บเข้าคลัง ไม่ใส่ใบงาน`);
+          console.log(`  [${id}] ขาด${entryGaps.map((g) => (g === 'name' ? 'ชื่อ นามสกุล' : 'เบอร์และอีเมล')).join(' และ ')} — เก็บเข้าคลัง ไม่ใส่ใบงาน`);
           return;
         }
         if (finalQualification.status === 'qualified') qualified += 1;

@@ -15,12 +15,12 @@ test('คนในคลังที่ตกเพศ อายุ จังห
   const qualificationSpec = { accepted_positions: ['พนักงานขับรถ'] };
   const base = { gender: 'ชาย', age: '30', desired_work_area: 'กรุงเทพมหานคร' };
   const rows = [
-    { id: 'old-driver', full_name: 'ก', desired_positions: 'พนักงานขับรถ', last_seen_at: '2026-09-01', ...base },
-    { id: 'new-driver', full_name: 'ข', desired_positions: 'พนักงานขับรถ', last_seen_at: '2026-11-01', ...base },
-    { id: 'helper', full_name: 'ค', desired_positions: 'พนักงานส่งของ', work_experience: [{ position: 'ขับรถส่งของ' }], last_seen_at: '2026-11-03', ...base },
-    { id: 'woman', full_name: 'ง', desired_positions: 'พนักงานขับรถ', ...base, gender: 'หญิง' },
-    { id: 'too-old', full_name: 'จ', desired_positions: 'พนักงานขับรถ', ...base, age: '52' },
-    { id: 'chiangmai', full_name: 'ฉ', desired_positions: 'พนักงานขับรถ', ...base, desired_work_area: 'เชียงใหม่' },
+    { id: 'old-driver', full_name: 'สมชาย ใจดี', phone: '0812345678', desired_positions: 'พนักงานขับรถ', last_seen_at: '2026-09-01', ...base },
+    { id: 'new-driver', full_name: 'สมศักดิ์ รักงาน', phone: '0812345678', desired_positions: 'พนักงานขับรถ', last_seen_at: '2026-11-01', ...base },
+    { id: 'helper', full_name: 'สมปอง ขยัน', phone: '0812345678', desired_positions: 'พนักงานส่งของ', work_experience: [{ position: 'ขับรถส่งของ' }], last_seen_at: '2026-11-03', ...base },
+    { id: 'woman', full_name: 'สมหญิง ใจงาม', phone: '0812345678', desired_positions: 'พนักงานขับรถ', ...base, gender: 'หญิง' },
+    { id: 'too-old', full_name: 'สมบัติ มีสุข', phone: '0812345678', desired_positions: 'พนักงานขับรถ', ...base, age: '52' },
+    { id: 'chiangmai', full_name: 'สมพร ดีเลิศ', phone: '0812345678', desired_positions: 'พนักงานขับรถ', ...base, desired_work_area: 'เชียงใหม่' },
   ];
   const ranked = rankBankCandidates(rows, { criteria, qualificationSpec, limit: 10 });
   assert.deepEqual(ranked.map((r) => r.row.id), ['new-driver', 'old-driver', 'helper']);
@@ -28,7 +28,7 @@ test('คนในคลังที่ตกเพศ อายุ จังห
 });
 
 test('ผูกไม่เกินจำนวนที่ขอ', () => {
-  const rows = Array.from({ length: 8 }, (_, i) => ({ id: String(i), full_name: `คน ${i}`, desired_positions: 'ธุรการ' }));
+  const rows = Array.from({ length: 8 }, (_, i) => ({ id: String(i), full_name: `คน ที่${i}`, phone: '0812345678', desired_positions: 'ธุรการ' }));
   assert.equal(rankBankCandidates(rows, { qualificationSpec: { accepted_positions: ['ธุรการ'] }, limit: 3 }).length, 3);
 });
 
