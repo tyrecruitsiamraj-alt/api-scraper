@@ -42,7 +42,7 @@ import { measureCampaign } from '../src/core/orchestrator-measure.js';
 import { processResumeBatch } from '../src/db/resume-uploads.js';
 import { sendAlert } from '../src/core/alert.js';
 import { CLOSE_JARVIS_SCRAPE_SQL, FINISHED_JARVIS_SCRAPES_SQL, REJECT_JARVIS_SCRAPE_SQL, WAIT_JARVIS_SCRAPE_SQL, rejectJarvisScrapeParams, scrapeOutcome } from '../src/core/jarvis-scrape-status.js';
-import { classifyScrapeTaskResult, cooldownError, requireSuccessfulScrapeTaskResult } from '../src/core/scrape-task-result.js';
+import { classifyScrapeTaskResult, cooldownError, isNetworkError, networkRetryAt, offlineWaitExpired, requireSuccessfulScrapeTaskResult } from '../src/core/scrape-task-result.js';
 import { imageGenerationCapability } from '../src/core/ai-image.js';
 import { scraperSlotLockName } from '../src/core/worker-selection.js';
 
@@ -551,8 +551,11 @@ async function runOne() {
     if (job.type === 'scrape') await completeJarvisScrapes();
   } catch (e) {
     const errMsg = String(e?.message ?? e).slice(0, 1500);
-    const retryAt = e?.retryAt instanceof Date && !Number.isNaN(e.retryAt.getTime()) ? e.retryAt : null;
-    const waiting = e?.waiting === true && Boolean(retryAt);
+    // เครื่องเข้าเว็บไม่ได้ (ทุกชนิดงาน เช่น ดึงเบอร์คืน): รอคิวลองใหม่ทุก 30 นาทีจนครบ 3 วัน ไม่ใช้รอบลองใหม่ 3 รอบจนตีกลับ
+    const offline = (e?.offline === true || isNetworkError(errMsg)) && !offlineWaitExpired(job.created_at);
+    const thrownAt = e?.retryAt instanceof Date && !Number.isNaN(e.retryAt.getTime()) ? e.retryAt : null;
+    const retryAt = thrownAt ?? (offline ? networkRetryAt() : null);
+    const waiting = Boolean(retryAt) && (offline || (e?.waiting === true && e?.offline !== true));
     const retrying = await retryOrFail(job, errMsg, retryAt, { waiting });
     console.error(`  ✗ ${waiting ? 'waiting for quota' : retrying ? 'retry scheduled' : 'error'}: ${e?.message ?? e}`);
     // แจ้งเตือนทันทีที่งานพัง (fail-soft — ไม่มี ALERT_WEBHOOK_URL = เงียบ)

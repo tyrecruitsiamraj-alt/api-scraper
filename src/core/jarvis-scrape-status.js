@@ -64,6 +64,9 @@ export function scrapeFailNote(error) {
     return 'เว็บหางานขอยืนยันตัวตน ต้องให้คนเข้าไปตรวจบัญชีก่อน';
   }
   if (raw.includes('รหัสผ่านไม่ถูกต้อง') || lower.includes('wrong password')) return 'รหัสบัญชีเว็บหางานไม่ถูกต้อง';
+  if (raw.includes('เครื่องค้นหาเข้าเว็บหางานไม่ได้') || /net::err_(cert|ssl|name_not|internet_disc|connection|timed_out|proxy|address_unr|tunnel|network)/.test(lower)) {
+    return 'เครื่องค้นหาเข้าเว็บหางานไม่ได้ติดกันเกิน 3 วัน ต้องให้ IT ตรวจอินเทอร์เน็ตของเครื่องค้นหา';
+  }
   if (lower.includes('daily cap reached') || lower.includes('provider daily cap')) return 'โควต้าค้นหาวันนี้เต็มแล้ว';
   if (raw.includes('CONTACT_REVEAL_BLOCKED')) return 'เว็บหางานไม่เปิดเบอร์ผู้สมัคร ต้องให้คนตรวจบัญชีและแพ็กเกจดูเบอร์ของเว็บหางานก่อน';
   if (lower.includes('locator.click') || lower.includes('timeout')) return 'กดช่องค้นหาบนเว็บหางานไม่สำเร็จ';

@@ -43,6 +43,7 @@ import { resolveSearchIdentityFromDescription } from '../web/lib/scrape-intake.j
 import { filterZeroYieldExpansionTerms } from './core/scrape-failure-learning.js';
 import { isZeroYieldRound, zeroYieldNote } from './core/zero-yield.js';
 import { bankLimit, matchBankCandidates, webSearchTarget } from './core/candidate-bank.js';
+import { isNetworkError, networkRetryAt } from './core/scrape-task-result.js';
 
 /**
  * Tasks worker — runs queued/due tasks as a full auto pipeline with live phases:
@@ -332,6 +333,14 @@ export async function runTask(t, runtime) {
     await finishTask(t.id, { status: 'queued', phase: 'idle', runId: r.runId, error });
     console.log(`  ${t.name}: ${error}`);
     return { status: 'error', runStatus: 'cooldown', waitReason: 'daily_cap', cooldownUntil: r.cooldownUntil, error, runId: r.runId, taskId: t.id };
+  }
+  // เครื่องเข้าเว็บหางานไม่ได้ = รอคิว ลองใหม่เอง ไม่ใช่ใบขอผิด (ดู isNetworkError)
+  if (r.status === 'failed' && isNetworkError(r.error)) {
+    const retryAt = networkRetryAt();
+    const error = `รอคิว: เครื่องค้นหาเข้าเว็บหางานไม่ได้ จะลองใหม่เอง ${bangkokTime(retryAt.toISOString())}`;
+    await finishTask(t.id, { status: 'queued', phase: 'idle', runId: r.runId, error });
+    console.log(`  ${t.name}: ${error} (${String(r.error).split('\n')[0].slice(0, 120)})`);
+    return { status: 'error', runStatus: 'offline', cooldownUntil: retryAt.toISOString(), error, runId: r.runId, taskId: t.id };
   }
   if (r.status === 'failed' || r.status === 'cooldown') {
     const until = r.status === 'cooldown' && r.cooldownUntil ? bangkokTime(r.cooldownUntil) : null;

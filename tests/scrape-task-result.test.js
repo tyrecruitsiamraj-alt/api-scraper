@@ -1,7 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import { classifyScrapeTaskResult, dailyRemaining, nextQuotaReset, requireSuccessfulScrapeTaskResult } from '../src/core/scrape-task-result.js';
+import { classifyScrapeTaskResult, dailyRemaining, isNetworkError, networkRetryAt, nextQuotaReset, offlineWaitExpired, requireSuccessfulScrapeTaskResult } from '../src/core/scrape-task-result.js';
+import { scrapeFailNote } from '../src/core/jarvis-scrape-status.js';
 
 test('queue accepts a completed or partial scrape task result', () => {
   const done = { status: 'done', matchedTotal: 15, target: 15 };
@@ -89,4 +90,39 @@ test('the quota-tab limit is the real daily limit; the account limit only applie
     dailyRemaining({ connectorCap: 200, connectorToday: 150, providerCap: null, platformToday: 0 }),
     { remaining: 50, cap: 200, used: 150, by: 'connector' },
   );
+});
+
+// ข้อความจริงจากเครื่อง RM009 คืน 25 พ.ย. 2569
+const CERT_ERROR = 'page.goto: net::ERR_CERT_AUTHORITY_INVALID at https://auth.jobthai.com/companies/login?client_id=x&response_type=code\nCall log:\n  - navigating to "https://auth.jobthai.com/companies/login", waiting until "domcontentloaded"';
+
+test('เครื่องเข้าเว็บไม่ได้ = ปัญหาเน็ต ไม่ใช่ใบขอผิด', () => {
+  assert.equal(isNetworkError(CERT_ERROR), true);
+  assert.equal(isNetworkError('page.goto: net::ERR_CERT_AUTHORITY_INVALID at https://www.facebook.com/'), true);
+  assert.equal(isNetworkError('page.goto: net::ERR_NAME_NOT_RESOLVED at https://www.jobthai.com/'), true);
+  assert.equal(isNetworkError('page.goto: net::ERR_INTERNET_DISCONNECTED'), true);
+  assert.equal(isNetworkError('locator.click: Timeout 15000ms exceeded'), false);
+  assert.equal(isNetworkError('CONTACT_REVEAL_BLOCKED: JobThai-LBA ไม่เปิดเบอร์'), false);
+  assert.equal(isNetworkError('รหัสผ่านไม่ถูกต้อง'), false);
+});
+
+test('งานที่เข้าเว็บไม่ได้ รอคิวลองใหม่ ไม่ตีกลับ', () => {
+  const retryAt = networkRetryAt(Date.parse('2026-11-25T00:05:00+07:00'));
+  assert.equal(retryAt.toISOString(), '2026-11-24T17:35:00.000Z');
+  const result = { status: 'error', runStatus: 'offline', cooldownUntil: retryAt.toISOString(), error: 'รอคิว: เครื่องค้นหาเข้าเว็บหางานไม่ได้ จะลองใหม่เอง 25 พ.ย. 00:35' };
+  assert.throws(() => requireSuccessfulScrapeTaskResult(result), (e) => {
+    assert.equal(e.waiting, true);
+    assert.equal(e.offline, true);
+    assert.equal(e.retryAt.toISOString(), retryAt.toISOString());
+    return true;
+  });
+});
+
+test('รอเน็ตได้ไม่เกิน 3 วัน แล้วตีกลับพร้อมเหตุที่คนอ่านรู้เรื่อง', () => {
+  const now = Date.parse('2026-11-25T08:00:00+07:00');
+  assert.equal(offlineWaitExpired('2026-11-24T23:00:00+07:00', now), false);
+  assert.equal(offlineWaitExpired('2026-11-21T23:00:00+07:00', now), true);
+  assert.equal(offlineWaitExpired(null, now), false);
+  const note = scrapeFailNote(CERT_ERROR);
+  assert.match(note, /เครื่องค้นหาเข้าเว็บหางานไม่ได้/);
+  assert.doesNotMatch(note, /ERR_|page\.goto/);
 });
