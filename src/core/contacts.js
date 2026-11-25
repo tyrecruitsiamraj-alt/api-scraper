@@ -3,6 +3,7 @@
  * fields the source site hides (e.g. email on a gated JobBKK view). Shared by
  * tasks-worker.js so tests exercise the exact production logic.
  */
+import { isPlaceholderEmail } from './candidate-email.js';
 
 /**
  * Strict LINE-id extraction. A loose /line/ match grabs the word "Line" out of
@@ -33,7 +34,7 @@ export function contactsFromText(text) {
   const email = (t.match(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/) || [])[0] || '';
   const phoneRaw = (t.match(/\b0\d[\d -]{7,11}\d\b/) || [])[0] || '';
   return {
-    email: /@jobbkk\.com$/i.test(email) ? '' : email,
+    email: /@jobbkk\.com$/i.test(email) || isPlaceholderEmail(email) ? '' : email,
     phone: phoneRaw.replace(/[ -]/g, ''),
     line_id: extractLineId(t),
   };

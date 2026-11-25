@@ -4,6 +4,7 @@ import { externalId, parseResumeHtml as parseJobthaiResumeHtml } from './parser.
 import { finalizeCandidateRecord } from '../jobbkk/parser.js';
 import { isResumeBodyComplete } from '../../core/resume-completeness.js';
 import { collectAssetsForDb } from './assets.js';
+import { isRealEmail } from '../../core/candidate-email.js';
 
 const isReal = (v) => v && !/x{3,}|click|กรุณา|ดูข้อมูล/i.test(v);
 
@@ -72,7 +73,7 @@ export const jobthaiProvider = {
     }
     const segs = blob.split('####').map((s) => s.trim()).filter(isReal);
     const phone = segs.find((s) => /^\+?\d[\d\s-]{7,}$/.test(s) && isThaiMobile(s.replace(/\D/g, '')));
-    const email = segs.find((s) => /^[^@\s]+@[^@\s]+\.[^@\s]{2,}$/.test(s));
+    const email = segs.find((s) => isRealEmail(s));
     // line id: a non-numeric token that isn't phone/email (exclude internal codes like "20.225", "1618")
     const line = segs.find((s) => s !== phone && s !== email && !/^\d+(\.\d+)?$/.test(s) && !/^\+?\d[\d\s-]{7,}$/.test(s));
     if (phone) record.phone = phone.replace(/\D/g, '');

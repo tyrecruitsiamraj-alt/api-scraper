@@ -24,7 +24,7 @@ test('fillMissingFromRawText recovers profile fields from collapsed JobBKK text'
   };
   fillMissingFromRawText(record, [
     'เพศ : ชาย อายุ 28 ปี ที่อยู่ปัจจุบัน กรุงเทพมหานคร 10240',
-    'เบอร์โทรศัพท์ 0812345678 อีเมล test.user@example.com',
+    'เบอร์โทรศัพท์ 0812345678 อีเมล test.user@gmail.com',
     'งานที่ต้องการ ตำแหน่ง : พนักงานขับรถ พื้นที่ที่ต้องการทำงาน : นนทบุรี',
     'เงินเดือนที่ต้องการ 18000 ประวัติการศึกษา มหาวิทยาลัยตัวอย่าง วุฒิการศึกษา ปริญญาตรี',
     'ประวัติการทำงาน บริษัท ตัวอย่าง จำกัด ตำแหน่งงาน พนักงานขับรถ Soft Skills',
@@ -33,7 +33,7 @@ test('fillMissingFromRawText recovers profile fields from collapsed JobBKK text'
   assert.equal(record.gender, 'ชาย');
   assert.equal(record.age, '28');
   assert.match(record.phone, /0812345678/);
-  assert.equal(record.email, 'test.user@example.com');
+  assert.equal(record.email, 'test.user@gmail.com');
   assert.match(record.desired_positions, /พนักงานขับรถ/);
   assert.equal(record.expected_salary, '18000');
   assert.match(record.education_summary, /ปริญญาตรี/);
@@ -95,7 +95,7 @@ test('finalizeCandidateRecord repairs blank arrays from raw_text and sets parse_
     work_experience: null,
     raw_text: [
       'เพศ : ชาย อายุ 25 ปี ที่อยู่ปัจจุบัน นนทบุรี 11000',
-      'เบอร์โทรศัพท์ 0833333333 อีเมล repair@example.com',
+      'เบอร์โทรศัพท์ 0833333333 อีเมล repair@gmail.com',
       'ประวัติการศึกษา วิทยาลัยเทคนิคตัวอย่าง ปวส. สาขาช่างยนต์',
       'ประวัติการทำงาน บริษัท บี จำกัด ตำแหน่งงาน ช่างยนต์ Soft Skills',
     ].join(' '),
@@ -103,7 +103,7 @@ test('finalizeCandidateRecord repairs blank arrays from raw_text and sets parse_
   assert.equal(repaired.gender, 'ชาย');
   assert.equal(repaired.age, '25');
   assert.match(repaired.phone, /0833333333/);
-  assert.equal(repaired.email, 'repair@example.com');
+  assert.equal(repaired.email, 'repair@gmail.com');
   assert.ok(Array.isArray(repaired.education));
   assert.ok(repaired.education.length >= 1);
   assert.ok(Array.isArray(repaired.work_experience));
@@ -118,7 +118,7 @@ test('preview_new HTML parser fills gender/age/education before returning', () =
       <div class="header-name">
         <h5>ที่อยู่ปัจจุบัน</h5><p>นนทบุรี 11000</p>
         <h5>เบอร์โทรศัพท์</h5><p>0822222222</p>
-        <h5>อีเมล</h5><p>demo@example.com</p>
+        <h5>อีเมล</h5><p>demo@gmail.com</p>
         <h5>เพศ</h5><p>หญิง</p>
         <h5>อายุ</h5><p>30 ปี</p>
       </div>
@@ -138,7 +138,7 @@ test('preview_new HTML parser fills gender/age/education before returning', () =
   assert.equal(parsed.gender, 'หญิง');
   assert.equal(parsed.age, '30');
   assert.equal(parsed.phone, '0822222222');
-  assert.equal(parsed.email, 'demo@example.com');
+  assert.equal(parsed.email, 'demo@gmail.com');
   assert.equal(parsed.education[0].degree, 'ปริญญาตรี');
   assert.equal(parsed.work_experience[0].position, 'เจ้าหน้าที่บัญชี');
   assert.equal(parsed.parse_status, 'success');

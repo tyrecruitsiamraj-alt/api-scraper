@@ -1,5 +1,6 @@
 import * as cheerio from 'cheerio';
 import { extractLineId, validLineId } from '../../core/contacts.js';
+import { isPlaceholderEmail } from '../../core/candidate-email.js';
 import { pickJobbkkProfileImageUrl } from '../../core/profile-photo.js';
 import { applyThaiNameSplit, splitThaiFullName } from '../../core/thai-name.js';
 
@@ -38,7 +39,7 @@ function isSitePhone(p) {
   return SITE_PHONE_BLACKLIST.has(String(p ?? '').replace(/\D/g, ''));
 }
 function isSiteEmail(e) {
-  return SITE_EMAIL_BLACKLIST.has(String(e ?? '').trim().toLowerCase());
+  return SITE_EMAIL_BLACKLIST.has(String(e ?? '').trim().toLowerCase()) || isPlaceholderEmail(e);
 }
 
 /**

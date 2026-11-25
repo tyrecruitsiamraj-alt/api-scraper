@@ -6,6 +6,7 @@ import {
   hasUsefulEducation,
   hasUsefulWorkExperience,
 } from '../providers/jobbkk/parser.js';
+import { isRealEmail } from './candidate-email.js';
 
 function clean(value) {
   return value == null ? '' : String(value).replace(/\s+/g, ' ').trim();
@@ -42,7 +43,8 @@ export function resumeBodyGaps(record = {}) {
 
 export function resumeContactGaps(record = {}) {
   const gaps = [];
-  if (!clean(record.phone) && !clean(record.email)) gaps.push('contact');
+  // อีเมลตัวอย่างของเว็บ (@example.com) ไม่นับเป็นช่องทางติดต่อ (25 พ.ย. 2569)
+  if (!clean(record.phone) && !isRealEmail(record.email)) gaps.push('contact');
   return gaps;
 }
 

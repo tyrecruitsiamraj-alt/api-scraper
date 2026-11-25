@@ -8,6 +8,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { contactsFromText } from './contacts.js';
 import { dropUnstorablePhone } from './candidate-phone.js';
+import { dropUnstorableEmail, isPlaceholderEmail } from './candidate-email.js';
 import {
   applyThaiNameSplit,
   namePrefixNeedsFix,
@@ -109,6 +110,7 @@ export function isJunkText(value) {
 
 function validEmail(value) {
   const email = String(value ?? '').trim().toLowerCase();
+  if (isPlaceholderEmail(email)) return '';
   return /^[^@\s]+@[^@\s]+\.[^\s@]{2,}$/.test(email) ? email : '';
 }
 
@@ -209,6 +211,7 @@ function jsonbFillExpression(col, paramIndex) {
 
 async function patchCandidateById(client, id, parsed) {
   parsed = await dropUnstorablePhone((sql, params) => client.query(sql, params), id, parsed);
+  parsed = dropUnstorableEmail(parsed);
   const phoneNorm = String(parsed.phone ?? '').replace(/\D/g, '');
   const emailNorm = validEmail(parsed.email);
   const sets = [];

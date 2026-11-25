@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { query, withTransaction } from './pool.js';
 import { decryptSecret, encryptSecret } from './crypto.js';
 import { dropUnstorablePhone, isSitePhone } from '../core/candidate-phone.js';
+import { dropUnstorableEmail, isPlaceholderEmail } from '../core/candidate-email.js';
 import { POSTER_TEMPLATE_ID, normalizePosterStandard } from '../core/poster-template.js';
 
 // ---------------------------------------------------------------------------
@@ -570,6 +571,8 @@ async function candidatesWhere(where, params) {
 export async function patchCandidateFromParsed(id, parsed) {
   // ข้อความหน้าเรซูเม่ที่ไม่เปิดเบอร์มีเบอร์ call center ของเว็บ — ห้ามเติมเป็นเบอร์ผู้สมัคร (24 พ.ย. 2569)
   parsed = await dropUnstorablePhone(query, id, parsed, SHARED_PHONE_MIN);
+  // อีเมลตัวอย่างของเว็บ (@example.com) ห้ามเติมเป็นอีเมลผู้สมัคร (25 พ.ย. 2569)
+  parsed = dropUnstorableEmail(parsed);
   const sets = [];
   const params = [id];
   for (const col of TEXT_COLS) {
@@ -631,6 +634,7 @@ export async function extractedTextForCandidate(candidateId) {
 /** Fill ONLY missing contact fields (never overwrite existing scraped values). */
 export async function fillCandidateContacts(id, { email, phone, line_id }) {
   ({ phone } = await dropUnstorablePhone(query, id, { phone }, SHARED_PHONE_MIN));
+  ({ email } = dropUnstorableEmail({ email }));
   const sets = [];
   const params = [id];
   const add = (col, val, norm) => {
@@ -737,7 +741,7 @@ export function stringifyForJsonb(value) {
 function validEmail(v) {
   const e = String(v ?? '').trim().toLowerCase();
   // อีเมลตัวอย่างที่เว็บใส่แทนตอนปิดข้อมูลติดต่อ ไม่ใช่ของผู้สมัคร
-  if (/@example\.(com|org|net)$/.test(e)) return '';
+  if (isPlaceholderEmail(e)) return '';
   return /^[^@\s]+@[^@\s]+\.[^@\s]{2,}$/.test(e) ? e : '';
 }
 
@@ -777,6 +781,7 @@ export function candidateDedupeKey({ phoneNorm, emailNorm, name, birthDate, sour
 
 function buildRow(parsed, source) {
   if (isSitePhone(parsed?.phone)) parsed = { ...parsed, phone: '' };
+  parsed = dropUnstorableEmail(parsed);
   const phoneNorm = String(parsed.phone ?? '').replace(/\D/g, '');
   const emailNorm = validEmail(parsed.email);
   const dedupeKey = candidateDedupeKey({ phoneNorm, emailNorm, name: parsed.name, birthDate: parsed.birth_date, source });

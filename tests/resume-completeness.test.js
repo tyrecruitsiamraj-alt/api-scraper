@@ -19,7 +19,7 @@ function completeBody(overrides = {}) {
     education: [{ institution: 'มหาวิทยาลัยตัวอย่าง', degree: 'ปริญญาตรี' }],
     work_experience: [{ company: 'บริษัท เอ', position: 'พนักงานขับรถ' }],
     phone: '0812345678',
-    email: 'ok@example.com',
+    email: 'ok@gmail.com',
     attachments: [{ title: 'resume.pdf', source_url: 'https://www.jobbkk.com/resumes/download_attach/1' }],
     profile_image_url: 'https://cdn.jobbkk.com/resume/face/example.jpg',
     ...overrides,

@@ -59,7 +59,7 @@ test('repairIncompleteCandidates fills blank fields from raw_text without invent
     platform: 'jobbkk',
     raw_text: [
       'เพศ : ชาย อายุ 27 ปี ที่อยู่ปัจจุบัน นนทบุรี 11000',
-      'เบอร์โทรศัพท์ 0844444444 อีเมล oldfix@example.com',
+      'เบอร์โทรศัพท์ 0844444444 อีเมล oldfix@gmail.com',
       'งานที่ต้องการ ตำแหน่ง : พนักงานขับรถ พื้นที่ที่ต้องการทำงาน : นนทบุรี',
       'เงินเดือนที่ต้องการ 17000',
       'ประวัติการศึกษา มหาวิทยาลัยตัวอย่าง ปริญญาตรี',
@@ -89,7 +89,7 @@ test('repairIncompleteCandidates fills blank fields from raw_text without invent
   assert.ok(result.filledFields >= 4);
   assert.ok(updated, 'expected candidate UPDATE');
   assert.match(String(updated.params.join(' ')), /0844444444/);
-  assert.match(String(updated.params.join(' ')), /oldfix@example.com/);
+  assert.match(String(updated.params.join(' ')), /oldfix@gmail.com/);
   assert.match(String(updated.params.join(' ')), /ปริญญาตรี/);
 });
 
@@ -98,7 +98,7 @@ test('repairIncompleteCandidates replaces year-only work stubs', async () => {
     id: '22222222-2222-2222-2222-222222222222',
     full_name: 'นายปีอย่างเดียว',
     phone: '0811111111',
-    email: 'year@example.com',
+    email: 'year@gmail.com',
     gender: 'ชาย',
     age: '30',
     address: 'นนทบุรี',
@@ -150,7 +150,7 @@ test('repairIncompleteCandidates replaces junk province quote from address', asy
     full_name: 'นายจังหวัด',
     prefix: 'นาย',
     phone: '0811111111',
-    email: 'p@example.com',
+    email: 'p@gmail.com',
     gender: 'ชาย',
     age: '30',
     address: '99 ถนนทดสอบ กรุงเทพมหานคร 10110',
@@ -212,7 +212,7 @@ test('repairIncompleteCandidates fills gender from prefix and contacts from OCR'
     language_skills: [],
     platform: 'jobbkk',
     source_raw_text: 'ชื่อ นายสมชาย ใจดี',
-    ocr_text: 'Contact 0899999999 email prefix@example.com Expected Salary 16000',
+    ocr_text: 'Contact 0899999999 email prefix@gmail.com Expected Salary 16000',
   };
   let updated = null;
   const db = {
@@ -255,7 +255,7 @@ test('repairIncompleteCandidates uses OCR text when raw_text is thin', async () 
     source_raw_text: 'ชื่อ นายโอซีอาร์',
     ocr_text: [
       'เพศ : ชาย อายุ 26 ปี ที่อยู่ปัจจุบัน กรุงเทพมหานคร',
-      'เบอร์โทรศัพท์ 0855555555 อีเมล ocr@example.com',
+      'เบอร์โทรศัพท์ 0855555555 อีเมล ocr@gmail.com',
       'ประวัติการศึกษา มหาวิทยาลัยตัวอย่าง ปริญญาตรี',
       'ประวัติการทำงาน บริษัท โอ จำกัด ตำแหน่งงาน ช่างอาคาร Soft Skills',
     ].join(' '),
@@ -334,7 +334,7 @@ test('repairIncompleteCandidates fills blank prefix from full_name', async () =>
     first_name: '',
     last_name: '',
     phone: '0811111111',
-    email: 'name@example.com',
+    email: 'name@gmail.com',
     gender: 'ชาย',
     age: '30',
     address: 'นนทบุรี',
@@ -378,7 +378,7 @@ test('repairIncompleteCandidates rewrites mangled glued prefix', async () => {
     first_name: 'ใจดี',
     last_name: '',
     phone: '0811111111',
-    email: 'name2@example.com',
+    email: 'name2@gmail.com',
     gender: 'ชาย',
     age: '30',
     address: 'นนทบุรี',
@@ -422,7 +422,7 @@ test('repairIncompleteCandidates fills JobThai prefix from คำนำหน้
     first_name: 'สมชาย',
     last_name: 'ใจดี',
     phone: '0811111111',
-    email: 'jt@example.com',
+    email: 'jt@gmail.com',
     gender: 'ชาย',
     age: '30',
     address: 'นนทบุรี',
