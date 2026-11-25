@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import { hasFullName, taskEntryGaps } from '../src/core/resume-completeness.js';
+import { hasFullName, taskEntryGaps, withStoredIdentity } from '../src/core/resume-completeness.js';
 import { rankBankCandidates } from '../src/core/candidate-bank.js';
 
 // 25 พ.ย. 2569 เจ้าของสั่ง: เข้าใบงานได้ต้องมีชื่อ นามสกุล และเบอร์หรืออีเมลอย่างน้อยหนึ่งอย่าง
@@ -33,10 +33,25 @@ test('the candidate library uses the same rule', () => {
   assert.deepEqual(rankBankCandidates(rows).map((r) => r.row.id), ['c1']);
 });
 
-test('the pipeline keeps them in the library, skips the contact reveal without a name, and records name_hidden', () => {
+test('a resume that shows no phone this time still counts the phone the library already has', () => {
+  const parsed = { name: 'สมชาย ใจดี', phone: '', email: '' };
+  assert.deepEqual(taskEntryGaps(withStoredIdentity(parsed, null)), ['contact']);
+  assert.deepEqual(taskEntryGaps(withStoredIdentity(parsed, { phone: '0812345678' })), []);
+  assert.deepEqual(taskEntryGaps(withStoredIdentity({ name: '', phone: '0812345678' }, { full_name: 'นายสมชาย ใจดี' })), []);
+  // ไม่แก้เรคคอร์ดเดิม
+  assert.equal(parsed.phone, '');
+});
+
+test('the pipeline does not save them at all, remembers their resume ids, and skips the contact reveal without a name', () => {
   const src = fs.readFileSync(new URL('../src/pipeline.js', import.meta.url), 'utf8');
-  assert.match(src, /const entryGaps = taskEntryGaps\(parsed\);\s*const keepOutOfTask = entryGaps\.length > 0;/);
+  assert.match(src, /const entryGaps = taskEntryGaps\(withStoredIdentity\(parsed, stored\)\);/);
+  assert.match(src, /skippedExternalIds\.add\(String\(id\)\);\s*filteredOut \+= 1;[\s\S]{0,200}return;/);
+  // ตัดสินก่อนดาวน์โหลดไฟล์แนบและก่อนบันทึก
+  assert.ok(src.indexOf('const entryGaps = taskEntryGaps') < src.indexOf('Always download every listed attachment'));
+  assert.ok(src.indexOf('const entryGaps = taskEntryGaps') < src.indexOf('await upsertCandidate(client, parsed'));
   assert.match(src, /provider\.enrichContacts && hasFullName\(parsed\)\) \{/);
-  assert.match(src, /const taskLink = keepOutOfTask \? null : await linkCandidateToTask\(client, \{/);
-  assert.match(src, /if \(parsed\.name_hidden\) await markCandidateNameHidden\(client, cand\.id\);/);
+  assert.match(src, /reasonCounts, skippedExternalIds \}\);/);
+  const repo = fs.readFileSync(new URL('../src/db/repositories.js', import.meta.url), 'utf8');
+  assert.match(repo, /jsonb_build_object\('skipped_external_ids', \$15::jsonb\)/);
+  assert.match(repo, /SELECT jsonb_array_elements_text\(r\.funnel->'skipped_external_ids'\)/);
 });

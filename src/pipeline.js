@@ -11,6 +11,7 @@ import {
   isResumeDeliveryComplete,
   hasFullName,
   taskEntryGaps,
+  withStoredIdentity,
   resumeAttachmentGaps,
   resumeBodyGaps,
   resumeContactGaps,
@@ -19,6 +20,7 @@ import { envInt, sleep } from './config.js';
 import {
   countScrapedToday,
   finishRun,
+  storedIdentityByExternalId,
   getConnectorCooldownUntil,
   getProviderCap,
   isTaskEnabled,
@@ -131,6 +133,8 @@ export async function runConnector(connector, criteria, runtime, opts = {}) {
   let waitReason = null; // 'daily_cap' = โควต้าวันนี้เต็ม รอคิววันถัดไป (ไม่ใช่งานล้ม)
   // เว็บไม่ยอมเปิดเบอร์/อีเมลผู้สมัคร (provider ตั้ง record.contact_hidden) — โดนติดกันโดยยังไม่เคยได้เบอร์เลย = หยุดรอบ
   let contactHidden = 0;
+  // เรซูเม่ที่เปิดแล้วไม่บันทึก (ไม่มีชื่อ นามสกุล หรือช่องทางติดต่อ) — จดเลขไว้ในรอบ ไม่ให้รอบถัดไปของใบนี้เปิดซ้ำ
+  const skippedExternalIds = new Set();
   let contactShown = 0;
   let stopHiddenContacts = false;
   let error = null;
@@ -408,6 +412,20 @@ export async function runConnector(connector, criteria, runtime, opts = {}) {
           console.warn(`  [${id}] qualified but no contact after enrich — demote to needs_review`);
         }
 
+        // ไม่มีชื่อ นามสกุล หรือไม่มีทั้งเบอร์และอีเมลจริง = ไม่บันทึกลงฐานเลย ไม่ใส่ใบงาน (เจ้าของ 25 พ.ย. 2569: "ไม่เอามาเลย หนัก DB")
+        // คนที่คลังมีชื่อ/เบอร์อยู่แล้ว (รอบนี้เว็บไม่โชว์) ใช้ของในคลังตัดสิน
+        const stored = taskEntryGaps(parsed).length
+          ? await storedIdentityByExternalId(connector.platform, provider.externalId(url)).catch(() => null)
+          : null;
+        const entryGaps = taskEntryGaps(withStoredIdentity(parsed, stored));
+        if (entryGaps.length) {
+          for (const gap of entryGaps) reasonCounts[`not_saved:${gap}`] = (reasonCounts[`not_saved:${gap}`] || 0) + 1;
+          skippedExternalIds.add(String(id));
+          filteredOut += 1;
+          console.log(`  [${id}] ขาด${entryGaps.map((g) => (g === 'name' ? 'ชื่อ นามสกุล' : 'เบอร์และอีเมล')).join(' และ ')} — ไม่บันทึก`);
+          return;
+        }
+
         // Always download every listed attachment for saved rows (not profile-only).
         // Incomplete attachment sets are skipped — desk must never show rows without files.
         let assets = [];
@@ -436,11 +454,6 @@ export async function runConnector(connector, criteria, runtime, opts = {}) {
           console.warn(`  ⚠ resume ${id}: ไฟล์แนบไม่ครบ (${attachmentGaps.join(',')}) — เก็บไว้ให้คนตรวจ`);
         }
         finalQualification = applyCompletenessGaps(finalQualification, { bodyGaps, attachmentGaps });
-        // เข้าใบงานได้ต้องมีชื่อ นามสกุล และเบอร์หรืออีเมลจริง — ขาดข้อไหนเก็บเข้าคลังอย่างเดียว (เจ้าของ 25 พ.ย. 2569)
-        const entryGaps = taskEntryGaps(parsed);
-        const keepOutOfTask = entryGaps.length > 0;
-        for (const gap of entryGaps) reasonCounts[`not_in_task:${gap}`] = (reasonCounts[`not_in_task:${gap}`] || 0) + 1;
-
         const { isNew, taskLink } = await withTransaction(async (client) => {
           const cand = await upsertCandidate(client, parsed, { platform: connector.platform, externalId: provider.externalId(url) });
           if (parsed.name_hidden) await markCandidateNameHidden(client, cand.id);
@@ -454,7 +467,7 @@ export async function runConnector(connector, criteria, runtime, opts = {}) {
             rawText: parsed.raw_text,
             searchRank: sourceRankById.get(String(id)) ?? i + 1,
           });
-          const taskLink = keepOutOfTask ? null : await linkCandidateToTask(client, {
+          const taskLink = await linkCandidateToTask(client, {
             taskId: opts.taskId ?? null,
             candidateId: cand.id,
             sourceId,
@@ -469,11 +482,6 @@ export async function runConnector(connector, criteria, runtime, opts = {}) {
 
         if (isNew) newCount += 1;
         else updatedCount += 1;
-        if (!taskLink) {
-          filteredOut += 1;
-          console.log(`  [${id}] ขาด${entryGaps.map((g) => (g === 'name' ? 'ชื่อ นามสกุล' : 'เบอร์และอีเมล')).join(' และ ')} — เก็บเข้าคลัง ไม่ใส่ใบงาน`);
-          return;
-        }
         if (finalQualification.status === 'qualified') qualified += 1;
         else if (finalQualification.status === 'needs_review') { needsReview += 1; filteredOut += 1; }
         else { rejected += 1; filteredOut += 1; }
@@ -541,7 +549,7 @@ export async function runConnector(connector, criteria, runtime, opts = {}) {
   return finalize();
 
   async function finalize() {
-    await finishRun(runId, { status, requested, found, newCount, updatedCount, failed, error, opened, qualified, needsReview, rejected, duplicate, reasonCounts });
+    await finishRun(runId, { status, requested, found, newCount, updatedCount, failed, error, opened, qualified, needsReview, rejected, duplicate, reasonCounts, skippedExternalIds });
     await recordResumeSearchAttempt({
       taskId: opts.taskId, runId, connectorId: connector.id, platform: connector.platform,
       jobFamily: opts.jobFamily, location: criteria.province, searchTerm: criteria.position || criteria.keyword || '',

@@ -304,14 +304,32 @@ export async function connectorRevealedRecently(connectorId, hours = 3) {
 
 export async function taskExternalIds(taskId, platform) {
   if (!taskId) return [];
+  // รวมเรซูเม่ที่รอบก่อนของใบนี้เปิดแล้วไม่บันทึก (ไม่มีชื่อ นามสกุล หรือช่องทางติดต่อ) — ไม่เปิดซ้ำให้เสียโควต้า
   const { rows } = await query(
-    `SELECT DISTINCT s.external_id
+    `SELECT s.external_id
        FROM scrape_task_candidates tc
        JOIN candidate_sources s ON s.candidate_id=tc.candidate_id
-      WHERE tc.task_id=$1 AND s.platform=$2 AND s.external_id IS NOT NULL`,
+      WHERE tc.task_id=$1 AND s.platform=$2 AND s.external_id IS NOT NULL
+     UNION
+     SELECT jsonb_array_elements_text(r.funnel->'skipped_external_ids')
+       FROM scrape_runs r
+      WHERE r.task_id=$1 AND r.platform=$2 AND jsonb_typeof(r.funnel->'skipped_external_ids') = 'array'`,
     [taskId, platform],
   );
   return rows.map((r) => String(r.external_id));
+}
+
+/** ชื่อและช่องทางติดต่อที่คลังมีอยู่แล้วของเรซูเม่นี้ (ใช้เติมตอนตัดสินว่าจะบันทึกไหม) */
+export async function storedIdentityByExternalId(platform, externalId) {
+  if (!platform || !externalId) return null;
+  const { rows } = await query(
+    `SELECT c.first_name, c.last_name, c.full_name, c.phone, c.email
+       FROM candidate_sources s JOIN candidates c ON c.id = s.candidate_id
+      WHERE s.platform = $1 AND s.external_id = $2
+      ORDER BY s.last_seen_at DESC NULLS LAST LIMIT 1`,
+    [platform, String(externalId)],
+  );
+  return rows[0] ?? null;
 }
 
 let nameHiddenColumnReady = null;
@@ -710,13 +728,17 @@ export async function touchRun(runId) {
   await query(`UPDATE scrape_runs SET heartbeat_at=now() WHERE id=$1 AND status='running'`, [runId]);
 }
 
-export async function finishRun(runId, { status, requested, found, newCount, updatedCount, failed, error, opened = 0, qualified = 0, needsReview = 0, rejected = 0, duplicate = 0, reasonCounts = {} }) {
+export async function finishRun(runId, { status, requested, found, newCount, updatedCount, failed, error, opened = 0, qualified = 0, needsReview = 0, rejected = 0, duplicate = 0, reasonCounts = {}, skippedExternalIds = [] }) {
   await query(
     `UPDATE scrape_runs SET status=$2, requested=$3, found=$4, new_count=$5, updated_count=$6,
        failed=$7, error=$8, opened_count=$9, qualified_count=$10, needs_review_count=$11,
-       rejected_count=$12, duplicate_count=$13, reason_counts=$14, finished_at=now() WHERE id=$1`,
+       rejected_count=$12, duplicate_count=$13, reason_counts=$14,
+       funnel = CASE WHEN jsonb_array_length($15::jsonb) > 0
+                     THEN COALESCE(funnel, '{}'::jsonb) || jsonb_build_object('skipped_external_ids', $15::jsonb)
+                     ELSE funnel END,
+       finished_at=now() WHERE id=$1`,
     [runId, status, requested, found, newCount, updatedCount, failed, error ?? null,
-     opened, qualified, needsReview, rejected, duplicate, reasonCounts],
+     opened, qualified, needsReview, rejected, duplicate, reasonCounts, JSON.stringify([...skippedExternalIds].map(String))],
   );
 }
 

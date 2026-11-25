@@ -62,8 +62,8 @@ export function hasFullName(record = {}) {
 }
 
 /**
- * คนที่จะเข้าใบงาน (และส่งให้ Jarvis) ต้องมีชื่อ นามสกุล และเบอร์หรืออีเมลจริงอย่างน้อยหนึ่งอย่าง
- * ขาดข้อไหน = เก็บเข้าคลังอย่างเดียว ไม่ใส่ใบงาน — เจ้าของสั่ง 25 พ.ย. 2569
+ * คนที่จะบันทึกลงฐานและเข้าใบงาน (ส่งให้ Jarvis) ต้องมีชื่อ นามสกุล และเบอร์หรืออีเมลจริงอย่างน้อยหนึ่งอย่าง
+ * ขาดข้อไหน = ไม่บันทึกเลย — เจ้าของสั่ง 25 พ.ย. 2569 ("ไม่เอามาเลย หนัก DB")
  * (แทนกติกา 23 พ.ย. ที่ส่งคนซ่อนชื่อเมื่อมีเบอร์)
  * @returns {string[]} ช่องที่ขาด: 'name' | 'contact' · ว่าง = เข้าใบงานได้
  */
@@ -72,6 +72,17 @@ export function taskEntryGaps(record = {}) {
   if (!hasFullName(record)) gaps.push('name');
   if (resumeContactGaps(record).length) gaps.push('contact');
   return gaps;
+}
+
+/** เติมชื่อ/เบอร์/อีเมลที่คลังมีอยู่แล้ว เฉพาะช่องที่เรซูเม่รอบนี้ว่าง — ใช้ตัดสินเท่านั้น ไม่แก้เรคคอร์ดเดิม */
+export function withStoredIdentity(record = {}, stored = null) {
+  if (!stored) return record;
+  const merged = { ...record };
+  for (const key of ['first_name', 'last_name', 'full_name', 'phone', 'email']) {
+    if (!clean(merged[key]) && clean(stored[key])) merged[key] = stored[key];
+  }
+  if (!clean(merged.name) && clean(stored.full_name)) merged.name = stored.full_name;
+  return merged;
 }
 
 /**
