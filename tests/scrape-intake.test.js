@@ -312,3 +312,17 @@ test('ใบขอ Scrap ที่ตำแหน่งกว้างเกิ�
   assert.deepEqual(scrapeRequestProblems({}), []);
   assert.ok(SCRAPE_RULES.too_generic_titles.includes('ช่าง'));
 });
+
+// เจ้าของ 25 พ.ย. 2569: ตำแหน่งบอกแค่หมวดงาน — มีเนื้องานแล้ววางแผนคำค้นจากเนื้องาน ไม่ตีกลับ (LAM6909001 โดนตีกลับ 5 รอบ)
+test('ตำแหน่งกว้างแต่มีเนื้องาน + วางแผนจากเนื้องาน = สั่งได้ · ไม่มีเนื้องาน = ยังตีกลับ', async () => {
+  const { scrapeRequestProblems } = await import('../web/lib/scrape-intake.js');
+  const job_description = 'ดูแล แก้ไข ซ่อม ตรวจสอบ อุปกรณ์ในห้องพักแขกและส่วนกลาง ระบบไฟฟ้า ประปา เครื่องปรับอากาศ';
+  assert.deepEqual(scrapeRequestProblems({ position: 'ช่าง', job_description, plan_from_description: true, ageMin: '22', ageMax: '45' }), []);
+  // มีเนื้องานแต่ไม่ได้ตั้งให้วางแผนจากเนื้องาน = ค้นด้วยชื่อตำแหน่ง ⇒ ยังตีกลับ
+  assert.equal(scrapeRequestProblems({ position: 'ช่าง', job_description }).length, 1);
+  assert.equal(scrapeRequestProblems({ position: 'ช่าง', job_description: '  ', plan_from_description: true }).length, 1);
+  // อายุใช้ไม่ได้ยังตีกลับแม้มีเนื้องาน
+  assert.deepEqual(scrapeRequestProblems({ position: 'ช่าง', job_description, plan_from_description: true, ageMin: '20', ageMax: '20' }), [
+    'ช่วงอายุ 20–20 ปี แคบเกินไป ต้องห่างกันอย่างน้อย 2 ปี',
+  ]);
+});

@@ -257,11 +257,18 @@ export const SCRAPE_RULES = Object.freeze({
   age_max: 80,
 });
 
-/** ปัญหาของใบขอที่ทำให้ค้นไม่ได้ (ว่าง = สั่งได้) — คำบนจอสำหรับคนสั่ง */
+/**
+ * ปัญหาของใบขอที่ทำให้ค้นไม่ได้ (ว่าง = สั่งได้) — คำบนจอสำหรับคนสั่ง
+ * ชื่อตำแหน่งกว้าง (ช่าง · พนักงาน …) ตีกลับเฉพาะใบที่ไม่มีเนื้องาน — ใบที่มีเนื้องานวางแผนคำค้นจากเนื้องานอยู่แล้ว
+ * (`plan_from_description`) ชื่อตำแหน่งเป็นแค่หมวดงาน เนื้องานบอกว่าต้องหาใคร ระดับไหน
+ * (เจ้าของ 25 พ.ย. 2569: "เราสนใจตำแหน่งแค่รู้ว่ามันคืองานอะไร เช่น ช่าง แต่เนื้องานบอก ผู้คุมหัวหน้าช่าง … ก็ต้องหาระดับพวกหัวหน้า"
+ *  — LAM6909001 ตำแหน่ง "ช่าง" มีเนื้องานซ่อมบำรุงอาคาร ไฟฟ้า ประปา แอร์ ครบ แต่โดนตีกลับ 5 รอบ)
+ */
 export function scrapeRequestProblems(criteria = {}) {
   const problems = [];
   const position = clean(criteria.position);
-  if (position && SCRAPE_RULES.too_generic_titles.includes(position)) {
+  const fromDescription = Boolean(clean(criteria.job_description)) && criteria.plan_from_description === true;
+  if (position && !fromDescription && SCRAPE_RULES.too_generic_titles.includes(position)) {
     problems.push(position === 'ช่าง'
       ? 'ชื่อตำแหน่ง "ช่าง" กว้างเกินไป เว็บหางานไม่รับ ใส่ให้ชัด เช่น ช่างไฟฟ้า ช่างอาคาร ช่างแอร์'
       : `ชื่อตำแหน่ง "${position}" กว้างเกินไป เว็บหางานไม่รับ ใส่ชื่อตำแหน่งเต็ม`);
