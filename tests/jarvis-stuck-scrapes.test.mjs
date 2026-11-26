@@ -54,3 +54,31 @@ test('the runner checks for stuck orders on every Jarvis sync, under one lock', 
   assert.match(src, /await client\.query\(WAIT_JARVIS_SCRAPE_SQL, \[row\.task_id, plan\.notes\]\);/);
   assert.match(src, /await client\.query\(REJECT_JARVIS_SCRAPE_SQL, \[row\.task_id, plan\.notes\]\);/);
 });
+
+// 26 พ.ย. 2569: ผลในใบ Jarvis เขียนครั้งเดียวตอนค้นจบ จำนวนจริงเปลี่ยนทีหลัง ใบค้าง "ได้ครบ 20/20" ทั้งที่เหลือ 5 คน
+test('a closed Jarvis result is rewritten from the real counts when they change', async () => {
+  const { refreshedJarvisResult } = await import('../src/core/jarvis-scrape-status.js');
+  // OPL6908045: Jarvis บอกได้ครบ แต่ผ่านเกณฑ์จริงเหลือ 5 รอตรวจ 4
+  assert.deepEqual(
+    refreshedJarvisResult({ status: 'completed', notes: 'ได้ครบ: ผ่านเกณฑ์ 20/20 คน', target: 20, qualified: 5, waiting: 4 }),
+    { status: 'completed', label: 'เจอบางส่วน', notes: 'เจอบางส่วน: ผ่านเกณฑ์ 5/20 คน · รอตรวจอีก 4 คน' },
+  );
+  // ผ่านเกณฑ์เหลือ 0 = ไม่สำเร็จ
+  assert.equal(refreshedJarvisResult({ status: 'completed', notes: 'เจอบางส่วน: ผ่านเกณฑ์ 1/20 คน · รอตรวจอีก 1 คน', target: 20, qualified: 0, waiting: 0 }).status, 'rejected');
+  // ตีกลับว่าไม่เจอ แล้วภายหลังมีคนผ่าน = เจอบางส่วน
+  assert.equal(refreshedJarvisResult({ status: 'rejected', notes: 'ตีกลับ: ค้นครบทุกคำแล้ว ไม่เจอคนผ่านเกณฑ์', target: 20, qualified: 3, waiting: 0 }).status, 'completed');
+  // ตรงอยู่แล้ว = ไม่เขียน
+  assert.equal(refreshedJarvisResult({ status: 'completed', notes: 'ได้ครบ: ผ่านเกณฑ์ 20/20 คน', target: 20, qualified: 20, waiting: 3 }), null);
+  // ตีกลับด้วยเหตุอื่น (บัญชีหมดอายุ · ยกเลิกคิว) ไม่แตะ
+  assert.equal(refreshedJarvisResult({ status: 'rejected', notes: 'ตีกลับ: ยกเลิกคิว LBD แล้ว ไม่ค้นต่อ ถ้ายังต้องการให้สั่ง Scrap ใหม่', target: 20, qualified: 4, waiting: 0 }), null);
+});
+
+test('only closed orders with no scrape job waiting or running are rewritten, guarded by the old note', async () => {
+  const { CLOSED_JARVIS_RESULTS_SQL, REFRESH_JARVIS_RESULT_SQL } = await import('../src/core/jarvis-scrape-status.js');
+  assert.match(CLOSED_JARVIS_RESULTS_SQL, /l\.status IN \('completed', 'rejected'\)/);
+  assert.match(CLOSED_JARVIS_RESULTS_SQL, /t\.status NOT IN \('running', 'queued'\)/);
+  assert.match(CLOSED_JARVIS_RESULTS_SQL, /NOT EXISTS \(SELECT 1 FROM work_queue w WHERE w\.ref_id = t\.id::text AND w\.type = 'scrape' AND w\.status IN \('queued', 'running'\)\)/);
+  assert.match(REFRESH_JARVIS_RESULT_SQL, /WHERE id::text = \$1 AND notes = \$4 AND status IN \('completed', 'rejected'\)/);
+  const src = fs.readFileSync(new URL('../workers/runner.js', import.meta.url), 'utf8');
+  assert.match(src, /await recoverStuckJarvisScrapes\(\);\s*await refreshJarvisResults\(\);/);
+});

@@ -151,3 +151,43 @@ export function stuckScrapeAction(row = {}) {
     params: [`${row.platform}:${row.connector_id}`, String(row.task_id), JSON.stringify({ ...criteria, auto_requeue: true }), row.owner_user ?? null, preferred],
   };
 }
+
+/**
+ * ผลในใบ Jarvis ต้องตรงกับจำนวนจริงเสมอ (เจ้าของ 26 พ.ย. 2569 "ห้ามให้ Status ไม่ตรงกันอีก")
+ * เดิมเขียนผลครั้งเดียวตอนค้นจบ แล้วจำนวนจริงเปลี่ยนทีหลัง (ล้างอีเมลตัวอย่าง · ลบคนที่ติดต่อไม่ได้ · ดึงเบอร์คืน)
+ * ใบจึงค้าง "ได้ครบ 20/20" ทั้งที่เหลือ 5 คน (OPL6908045) · 31 ใบเลขไม่ตรงในวันที่ตรวจ
+ * ตัวนี้เลือกเฉพาะใบล่าสุดที่ปิดแล้วด้วยผลการค้น (ได้ครบ / เจอบางส่วน / ตีกลับเพราะไม่เจอ) และไม่มีงานค้นค้างอยู่
+ * ใบที่ตีกลับด้วยเหตุอื่น (บัญชีหมดอายุ · ยกเลิกคิว) ไม่แตะ
+ */
+export const RESULT_NOTE_RE = /^(ได้ครบ:|เจอบางส่วน:|ตีกลับ: ค้นครบทุกคำแล้ว)/;
+export const CLOSED_JARVIS_RESULTS_SQL = `WITH latest AS (
+    SELECT DISTINCT ON (r.request_no) r.id, r.request_no, r.status, r.notes
+      FROM "jarvis_rm".job_posting_requests r
+     WHERE to_jsonb(r)->>'request_type' = 'scraping'
+     ORDER BY r.request_no, r.created_at DESC)
+  SELECT l.id::text AS req_id, l.request_no, l.status, l.notes,
+         COALESCE(NULLIF(t.target_count, 0), t.progress_target, 0)::int AS target,
+         count(c.candidate_id) FILTER (WHERE c.qualification_status = 'qualified')::int AS qualified,
+         count(c.candidate_id) FILTER (WHERE c.qualification_status = 'needs_review')::int AS waiting
+    FROM latest l
+    JOIN scrape_tasks t ON t.source_request_no = l.request_no
+    LEFT JOIN scrape_task_candidates c ON c.task_id = t.id
+   WHERE l.status IN ('completed', 'rejected')
+     AND (l.notes LIKE 'ได้ครบ:%' OR l.notes LIKE 'เจอบางส่วน:%' OR l.notes LIKE 'ตีกลับ: ค้นครบทุกคำแล้ว%')
+     AND t.status NOT IN ('running', 'queued')
+     AND NOT EXISTS (SELECT 1 FROM work_queue w WHERE w.ref_id = t.id::text AND w.type = 'scrape' AND w.status IN ('queued', 'running'))
+   GROUP BY l.id, l.request_no, l.status, l.notes, t.id`;
+
+/** $1 = Jarvis row id · $2 status · $3 notes · $4 notes เดิม (เขียนเฉพาะเมื่อไม่มีใครแก้ระหว่างอ่านกับเขียน) */
+export const REFRESH_JARVIS_RESULT_SQL = `UPDATE "jarvis_rm".job_posting_requests
+    SET status = $2, notes = $3, updated_at = now()
+  WHERE id::text = $1 AND notes = $4 AND status IN ('completed', 'rejected')
+  RETURNING request_no`;
+
+/** ผลที่ควรเป็นตามจำนวนจริง · null = ตรงอยู่แล้วหรือไม่ใช่ใบที่ปิดด้วยผลการค้น */
+export function refreshedJarvisResult(row = {}) {
+  if (!RESULT_NOTE_RE.test(String(row.notes ?? ''))) return null;
+  const out = scrapeOutcome(row);
+  if (out.status === row.status && out.notes === row.notes) return null;
+  return out;
+}

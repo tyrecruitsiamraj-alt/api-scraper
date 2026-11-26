@@ -41,7 +41,7 @@ import { generateDraftForCampaign, regenerateImageForContent } from '../src/core
 import { measureCampaign } from '../src/core/orchestrator-measure.js';
 import { processResumeBatch } from '../src/db/resume-uploads.js';
 import { sendAlert } from '../src/core/alert.js';
-import { CLOSE_JARVIS_SCRAPE_SQL, FINISHED_JARVIS_SCRAPES_SQL, REJECT_JARVIS_SCRAPE_SQL, REQUEUE_STUCK_SCRAPE_SQL, STUCK_JARVIS_SCRAPES_SQL, WAIT_JARVIS_SCRAPE_SQL, rejectJarvisScrapeParams, scrapeOutcome, stuckScrapeAction } from '../src/core/jarvis-scrape-status.js';
+import { CLOSE_JARVIS_SCRAPE_SQL, CLOSED_JARVIS_RESULTS_SQL, FINISHED_JARVIS_SCRAPES_SQL, REFRESH_JARVIS_RESULT_SQL, REJECT_JARVIS_SCRAPE_SQL, REQUEUE_STUCK_SCRAPE_SQL, STUCK_JARVIS_SCRAPES_SQL, WAIT_JARVIS_SCRAPE_SQL, refreshedJarvisResult, rejectJarvisScrapeParams, scrapeOutcome, stuckScrapeAction } from '../src/core/jarvis-scrape-status.js';
 import { classifyScrapeTaskResult, cooldownError, isNetworkError, networkRetryAt, offlineWaitExpired, requireSuccessfulScrapeTaskResult } from '../src/core/scrape-task-result.js';
 import { imageGenerationCapability } from '../src/core/ai-image.js';
 import { scraperSlotLockName } from '../src/core/worker-selection.js';
@@ -498,11 +498,27 @@ async function recoverStuckJarvisScrapes() {
   }
 }
 
+// ใบ Scrap ที่ปิดแล้ว: ผลในใบ Jarvis ต้องตรงกับจำนวนจริงเสมอ จำนวนเปลี่ยนทีหลังก็เขียนใหม่ (เจ้าของ 26 พ.ย. 2569)
+async function refreshJarvisResults() {
+  try {
+    const { rows } = await query(CLOSED_JARVIS_RESULTS_SQL);
+    for (const row of rows) {
+      const out = refreshedJarvisResult(row);
+      if (!out) continue;
+      const done = await query(REFRESH_JARVIS_RESULT_SQL, [row.req_id, out.status, out.notes, row.notes]);
+      if (done.rows?.length) console.log(`  ↻ Jarvis ${row.request_no}: ${row.notes} → ${out.notes}`);
+    }
+  } catch (e) {
+    console.warn(`  อัปเดตผล Scrap ใน Jarvis ให้ตรงจำนวนจริงไม่ได้: ${e?.message ?? e}`);
+  }
+}
+
 async function syncJarvisIfDue() {
   if (Date.now() - lastJarvisSync < JARVIS_SYNC_MS) return;
   lastJarvisSync = Date.now();
   await completeJarvisScrapes();
   await recoverStuckJarvisScrapes();
+  await refreshJarvisResults();
   try {
     await withTransaction(async (client) => {
       const lock = await client.query(`SELECT pg_try_advisory_xact_lock(hashtext('jarvis-post-sync')) AS ok`);
