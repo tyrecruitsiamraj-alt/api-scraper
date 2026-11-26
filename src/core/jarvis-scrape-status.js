@@ -101,3 +101,53 @@ export const WAIT_JARVIS_SCRAPE_SQL = `UPDATE "jarvis_rm".job_posting_requests r
     AND r.status = 'in_progress'
     AND to_jsonb(r)->>'request_type' = 'scraping'
   RETURNING r.request_no`;
+
+/**
+ * ใบ Scrap ใน Jarvis ที่ "กำลังทำ" แต่ไม่มีงานค้นในคิวเลย (26 พ.ย. 2569)
+ * - LAO6909004 สั่ง 20 พ.ย. 08:20 ตอนไม่มีเครื่องค้นเปิด ระบบไม่สร้างงาน ใบค้าง 6 วัน
+ * - LAO6910025 งานค้นถูกข้ามเพราะ "กำลังรันในอีกช่อง" แล้วช่องนั้นค้างตาย ไม่มีใครเขียนกลับ Jarvis
+ * เจ้าของเลือก: ส่งเข้าคิวให้เอง 1 ครั้ง ถ้าค้างซ้ำค่อยตีกลับพร้อมเหตุให้สั่งใหม่
+ * ไม่แตะใบที่มีงานรอ/กำลังรัน (รวมงานที่รอโควต้าหรือรอเน็ต) และงานที่ค้นจบแล้ว (completeJarvisScrapes ปิดให้)
+ */
+export const STUCK_SCRAPE_MINUTES = 15;
+export const STUCK_JARVIS_SCRAPES_SQL = `WITH latest AS (
+    SELECT DISTINCT ON (r.request_no) r.request_no, r.status, r.created_at, r.updated_at
+      FROM "jarvis_rm".job_posting_requests r
+     WHERE to_jsonb(r)->>'request_type' = 'scraping'
+     ORDER BY r.request_no, r.created_at DESC)
+  SELECT l.request_no, t.id::text AS task_id, t.connector_id::text AS connector_id, t.enabled, t.criteria, c.platform,
+         (SELECT w.owner_user FROM work_queue w WHERE w.ref_id = t.id::text AND w.type = 'scrape' ORDER BY w.created_at DESC LIMIT 1) AS owner_user,
+         EXISTS (SELECT 1 FROM work_queue w WHERE w.ref_id = t.id::text AND w.type = 'scrape'
+                  AND w.created_at >= l.created_at AND w.payload->>'auto_requeue' = 'true') AS already_requeued
+    FROM latest l
+    JOIN scrape_tasks t ON t.source_request_no = l.request_no
+    JOIN connectors c ON c.id = t.connector_id
+   WHERE l.status = 'in_progress'
+     AND l.updated_at < now() - interval '${STUCK_SCRAPE_MINUTES} minutes'
+     AND t.status NOT IN ('running', 'done', 'partial')
+     AND NOT EXISTS (SELECT 1 FROM work_queue w WHERE w.ref_id = t.id::text AND w.type = 'scrape' AND w.status IN ('queued', 'running'))`;
+
+/** $1 connector_key · $2 task id · $3 payload · $4 owner · $5 preferred worker (null = เครื่องไหนก็ได้) */
+export const REQUEUE_STUCK_SCRAPE_SQL = `INSERT INTO work_queue (type, module, connector_key, ref_id, payload, owner_user, preferred_worker)
+  SELECT 'scrape', 'scraper', $1, $2, $3::jsonb, $4, $5
+   WHERE NOT EXISTS (SELECT 1 FROM work_queue w WHERE w.ref_id = $2 AND w.status IN ('queued', 'running'))
+  RETURNING id`;
+
+export const STUCK_REQUEUE_NOTE = 'รอคิว: งานค้นหลุดจากคิว ระบบส่งค้นใหม่ให้เองแล้ว';
+
+/** ใบค้างใบนี้ต้องทำอะไร: ส่งเข้าคิวใหม่ หรือ ตีกลับ (ส่งเองไปแล้ว 1 ครั้งยังค้าง / คนกดปิดงานไว้) */
+export function stuckScrapeAction(row = {}) {
+  if (row.enabled === false) {
+    return { action: 'reject', notes: 'ตีกลับ: งานค้นถูกปิดไว้ในระบบ So Scraping กรุณาสั่งใหม่' };
+  }
+  if (row.already_requeued) {
+    return { action: 'reject', notes: 'ตีกลับ: งานค้นหลุดจากคิวซ้ำ ระบบส่งค้นใหม่ให้แล้ว 1 ครั้งแต่ยังค้าง กรุณาสั่งใหม่' };
+  }
+  const criteria = row.criteria && typeof row.criteria === 'object' ? row.criteria : {};
+  const preferred = String(criteria.preferred_worker ?? '').trim() || null;
+  return {
+    action: 'requeue',
+    notes: STUCK_REQUEUE_NOTE,
+    params: [`${row.platform}:${row.connector_id}`, String(row.task_id), JSON.stringify({ ...criteria, auto_requeue: true }), row.owner_user ?? null, preferred],
+  };
+}

@@ -41,7 +41,7 @@ import { generateDraftForCampaign, regenerateImageForContent } from '../src/core
 import { measureCampaign } from '../src/core/orchestrator-measure.js';
 import { processResumeBatch } from '../src/db/resume-uploads.js';
 import { sendAlert } from '../src/core/alert.js';
-import { CLOSE_JARVIS_SCRAPE_SQL, FINISHED_JARVIS_SCRAPES_SQL, REJECT_JARVIS_SCRAPE_SQL, WAIT_JARVIS_SCRAPE_SQL, rejectJarvisScrapeParams, scrapeOutcome } from '../src/core/jarvis-scrape-status.js';
+import { CLOSE_JARVIS_SCRAPE_SQL, FINISHED_JARVIS_SCRAPES_SQL, REJECT_JARVIS_SCRAPE_SQL, REQUEUE_STUCK_SCRAPE_SQL, STUCK_JARVIS_SCRAPES_SQL, WAIT_JARVIS_SCRAPE_SQL, rejectJarvisScrapeParams, scrapeOutcome, stuckScrapeAction } from '../src/core/jarvis-scrape-status.js';
 import { classifyScrapeTaskResult, cooldownError, isNetworkError, networkRetryAt, offlineWaitExpired, requireSuccessfulScrapeTaskResult } from '../src/core/scrape-task-result.js';
 import { imageGenerationCapability } from '../src/core/ai-image.js';
 import { scraperSlotLockName } from '../src/core/worker-selection.js';
@@ -472,10 +472,37 @@ async function completeJarvisScrapes() {
   }
 }
 
+// ใบ Scrap ที่ Jarvis ยัง "กำลังทำ" แต่ไม่มีงานค้นในคิว → ส่งเข้าคิวให้เอง 1 ครั้ง ค้างซ้ำ = ตีกลับพร้อมเหตุ (เจ้าของ 26 พ.ย. 2569)
+async function recoverStuckJarvisScrapes() {
+  try {
+    await withTransaction(async (client) => {
+      const lock = await client.query(`SELECT pg_try_advisory_xact_lock(hashtext('jarvis-stuck-scrapes')) AS ok`);
+      if (!lock.rows[0]?.ok) return;
+      const { rows } = await client.query(STUCK_JARVIS_SCRAPES_SQL);
+      for (const row of rows) {
+        const plan = stuckScrapeAction(row);
+        if (plan.action === 'requeue') {
+          const ins = await client.query(REQUEUE_STUCK_SCRAPE_SQL, plan.params);
+          if (!ins.rows[0]) continue;
+          await client.query(`UPDATE scrape_tasks SET status='queued', phase='idle', last_error=$2, updated_at=now() WHERE id=$1 AND status <> 'running'`, [row.task_id, plan.notes]);
+          await client.query(WAIT_JARVIS_SCRAPE_SQL, [row.task_id, plan.notes]);
+          console.log(`  ↻ Jarvis ${row.request_no}: งานค้นหลุดจากคิว ส่งค้นใหม่ให้แล้ว`);
+        } else {
+          await client.query(REJECT_JARVIS_SCRAPE_SQL, [row.task_id, plan.notes]);
+          console.log(`  ✗ Jarvis ${row.request_no}: ${plan.notes}`);
+        }
+      }
+    });
+  } catch (e) {
+    console.warn(`  กู้ใบ Scrap ที่ค้างใน Jarvis ไม่ได้: ${e?.message ?? e}`);
+  }
+}
+
 async function syncJarvisIfDue() {
   if (Date.now() - lastJarvisSync < JARVIS_SYNC_MS) return;
   lastJarvisSync = Date.now();
   await completeJarvisScrapes();
+  await recoverStuckJarvisScrapes();
   try {
     await withTransaction(async (client) => {
       const lock = await client.query(`SELECT pg_try_advisory_xact_lock(hashtext('jarvis-post-sync')) AS ok`);
