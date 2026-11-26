@@ -57,26 +57,42 @@ test('โควต้านับใหม่หลังเที่ยงค�
   assert.equal(nextQuotaReset(Date.parse('2026-11-21T00:01:00+07:00')).toISOString(), new Date('2026-11-22T00:05:00+07:00').toISOString());
 });
 
-test('โควต้าเต็ม = รอคิว ไม่นับเป็นรอบลองใหม่ · บัญชีถูกพัก = รอแบบเดิม', () => {
-  const until = '2026-11-21T00:05:00+07:00';
-  const wait = (waitReason) => {
+// 26 พ.ย. 2569: โควต้าเต็มแล้วเก็บไว้ในคิว Jarvis ขึ้นแค่ "กำลังทำ" คนสั่งไม่รู้ว่าต่อคิวอยู่ → ตีกลับทันทีพร้อมเหตุ
+test('โควต้าเต็ม = จบคิวทันที ไม่ลองซ้ำ ตีกลับใบใน Jarvis · บัญชีถูกพัก = รอแบบเดิม', () => {
+  const thrown = (result) => {
     try {
-      requireSuccessfulScrapeTaskResult({ status: 'error', runStatus: 'cooldown', cooldownUntil: until, waitReason, error: 'x' });
+      requireSuccessfulScrapeTaskResult(result);
     } catch (e) {
       return e;
     }
     return null;
   };
-  assert.equal(wait('daily_cap').waiting, true);
-  assert.equal(wait('daily_cap').retryAt.toISOString(), new Date(until).toISOString());
-  assert.equal(wait(null).waiting, false);
+  const quota = thrown({ status: 'error', runStatus: 'quota_full', error: 'โควต้าค้นหาวันนี้เต็มแล้ว ไม่ได้ค้น (provider daily cap reached for jobthai (1003/1000))' });
+  assert.equal(quota.final, true);
+  assert.equal(quota.waiting, undefined);
+  assert.equal(quota.retryAt, undefined);
+  assert.equal(scrapeFailNote(quota.message), 'โควต้าค้นหาวันนี้เต็มแล้ว ยังไม่ได้ค้น ให้สั่ง Scrap ใหม่พรุ่งนี้');
+  const paused = thrown({ status: 'error', runStatus: 'cooldown', cooldownUntil: '2026-11-21T00:05:00+07:00', error: 'x' });
+  assert.equal(paused.waiting, false);
+  assert.equal(paused.final, undefined);
   const runner = fs.readFileSync(new URL('../workers/runner.js', import.meta.url), 'utf8');
-  assert.match(runner, /if \(waiting && retryAt\) \{[\s\S]*?SET status='queued', worker_id=NULL, locked_at=NULL,\s+available_at=now\(\)/, 'รอคิวไม่แตะ attempts');
-  assert.match(runner, /WAIT_JARVIS_SCRAPE_SQL/);
+  assert.match(runner, /const attempts = final \? Math\.max\(maxAttempts/, 'final ข้ามรอบลองใหม่');
+  assert.match(runner, /retryOrFail\(job, errMsg, retryAt, \{ waiting: !final && waiting, final \}\)/);
   const pipeline = fs.readFileSync(new URL('../src/pipeline.js', import.meta.url), 'utf8');
-  assert.match(pipeline, /cooldownUntil = nextQuotaReset\(\)\.toISOString\(\);\s+waitReason = 'daily_cap';/);
+  assert.match(pipeline, /waitReason = 'daily_cap';/);
   const worker = fs.readFileSync(new URL('../src/tasks-worker.js', import.meta.url), 'utf8');
-  assert.match(worker, /await finishTask\(t\.id, \{ status: 'queued', phase: 'idle', runId: r\.runId, error \}\);/);
+  assert.match(worker, /r\.waitReason === 'daily_cap'\) \{[\s\S]*?finishTask\(t\.id, \{ status: 'error', phase: 'error'[\s\S]*?runStatus: 'quota_full'/);
+});
+
+// 26 พ.ย. 2569 เจ้าของ: "เต็มแล้วไม่ควรสั่งได้" — รับใบจาก Jarvis ตอนโควต้าเต็ม = ตีกลับทันที ไม่สร้างงานค้น
+test('รับใบ Scrap จาก Jarvis ตอนโควต้าเต็ม: ไม่เข้าคิว ตีกลับพร้อมเหตุ', () => {
+  const start = fs.readFileSync(new URL('../web/lib/jarvis-start.ts', import.meta.url), 'utf8');
+  const repo = fs.readFileSync(new URL('../web/lib/repo.ts', import.meta.url), 'utf8');
+  assert.match(start, /const quota = await connectorQuotaToday\(id\);\s+if \(quota && quota\.remaining <= 0\) \{[\s\S]*?continue;/);
+  assert.match(start, /if \(quotaFull\) \{[\s\S]*?SET status = 'rejected'[\s\S]*?r\.status = 'pending'[\s\S]*?scrapeFailNote\('โควต้าค้นหาวันนี้เต็ม'\)/);
+  assert.ok(start.indexOf('connectorQuotaToday(id)') < start.indexOf('createScrapeTaskFromSoRecruit(requestNo'), 'เช็กโควต้าก่อนสร้างงาน');
+  assert.match(repo, /export async function connectorQuotaToday[\s\S]*?dailyRemaining\(/, 'นิยามโควต้าเดียวกับตัวค้น');
+  assert.equal(scrapeFailNote('โควต้าค้นหาวันนี้เต็ม'), 'โควต้าค้นหาวันนี้เต็มแล้ว ยังไม่ได้ค้น ให้สั่ง Scrap ใหม่พรุ่งนี้');
 });
 
 // 23 พ.ย. 2569: ตั้ง JobThai 1,000 ในแท็บโควต้า แต่ระบบหยุดที่เพดานบัญชี 200

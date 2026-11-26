@@ -327,12 +327,13 @@ export async function runTask(t, runtime) {
   });
 
   if (r.status === 'stopped') return finishStopped(t, r.runId);
-  // โควต้าค้นหาวันนี้เต็ม = งานรอคิว (ไม่ใช่ไม่สำเร็จ) คิวจะหยิบต่อเองหลังโควต้านับใหม่ — เจ้าของเคาะ 20 พ.ย. 2569
-  if (r.status === 'cooldown' && r.waitReason === 'daily_cap' && r.cooldownUntil) {
-    const error = `รอคิว: โควต้าค้นหาวันนี้เต็มแล้ว จะค้นต่อเอง ${bangkokTime(r.cooldownUntil)}`;
-    await finishTask(t.id, { status: 'queued', phase: 'idle', runId: r.runId, error });
+  // โควต้าค้นหาวันนี้เต็ม = จบงานนี้ทันทีและตีกลับใบใน Jarvis พร้อมบอกเหตุ ให้คนสั่งรู้และสั่งใหม่เอง
+  // 26 พ.ย. 2569 เจ้าของ: เก็บไว้ในคิวแล้ว Jarvis ขึ้นแค่ "กำลังทำ" คนสั่งไม่รู้ว่าต่อคิวอยู่ (แทนกติกา 20 พ.ย. ที่ให้รอคิววันถัดไป)
+  if (r.status === 'cooldown' && r.waitReason === 'daily_cap') {
+    const error = `โควต้าค้นหาวันนี้เต็มแล้ว ไม่ได้ค้น (${r.error})`;
+    await finishTask(t.id, { status: 'error', phase: 'error', runId: r.runId, error });
     console.log(`  ${t.name}: ${error}`);
-    return { status: 'error', runStatus: 'cooldown', waitReason: 'daily_cap', cooldownUntil: r.cooldownUntil, error, runId: r.runId, taskId: t.id };
+    return { status: 'error', runStatus: 'quota_full', error, runId: r.runId, taskId: t.id };
   }
   // เครื่องเข้าเว็บหางานไม่ได้ = รอคิว ลองใหม่เอง ไม่ใช่ใบขอผิด (ดู isNetworkError)
   if (r.status === 'failed' && isNetworkError(r.error)) {

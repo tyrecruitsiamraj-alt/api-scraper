@@ -7,6 +7,7 @@ import { pool, q } from './db';
 import { getCandidateDuplicates } from './candidate-duplicates';
 import { liveCounts, postedOutcome } from '../../src/core/post-task-state.js';
 import { TEXT_FIELDS } from '../../src/core/resume-fields.js';
+import { dailyRemaining } from '../../src/core/scrape-task-result.js';
 import { syncJarvisPostOrders } from '../../src/core/jarvis-post-sync.js';
 import { evaluateContentQuality, operatorFacingQuality, qualityFailureMessages } from '../../src/core/content-quality.js';
 import type { ContentQualityResult } from '../../src/core/content-quality.js';
@@ -752,6 +753,32 @@ export async function listConnectorOptions(): Promise<ScrapeConnectorOption[]> {
       WHERE c.enabled = true
       ORDER BY CASE c.platform WHEN 'jobthai' THEN 0 WHEN 'jobbkk' THEN 1 ELSE 2 END, c.label`,
   );
+}
+
+/**
+ * โควต้าเปิดโปรไฟล์ที่เหลือวันนี้ของบัญชี — นิยามเดียวกับตัวค้น (src/pipeline.js → dailyRemaining)
+ * เพดานในแท็บโควต้า (provider_limits) ชนะเพดานของบัญชี · นับวันตามเวลาไทย
+ */
+export async function connectorQuotaToday(id: string) {
+  const rows = await q<{ platform: string; connector_cap: number; provider_cap: number | null; connector_today: number; platform_today: number }>(
+    `SELECT c.platform, c.daily_cap AS connector_cap, pl.daily_cap AS provider_cap,
+            COALESCE((SELECT SUM(r.opened_count) FROM scrape_runs r WHERE r.connector_id = c.id
+                       AND r.started_at >= ((now() AT TIME ZONE 'Asia/Bangkok')::date::timestamp AT TIME ZONE 'Asia/Bangkok')), 0)::int AS connector_today,
+            COALESCE((SELECT SUM(r.opened_count) FROM scrape_runs r WHERE r.platform = c.platform
+                       AND r.started_at >= ((now() AT TIME ZONE 'Asia/Bangkok')::date::timestamp AT TIME ZONE 'Asia/Bangkok')), 0)::int AS platform_today
+       FROM connectors c LEFT JOIN provider_limits pl ON pl.platform = c.platform
+      WHERE c.id = $1`,
+    [id],
+  );
+  const r = rows[0];
+  if (!r) return null;
+  return {
+    platform: r.platform,
+    ...dailyRemaining({
+      connectorCap: Number(r.connector_cap), connectorToday: Number(r.connector_today),
+      providerCap: r.provider_cap == null ? null : Number(r.provider_cap), platformToday: Number(r.platform_today),
+    }),
+  };
 }
 
 export async function getConnectorOption(id: string): Promise<ScrapeConnectorOption | null> {

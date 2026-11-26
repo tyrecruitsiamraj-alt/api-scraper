@@ -12,8 +12,14 @@ export function requireSuccessfulScrapeTaskResult(result) {
   if (result?.runStatus === 'offline') {
     throw offlineError(result.error || 'เครื่องค้นหาเข้าเว็บหางานไม่ได้', result.cooldownUntil ? new Date(result.cooldownUntil) : networkRetryAt());
   }
+  // โควต้าวันนี้เต็ม: จบคิวทันที ไม่ลองซ้ำ ไม่รอ — ตีกลับใบใน Jarvis ให้คนสั่งใหม่เอง
+  if (result?.runStatus === 'quota_full') {
+    const err = new Error(result.error || 'โควต้าค้นหาวันนี้เต็มแล้ว');
+    err.final = true;
+    throw err;
+  }
   if (result?.runStatus === 'cooldown' && result.cooldownUntil) {
-    throw cooldownError(result.error || 'connector cooling down', result.cooldownUntil, { waiting: result.waitReason === 'daily_cap' });
+    throw cooldownError(result.error || 'connector cooling down', result.cooldownUntil);
   }
   if (!result || result.status === 'error') {
     throw new Error(result?.error || 'scrape task failed without a terminal result');

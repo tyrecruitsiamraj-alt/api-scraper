@@ -368,7 +368,7 @@ async function runWithLease(job, handler) {
   }
 }
 
-async function retryOrFail(job, error, retryAt = null, { waiting = false } = {}) {
+async function retryOrFail(job, error, retryAt = null, { waiting = false, final = false } = {}) {
   // รอโควต้าวันถัดไป (waiting) ไม่ใช่งานล้ม: เข้าคิวรอถึงเวลานั้นโดยไม่นับรอบลองใหม่ และไม่ตีกลับใบใน Jarvis
   // 20 พ.ย. 2569: โควต้าเต็มแล้วลองซ้ำ 3 รอบทุกใบ (688 แถวเปล่า) แล้วตีกลับ 229 คำสั่ง
   if (waiting && retryAt) {
@@ -385,8 +385,9 @@ async function retryOrFail(job, error, retryAt = null, { waiting = false } = {})
     }
     return true;
   }
-  const attempts = Number(job.attempts || 0) + 1;
   const maxAttempts = Math.max(1, Number(job.max_attempts || 3));
+  // final = ลองซ้ำไม่มีประโยชน์ (เช่น โควต้าค้นหาวันนี้เต็ม) → จบคิวและตีกลับ Jarvis ทันที
+  const attempts = final ? Math.max(maxAttempts, Number(job.attempts || 0) + 1) : Number(job.attempts || 0) + 1;
   if (attempts >= maxAttempts) {
     await query(
       `UPDATE work_queue
@@ -599,10 +600,11 @@ async function runOne() {
     const thrownAt = e?.retryAt instanceof Date && !Number.isNaN(e.retryAt.getTime()) ? e.retryAt : null;
     const retryAt = thrownAt ?? (offline ? networkRetryAt() : null);
     const waiting = Boolean(retryAt) && (offline || (e?.waiting === true && e?.offline !== true));
-    const retrying = await retryOrFail(job, errMsg, retryAt, { waiting });
+    const final = e?.final === true;
+    const retrying = await retryOrFail(job, errMsg, retryAt, { waiting: !final && waiting, final });
     console.error(`  ✗ ${waiting ? 'waiting for quota' : retrying ? 'retry scheduled' : 'error'}: ${e?.message ?? e}`);
     // แจ้งเตือนทันทีที่งานพัง (fail-soft — ไม่มี ALERT_WEBHOOK_URL = เงียบ)
-    if (!retrying) {
+    if (!retrying && !final) {
       await sendAlert(`งาน ${job.type} ไม่สำเร็จบนเครื่อง ${WORKER_NAME}\nงาน: ${job.connector_key}\nสาเหตุ: ${errMsg}`);
     }
   }

@@ -119,11 +119,11 @@ export function humanizeOperatorError(value: string | null | undefined): {
       technical,
     };
   }
-  if (lower.includes('daily cap reached') || lower.includes('provider daily cap')) {
+  if (technical.includes('โควต้าค้นหาวันนี้เต็ม') || lower.includes('daily cap reached') || lower.includes('provider daily cap')) {
     return {
       title: 'โควต้าค้นหาวันนี้เต็มแล้ว',
-      detail: 'โควต้าเปิด Resume ของ JobBKK/JobThai วันนี้ครบแล้ว จึงเริ่มงานค้นหาต่อไม่ได้ (ไม่เกี่ยวกับคำค้นหรือ Worker)',
-      next: 'งานรอคิวและค้นต่อเองหลังเที่ยงคืน (เวลาไทย) · ถ้าต้องการเพิ่มโควต้า ไปที่ ตั้งค่า → โควต้าการใช้งาน',
+      detail: 'โควต้าเปิด Resume ของ JobBKK/JobThai วันนี้ครบแล้ว งานนี้ยังไม่ได้ค้น และตีกลับใบใน Jarvis แล้ว',
+      next: 'สั่ง Scrap ใหม่พรุ่งนี้ · ถ้าต้องการเพิ่มโควต้า ไปที่ ตั้งค่า → โควต้าการใช้งาน',
       technical,
     };
   }

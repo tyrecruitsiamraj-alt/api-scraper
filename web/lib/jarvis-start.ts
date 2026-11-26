@@ -1,6 +1,7 @@
 import 'server-only';
 import { q } from './db';
-import { createScrapeTaskFromSoRecruit, enqueueScrapeForTask, getConnectorOption, listJarvisPostOrders, postJarvisOrder, skippedGroupsNote } from './repo';
+import { connectorQuotaToday, createScrapeTaskFromSoRecruit, enqueueScrapeForTask, getConnectorOption, listJarvisPostOrders, postJarvisOrder, skippedGroupsNote } from './repo';
+import { scrapeFailNote } from '../../src/core/jarvis-scrape-status.js';
 
 /**
  * เริ่มงานจากคำสั่ง Jarvis ทันที (ไม่ต้องมีคนกดในระบบนี้) — Jarvis เรียกหลังบันทึก job_posting_requests
@@ -62,15 +63,34 @@ async function startScraping(requestNo: string, requestedBy: string, snapshot: R
   if (!chosen.length) return { ok: false, status: 422, error: 'ยังไม่ได้เลือกบัญชี Scrap (scrape_connector_ids)' };
   let connectorId: string | null = null;
   const blocked: string[] = [];
+  let quotaFull = false;
   for (const id of chosen) {
     const option = await getConnectorOption(id);
-    if (option?.available) {
-      connectorId = id;
-      break;
+    if (!option?.available) {
+      blocked.push(option?.block_reason || `บัญชี ${id} ไม่พร้อมใช้งาน`);
+      continue;
     }
-    blocked.push(option?.block_reason || `บัญชี ${id} ไม่พร้อมใช้งาน`);
+    // โควต้าวันนี้เต็ม = ไม่รับใบเข้าคิว (26 พ.ย. 2569 เจ้าของ: เต็มแล้วไม่ควรสั่งได้ เก็บไว้ในคิวคนสั่งไม่รู้ว่ารออยู่)
+    const quota = await connectorQuotaToday(id);
+    if (quota && quota.remaining <= 0) {
+      quotaFull = true;
+      blocked.push(`${option.label} โควต้าค้นหาวันนี้เต็มแล้ว (${quota.used.toLocaleString('th-TH')}/${quota.cap.toLocaleString('th-TH')})`);
+      continue;
+    }
+    connectorId = id;
+    break;
   }
-  if (!connectorId) return { ok: false, status: 422, error: blocked.join(' · ') };
+  if (!connectorId) {
+    // โควต้าเต็มทุกบัญชีที่เลือก: ตีกลับใบใน Jarvis เลย ไม่ปล่อยค้าง "รอดำเนินการ" ให้คนสั่งรู้และสั่งใหม่พรุ่งนี้
+    if (quotaFull) {
+      await q(
+        `UPDATE "jarvis_rm".job_posting_requests r SET status = 'rejected', notes = $2, updated_at = now()
+          WHERE r.request_no = $1 AND r.status = 'pending' AND to_jsonb(r)->>'request_type' = 'scraping'`,
+        [requestNo, `ตีกลับ: ${scrapeFailNote('โควต้าค้นหาวันนี้เต็ม')}`],
+      );
+    }
+    return { ok: false, status: 422, error: blocked.join(' · ') };
+  }
 
   try {
     const taskId = await createScrapeTaskFromSoRecruit(requestNo, connectorId, {});

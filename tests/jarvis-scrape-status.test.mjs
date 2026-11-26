@@ -12,7 +12,7 @@ test('เหตุที่ส่งกลับ Jarvis เป็นประโ
     'JobBKK เลือกจังหวัดในหน้าค้นหาไม่ได้ ระบบจึงหยุดเพื่อไม่ดึงคนทั้งประเทศมาปน',
   );
   assert.equal(scrapeFailNote('locator.click: Timeout 15000ms exceeded.'), 'กดช่องค้นหาบนเว็บหางานไม่สำเร็จ');
-  assert.equal(scrapeFailNote('provider daily cap reached'), 'โควต้าค้นหาวันนี้เต็มแล้ว');
+  assert.equal(scrapeFailNote('provider daily cap reached'), 'โควต้าค้นหาวันนี้เต็มแล้ว ยังไม่ได้ค้น ให้สั่ง Scrap ใหม่พรุ่งนี้');
 });
 
 test('เหตุที่ไม่รู้จัก = ท่อนแรกของข้อความ ไม่เกิน 200 ตัว · ว่าง = ค้นหาไม่สำเร็จ', () => {

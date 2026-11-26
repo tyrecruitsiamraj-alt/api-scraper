@@ -180,7 +180,7 @@ export async function runConnector(connector, criteria, runtime, opts = {}) {
       error = daily.by === 'provider'
         ? `provider daily cap reached for ${connector.platform} (${daily.used}/${daily.cap})`
         : `connector daily cap reached (${daily.used}/${daily.cap})`;
-      // โควต้าเต็ม = รอคิวจนโควต้านับใหม่ (หลังเที่ยงคืนเวลาไทย) ไม่ลองซ้ำ ไม่ตีกลับ
+      // โควต้าเต็ม = ไม่ค้น งานนี้จบและตีกลับใบใน Jarvis ทันที (tasks-worker) ไม่ลองซ้ำ
       cooldownUntil = nextQuotaReset().toISOString();
       waitReason = 'daily_cap';
       console.warn(`  [${connector.label}] ${error} — รอคิวถึง ${cooldownUntil}`);
