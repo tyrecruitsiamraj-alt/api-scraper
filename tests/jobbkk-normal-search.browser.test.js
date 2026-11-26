@@ -433,3 +433,34 @@ test('Position counts as applied when only the chip counter moves', async (t) =>
   const result = await runNormalSearch(page, { position: 'เจ้าหน้าที่ IT', province: 'สมุทรปราการ', maxCandidates: 5 }, { need: 5 });
   assert.ok(result.report.applied.includes('position'), result.report.positionBox);
 });
+
+// 26 พ.ย. 2569 (หน้าจริงที่เจ้าของล็อกอินให้ดู): ข้อความ "ค้นหาชื่อตำแหน่งงาน" หายทันทีที่มีคำในช่อง
+// โค้ดเดิมหาช่องจากข้อความนี้ รอบแรกเลือกไม่ติด รอบสองหาช่องไม่เจอ กดค้าง 15 วิแล้วล้มทั้งใบ
+// กล่องมีชื่อตายตัว .ant-select[name=searchJobPosition] — หาจากชื่อนี้
+test('Position retry still finds the box after its placeholder disappears', async (t) => {
+  const browser = await chromium.launch({ headless: true });
+  t.after(async () => {
+    await browser.close().catch(() => {});
+  });
+  const page = await browser.newPage();
+  await page.setContent(FIXTURE, { waitUntil: 'domcontentloaded' });
+  await page.evaluate(() => {
+    const input = document.getElementById('position-input');
+    const ph = document.querySelector('[name=searchJobPosition] .ant-select-selection-placeholder');
+    const wrap = ph.parentElement;
+    input.addEventListener('input', () => {
+      if (input.value) ph.remove();
+      else if (!ph.isConnected) wrap.append(ph);
+    });
+    // เลือกครั้งแรกไม่ติด ให้โค้ดต้องลองรอบสอง
+    let first = true;
+    const option = document.querySelector('#position-dropdown .ant-select-item-option-content');
+    option.addEventListener('click', (event) => {
+      if (first) { first = false; event.stopImmediatePropagation(); }
+    }, true);
+  });
+
+  const result = await runNormalSearch(page, { position: 'เจ้าหน้าที่ IT', province: 'สมุทรปราการ', maxCandidates: 5 }, { need: 5 });
+  assert.ok(result.report.applied.includes('position'), result.report.positionBox);
+  assert.match(result.report.positionBox, /รอบ 2/u);
+});

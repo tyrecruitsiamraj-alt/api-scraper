@@ -97,12 +97,22 @@ async function pickOptionByKeyboard(page, wanted, maxSteps = 90) {
   return false;
 }
 
+/**
+ * กล่องตำแหน่ง/Keyword ของ JobBKK มีชื่อตายตัว (ดูหน้าจริง 26 พ.ย. 2569): .ant-select[name=searchJobPosition] / [name=searchKeyword]
+ * ช่องพิมพ์คือ input.ant-input ข้างใน · หาด้วยชื่อกล่องก่อน
+ * เดิมหาด้วยข้อความ "ค้นหาชื่อตำแหน่งงาน" ในกล่อง แต่ข้อความนั้นหายทันทีที่มีคำในช่อง
+ * รอบลองซ้ำจึงหาช่องไม่เจอ กดค้าง 15 วิแล้วล้มทั้งใบ (16–20 พ.ย. และ 26 พ.ย. 2569)
+ */
+export const CHIP_BOX_NAME = { position: 'searchJobPosition', keyword: 'searchKeyword' };
+
 async function findChipInput(page, field) {
   const needle = field === 'position' ? 'ค้นหาชื่อตำแหน่งงาน' : 'ค้นหา Keyword';
+  const named = page.locator(`.ant-select[name="${CHIP_BOX_NAME[field]}"]`);
   const nearby = page.locator('.ant-select, .ant-select-selection-wrap, .ant-form-item').filter({
     hasText: new RegExp(escapeRegExp(needle), 'u'),
   });
   return firstEditableLocator([
+    named.locator('input.ant-input, input.ant-select-selection-search-input, input:not([readonly])'),
     nearby.locator('input.ant-select-selection-search-input, input:not([readonly])'),
     page.locator(`input[placeholder="${needle}"]`),
     page.getByRole('combobox', { name: new RegExp(escapeRegExp(needle), 'u') }),
