@@ -9,7 +9,7 @@ import { kickWorker } from './worker-kick';
 import { postCaptionIssues } from '../../src/core/post-caption-check.js';
 import { MAX_GROUPS_PER_ADD, parseGroupLinks } from '../../src/core/group-links.js';
 import { dailyCapCeiling } from '../../autopost/server/post-pacing.js';
-import { dismissCommentLead, jarvisLeadsConfigured, requestAiCall, saveManualReply, saveReplyTemplate } from './comment-leads';
+import { dismissCommentLead, requestAiCall, saveJarvisLeadsKey, saveManualReply, saveReplyTemplate } from './comment-leads';
 import type { ReplyKind } from './comment-leads';
 import { replyTemplateProblem } from '../../autopost/server/comment-reply-templates.js';
 import { q } from './db';
@@ -246,8 +246,23 @@ export async function requestAiCallAction(formData: FormData) {
   let notice = 'เลือกคนที่จะให้ AI โทรก่อน';
   if (ids.length) {
     const { requested, skipped } = await requestAiCall(ids, session.user?.email ?? session.user?.name ?? null);
-    notice = `ขอให้ AI โทร ${requested} คน${skipped ? ` (ข้าม ${skipped} คน: ไม่มีเบอร์หรือขอไปแล้ว)` : ''}`;
-    if (!jarvisLeadsConfigured()) notice += ' · ยังไม่ได้เชื่อม API ของ Jarvis รายชื่อจะรอส่งจนกว่าจะเชื่อม';
+    notice = `ขอให้ AI โทร ${requested} คน${skipped ? ` (ข้าม ${skipped} คน: ไม่มีเบอร์หรือขอไปแล้ว)` : ''} · ระบบส่งเข้า Jarvis ภายใน 5–10 นาที`;
+  }
+  revalidatePath('/autopost/leads');
+  redirect(`/autopost/leads?notice=${encodeURIComponent(notice)}`);
+}
+
+/** วาง key ที่ออกจากหน้าตั้งค่าของ Jarvis (ชื่อ so-scraping) ให้เครื่อง RM009 ใช้ส่งคนฝากเบอร์เข้า Jarvis */
+export async function saveJarvisLeadsKeyAction(formData: FormData) {
+  const session = await getServerSession(authOptions);
+  if (!session) throw new Error('unauthorized');
+  const key = String(formData.get('key') ?? '').trim();
+  let notice: string;
+  if (key.length < 16 || /\s/.test(key)) {
+    notice = 'key ไม่ถูกต้อง คัดลอกจากหน้าตั้งค่าของ Jarvis มาวางทั้งก้อน';
+  } else {
+    await saveJarvisLeadsKey(key, session.user?.email ?? session.user?.name ?? null);
+    notice = 'บันทึก key แล้ว เครื่อง RM009 จะเริ่มส่งคนฝากเบอร์เข้า Jarvis ภายใน 5–10 นาที';
   }
   revalidatePath('/autopost/leads');
   redirect(`/autopost/leads?notice=${encodeURIComponent(notice)}`);

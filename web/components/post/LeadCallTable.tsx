@@ -58,6 +58,7 @@ export function LeadCallTable({ leads }: { leads: CommentLead[] }) {
             <TableHead>เบอร์</TableHead>
             <TableHead className="hidden md:table-cell">คอมเมนต์</TableHead>
             <TableHead className="hidden lg:table-cell">ใบงาน</TableHead>
+            <TableHead>Jarvis</TableHead>
             <TableHead>AI โทร</TableHead>
           </TableRow>
         </TableHeader>
@@ -87,8 +88,19 @@ export function LeadCallTable({ leads }: { leads: CommentLead[] }) {
                 <TableCell className="hidden max-w-72 truncate text-muted-foreground md:table-cell">{l.comment_text}</TableCell>
                 <TableCell className="hidden text-muted-foreground lg:table-cell">{l.request_no ?? '-'}</TableCell>
                 <TableCell>
+                  {l.jarvis_sent_at ? (
+                    <Badge variant="outline" className="border-success/30 bg-success/10 text-success" title={`ส่งเมื่อ ${thaiTime(l.jarvis_sent_at)}`}>เข้า Jarvis แล้ว</Badge>
+                  ) : l.jarvis_error ? (
+                    <span className="text-destructive" title={l.jarvis_error}>ไม่รับ: {l.jarvis_error}</span>
+                  ) : (
+                    <Badge variant="outline">รอส่ง</Badge>
+                  )}
+                </TableCell>
+                <TableCell>
                   {l.ai_call_batch_id ? (
                     <Badge variant="outline" className="border-success/30 bg-success/10 text-success">ส่งแล้ว</Badge>
+                  ) : l.ai_call_error ? (
+                    <span className="text-destructive" title={l.ai_call_error}>ไม่ได้ส่ง: {l.ai_call_error}</span>
                   ) : l.ai_call_requested_at ? (
                     <Badge variant="outline" title={`ขอเมื่อ ${thaiTime(l.ai_call_requested_at)}`}>รอส่ง Jarvis</Badge>
                   ) : (

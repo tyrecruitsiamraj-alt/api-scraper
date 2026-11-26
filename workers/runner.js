@@ -18,8 +18,10 @@ import { closeSync, existsSync, mkdirSync, openSync, statSync, unlinkSync, utime
 import { dirname, resolve } from 'node:path';
 import { sleep } from '../src/config.js';
 import { loadRuntime } from '../src/config.js';
-import { query, closePool, withTransaction } from '../src/db/pool.js';
+import { query, closePool, getPool, withTransaction } from '../src/db/pool.js';
+import { decryptSecret } from '../src/db/crypto.js';
 import { syncJarvisPostOrders } from '../src/core/jarvis-post-sync.js';
+import { JARVIS_BASE_DEFAULT, loadJarvisLeadsKey, sendCommentLeadsToJarvis } from '../src/core/jarvis-comment-leads.js';
 import {
   countScrapedToday,
   fillCandidateContacts,
@@ -536,6 +538,45 @@ async function syncJarvisIfDue() {
   }
 }
 
+// คนคอมเมนต์ทิ้งเบอร์ → Jarvis ทุก 5 นาที (เจ้าของ 26 พ.ย. 2569) · ทำเบื้องหลัง · สองช่องบนเครื่องเดียวกันส่งทีละช่อง (advisory lock)
+// ล็อกแบบ session บน connection ว่าง (ไม่เปิด transaction ค้างระหว่างรอ Jarvis ตอบ)
+const COMMENT_SEND_MS = 5 * 60 * 1000;
+let lastCommentSend = 0;
+let commentSendRunning = false;
+async function sendCommentLeadsIfDue() {
+  if (commentSendRunning || Date.now() - lastCommentSend < COMMENT_SEND_MS) return;
+  lastCommentSend = Date.now();
+  commentSendRunning = true;
+  let client = null;
+  try {
+    const rowsOf = (sql, params) => query(sql, params).then((x) => x.rows);
+    const apiKey = await loadJarvisLeadsKey(rowsOf, decryptSecret);
+    if (!apiKey) return;
+    client = await getPool().connect();
+    const lock = await client.query(`SELECT pg_try_advisory_lock(hashtext('jarvis-comment-leads')) AS ok`);
+    if (!lock.rows[0]?.ok) return;
+    try {
+      const r = await sendCommentLeadsToJarvis({
+        rowsOf,
+        apiKey,
+        baseUrl: process.env.JARVIS_BASE_URL || JARVIS_BASE_DEFAULT,
+        autopostSchema: process.env.AUTOPOST_SCHEMA || 'so_autopost_apiscraper',
+      });
+      if (r.sent || r.rejected || r.aiAdded || r.aiSkipped) {
+        console.log(`  คอมเมนต์ → Jarvis: ส่งแล้ว ${r.sent} · Jarvis ไม่รับ ${r.rejected} · AI โทร ${r.aiAdded} · AI ข้าม ${r.aiSkipped}`);
+      }
+      if (r.stopped || r.retry) console.warn(`  คอมเมนต์ → Jarvis: ${r.stopped || r.retry}`);
+    } finally {
+      await client.query(`SELECT pg_advisory_unlock(hashtext('jarvis-comment-leads'))`).catch(() => {});
+    }
+  } catch (e) {
+    console.warn(`  ส่งคอมเมนต์เข้า Jarvis ไม่สำเร็จ — ${e?.message ?? e}`);
+  } finally {
+    client?.release();
+    commentSendRunning = false;
+  }
+}
+
 // ไฟล์แนบที่ค้าง "รออ่าน" (เซิร์ฟเวอร์ AI ไม่มีโมเดล OCR / เครื่องไม่มีตัวแปลง PDF) — อ่านย้อนทุก 10 นาทีเมื่อพร้อม
 const OCR_BACKLOG_MS = 10 * 60 * 1000;
 let lastOcrBacklog = 0;
@@ -565,6 +606,7 @@ async function runOne() {
     await syncJarvisIfDue();
     // ทำเบื้องหลัง ไม่ให้การอ่านไฟล์ย้อนหลังหน่วงการรับงาน Scrap
     readOcrBacklogIfDue();
+    sendCommentLeadsIfDue();
   }
   const job = await claimNext();
   if (!job) return false;

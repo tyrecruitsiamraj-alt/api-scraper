@@ -1,5 +1,7 @@
 import 'server-only';
-import { q } from './db';
+import { pool, q } from './db';
+import { encryptSecret } from './crypto';
+import { INTEGRATION_SECRETS_DDL, JARVIS_LEADS_SECRET } from '../../src/core/jarvis-comment-leads.js';
 import {
   DEFAULT_REPLY_TEMPLATES,
   REPLY_KIND_LABELS,
@@ -33,15 +35,80 @@ export type CommentLead = {
   replied_at: string | null;
   reply_error: string | null;
   jarvis_sent_at: string | null;
+  jarvis_error: string | null;
   ai_call_requested_at: string | null;
   ai_call_requested_by: string | null;
   ai_call_batch_id: string | null;
   ai_call_error: string | null;
 };
 
-/** ตั้งค่า JARVIS_LEADS_API_URL + JARVIS_LEADS_API_KEY เมื่อทีม Jarvis ทำ API รับ lead / AI โทรเสร็จ */
-export function jarvisLeadsConfigured(): boolean {
-  return Boolean(process.env.JARVIS_LEADS_API_URL && process.env.JARVIS_LEADS_API_KEY);
+export type JarvisLeadsStatus = {
+  /** ตั้ง key แล้ว (เครื่อง RM009 ส่งทุก 5 นาที) */
+  configured: boolean;
+  keyUpdatedAt: string | null;
+  keyUpdatedBy: string | null;
+  /** คนฝากเบอร์: ส่งเข้า Jarvis แล้ว · รอส่ง · Jarvis ไม่รับ */
+  sent: number;
+  waiting: number;
+  rejected: number;
+  lastSentAt: string | null;
+};
+
+/** สถานะการส่งคนฝากเบอร์เข้า Jarvis — นับจากฐานตรง ๆ ทุกครั้ง */
+export async function jarvisLeadsStatus(): Promise<JarvisLeadsStatus> {
+  let key: { updated_at: string; updated_by: string | null } | undefined;
+  try {
+    [key] = await q<{ updated_at: string; updated_by: string | null }>(
+      `SELECT updated_at, updated_by FROM integration_secrets WHERE name = $1`,
+      [JARVIS_LEADS_SECRET],
+    );
+  } catch {
+    key = undefined; // ตารางยังไม่ถูกสร้าง = ยังไม่เคยตั้ง key
+  }
+  let counts = { sent: 0, waiting: 0, rejected: 0, last_sent_at: null as string | null };
+  try {
+    const [c] = await q<{ sent: number; waiting: number; rejected: number; last_sent_at: string | null }>(
+      `SELECT count(*) FILTER (WHERE jarvis_sent_at IS NOT NULL)::int AS sent,
+              count(*) FILTER (WHERE jarvis_sent_at IS NULL AND jarvis_error IS NULL)::int AS waiting,
+              count(*) FILTER (WHERE jarvis_sent_at IS NULL AND jarvis_error IS NOT NULL)::int AS rejected,
+              max(jarvis_sent_at) AS last_sent_at
+         FROM ${AP}.comment_leads WHERE phone IS NOT NULL`,
+    );
+    if (c) counts = c;
+  } catch {
+    // ตาราง comment_leads ยังไม่ถูกสร้าง
+  }
+  return {
+    configured: Boolean(key),
+    keyUpdatedAt: key?.updated_at ?? null,
+    keyUpdatedBy: key?.updated_by ?? null,
+    sent: counts.sent,
+    waiting: counts.waiting,
+    rejected: counts.rejected,
+    lastSentAt: counts.last_sent_at,
+  };
+}
+
+/** เก็บ key ที่ออกจากหน้าตั้งค่าของ Jarvis (เข้ารหัส) · ตารางยังไม่มี = สร้างก่อน (ตารางใหม่ ไม่มีใครล็อกอยู่) */
+export async function saveJarvisLeadsKey(key: string, by: string | null): Promise<void> {
+  const enc = encryptSecret(key);
+  const client = await pool().connect();
+  try {
+    await client.query('BEGIN');
+    await client.query(`SET LOCAL lock_timeout = '3s'`);
+    await client.query(INTEGRATION_SECRETS_DDL);
+    await client.query(
+      `INSERT INTO integration_secrets (name, secret_enc, updated_by, updated_at) VALUES ($1, $2, $3, now())
+       ON CONFLICT (name) DO UPDATE SET secret_enc = EXCLUDED.secret_enc, updated_by = EXCLUDED.updated_by, updated_at = now()`,
+      [JARVIS_LEADS_SECRET, enc, by],
+    );
+    await client.query('COMMIT');
+  } catch (e) {
+    await client.query('ROLLBACK').catch(() => {});
+    throw e;
+  } finally {
+    client.release();
+  }
 }
 
 export async function listCommentLeads(opts: { requestNo?: string | null; limit?: number } = {}): Promise<CommentLead[]> {
@@ -50,7 +117,7 @@ export async function listCommentLeads(opts: { requestNo?: string | null; limit?
       `SELECT c.id, c.request_no, j.title AS job_title, COALESCE(g.name, c.group_id) AS group_name,
               c.post_link, c.comment_url, c.commenter_name, c.commenter_profile_url, c.comment_text, c.phone,
               c.kind, c.needs_human, c.first_seen_at, c.reply_text, c.reply_source, c.replied_at, c.reply_error,
-              c.jarvis_sent_at, c.ai_call_requested_at, c.ai_call_requested_by, c.ai_call_batch_id, c.ai_call_error
+              c.jarvis_sent_at, c.jarvis_error, c.ai_call_requested_at, c.ai_call_requested_by, c.ai_call_batch_id, c.ai_call_error
          FROM ${AP}.comment_leads c
          LEFT JOIN ${AP}.jobs j ON j.id = c.job_id
          LEFT JOIN ${AP}.groups g ON g.fb_group_id = c.group_id
@@ -85,7 +152,7 @@ export async function dismissCommentLead(id: string): Promise<void> {
 
 /**
  * ขอให้ AI โทร — บันทึกว่ามีคนขอแล้ว เฉพาะคนที่มีเบอร์และยังไม่เคยขอ
- * เมื่อเชื่อม API ของ Jarvis แล้ว จะส่งต่อให้ Jarvis (ตอนนี้เก็บสถานะ "รอส่ง" ไว้)
+ * เครื่อง RM009 ส่งต่อให้ Jarvis เองทุก 5 นาที หลังคนนั้นเข้า Jarvis แล้ว (src/core/jarvis-comment-leads.js)
  */
 export async function requestAiCall(ids: string[], by: string | null): Promise<{ requested: number; skipped: number }> {
   if (!ids.length) return { requested: 0, skipped: 0 };

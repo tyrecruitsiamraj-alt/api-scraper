@@ -1,7 +1,7 @@
 import { ExternalLinkIcon } from 'lucide-react';
-import { dismissCommentLeadAction, replyCommentLeadAction } from '@/lib/actions';
-import { jarvisLeadsConfigured, listCommentLeads, listReplyTemplates } from '@/lib/comment-leads';
-import type { CommentLead } from '@/lib/comment-leads';
+import { dismissCommentLeadAction, replyCommentLeadAction, saveJarvisLeadsKeyAction } from '@/lib/actions';
+import { jarvisLeadsStatus, listCommentLeads, listReplyTemplates } from '@/lib/comment-leads';
+import type { CommentLead, JarvisLeadsStatus } from '@/lib/comment-leads';
 import { AutopostNav } from '@/components/AutopostNav';
 import { LeadCallTable } from '@/components/post/LeadCallTable';
 import { ReplyTemplatesCard } from '@/components/post/ReplyTemplatesCard';
@@ -10,7 +10,8 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardAction, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from '@/components/ui/empty';
-import { Field, FieldLabel } from '@/components/ui/field';
+import { Field, FieldDescription, FieldLabel } from '@/components/ui/field';
+import { Input } from '@/components/ui/input';
 import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -77,6 +78,50 @@ function NeedsReplyCard({ lead }: { lead: CommentLead }) {
   );
 }
 
+// คนฝากเบอร์ → Jarvis: ตัวเลขส่งแล้ว/รอส่ง/Jarvis ไม่รับ + ช่องวาง key (เครื่อง RM009 ส่งทุก 5 นาที)
+function JarvisSendCard({ status }: { status: JarvisLeadsStatus }) {
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>ส่งคนฝากเบอร์เข้า Jarvis</CardTitle>
+        <CardDescription>
+          {status.configured
+            ? `ส่งเองทุก 5 นาที · ส่งล่าสุด ${thaiTime(status.lastSentAt)}`
+            : 'ยังไม่ได้วาง key จึงยังไม่ส่ง คนฝากเบอร์รออยู่ที่นี่'}
+        </CardDescription>
+        <CardAction>
+          <Badge variant="outline">{status.configured ? 'เชื่อมแล้ว' : 'ยังไม่เชื่อม'}</Badge>
+        </CardAction>
+      </CardHeader>
+      <CardContent className="flex flex-col gap-4">
+        <dl className="grid grid-cols-3 gap-4">
+          {([
+            ['ส่งเข้า Jarvis แล้ว', status.sent],
+            ['รอส่ง', status.waiting],
+            ['Jarvis ไม่รับ', status.rejected],
+          ] as const).map(([label, value]) => (
+            <div key={label} className="flex flex-col gap-0.5 rounded-lg border p-3">
+              <dt className="text-xs text-muted-foreground">{label}</dt>
+              <dd className="text-2xl font-semibold tabular-nums">{value}</dd>
+            </div>
+          ))}
+        </dl>
+        <form action={saveJarvisLeadsKeyAction} className="flex flex-col gap-2">
+          <Field>
+            <FieldLabel htmlFor="jarvis-key">{status.configured ? 'เปลี่ยน key' : 'key จาก Jarvis'}</FieldLabel>
+            <Input id="jarvis-key" name="key" type="password" autoComplete="off" required />
+            <FieldDescription>
+              ใน Jarvis ไปที่ ตั้งค่า › เชื่อมระบบภายนอก › So Scraping กด ออก key ใหม่ แล้วคัดลอกมาวาง
+              {status.keyUpdatedAt ? ` · ตั้งล่าสุด ${thaiTime(status.keyUpdatedAt)}${status.keyUpdatedBy ? ` โดย ${status.keyUpdatedBy}` : ''}` : ''}
+            </FieldDescription>
+          </Field>
+          <Button size="sm" className="self-start">บันทึก key</Button>
+        </form>
+      </CardContent>
+    </Card>
+  );
+}
+
 // คนที่คอมเมนต์ใต้โพสต์รับสมัคร: ตอบเองไม่ได้ให้คนตอบ, ฝากเบอร์แล้วเลือกส่ง AI โทร
 export default async function CommentLeadsPage(props: { searchParams?: Promise<{ notice?: string; request?: string }> }) {
   const searchParams = await props.searchParams;
@@ -88,6 +133,7 @@ export default async function CommentLeadsPage(props: { searchParams?: Promise<{
   const withPhone = all.filter((l) => l.phone);
   const replied = all.filter((l) => l.replied_at).length;
   const replyTemplates = await listReplyTemplates();
+  const jarvis = await jarvisLeadsStatus();
 
   return (
     <div className="flex flex-col gap-6">
@@ -105,14 +151,6 @@ export default async function CommentLeadsPage(props: { searchParams?: Promise<{
           <AlertDescription>{notice}</AlertDescription>
         </Alert>
       )}
-      {!jarvisLeadsConfigured() && (
-        <Alert>
-          <AlertDescription>
-            ยังไม่ได้เชื่อม API ของ Jarvis: กดส่ง AI โทรได้ ระบบจะเก็บรายชื่อไว้ "รอส่ง Jarvis" และส่งให้เมื่อเชื่อมแล้ว
-          </AlertDescription>
-        </Alert>
-      )}
-
       <dl className="grid grid-cols-2 gap-4 sm:grid-cols-4">
         {[
           ['คอมเมนต์ทั้งหมด', all.length],
@@ -126,6 +164,8 @@ export default async function CommentLeadsPage(props: { searchParams?: Promise<{
           </div>
         ))}
       </dl>
+
+      <JarvisSendCard status={jarvis} />
 
       <ReplyTemplatesCard templates={replyTemplates} />
 
